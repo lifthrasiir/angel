@@ -1,0 +1,14 @@
+{
+  "name": "angel",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build-frontend": "npm run build --prefix frontend",
+    "start-backend": "go run .",
+    "start": "npm run build-frontend && npm run start-backend"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
