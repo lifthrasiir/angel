@@ -87,8 +87,8 @@ func NewCodeAssistClient(httpClient *http.Client, projectID string) *CodeAssistC
 	}
 }
 
-// SendMessage calls the generateContent of Code Assist API.
-func (c *CodeAssistClient) SendMessage(ctx context.Context, contents []Content, modelName string) (*CaGenerateContentResponse, error) {
+// SendMessageStream calls the streamGenerateContent of Code Assist API.
+func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string) (io.ReadCloser, error) {
 	reqBody := CAGenerateContentRequest{
 		Model:   modelName,
 		Project: c.projectID,
@@ -102,30 +102,26 @@ func (c *CodeAssistClient) SendMessage(ctx context.Context, contents []Content, 
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	url := "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
+	url := "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent"
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream") // Indicate that we expect a stream
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close() // Close the body after reading for error logging
 		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
 	}
 
-	var caResp CaGenerateContentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&caResp); err != nil {
-		return nil, fmt.Errorf("failed to decode API response: %w", err)
-	}
-
-	return &caResp, nil
+	return resp.Body, nil // Return the response body directly
 }
 
 // CountTokens calls the countTokens of Code Assist API.
@@ -171,6 +167,37 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content, 
 // Define ChatSession struct (used instead of genai.ChatSession)
 type ChatSession struct {
 	History []*Content
+}
+
+// GeminiEventType enum definition (matches GeminiEventType in TypeScript)
+type GeminiEventType string
+
+const (
+	GeminiEventTypeContent              GeminiEventType = "content"
+	GeminiEventTypeToolCode             GeminiEventType = "tool_code"
+	GeminiEventTypeToolCallConfirmation GeminiEventType = "tool_call_confirmation"
+	GeminiEventTypeToolCallResponse     GeminiEventType = "tool_call_response"
+	GeminiTypeError                     GeminiEventType = "error"
+	GeminiTypeFinished                  GeminiEventType = "finished"
+)
+
+// ServerGeminiContentEvent matches ServerGeminiContentEvent in TypeScript
+type ServerGeminiContentEvent struct {
+	Type  GeminiEventType `json:"type"`
+	Value Content         `json:"value"`
+}
+
+// ServerGeminiFinishedEvent matches ServerGeminiFinishedEvent in TypeScript
+type ServerGeminiFinishedEvent struct {
+	Type GeminiEventType `json:"type"`
+}
+
+// ServerGeminiErrorEvent matches ServerGeminiErrorEvent in TypeScript
+type ServerGeminiErrorEvent struct {
+	Type  GeminiEventType `json:"type"`
+	Value struct {
+		Message string `json:"message"`
+	} `json:"value"`
 }
 
 // Declare global variables (accessible from main.go)

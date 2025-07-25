@@ -61,22 +61,113 @@ function App() {
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
 
+    // Add an empty agent message placeholder and get its index
+    let agentMessageIndex = -1;
+    setMessages((prev) => {
+      const newMessages = [...prev, { role: 'model', parts: [{ text: '' }] }];
+      agentMessageIndex = newMessages.length - 1;
+      return newMessages;
+    });
+
     try {
       const response = await fetch('/api/chat/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: chatSessionId, message: inputMessage }),
       });
-      if (response.ok) {
-        const data = await response.json();
-        const agentResponse: ChatMessage = { role: 'model', parts: [{ text: data.response }] };
-        setMessages((prev) => [...prev, agentResponse]);
-      } else {
-        setMessages((prev) => [...prev, { role: 'system', parts: [{ text: 'Failed to send message.' }] }]);
+
+      if (!response.ok) {
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
+            newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: 'Failed to send message or receive stream.' }] };
+          }
+          return newMessages;
+        });
+        return;
       }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        console.error('Failed to get readable stream reader.');
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
+            newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: 'Failed to get readable stream reader.' }] };
+          }
+          return newMessages;
+        });
+        return;
+      }
+
+      const decoder = new TextDecoder('utf-8');
+      let buffer = ''; // Buffer to accumulate partial SSE lines
+      let accumulatedAgentText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf('\n\n')) !== -1) {
+          const eventString = buffer.substring(0, newlineIndex);
+          buffer = buffer.substring(newlineIndex + 2); // Remove processed event from buffer
+
+          // Parse the event string
+          const lines = eventString.split('\n');
+          let data = '';
+          let eventType = 'message'; // Default SSE event type
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              data += line.substring(6);
+            } else if (line.startsWith('event: ')) {
+              eventType = line.substring(7);
+            }
+          }
+
+          if (eventType === 'message') {
+            accumulatedAgentText += data;
+            setMessages((prev) => {
+              const newMessages = [...prev];
+              if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
+                newMessages[agentMessageIndex].parts[0].text = accumulatedAgentText;
+              }
+              return newMessages;
+            });
+          } else if (eventType === 'done') {
+            // Stream finished. The final text is already accumulated.
+            // No explicit action needed here as the last update to messages will be the final one.
+          } else if (eventType === 'error') {
+            console.error('SSE Error:', data);
+            setMessages((prev) => {
+              const newMessages = [...prev];
+              if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
+                newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: `Error: ${data}` }] };
+              }
+              return newMessages;
+            });
+            return; // Stop processing on error
+          }
+        }
+      }
+
     } catch (error) {
-      console.error("Error sending message:", error);
-      setMessages((prev) => [...prev, { role: 'system', parts: [{ text: 'Error sending message.' }] }]);
+      console.error("Error sending message or receiving stream:", error);
+      setMessages((prev) => {
+        const newMessages = [...prev];
+        // If an agent message placeholder was added, update it to an an error message
+        if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
+          newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] };
+        } else {
+          // Otherwise, just add a new system error message
+          newMessages.push({ role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] });
+        }
+        return newMessages;
+      });
     }
   };
 

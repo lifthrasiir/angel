@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"golang.org/x/oauth2"
@@ -177,39 +180,119 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Role:  "user",
 	})
 
-	// []*Content를 []Content로 변환
 	var historyContents []Content
 	for _, h := range cs.History {
 		historyContents = append(historyContents, *h)
 	}
 
-	// Code Assist API expects model name in 'models/gemini-pro' format.
 	modelName := "gemini-2.5-flash"
 
-	resp, err := GeminiClient.SendMessage(context.Background(), historyContents, modelName)
-	if err != nil {
-		log.Printf("CodeAssist API 호출 실패: %v", err)
-		http.Error(w, fmt.Sprintf("CodeAssist API 호출 실패: %v", err), http.StatusInternalServerError)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
 
+	respBody, err := GeminiClient.SendMessageStream(context.Background(), historyContents, modelName)
+	if err != nil {
+		log.Printf("CodeAssist API call failed: %v", err)
+		http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer respBody.Close()
+
 	var agentResponseText string
-	if len(resp.Response.Candidates) > 0 && len(resp.Response.Candidates[0].Content.Parts) > 0 {
-		for _, part := range resp.Response.Candidates[0].Content.Parts {
-			agentResponseText += part.Text
-		}
-	} else {
-		agentResponseText = "Could not generate response."
+	if err := processStreamingJsonResponse(respBody, w, flusher, &agentResponseText); err != nil {
+		log.Printf("Error processing streaming response: %v", err)
 	}
 
-	// Add model response to chat history
 	cs.History = append(cs.History, &Content{
 		Parts: []Part{{Text: agentResponseText}},
 		Role:  "model",
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"response": agentResponseText})
+	/*
+		finishedEvent := ServerGeminiFinishedEvent{
+			Type: GeminiTypeFinished,
+		}
+		eventBytes, _ := json.Marshal(finishedEvent)
+		fmt.Fprintf(w, "data: %s\n\n", eventBytes)
+		flusher.Flush()
+	*/
+}
+
+func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher http.Flusher, agentResponseText *string) (err error) {
+	b := make([]byte, 1)
+	n, err := r.Read(b)
+	if n != 1 {
+		err = fmt.Errorf("expected opening bracket '[', but got a premature EOF")
+		return
+	}
+	if b[0] != '[' {
+		err = fmt.Errorf("expected opening bracket '[', but got %v", b[0])
+		return
+	}
+
+	scanner := bufio.NewScanner(r)
+	var lines strings.Builder
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "data: ") {
+			line = line[6:]
+		}
+		lines.WriteString(line)
+		if line != "}" {
+			continue
+		}
+
+		var caResp CaGenerateContentResponse
+		if err := json.Unmarshal([]byte(lines.String()), &caResp); err != nil {
+			log.Printf("Failed to decode JSON object from stream: %v", err)
+			continue
+		}
+		lines.Reset()
+
+		if len(caResp.Response.Candidates) > 0 && len(caResp.Response.Candidates[0].Content.Parts) > 0 {
+			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					/*
+						contentEvent := ServerGeminiContentEvent{
+							Type:  GeminiEventTypeContent,
+							Value: Content{Role: "model", Parts: []Part{{Text: part.Text}}},
+						}
+						eventBytes, _ := json.Marshal(contentEvent)
+					*/
+					fmt.Fprintf(w, "data: %s\n\n", part.Text)
+					*agentResponseText += part.Text
+					flusher.Flush()
+				}
+			}
+		}
+
+		if !scanner.Scan() {
+			break
+		}
+
+		line = scanner.Text()
+		if line == "," {
+			continue
+		} else if line == "]" {
+			break
+		} else {
+			log.Printf("Unexpected streaming delimiter %v", line)
+			continue
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("Error reading from response body: %v", err)
+	}
+
+	return
 }
 
 // Add countTokens handler
@@ -228,10 +311,8 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Code Assist API expects model name in 'models/gemini-pro' format.
 	modelName := "gemini-2.5-flash"
 
-	// Create Content for CountTokens request
 	contents := []Content{
 		{
 			Role:  "user",
@@ -251,6 +332,5 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func generateSessionID() string {
-	// In a real application, you'd use a more robust method for session IDs
 	return fmt.Sprintf("session-%d", len(ChatSessions)+1)
 }

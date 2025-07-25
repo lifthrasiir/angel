@@ -1,3 +1,3 @@
-
-
-All project comments and messages must be in English. Respond to users in their requested language.
+- All project comments and messages must be in English. Respond to users in their requested language.
+- The "agent" or "angel" refer to the LLM model behind the web view.
+- Many features require modifications to both Go and TypeScript.
