@@ -3,20 +3,20 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"crypto/rand"
-	"encoding/base64"
-	"net/url"
 
-	"github.com/gorilla/mux"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -105,18 +105,14 @@ func main() {
 }
 
 func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
-	log.Printf("handleGoogleLogin: Full request URL: %s", r.URL.String())
-
 	// Capture the entire raw query string from the /login request.
-	// This will contain both 'redirect_to' and 'draftMessage'.
+	// This will contain both 'redirect_to' and 'draft_message'.
 	redirectToQueryString := r.URL.RawQuery
 	if redirectToQueryString == "" {
 		// If no query parameters, default to redirecting to the root.
 		// This case might not be hit if frontend always sends redirect_to.
 		redirectToQueryString = "redirect_to=/" // Ensure a default redirect_to
 	}
-
-	log.Printf("handleGoogleLogin: Query string for state encoding: %s", redirectToQueryString)
 
 	// Generate a secure random state string
 	b := make([]byte, 16)
@@ -145,9 +141,7 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	// Remove the state after use to prevent replay attacks
 	delete(oauthStates, stateParam)
 
-	log.Printf("handleGoogleCallback: Original query string from state: %s", originalQueryString)
-
-	// Parse the original query string to extract redirect_to and draftMessage
+	// Parse the original query string to extract redirect_to and draft_message
 	parsedQuery, err := url.ParseQuery(originalQueryString)
 	if err != nil {
 		log.Printf("Error parsing original query string from state: %v", err)
@@ -159,20 +153,18 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if frontendPath == "" {
 		frontendPath = "/" // Default to root if not specified
 	}
-	draftMessage := parsedQuery.Get("draftMessage")
+	draftMessage := parsedQuery.Get("draft_message")
 
 	// Construct the final URL for the frontend
 	finalRedirectURL := frontendPath
 	if draftMessage != "" {
 		// Check if frontendPath already has query parameters
 		if strings.Contains(frontendPath, "?") {
-			finalRedirectURL = fmt.Sprintf("%s&draftMessage=%s", frontendPath, url.QueryEscape(draftMessage))
+			finalRedirectURL = fmt.Sprintf("%s&draft_message=%s", frontendPath, url.QueryEscape(draftMessage))
 		} else {
-			finalRedirectURL = fmt.Sprintf("%s?draftMessage=%s", frontendPath, url.QueryEscape(draftMessage))
+			finalRedirectURL = fmt.Sprintf("%s?draft_message=%s", frontendPath, url.QueryEscape(draftMessage))
 		}
 	}
-
-	log.Printf("handleGoogleCallback: Final redirecting to: %s", finalRedirectURL)
 
 	code := r.FormValue("code")
 	Token, err := GoogleOauthConfig.Exchange(context.Background(), code)
@@ -223,7 +215,6 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
-	log.Println("chatMessage handler called")
 	if GeminiClient == nil {
 		log.Println("chatMessage: GeminiClient not initialized.")
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
@@ -246,29 +237,24 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	log.Printf("chatMessage: Received message for session %s: %s", requestBody.SessionID, requestBody.Message)
 
 	sessionId := requestBody.SessionID
 	userMessage := requestBody.Message
 
 	// Add user message to current chat history in DB
-	log.Printf("chatMessage: Adding user message to session %s", sessionId)
 	if err := AddMessageToSession(sessionId, "user", userMessage); err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("chatMessage: User message added to session %s", sessionId)
 
 	// Retrieve session history from DB
-	log.Printf("chatMessage: Retrieving session history for session %s", sessionId)
 	historyContents, err := GetSessionHistory(sessionId)
 	if err != nil {
 		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("chatMessage: Retrieved %d messages from session history for session %s", len(historyContents), sessionId)
 
 	modelName := "gemini-2.5-flash"
 
@@ -284,7 +270,6 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("chatMessage: Sending message stream to GeminiClient for session %s", sessionId)
 	respBody, err := GeminiClient.SendMessageStream(context.Background(), historyContents, modelName)
 	if err != nil {
 		log.Printf("chatMessage: CodeAssist API call failed: %v", err)
@@ -292,23 +277,18 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer respBody.Close()
-	log.Printf("chatMessage: Message stream sent to GeminiClient for session %s", sessionId)
 
 	var agentResponseText string
-	log.Println("chatMessage: Processing streaming JSON response...")
 	if err := processStreamingJsonResponse(respBody, w, flusher, &agentResponseText); err != nil {
 		log.Printf("chatMessage: Error processing streaming response: %v", err)
+		return
 	}
-	log.Printf("chatMessage: Finished processing streaming JSON response. Agent response text length: %d", len(agentResponseText))
-
 	// Add agent response to chat history in DB
-	log.Printf("chatMessage: Adding agent response to session %s", sessionId)
 	if err := AddMessageToSession(sessionId, "model", agentResponseText); err != nil {
 		log.Printf("chatMessage: Failed to save agent response: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save agent response: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("chatMessage: Agent response added to session %s", sessionId)
 }
 
 // New endpoint to load chat session history
@@ -392,10 +372,7 @@ func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher ht
 						}
 						eventBytes, _ := json.Marshal(contentEvent)
 					*/
-					for line := range strings.Lines(part.Text) {
-						fmt.Fprintf(w, "data: %s\n", line)
-					}
-					fmt.Fprintf(w, "\n")
+					fmt.Fprintf(w, "data: %s\n\n", strings.ReplaceAll(part.Text, "\n", "\ndata: "))
 					*agentResponseText += part.Text
 					flusher.Flush()
 				}

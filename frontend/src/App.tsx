@@ -29,23 +29,18 @@ function ChatApp() {
   }, [messages]);
 
   useEffect(() => {
-    // Check for redirect_to and draftMessage parameters after login
+    // Check for redirect_to and draft_message parameters after login
     const params = new URLSearchParams(location.search);
     const redirectTo = params.get('redirect_to');
-    const draftMessage = params.get('draftMessage');
-
-    console.log('URL search params:', location.search);
-    console.log('Parsed draftMessage from URL:', draftMessage);
+    const draftMessage = params.get('draft_message');
 
     if (draftMessage) {
       setInputMessage(draftMessage);
-      console.log('Setting inputMessage from URL parameter:', draftMessage);
     }
 
     if (redirectTo) {
       // Basic validation: ensure redirectTo is a relative path within the application
       if (redirectTo.startsWith('/')) {
-        console.log('Redirecting to original page:', redirectTo, 'Draft in URL parameter:', draftMessage);
         navigate(redirectTo, { replace: true }); // Redirect to the original page
       } else {
         console.warn('Invalid redirectTo URL detected, redirecting to home:', redirectTo);
@@ -55,7 +50,6 @@ function ChatApp() {
     }
 
     const initializeChatSession = async () => {
-      console.log('initializeChatSession called.');
       let currentSessionId = urlSessionId;
 
       if (currentSessionId) {
@@ -116,9 +110,8 @@ function ChatApp() {
     let redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
 
     if (draftMessage) {
-      redirectToUrl += `&draftMessage=${encodeURIComponent(draftMessage)}`;
+      redirectToUrl += `&draft_message=${encodeURIComponent(draftMessage)}`;
     }
-    console.log('Initiating login redirect. Redirecting to:', redirectToUrl);
     window.location.href = redirectToUrl;
   };
 
@@ -213,16 +206,17 @@ function ChatApp() {
 
           // Parse the event string
           const lines = eventString.split('\n');
-          let data = '';
+          let dataParts: string[] = [];
           let eventType = 'message'; // Default SSE event type
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
-              data += line.substring(6);
+              dataParts.push(line.substring(6));
             } else if (line.startsWith('event: ')) {
               eventType = line.substring(7);
             }
           }
+          let data = dataParts.join('\n');
 
           if (eventType === 'message') {
             accumulatedAgentText += data;

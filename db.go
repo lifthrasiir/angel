@@ -60,6 +60,7 @@ func GetSessionHistory(sessionID string) ([]Content, error) {
 		if err := rows.Scan(&role, &text); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
+
 		history = append(history, Content{
 			Role:  role,
 			Parts: []Part{{Text: text}},
