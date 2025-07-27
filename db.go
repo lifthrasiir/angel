@@ -20,7 +20,8 @@ func InitDB() {
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS sessions (
 		id TEXT PRIMARY KEY,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS messages (
@@ -44,12 +45,48 @@ func InitDB() {
 	log.Println("Database initialized and tables created.")
 }
 
+// Session struct to hold session data
+type Session struct {
+	ID         string `json:"id"`
+	LastUpdated string `json:"last_updated_at"`
+}
+
 func CreateSession(sessionID string) error {
 	_, err := db.Exec("INSERT INTO sessions (id) VALUES (?)", sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 	return nil
+}
+
+func UpdateSessionLastUpdated(sessionID string) error {
+	_, err := db.Exec("UPDATE sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update session last_updated_at: %w", err)
+	}
+	return nil
+}
+
+func GetAllSessions() ([]Session, error) {
+	rows, err := db.Query("SELECT id, last_updated_at FROM sessions ORDER BY last_updated_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []Session
+	for rows.Next() {
+		var s Session
+		if err := rows.Scan(&s.ID, &s.LastUpdated); err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		sessions = append(sessions, s)
+	}
+	// Ensure an empty slice is returned, not nil, for JSON marshaling
+	if sessions == nil {
+		return []Session{}, nil
+	}
+	return sessions, nil
 }
 
 func GetSessionHistory(sessionID string) ([]Content, error) {

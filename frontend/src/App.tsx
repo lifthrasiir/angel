@@ -17,20 +17,42 @@ interface ChatMessage {
   type?: "model" | "thought" | "system" | "user"; // Add type field
 }
 
+interface Session {
+  id: string;
+  last_updated_at: string;
+}
+
 function ChatApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
+  const [sessions, setSessions] = useState<Session[]>([]); // New state for sessions
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
-  const [isSessionInitialized, setIsSessionInitialized] = useState(false); // New state
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const fetchSessions = async () => {
+    try {
+      const response = await fetch('/api/chat/sessions');
+      if (response.ok) {
+        const data: Session[] = await response.json();
+        setSessions(data);
+      } else if (response.status === 401) {
+        // Not logged in, clear sessions
+        setSessions([]);
+      } else {
+        console.error('Failed to fetch sessions:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('Error fetching sessions:', error);
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -52,8 +74,6 @@ function ChatApp() {
     }
 
     const initializeChatSession = async () => {
-      if (isSessionInitialized) return; // Prevent re-initialization
-
       let currentSessionId = urlSessionId;
 
       if (currentSessionId) {
@@ -61,9 +81,14 @@ function ChatApp() {
           const response = await fetch(`/api/chat/load?sessionId=${currentSessionId}`);
           if (response.ok) {
             const data = await response.json();
+            if (!data) {
+                console.error('Received null data from API for session load');
+                await startNewSession();
+                return;
+            }
             setChatSessionId(data.sessionId);
             // Ensure loaded messages have an ID
-            setMessages(data.history.map((msg: any) => {
+            setMessages((data.history || []).map((msg: any) => {
               const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID() };
               if (chatMessage.role === 'thought') {
                 chatMessage.type = 'thought';
@@ -76,7 +101,6 @@ function ChatApp() {
               return chatMessage;
             }));
             setIsLoggedIn(true);
-            setIsSessionInitialized(true); // Mark as initialized
             if (currentSessionId !== data.sessionId) {
                 navigate(`/${data.sessionId}`, { replace: true });
             }
@@ -90,7 +114,8 @@ function ChatApp() {
           console.error('Error loading session:', error);
           await startNewSession();
         }
-      } else {
+      }
+ else {
         await startNewSession();
       }
     };
@@ -100,11 +125,16 @@ function ChatApp() {
         const response = await fetch('/api/chat/new', { method: 'POST' });
         if (response.ok) {
           const data = await response.json();
+          if (!data) {
+              console.error('Received null data from API for new session');
+              setIsLoggedIn(false);
+              setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Failed to start new session: received null data.' }] }]);
+              return;
+          }
           setChatSessionId(data.sessionId);
           setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: data.message }] }]);
           setIsLoggedIn(true);
-          setIsSessionInitialized(true); // Mark as initialized
-          navigate(`/${data.sessionId}`, { replace: true }); // Use replace to avoid history stack issues
+          navigate(`/${data.sessionId}`); // Use replace to avoid history stack issues
         } else if (response.status === 401) {
           handleLogin();
         } else {
@@ -118,11 +148,9 @@ function ChatApp() {
       }
     };
 
-    // Only run initialization if not already initialized and not handling a redirect
-    if (!isSessionInitialized && !location.search.includes('redirect_to')) {
-      initializeChatSession();
-    }
-  }, [urlSessionId, navigate, location.search, isSessionInitialized]);
+    initializeChatSession();
+    fetchSessions(); // Fetch sessions on initial load
+  }, [urlSessionId, navigate, location.search]);
 
 
   const handleLogin = () => {
@@ -146,7 +174,8 @@ function ChatApp() {
         const data = await response.json();
         setChatSessionId(data.sessionId);
         setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: data.message }] }]);
-        navigate(`/${data.sessionId}`);
+        navigate(`/${data.sessionId}`, { replace: true });
+        fetchSessions(); // Refresh sessions after new chat
       } else if (response.status === 401) {
         handleLogin();
       } else {
@@ -264,6 +293,7 @@ ${description}` }], type: 'thought' } as ChatMessage);
           }
         }
       }
+      fetchSessions(); // Refresh sessions after sending message
 
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
@@ -283,44 +313,83 @@ ${description}` }], type: 'thought' } as ChatMessage);
   };
 
   return (
-    <div style={{ padding: '20px', maxWidth: '800px', margin: 'auto' }}>
-      <h1>Angel CLI Web</h1>
-      {!isLoggedIn ? (
-        <div>
-          <p>Login required.</p>
-          <button onClick={handleLogin}>Login with Google Account</button>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+      {/* Sidebar */}
+      <div style={{ width: '200px', background: '#f0f0f0', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRight: '1px solid #ccc', boxSizing: 'border-box', overflowY: 'auto', flexShrink: 0 }}>
+        <div style={{ fontSize: '3em', marginBottom: '20px' }}>😇</div>
+        {!isLoggedIn ? (
+          <button onClick={handleLogin} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Login</button>
+        ) : (
+          <button onClick={handleNewChatSession} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
+        )}
+        <div style={{ width: '100%', marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px' }}>
+          <h3>Sessions</h3>
+          {sessions && sessions.length === 0 ? (
+            <p>No sessions yet.</p>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, width: '100%' }}>
+              {sessions.map((session) => (
+                <li key={session.id} style={{ marginBottom: '5px' }}>
+                  <button
+                    onClick={() => navigate(`/${session.id}`)}
+                    style={{
+                      width: '100%',
+                      padding: '8px',
+                      textAlign: 'left',
+                      border: '1px solid #ddd',
+                      borderRadius: '5px',
+                      background: session.id === chatSessionId ? '#e0e0e0' : 'white',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {session.id}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      ) : (
-        <div>
-          <p>Logged in. Session ID: {chatSessionId || 'None'}</p>
-          <button onClick={handleNewChatSession}>Start New Chat Session</button>
-          <div style={{ border: '1px solid #ccc', padding: '10px', marginTop: '20px', height: '300px', overflowY: 'scroll' }}>
-            {messages.map((msg) => (
-              <ChatMessage key={msg.id} role={msg.role} text={msg.parts[0].text} type={msg.type} />
-            ))}
-            <div ref={messagesEndRef} />
+      </div>
+
+      {/* Main Chat Area */}
+      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <h1 style={{ textAlign: 'center', padding: '10px 0', margin: 0, borderBottom: '1px solid #eee' }}>Angel CLI Web</h1>
+        {!isLoggedIn && (
+          <div style={{ padding: '20px', textAlign: 'center' }}>
+            <p>Login required to start chatting.</p>
           </div>
-          <div style={{ marginTop: '10px' }}>
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => {
-                setInputMessage(e.target.value);
-              }}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleSendMessage();
-                }
-              }}
-              placeholder="Enter your message..."
-              style={{ width: 'calc(100% - 80px)', padding: '8px' }}
-            />
-            <button onClick={handleSendMessage} style={{ width: '70px', padding: '8px', marginLeft: '10px' }}>
-              Send
-            </button>
-          </div>
-        </div>
-      )}
+        )}
+        {isLoggedIn && (
+          <>
+            <div style={{ flexGrow: 1, overflowY: 'auto', padding: '20px' }}>
+              {messages?.map((msg) => (
+                <ChatMessage key={msg.id} role={msg.role} text={msg.parts[0].text} type={msg.type} />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+            <div style={{ padding: '10px 20px', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', position: 'sticky', bottom: 0, background: 'white' }}>
+              <input
+                type="text"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSendMessage();
+                  }
+                }}
+                placeholder="Enter your message..."
+                style={{ flexGrow: 1, padding: '10px', marginRight: '10px', border: '1px solid #eee', borderRadius: '5px' }}
+              />
+              <button onClick={handleSendMessage} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+                Send
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

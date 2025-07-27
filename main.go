@@ -84,6 +84,7 @@ func main() {
 	router.HandleFunc("/api/chat/new", newChatSession).Methods("POST")
 	router.HandleFunc("/api/chat/message", chatMessage).Methods("POST")
 	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")       // New endpoint to load chat session
+	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")  // New endpoint to list all chat sessions
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST") // Add countTokens handler
 
 	// Serve frontend static files
@@ -210,6 +211,12 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Update last_updated_at for the new session
+	if err := UpdateSessionLastUpdated(sessionId); err != nil {
+		log.Printf("Failed to update last_updated_at for new session %s: %v", sessionId, err)
+		// Non-fatal error, continue with response
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"sessionId": sessionId, "message": "New chat session started."})
 }
@@ -247,6 +254,12 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Update last_updated_at for the current session
+	if err := UpdateSessionLastUpdated(sessionId); err != nil {
+		log.Printf("Failed to update last_updated_at for session %s: %v", sessionId, err)
+		// Non-fatal error, continue with response
 	}
 
 	// Retrieve session history from DB for Gemini API
@@ -324,6 +337,23 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"sessionId": sessionId, "history": history})
+}
+
+// New endpoint to list all chat sessions
+func listChatSessions(w http.ResponseWriter, r *http.Request) {
+	if GeminiClient == nil {
+		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
+		return
+	}
+
+	sessions, err := GetAllSessions()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve sessions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sessions)
 }
 
 func sendServerEvent(w http.ResponseWriter, flusher http.Flusher, data string) {
