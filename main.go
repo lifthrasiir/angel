@@ -11,11 +11,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"crypto/rand"
+	"encoding/base64"
+	"net/url"
 
 	"github.com/gorilla/mux"
+	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
+
+var oauthStates = make(map[string]string) // Stores randomState -> originalQueryString
 
 func init() {
 	// Select authentication method from environment variables
@@ -25,9 +31,6 @@ func init() {
 	} else if os.Getenv("GOOGLE_API_KEY") != "" || (os.Getenv("GOOGLE_CLOUD_PROJECT") != "" && os.Getenv("GOOGLE_CLOUD_LOCATION") != "") {
 		SelectedAuthType = AuthTypeUseVertexAI
 		log.Println("Authentication method: Using Vertex AI")
-	} else if os.Getenv("CLOUD_SHELL") == "true" { // Check Cloud Shell environment variable
-		SelectedAuthType = AuthTypeCloudShell
-		log.Println("Authentication method: Using Cloud Shell")
 	} else {
 		SelectedAuthType = AuthTypeLoginWithGoogle
 		log.Println("Authentication method: Using Google Login (OAuth)")
@@ -63,6 +66,8 @@ func init() {
 	case AuthTypeCloudShell:
 		InitGeminiClient() // Cloud Shell authentication is handled inside InitGeminiClient
 	}
+
+	InitDB() // Initialize SQLite database
 }
 
 func main() {
@@ -77,31 +82,100 @@ func main() {
 	// API handlers
 	router.HandleFunc("/api/chat/new", newChatSession).Methods("POST")
 	router.HandleFunc("/api/chat/message", chatMessage).Methods("POST")
+	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")       // New endpoint to load chat session
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST") // Add countTokens handler
 
 	// Serve frontend static files
 	frontendPath := filepath.Join(".", "frontend", "dist")
-	router.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendPath)))
+	// Serve static files and fallback to index.html for client-side routing
+	router.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Try to serve the requested file
+		fs := http.FileServer(http.Dir(frontendPath))
+		// Check if the file exists
+		if _, err := os.Stat(filepath.Join(frontendPath, r.URL.Path)); os.IsNotExist(err) {
+			// If not, serve index.html for client-side routing
+			http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
+			return
+		}
+		fs.ServeHTTP(w, r)
+	}))
 
 	fmt.Println("Server started at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
 func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
-	url := GoogleOauthConfig.AuthCodeURL(OAuthState)
+	log.Printf("handleGoogleLogin: Full request URL: %s", r.URL.String())
+
+	// Capture the entire raw query string from the /login request.
+	// This will contain both 'redirect_to' and 'draftMessage'.
+	redirectToQueryString := r.URL.RawQuery
+	if redirectToQueryString == "" {
+		// If no query parameters, default to redirecting to the root.
+		// This case might not be hit if frontend always sends redirect_to.
+		redirectToQueryString = "redirect_to=/" // Ensure a default redirect_to
+	}
+
+	log.Printf("handleGoogleLogin: Query string for state encoding: %s", redirectToQueryString)
+
+	// Generate a secure random state string
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		log.Printf("Error generating random state: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	randomState := base64.URLEncoding.EncodeToString(b)
+	oauthStates[randomState] = redirectToQueryString // Store the original query string with the random state
+
+	url := GoogleOauthConfig.AuthCodeURL(randomState)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
 func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
-	if r.FormValue("state") != OAuthState {
-		log.Printf("Invalid OAuth state: %s", r.FormValue("state"))
+	stateParam := r.FormValue("state")
+
+	// Validate the random part of the state against the stored value
+	originalQueryString, ok := oauthStates[stateParam]
+	if !ok {
+		log.Printf("Invalid or expired OAuth state: %s", stateParam)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+	// Remove the state after use to prevent replay attacks
+	delete(oauthStates, stateParam)
+
+	log.Printf("handleGoogleCallback: Original query string from state: %s", originalQueryString)
+
+	// Parse the original query string to extract redirect_to and draftMessage
+	parsedQuery, err := url.ParseQuery(originalQueryString)
+	if err != nil {
+		log.Printf("Error parsing original query string from state: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 
+	frontendPath := parsedQuery.Get("redirect_to")
+	if frontendPath == "" {
+		frontendPath = "/" // Default to root if not specified
+	}
+	draftMessage := parsedQuery.Get("draftMessage")
+
+	// Construct the final URL for the frontend
+	finalRedirectURL := frontendPath
+	if draftMessage != "" {
+		// Check if frontendPath already has query parameters
+		if strings.Contains(frontendPath, "?") {
+			finalRedirectURL = fmt.Sprintf("%s&draftMessage=%s", frontendPath, url.QueryEscape(draftMessage))
+		} else {
+			finalRedirectURL = fmt.Sprintf("%s?draftMessage=%s", frontendPath, url.QueryEscape(draftMessage))
+		}
+	}
+
+	log.Printf("handleGoogleCallback: Final redirecting to: %s", finalRedirectURL)
+
 	code := r.FormValue("code")
-	var err error
-	Token, err = GoogleOauthConfig.Exchange(context.Background(), code)
+	Token, err := GoogleOauthConfig.Exchange(context.Background(), code)
 	if err != nil {
 		log.Printf("Failed to exchange token: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -109,7 +183,7 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve Project ID using the token
-	if err := FetchProjectID(Token); err != nil {
+	if err = FetchProjectID(Token); err != nil {
 		log.Printf("Failed to retrieve Project ID: %v", err)
 		http.Error(w, "Could not retrieve Project ID.", http.StatusInternalServerError)
 		return
@@ -121,8 +195,8 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	// Initialize GenAI service
 	InitGeminiClient()
 
-	// Redirect to frontend root after successful authentication
-	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	// Redirect to the original path after successful authentication
+	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)
 }
 
 // New chat session start handler
@@ -137,20 +211,28 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := generateSessionID() // Generate session ID
-
-	cs := &ChatSession{}      // Create a new ChatSession instance
-	cs.History = []*Content{} // Explicitly initialize chat history
-	ChatSessions[sessionID] = cs
+	sessionId := generateSessionID() // Generate session ID
+	if err := CreateSession(sessionId); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create new session: %v", err), http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"sessionId": sessionID, "message": "New chat session started."})
+	json.NewEncoder(w).Encode(map[string]string{"sessionId": sessionId, "message": "New chat session started."})
 }
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
+	log.Println("chatMessage handler called")
 	if GeminiClient == nil {
+		log.Println("chatMessage: GeminiClient not initialized.")
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
+		return
+	}
+	// Add ProjectID validation for OAuth method
+	if SelectedAuthType == AuthTypeLoginWithGoogle && ProjectID == "" {
+		log.Println("chatMessage: Project ID is not set. Please log in again.")
+		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
 		return
 	}
 
@@ -160,30 +242,33 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		log.Printf("chatMessage: Invalid request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	log.Printf("chatMessage: Received message for session %s: %s", requestBody.SessionID, requestBody.Message)
 
 	sessionId := requestBody.SessionID
 	userMessage := requestBody.Message
 
-	// Retrieve session history
-	cs, ok := ChatSessions[sessionId]
-	if !ok {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+	// Add user message to current chat history in DB
+	log.Printf("chatMessage: Adding user message to session %s", sessionId)
+	if err := AddMessageToSession(sessionId, "user", userMessage); err != nil {
+		log.Printf("chatMessage: Failed to save user message: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
 	}
+	log.Printf("chatMessage: User message added to session %s", sessionId)
 
-	// Add user message to current chat history
-	cs.History = append(cs.History, &Content{
-		Parts: []Part{{Text: userMessage}},
-		Role:  "user",
-	})
-
-	var historyContents []Content
-	for _, h := range cs.History {
-		historyContents = append(historyContents, *h)
+	// Retrieve session history from DB
+	log.Printf("chatMessage: Retrieving session history for session %s", sessionId)
+	historyContents, err := GetSessionHistory(sessionId)
+	if err != nil {
+		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
+		return
 	}
+	log.Printf("chatMessage: Retrieved %d messages from session history for session %s", len(historyContents), sessionId)
 
 	modelName := "gemini-2.5-flash"
 
@@ -194,38 +279,73 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		log.Println("chatMessage: Streaming unsupported!")
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("chatMessage: Sending message stream to GeminiClient for session %s", sessionId)
 	respBody, err := GeminiClient.SendMessageStream(context.Background(), historyContents, modelName)
 	if err != nil {
-		log.Printf("CodeAssist API call failed: %v", err)
+		log.Printf("chatMessage: CodeAssist API call failed: %v", err)
 		http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer respBody.Close()
+	log.Printf("chatMessage: Message stream sent to GeminiClient for session %s", sessionId)
 
 	var agentResponseText string
+	log.Println("chatMessage: Processing streaming JSON response...")
 	if err := processStreamingJsonResponse(respBody, w, flusher, &agentResponseText); err != nil {
-		log.Printf("Error processing streaming response: %v", err)
+		log.Printf("chatMessage: Error processing streaming response: %v", err)
 	}
+	log.Printf("chatMessage: Finished processing streaming JSON response. Agent response text length: %d", len(agentResponseText))
 
-	cs.History = append(cs.History, &Content{
-		Parts: []Part{{Text: agentResponseText}},
-		Role:  "model",
-	})
-
-	/*
-		finishedEvent := ServerGeminiFinishedEvent{
-			Type: GeminiTypeFinished,
-		}
-		eventBytes, _ := json.Marshal(finishedEvent)
-		fmt.Fprintf(w, "data: %s\n\n", eventBytes)
-		flusher.Flush()
-	*/
+	// Add agent response to chat history in DB
+	log.Printf("chatMessage: Adding agent response to session %s", sessionId)
+	if err := AddMessageToSession(sessionId, "model", agentResponseText); err != nil {
+		log.Printf("chatMessage: Failed to save agent response: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to save agent response: %v", err), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("chatMessage: Agent response added to session %s", sessionId)
 }
 
+// New endpoint to load chat session history
+func loadChatSession(w http.ResponseWriter, r *http.Request) {
+	if GeminiClient == nil {
+		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
+		return
+	}
+	// Add ProjectID validation for OAuth method
+	if SelectedAuthType == AuthTypeLoginWithGoogle && ProjectID == "" {
+		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
+		return
+	}
+
+	sessionId := r.URL.Query().Get("sessionId")
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
+	history, err := GetSessionHistory(sessionId)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	// Ensure history is an empty slice if no messages are found, not nil
+	if history == nil {
+		history = []Content{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"sessionId": sessionId, "history": history})
+}
+
+// NOTE: This function is intentionally designed to parse a specific JSON stream format, not standard SSE. Do not modify without understanding its purpose.
 func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher http.Flusher, agentResponseText *string) (err error) {
 	b := make([]byte, 1)
 	n, err := r.Read(b)
@@ -340,5 +460,5 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func generateSessionID() string {
-	return fmt.Sprintf("session-%d", len(ChatSessions)+1)
+	return uuid.New().String()
 }

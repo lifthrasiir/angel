@@ -1,38 +1,125 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  useNavigate,
+  useParams,
+  useLocation, // Add useLocation
+} from 'react-router-dom';
 
 interface ChatMessage {
   role: string;
   parts: { text: string }[];
 }
 
-function App() {
+function ChatApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const { sessionId: urlSessionId } = useParams();
+  const location = useLocation(); // Get current location
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   useEffect(() => {
-    const checkLoginStatus = async () => {
+    // Check for redirect_to and draftMessage parameters after login
+    const params = new URLSearchParams(location.search);
+    const redirectTo = params.get('redirect_to');
+    const draftMessage = params.get('draftMessage');
+
+    console.log('URL search params:', location.search);
+    console.log('Parsed draftMessage from URL:', draftMessage);
+
+    if (draftMessage) {
+      setInputMessage(draftMessage);
+      console.log('Setting inputMessage from URL parameter:', draftMessage);
+    }
+
+    if (redirectTo) {
+      // Basic validation: ensure redirectTo is a relative path within the application
+      if (redirectTo.startsWith('/')) {
+        console.log('Redirecting to original page:', redirectTo, 'Draft in URL parameter:', draftMessage);
+        navigate(redirectTo, { replace: true }); // Redirect to the original page
+      } else {
+        console.warn('Invalid redirectTo URL detected, redirecting to home:', redirectTo);
+        navigate('/', { replace: true }); // Redirect to home to prevent open redirect
+      }
+      return; // Prevent further initialization
+    }
+
+    const initializeChatSession = async () => {
+      console.log('initializeChatSession called.');
+      let currentSessionId = urlSessionId;
+
+      if (currentSessionId) {
+        // Try to load existing session
+        try {
+          const response = await fetch(`/api/chat/load?sessionId=${currentSessionId}`);
+          if (response.ok) {
+            const data = await response.json();
+            setChatSessionId(data.sessionId);
+            setMessages(data.history);
+            setIsLoggedIn(true);
+          } else if (response.status === 401) { // Handle unauthorized
+            handleLogin();
+          } else {
+            console.error('Failed to load session:', response.statusText);
+            // If loading fails, create a new session
+            await startNewSession();
+          }
+        } catch (error) {
+          console.error('Error loading session:', error);
+          // If error, create a new session
+          await startNewSession();
+        }
+      } else {
+        // No session ID in URL, create a new session
+        await startNewSession();
+      }
+    };
+
+    const startNewSession = async () => {
       try {
         const response = await fetch('/api/chat/new', { method: 'POST' });
         if (response.ok) {
-          setIsLoggedIn(true);
           const data = await response.json();
           setChatSessionId(data.sessionId);
           setMessages([{ role: 'system', parts: [{ text: data.message }] }]);
+          setIsLoggedIn(true);
+          navigate(`/${data.sessionId}`); // Update URL with new session ID
+        } else if (response.status === 401) { // Handle unauthorized
+          handleLogin();
         } else {
           setIsLoggedIn(false);
+          setMessages([{ role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
         }
       } catch (error) {
-        console.error("Failed to check login status:", error);
+        console.error('Error starting new chat session:', error);
         setIsLoggedIn(false);
+        setMessages([{ role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
       }
     };
-    checkLoginStatus();
-  }, []);
+
+    initializeChatSession(); // Initialize or load chat session
+  }, [urlSessionId, navigate, location.search]); // Re-run when URL session ID or search params change
 
   const handleLogin = () => {
-    window.location.href = '/login';
+    const currentPath = location.pathname + location.search;
+    const draftMessage = inputMessage; // Get current input message
+    let redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
+
+    if (draftMessage) {
+      redirectToUrl += `&draftMessage=${encodeURIComponent(draftMessage)}`;
+    }
+    console.log('Initiating login redirect. Redirecting to:', redirectToUrl);
+    window.location.href = redirectToUrl;
   };
 
   const handleNewChatSession = async () => {
@@ -45,11 +132,14 @@ function App() {
         const data = await response.json();
         setChatSessionId(data.sessionId);
         setMessages([{ role: 'system', parts: [{ text: data.message }] }]);
+        navigate(`/${data.sessionId}`); // Update URL with new session ID
+      } else if (response.status === 401) { // Handle unauthorized
+        handleLogin();
       } else {
         setMessages([{ role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
       }
     } catch (error) {
-      console.error("Error starting new chat session:", error);
+      console.error('Error starting new chat session:', error);
       setMessages([{ role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
     }
   };
@@ -75,6 +165,11 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: chatSessionId, message: inputMessage }),
       });
+
+      if (response.status === 401) { // Handle unauthorized
+        handleLogin();
+        return;
+      }
 
       if (!response.ok) {
         setMessages((prev) => {
@@ -156,7 +251,7 @@ function App() {
       }
 
     } catch (error) {
-      console.error("Error sending message or receiving stream:", error);
+      console.error('Error sending message or receiving stream:', error);
       setMessages((prev) => {
         const newMessages = [...prev];
         // If an agent message placeholder was added, update it to an an error message
@@ -189,12 +284,15 @@ function App() {
                 <strong>{msg.role === 'user' ? 'You' : 'Agent'}:</strong> {msg.parts[0].text}
               </p>
             ))}
+            <div ref={messagesEndRef} /> {/* Scroll target */}
           </div>
           <div style={{ marginTop: '10px' }}>
             <input
               type="text"
               value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
+              onChange={(e) => {
+                setInputMessage(e.target.value);
+              }}
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
                   handleSendMessage();
@@ -210,6 +308,17 @@ function App() {
         </div>
       )}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<ChatApp />} />
+        <Route path="/:sessionId" element={<ChatApp />} />
+      </Routes>
+    </Router>
   );
 }
 

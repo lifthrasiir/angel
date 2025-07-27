@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -164,9 +164,12 @@ func checkDeveloperMode(testDir string) (bool, error) {
 
 	// If there's an error, check if it's because of insufficient privilege.
 	// A common error message for insufficient privileges on Windows is "A required privilege is not held by the client."
-	// Or in Korean: "클라이언트가 필요한 권한을 가지고 있지 않습니다."
-	if strings.Contains(string(output), "privilege") || strings.Contains(string(output), "권한") {
-		return false, nil // Not an error, just not in dev mode.
+	
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		// Check for specific error code for insufficient privileges (1314 on Windows)
+		if exitErr.ExitCode() == 1314 {
+			return false, nil // Not an error, just not in dev mode.
+		}
 	}
 
 	// For other errors, return them.

@@ -209,9 +209,9 @@ var (
 	OAuthState        = "random"
 	Token             *oauth2.Token
 	GeminiClient      *CodeAssistClient // Changed from CodeAssistClient to GeminiClient
-	ChatSessions      = make(map[string]*ChatSession)
-	ProjectID         string
-	SelectedAuthType  AuthType
+
+	ProjectID        string
+	SelectedAuthType AuthType
 )
 
 // InitGeminiClient initializes the CodeAssistClient.
