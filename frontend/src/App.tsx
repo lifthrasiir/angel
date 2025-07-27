@@ -185,7 +185,7 @@ function App() {
           <button onClick={handleNewChatSession}>Start New Chat Session</button>
           <div style={{ border: '1px solid #ccc', padding: '10px', marginTop: '20px', height: '300px', overflowY: 'scroll' }}>
             {messages.map((msg, index) => (
-              <p key={index}>
+              <p key={index} style={{ whiteSpace: 'pre-wrap' }}>
                 <strong>{msg.role === 'user' ? 'You' : 'Agent'}:</strong> {msg.parts[0].text}
               </p>
             ))}

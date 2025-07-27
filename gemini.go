@@ -13,6 +13,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const oauthTokenJson = "x:\\oauth_token.json"
+
 // AuthType enum definition (matches AuthType in TypeScript)
 type AuthType string
 
@@ -25,7 +27,8 @@ const (
 
 // Define Go structs to match the structs defined in gemini-cli's converter.ts
 type Part struct {
-	Text string `json:"text,omitempty"`
+	Text    string `json:"text,omitempty"`
+	Thought string `json:"thought,omitempty"` // Add this field
 	// TODO: Add other part types like inlineData, functionCall, functionResponse if needed
 }
 
@@ -243,7 +246,7 @@ func InitGeminiClient() {
 
 // saveToken saves the OAuth token to a file.
 func SaveToken(t *oauth2.Token) {
-	file, err := os.Create("oauth_token.json")
+	file, err := os.Create(oauthTokenJson)
 	if err != nil {
 		log.Printf("Failed to create token file: %v", err)
 		return
@@ -255,13 +258,13 @@ func SaveToken(t *oauth2.Token) {
 	if err := encoder.Encode(t); err != nil {
 		log.Printf("Failed to save token: %v", err)
 	}
-	log.Println("OAuth token saved to oauth_token.json.")
+	log.Printf("OAuth token saved to %s.", oauthTokenJson)
 	Token = t // Update global token variable
 }
 
 // loadToken loads the OAuth token from a file.
 func LoadToken() {
-	file, err := os.Open("oauth_token.json")
+	file, err := os.Open(oauthTokenJson)
 	if err != nil {
 		log.Printf("No existing token file: %v", err)
 		return

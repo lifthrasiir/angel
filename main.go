@@ -259,6 +259,11 @@ func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher ht
 
 		if len(caResp.Response.Candidates) > 0 && len(caResp.Response.Candidates[0].Content.Parts) > 0 {
 			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+				// Check if it's a thought part
+				if part.Thought != "" { // If it's a thought, skip it
+					log.Printf("Thinking: %v", part.Thought)
+					continue
+				}
 				if part.Text != "" {
 					/*
 						contentEvent := ServerGeminiContentEvent{
@@ -267,7 +272,10 @@ func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher ht
 						}
 						eventBytes, _ := json.Marshal(contentEvent)
 					*/
-					fmt.Fprintf(w, "data: %s\n\n", part.Text)
+					for line := range strings.Lines(part.Text) {
+						fmt.Fprintf(w, "data: %s\n", line)
+					}
+					fmt.Fprintf(w, "\n")
 					*agentResponseText += part.Text
 					flusher.Flush()
 				}
