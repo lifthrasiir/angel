@@ -12,7 +12,7 @@ var db *sql.DB
 
 func InitDB() {
 	var err error
-	db, err = sql.Open("sqlite3", "./chat_history.db")
+	db, err = sql.Open("sqlite3", "X:/angel.db")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
@@ -30,6 +30,11 @@ func InitDB() {
 		text TEXT NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (session_id) REFERENCES sessions(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS oauth_tokens (
+		id INTEGER PRIMARY KEY,
+		token_data TEXT NOT NULL
 	);
 	`
 	_, err = db.Exec(createTableSQL)
@@ -75,4 +80,24 @@ func AddMessageToSession(sessionID string, role string, text string) error {
 		return fmt.Errorf("failed to add message to session: %w", err)
 	}
 	return nil
+}
+
+func SaveOAuthToken(tokenJSON string) error {
+	_, err := db.Exec("INSERT OR REPLACE INTO oauth_tokens (id, token_data) VALUES (1, ?)", tokenJSON)
+	if err != nil {
+		return fmt.Errorf("failed to save OAuth token: %w", err)
+	}
+	return nil
+}
+
+func LoadOAuthToken() (string, error) {
+	var tokenJSON string
+	err := db.QueryRow("SELECT token_data FROM oauth_tokens WHERE id = 1").Scan(&tokenJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil // No token found, not an error
+		}
+		return "", fmt.Errorf("failed to load OAuth token: %w", err)
+	}
+	return tokenJSON, nil
 }

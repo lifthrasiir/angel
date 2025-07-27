@@ -24,6 +24,7 @@ import (
 var oauthStates = make(map[string]string) // Stores randomState -> originalQueryString
 
 func init() {
+	InitDB() // Initialize SQLite database
 	// Select authentication method from environment variables
 	if os.Getenv("GEMINI_API_KEY") != "" {
 		SelectedAuthType = AuthTypeUseGemini
@@ -67,7 +68,6 @@ func init() {
 		InitGeminiClient() // Cloud Shell authentication is handled inside InitGeminiClient
 	}
 
-	InitDB() // Initialize SQLite database
 }
 
 func main() {

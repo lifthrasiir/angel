@@ -2,5 +2,5 @@
 *.exe
 *.db
 node_modules
-oauth_token.json
+
 frontend/dist

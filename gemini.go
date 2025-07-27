@@ -8,12 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 
 	"golang.org/x/oauth2"
 )
-
-const oauthTokenJson = "x:\\oauth_token.json"
 
 // AuthType enum definition (matches AuthType in TypeScript)
 type AuthType string
@@ -244,39 +241,40 @@ func InitGeminiClient() {
 	log.Println("CodeAssist client initialized.")
 }
 
-// saveToken saves the OAuth token to a file.
+// saveToken saves the OAuth token to the database.
 func SaveToken(t *oauth2.Token) {
-	file, err := os.Create(oauthTokenJson)
+	tokenJSON, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
-		log.Printf("Failed to create token file: %v", err)
+		log.Printf("Failed to marshal token: %v", err)
 		return
 	}
-	defer file.Close()
 
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(t); err != nil {
-		log.Printf("Failed to save token: %v", err)
+	if err := SaveOAuthToken(string(tokenJSON)); err != nil {
+		log.Printf("Failed to save OAuth token to DB: %v", err)
+		return
 	}
-	log.Printf("OAuth token saved to %s.", oauthTokenJson)
+	log.Println("OAuth token saved to DB.")
 	Token = t // Update global token variable
 }
 
-// loadToken loads the OAuth token from a file.
+// loadToken loads the OAuth token from the database.
 func LoadToken() {
-	file, err := os.Open(oauthTokenJson)
+	tokenJSON, err := LoadOAuthToken()
 	if err != nil {
-		log.Printf("No existing token file: %v", err)
+		log.Printf("Failed to load OAuth token from DB: %v", err)
 		return
 	}
-	defer file.Close()
 
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&Token); err != nil {
-		log.Printf("Failed to decode token: %v", err)
+	if tokenJSON == "" {
+		log.Println("No existing token in DB.")
 		return
 	}
-	log.Println("OAuth token loaded.")
+
+	if err := json.Unmarshal([]byte(tokenJSON), &Token); err != nil {
+		log.Printf("Failed to decode token from DB: %v", err)
+		return
+	}
+	log.Println("OAuth token loaded from DB.")
 }
 
 // fetchProjectID retrieves the Google Cloud Project ID with the OAuth token.
