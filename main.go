@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -14,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"regexp"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -248,8 +249,8 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve session history from DB
-	historyContents, err := GetSessionHistory(sessionId)
+	// Retrieve session history from DB for Gemini API
+	historyContents, err := GetSessionHistoryForGeminiAPI(sessionId)
 	if err != nil {
 		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
@@ -279,7 +280,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	defer respBody.Close()
 
 	var agentResponseText string
-	if err := processStreamingJsonResponse(respBody, w, flusher, &agentResponseText); err != nil {
+	if err := processStreamingJsonResponse(respBody, w, flusher, &agentResponseText, sessionId); err != nil {
 		log.Printf("chatMessage: Error processing streaming response: %v", err)
 		return
 	}
@@ -309,7 +310,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history, err := GetSessionHistory(sessionId)
+	history, err := GetSessionHistoryForWebAPI(sessionId) // Use the new function for web API
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
 		return
@@ -325,77 +326,69 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"sessionId": sessionId, "history": history})
 }
 
+func sendServerEvent(w http.ResponseWriter, flusher http.Flusher, data string) {
+	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
+	fmt.Fprintf(w, "data: %s\n\n", escapedData)
+	flusher.Flush()
+}
+
 // NOTE: This function is intentionally designed to parse a specific JSON stream format, not standard SSE. Do not modify without understanding its purpose.
-func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher http.Flusher, agentResponseText *string) (err error) {
-	b := make([]byte, 1)
-	n, err := r.Read(b)
-	if n != 1 {
-		err = fmt.Errorf("expected opening bracket '[', but got a premature EOF")
-		return
-	}
-	if b[0] != '[' {
-		err = fmt.Errorf("expected opening bracket '[', but got %v", b[0])
-		return
+func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher http.Flusher, agentResponseText *string, sessionId string) (err error) {
+	dec := json.NewDecoder(r)
+
+	// Read the opening bracket of the JSON array
+	_, err = dec.Token()
+	if err != nil {
+		return fmt.Errorf("expected opening bracket '[', but got %w", err)
 	}
 
-	scanner := bufio.NewScanner(r)
-	var lines strings.Builder
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "data: ") {
-			line = line[6:]
-		}
-		lines.WriteString(line)
-		if line != "}" {
-			continue
-		}
-
+	for dec.More() {
 		var caResp CaGenerateContentResponse
-		if err := json.Unmarshal([]byte(lines.String()), &caResp); err != nil {
+		if err := dec.Decode(&caResp); err != nil {
 			log.Printf("Failed to decode JSON object from stream: %v", err)
 			continue
 		}
-		lines.Reset()
 
 		if len(caResp.Response.Candidates) > 0 && len(caResp.Response.Candidates[0].Content.Parts) > 0 {
 			for _, part := range caResp.Response.Candidates[0].Content.Parts {
 				// Check if it's a thought part
-				if part.Thought != "" { // If it's a thought, skip it
-					log.Printf("Thinking: %v", part.Thought)
-					continue
+				if part.Thought { // If it's a thought
+					// Parse subject and description from part.Text
+					rawText := part.Text
+					subject := ""
+					description := rawText
+
+					// Use regexp to extract subject and description
+					re := regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
+					matches := re.FindStringSubmatch(rawText)
+					if len(matches) > 2 {
+						subject = matches[1]
+						description = matches[2]
+					}
+
+					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s\n%s", subject, description))
+					// Add thought message to chat history in DB
+					if err := AddMessageToSession(sessionId, "thought", fmt.Sprintf("%s\n%s", subject, description)); err != nil {
+						log.Printf("Failed to save thought message: %v", err)
+					}
+					continue // Skip further processing for thought parts
 				}
 				if part.Text != "" {
-					/*
-						contentEvent := ServerGeminiContentEvent{
-							Type:  GeminiEventTypeContent,
-							Value: Content{Role: "model", Parts: []Part{{Text: part.Text}}},
-						}
-						eventBytes, _ := json.Marshal(contentEvent)
-					*/
-					fmt.Fprintf(w, "data: %s\n\n", strings.ReplaceAll(part.Text, "\n", "\ndata: "))
+					sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
 					*agentResponseText += part.Text
-					flusher.Flush()
 				}
 			}
 		}
-
-		if !scanner.Scan() {
-			break
-		}
-
-		line = scanner.Text()
-		if line == "," {
-			continue
-		} else if line == "]" {
-			break
-		} else {
-			log.Printf("Unexpected streaming delimiter %v", line)
-			continue
-		}
 	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("Error reading from response body: %v", err)
+
+	// Read the closing bracket of the JSON array
+	_, err = dec.Token()
+	if err != nil {
+		return fmt.Errorf("expected closing bracket ']', but got %w", err)
 	}
+
+	// Send 'Q' to signal end of content
+	sendServerEvent(w, flusher, "Q")
 
 	return
 }
@@ -438,4 +431,52 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 func generateSessionID() string {
 	return uuid.New().String()
+}
+
+func GetSessionHistoryForGeminiAPI(sessionId string) ([]Content, error) {
+	rows, err := db.Query("SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query chat history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []Content
+	for rows.Next() {
+		var role, message string
+		if err := rows.Scan(&role, &message); err != nil {
+			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
+		}
+		// Filter out "thought" messages when retrieving history for the model
+		if role == "thought" {
+			continue
+		}
+		history = append(history, Content{
+			Role:  role,
+			Parts: []Part{{Text: message}},
+		})
+	}
+
+	return history, nil
+}
+
+func GetSessionHistoryForWebAPI(sessionId string) ([]Content, error) {
+	rows, err := db.Query("SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query chat history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []Content
+	for rows.Next() {
+		var role, message string
+		if err := rows.Scan(&role, &message); err != nil {
+			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
+		}
+		history = append(history, Content{
+			Role:  role,
+			Parts: []Part{{Text: message}},
+		})
+	}
+
+	return history, nil
 }

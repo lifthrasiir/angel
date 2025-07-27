@@ -66,6 +66,16 @@ func GetSessionHistory(sessionID string) ([]Content, error) {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
 
+		switch role {
+		case "user", "model":
+			// acceptable
+		case "thought":
+			continue // should be omitted from the history
+		default:
+			log.Printf("GetSessionHistory: unexpected role %q", role)
+			continue
+		}
+
 		history = append(history, Content{
 			Role:  role,
 			Parts: []Part{{Text: text}},

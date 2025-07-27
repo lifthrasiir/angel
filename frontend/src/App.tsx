@@ -14,6 +14,7 @@ interface ChatMessage {
   id: string; // Add id field
   role: string;
   parts: { text: string }[];
+  type?: "model" | "thought" | "system" | "user"; // Add type field
 }
 
 function ChatApp() {
@@ -25,6 +26,7 @@ function ChatApp() {
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
+  const [isSessionInitialized, setIsSessionInitialized] = useState(false); // New state
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -50,6 +52,8 @@ function ChatApp() {
     }
 
     const initializeChatSession = async () => {
+      if (isSessionInitialized) return; // Prevent re-initialization
+
       let currentSessionId = urlSessionId;
 
       if (currentSessionId) {
@@ -59,12 +63,27 @@ function ChatApp() {
             const data = await response.json();
             setChatSessionId(data.sessionId);
             // Ensure loaded messages have an ID
-            setMessages(data.history.map((msg: any) => ({ ...msg, id: msg.id || crypto.randomUUID() })));
+            setMessages(data.history.map((msg: any) => {
+              const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID() };
+              if (chatMessage.role === 'thought') {
+                chatMessage.type = 'thought';
+                // Reconstruct the thought message text for display
+                const parts = chatMessage.parts[0].text.split('\n');
+                const subject = parts[0];
+                const description = parts.slice(1).join('\n');
+                chatMessage.parts[0].text = `**Thought: ${subject}**\n${description}`;
+              }
+              return chatMessage;
+            }));
             setIsLoggedIn(true);
+            setIsSessionInitialized(true); // Mark as initialized
+            if (currentSessionId !== data.sessionId) {
+                navigate(`/${data.sessionId}`, { replace: true });
+            }
           } else if (response.status === 401) {
             handleLogin();
           } else {
-            console.error('Failed to load session:', response.statusText);
+            console.error('Failed to load session:', response.status, response.statusText);
             await startNewSession();
           }
         } catch (error) {
@@ -84,7 +103,8 @@ function ChatApp() {
           setChatSessionId(data.sessionId);
           setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: data.message }] }]);
           setIsLoggedIn(true);
-          navigate(`/${data.sessionId}`);
+          setIsSessionInitialized(true); // Mark as initialized
+          navigate(`/${data.sessionId}`, { replace: true }); // Use replace to avoid history stack issues
         } else if (response.status === 401) {
           handleLogin();
         } else {
@@ -98,8 +118,12 @@ function ChatApp() {
       }
     };
 
-    initializeChatSession();
-  }, [urlSessionId, navigate, location.search]);
+    // Only run initialization if not already initialized and not handling a redirect
+    if (!isSessionInitialized && !location.search.includes('redirect_to')) {
+      initializeChatSession();
+    }
+  }, [urlSessionId, navigate, location.search, isSessionInitialized]);
+
 
   const handleLogin = () => {
     const currentPath = location.pathname + location.search;
@@ -137,14 +161,13 @@ function ChatApp() {
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !chatSessionId) return;
 
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ text: inputMessage }] };
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ text: inputMessage }], type: 'user' };
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
 
-    let agentMessageIndex = -1;
+    let agentMessageId = crypto.randomUUID();
     setMessages((prev) => {
-      const newMessages = [...prev, { id: crypto.randomUUID(), role: 'model', parts: [{ text: '' }] }];
-      agentMessageIndex = newMessages.length - 1;
+      const newMessages = [...prev, { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage];
       return newMessages;
     });
 
@@ -163,8 +186,11 @@ function ChatApp() {
       if (!response.ok) {
         setMessages((prev) => {
           const newMessages = [...prev];
-          if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-            newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: 'Failed to send message or receive stream.' }] };
+          const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
+          if (agentMessage) {
+            agentMessage.role = 'system';
+            agentMessage.parts[0].text = 'Failed to send message or receive stream.';
+            agentMessage.type = 'system';
           }
           return newMessages;
         });
@@ -176,8 +202,11 @@ function ChatApp() {
         console.error('Failed to get readable stream reader.');
         setMessages((prev) => {
           const newMessages = [...prev];
-          if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-            newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: 'Failed to get readable stream reader.' }] };
+          const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
+          if (agentMessage) {
+            agentMessage.role = 'system';
+            agentMessage.parts[0].text = 'Failed to get readable stream reader.';
+            agentMessage.type = 'system';
           }
           return newMessages;
         });
@@ -186,7 +215,7 @@ function ChatApp() {
 
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
-      let accumulatedAgentText = '';
+      let currentAgentText = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -200,40 +229,38 @@ function ChatApp() {
           const eventString = buffer.substring(0, newlineIndex);
           buffer = buffer.substring(newlineIndex + 2);
 
-          const lines = eventString.split('\n');
-          let dataParts: string[] = [];
-          let eventType = 'message';
+          const data = eventString.slice(6).replace(/\ndata: /g, '\n');
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              dataParts.push(line.substring(6));
-            } else if (line.startsWith('event: ')) {
-              eventType = line.substring(7);
-            }
-          }
-          let data = dataParts.join('\n');
+          if (data.startsWith('M\n')) {
+            currentAgentText += data.substring(2); // Remove "M\n"
 
-          if (eventType === 'message') {
-            accumulatedAgentText += data;
             setMessages((prev) => {
               const newMessages = [...prev];
-              if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-                newMessages[agentMessageIndex].parts[0].text = accumulatedAgentText;
+              const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
+              if (agentMessage) {
+                agentMessage.parts[0].text = currentAgentText;
               }
               return newMessages;
             });
-          } else if (eventType === 'done') {
-            // Stream finished.
-          } else if (eventType === 'error') {
-            console.error('SSE Error:', data);
+          } else if (data.startsWith('T\n')) {
+            const parts = data.substring(2).split('\n'); // Remove "T\n" and split by newline
+            const subject = parts[0];
+            const description = parts.slice(1).join('\n');
+
             setMessages((prev) => {
               const newMessages = [...prev];
-              if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-                newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: `Error: ${data}` }] };
+              const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
+              if (agentMessageIndex !== -1) {
+                newMessages.splice(agentMessageIndex, 0, { id: crypto.randomUUID(), role: 'system', parts: [{ text: `**Thought: ${subject}**
+${description}` }], type: 'thought' } as ChatMessage);
               }
               return newMessages;
             });
-            return;
+          } else if (data === 'Q') {
+            // End of content signal
+            break;
+          } else {
+            console.warn('Unknown protocol:', data);
           }
         }
       }
@@ -242,10 +269,13 @@ function ChatApp() {
       console.error('Error sending message or receiving stream:', error);
       setMessages((prev) => {
         const newMessages = [...prev];
-        if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-          newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] };
+        const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
+        if (agentMessage) {
+          agentMessage.role = 'system';
+          agentMessage.parts[0].text = 'Error sending message or receiving stream.';
+          agentMessage.type = 'system';
         } else {
-          newMessages.push({ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] });
+          newMessages.push({ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }], type: 'system' });
         }
         return newMessages;
       });
@@ -266,7 +296,7 @@ function ChatApp() {
           <button onClick={handleNewChatSession}>Start New Chat Session</button>
           <div style={{ border: '1px solid #ccc', padding: '10px', marginTop: '20px', height: '300px', overflowY: 'scroll' }}>
             {messages.map((msg) => (
-              <ChatMessage key={msg.id} role={msg.role} text={msg.parts[0].text} />
+              <ChatMessage key={msg.id} role={msg.role} text={msg.parts[0].text} type={msg.type} />
             ))}
             <div ref={messagesEndRef} />
           </div>

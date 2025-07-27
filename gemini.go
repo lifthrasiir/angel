@@ -25,7 +25,7 @@ const (
 // Define Go structs to match the structs defined in gemini-cli's converter.ts
 type Part struct {
 	Text    string `json:"text,omitempty"`
-	Thought string `json:"thought,omitempty"` // Add this field
+	Thought bool   `json:"thought,omitempty"` // Change to bool
 	// TODO: Add other part types like inlineData, functionCall, functionResponse if needed
 }
 
@@ -34,10 +34,20 @@ type Content struct {
 	Parts []Part `json:"parts"`
 }
 
+type ThinkingConfig struct {
+	IncludeThoughts bool `json:"includeThoughts,omitempty"`
+}
+
+type GenerationConfig struct {
+	ThinkingConfig *ThinkingConfig `json:"thinkingConfig,omitempty"`
+	// TODO: Add other generation config fields like temperature, topP if needed
+}
+
 type VertexGenerateContentRequest struct {
-	Contents          []Content `json:"contents"`
-	SystemInstruction *Content  `json:"systemInstruction,omitempty"`
-	SessionID         string    `json:"session_id,omitempty"`
+	Contents          []Content         `json:"contents"`
+	SystemInstruction *Content          `json:"systemInstruction,omitempty"`
+	SessionID         string            `json:"session_id,omitempty"`
+	GenerationConfig  *GenerationConfig `json:"generationConfig,omitempty"` // Add this field
 	// TODO: Add other fields from VertexGenerateContentRequest if needed
 }
 
@@ -94,6 +104,11 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Con
 		Project: c.projectID,
 		Request: VertexGenerateContentRequest{
 			Contents: contents,
+			GenerationConfig: &GenerationConfig{
+				ThinkingConfig: &ThinkingConfig{
+					IncludeThoughts: true,
+				},
+			},
 		},
 	}
 
@@ -179,12 +194,25 @@ const (
 	GeminiEventTypeToolCallResponse     GeminiEventType = "tool_call_response"
 	GeminiTypeError                     GeminiEventType = "error"
 	GeminiTypeFinished                  GeminiEventType = "finished"
+	GeminiEventTypeThought              GeminiEventType = "thought"
 )
 
 // ServerGeminiContentEvent matches ServerGeminiContentEvent in TypeScript
 type ServerGeminiContentEvent struct {
 	Type  GeminiEventType `json:"type"`
 	Value Content         `json:"value"`
+}
+
+// ThoughtSummary matches ThoughtSummary in TypeScript
+type ThoughtSummary struct {
+	Subject     string `json:"subject"`
+	Description string `json:"description"`
+}
+
+// ServerGeminiThoughtEvent matches ServerGeminiThoughtEvent in TypeScript
+type ServerGeminiThoughtEvent struct {
+	Type  GeminiEventType `json:"type"`
+	Value ThoughtSummary  `json:"value"`
 }
 
 // ServerGeminiFinishedEvent matches ServerGeminiFinishedEvent in TypeScript
