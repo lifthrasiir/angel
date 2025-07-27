@@ -5,8 +5,10 @@ import {
   Route,
   useNavigate,
   useParams,
-  useLocation, // Add useLocation
+  useLocation,
 } from 'react-router-dom';
+
+import ChatMessage from './components/ChatMessage';
 
 interface ChatMessage {
   role: string;
@@ -21,15 +23,13 @@ function ChatApp() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
-  const location = useLocation(); // Get current location
+  const location = useLocation();
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
-    // Check for redirect_to and draft_message parameters after login
     const params = new URLSearchParams(location.search);
     const redirectTo = params.get('redirect_to');
     const draftMessage = params.get('draft_message');
@@ -39,21 +39,19 @@ function ChatApp() {
     }
 
     if (redirectTo) {
-      // Basic validation: ensure redirectTo is a relative path within the application
       if (redirectTo.startsWith('/')) {
-        navigate(redirectTo, { replace: true }); // Redirect to the original page
+        navigate(redirectTo, { replace: true });
       } else {
         console.warn('Invalid redirectTo URL detected, redirecting to home:', redirectTo);
-        navigate('/', { replace: true }); // Redirect to home to prevent open redirect
+        navigate('/', { replace: true });
       }
-      return; // Prevent further initialization
+      return;
     }
 
     const initializeChatSession = async () => {
       let currentSessionId = urlSessionId;
 
       if (currentSessionId) {
-        // Try to load existing session
         try {
           const response = await fetch(`/api/chat/load?sessionId=${currentSessionId}`);
           if (response.ok) {
@@ -61,20 +59,17 @@ function ChatApp() {
             setChatSessionId(data.sessionId);
             setMessages(data.history);
             setIsLoggedIn(true);
-          } else if (response.status === 401) { // Handle unauthorized
+          } else if (response.status === 401) {
             handleLogin();
           } else {
             console.error('Failed to load session:', response.statusText);
-            // If loading fails, create a new session
             await startNewSession();
           }
         } catch (error) {
           console.error('Error loading session:', error);
-          // If error, create a new session
           await startNewSession();
         }
       } else {
-        // No session ID in URL, create a new session
         await startNewSession();
       }
     };
@@ -87,8 +82,8 @@ function ChatApp() {
           setChatSessionId(data.sessionId);
           setMessages([{ role: 'system', parts: [{ text: data.message }] }]);
           setIsLoggedIn(true);
-          navigate(`/${data.sessionId}`); // Update URL with new session ID
-        } else if (response.status === 401) { // Handle unauthorized
+          navigate(`/${data.sessionId}`);
+        } else if (response.status === 401) {
           handleLogin();
         } else {
           setIsLoggedIn(false);
@@ -101,12 +96,12 @@ function ChatApp() {
       }
     };
 
-    initializeChatSession(); // Initialize or load chat session
-  }, [urlSessionId, navigate, location.search]); // Re-run when URL session ID or search params change
+    initializeChatSession();
+  }, [urlSessionId, navigate, location.search]);
 
   const handleLogin = () => {
     const currentPath = location.pathname + location.search;
-    const draftMessage = inputMessage; // Get current input message
+    const draftMessage = inputMessage;
     let redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
 
     if (draftMessage) {
@@ -125,8 +120,8 @@ function ChatApp() {
         const data = await response.json();
         setChatSessionId(data.sessionId);
         setMessages([{ role: 'system', parts: [{ text: data.message }] }]);
-        navigate(`/${data.sessionId}`); // Update URL with new session ID
-      } else if (response.status === 401) { // Handle unauthorized
+        navigate(`/${data.sessionId}`);
+      } else if (response.status === 401) {
         handleLogin();
       } else {
         setMessages([{ role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
@@ -144,7 +139,6 @@ function ChatApp() {
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
 
-    // Add an empty agent message placeholder and get its index
     let agentMessageIndex = -1;
     setMessages((prev) => {
       const newMessages = [...prev, { role: 'model', parts: [{ text: '' }] }];
@@ -159,7 +153,7 @@ function ChatApp() {
         body: JSON.stringify({ sessionId: chatSessionId, message: inputMessage }),
       });
 
-      if (response.status === 401) { // Handle unauthorized
+      if (response.status === 401) {
         handleLogin();
         return;
       }
@@ -189,7 +183,7 @@ function ChatApp() {
       }
 
       const decoder = new TextDecoder('utf-8');
-      let buffer = ''; // Buffer to accumulate partial SSE lines
+      let buffer = '';
       let accumulatedAgentText = '';
 
       while (true) {
@@ -202,12 +196,11 @@ function ChatApp() {
         let newlineIndex;
         while ((newlineIndex = buffer.indexOf('\n\n')) !== -1) {
           const eventString = buffer.substring(0, newlineIndex);
-          buffer = buffer.substring(newlineIndex + 2); // Remove processed event from buffer
+          buffer = buffer.substring(newlineIndex + 2);
 
-          // Parse the event string
           const lines = eventString.split('\n');
           let dataParts: string[] = [];
-          let eventType = 'message'; // Default SSE event type
+          let eventType = 'message';
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
@@ -228,8 +221,7 @@ function ChatApp() {
               return newMessages;
             });
           } else if (eventType === 'done') {
-            // Stream finished. The final text is already accumulated.
-            // No explicit action needed here as the last update to messages will be the final one.
+            // Stream finished.
           } else if (eventType === 'error') {
             console.error('SSE Error:', data);
             setMessages((prev) => {
@@ -239,7 +231,7 @@ function ChatApp() {
               }
               return newMessages;
             });
-            return; // Stop processing on error
+            return;
           }
         }
       }
@@ -248,11 +240,9 @@ function ChatApp() {
       console.error('Error sending message or receiving stream:', error);
       setMessages((prev) => {
         const newMessages = [...prev];
-        // If an agent message placeholder was added, update it to an an error message
         if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
           newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] };
         } else {
-          // Otherwise, just add a new system error message
           newMessages.push({ role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] });
         }
         return newMessages;
@@ -274,11 +264,9 @@ function ChatApp() {
           <button onClick={handleNewChatSession}>Start New Chat Session</button>
           <div style={{ border: '1px solid #ccc', padding: '10px', marginTop: '20px', height: '300px', overflowY: 'scroll' }}>
             {messages.map((msg, index) => (
-              <p key={index} style={{ whiteSpace: 'pre-wrap' }}>
-                <strong>{msg.role === 'user' ? 'You' : 'Agent'}:</strong> {msg.parts[0].text}
-              </p>
+              <ChatMessage key={index} role={msg.role} text={msg.parts[0].text} />
             ))}
-            <div ref={messagesEndRef} /> {/* Scroll target */}
+            <div ref={messagesEndRef} />
           </div>
           <div style={{ marginTop: '10px' }}>
             <input

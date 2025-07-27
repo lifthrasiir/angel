@@ -2,5 +2,5 @@
 *.exe
 *.db
 node_modules
-
+/angel
 frontend/dist

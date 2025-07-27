@@ -1,3 +1,7 @@
-- All project comments and messages must be in English. Respond to users in their requested language.
-- The "agent" or "angel" refer to the LLM model behind the web view.
-- Many features require modifications to both Go and TypeScript.
+- **Project:** Angel - A personalized coding agent using Go and React/TypeScript.
+- **Goal:** Create a simple, single-user web version of `@google/gemini-cli`.
+- **Language:** Code and comments should be in English. Respond to the user in their requested language.
+- **Terminology:** The terms "agent" or "angel" refer to the LLM model.
+- **Development:** Features may require modifications to both the Go and TypeScript code. `go fmt` after any Go modifications.
+- **Build:** `npm run build-frontend`, `npm run build-backend`, `npm run build` (both). Never run `npm start`, the user will.
+- **Dependency:** Minimize. Clearly explain why any new dependency is required.

@@ -6,13 +6,20 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build-frontend": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/mdast": "^4.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^7.7.1"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.7.1",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-html": "^16.0.1",
+    "unist-util-visit": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",

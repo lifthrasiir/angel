@@ -5,8 +5,9 @@
   "main": "index.js",
   "scripts": {
     "build-frontend": "npm run build --prefix frontend",
-    "start-backend": "go run .",
-    "start": "npm run build-frontend && npm run start-backend"
+    "build-backend": "go build .",
+    "build": "npm run build-frontend && npm run build-backend",
+    "start": "npm run build-frontend && npm run build-backend && node -e \"require('child_process').execSync(process.platform === 'win32' ? 'angel.exe' : '.\\angel', { stdio: 'inherit' })\""
   },
   "keywords": [],
   "author": "",
