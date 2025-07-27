@@ -148,3 +148,13 @@ func LoadOAuthToken() (string, error) {
 	}
 	return tokenJSON, nil
 }
+
+// SessionExists checks if a session with the given ID exists.
+func SessionExists(sessionID string) (bool, error) {
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)", sessionID).Scan(&exists)
+	if err != nil && err != sql.ErrNoRows {
+		return false, fmt.Errorf("failed to check session existence: %w", err)
+	}
+	return exists, nil
+}

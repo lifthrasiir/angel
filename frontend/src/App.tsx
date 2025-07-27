@@ -43,11 +43,14 @@ function ChatApp() {
       if (response.ok) {
         const data: Session[] = await response.json();
         setSessions(data);
+        setIsLoggedIn(true); // Set isLoggedIn to true on successful fetch
       } else if (response.status === 401) {
         // Not logged in, clear sessions
         setSessions([]);
+        setIsLoggedIn(false); // Set isLoggedIn to false on 401
       } else {
         console.error('Failed to fetch sessions:', response.status, response.statusText);
+        setIsLoggedIn(false); // Also set to false on other errors
       }
     } catch (error) {
       console.error('Error fetching sessions:', error);
@@ -83,7 +86,6 @@ function ChatApp() {
             const data = await response.json();
             if (!data) {
                 console.error('Received null data from API for session load');
-                await startNewSession();
                 return;
             }
             setChatSessionId(data.sessionId);
@@ -100,51 +102,29 @@ function ChatApp() {
               }
               return chatMessage;
             }));
-            setIsLoggedIn(true);
             if (currentSessionId !== data.sessionId) {
                 navigate(`/${data.sessionId}`, { replace: true });
             }
           } else if (response.status === 401) {
             handleLogin();
+          } else if (response.status === 404) {
+            console.warn('Session not found:', currentSessionId);
+            setChatSessionId(null);
+            setMessages([]);
           } else {
             console.error('Failed to load session:', response.status, response.statusText);
-            await startNewSession();
+            setChatSessionId(null);
+            setMessages([]);
           }
         } catch (error) {
           console.error('Error loading session:', error);
-          await startNewSession();
+          setChatSessionId(null);
+          setMessages([]);
         }
-      }
- else {
-        await startNewSession();
-      }
-    };
-
-    const startNewSession = async () => {
-      try {
-        const response = await fetch('/api/chat/new', { method: 'POST' });
-        if (response.ok) {
-          const data = await response.json();
-          if (!data) {
-              console.error('Received null data from API for new session');
-              setIsLoggedIn(false);
-              setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Failed to start new session: received null data.' }] }]);
-              return;
-          }
-          setChatSessionId(data.sessionId);
-          setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: data.message }] }]);
-          setIsLoggedIn(true);
-          navigate(`/${data.sessionId}`); // Use replace to avoid history stack issues
-        } else if (response.status === 401) {
-          handleLogin();
-        } else {
-          setIsLoggedIn(false);
-          setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
-        }
-      } catch (error) {
-        console.error('Error starting new chat session:', error);
-        setIsLoggedIn(false);
-        setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
+      } else {
+        // No session ID in URL, clear current session state
+        setChatSessionId(null);
+        setMessages([]);
       }
     };
 
@@ -164,27 +144,9 @@ function ChatApp() {
     window.location.href = redirectToUrl;
   };
 
-  const handleNewChatSession = async () => {
-    try {
-      const response = await fetch('/api/chat/new', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setChatSessionId(data.sessionId);
-        setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: data.message }] }]);
-        navigate(`/${data.sessionId}`, { replace: true });
-        fetchSessions(); // Refresh sessions after new chat
-      } else if (response.status === 401) {
-        handleLogin();
-      } else {
-        setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
-      }
-    } catch (error) {
-      console.error('Error starting new chat session:', error);
-      setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
-    }
+  const handleCreateNewSession = async () => {
+    // Directly navigate to the new session endpoint, backend will handle creation and redirect
+    window.location.href = '/new';
   };
 
   const handleSendMessage = async () => {
@@ -320,7 +282,7 @@ ${description}` }], type: 'thought' } as ChatMessage);
         {!isLoggedIn ? (
           <button onClick={handleLogin} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Login</button>
         ) : (
-          <button onClick={handleNewChatSession} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
+          <button onClick={handleCreateNewSession} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
         )}
         <div style={{ width: '100%', marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px' }}>
           <h3>Sessions</h3>
@@ -362,7 +324,19 @@ ${description}` }], type: 'thought' } as ChatMessage);
             <p>Login required to start chatting.</p>
           </div>
         )}
-        {isLoggedIn && (
+        {isLoggedIn && !chatSessionId && (
+          <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+            <h2>Welcome to Angel CLI Web!</h2>
+            <p>Start a new conversation by creating a new session.</p>
+            <button
+              onClick={handleCreateNewSession}
+              style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginTop: '20px' }}
+            >
+              Create New Session
+            </button>
+          </div>
+        )}
+        {isLoggedIn && chatSessionId && (
           <>
             <div style={{ flexGrow: 1, overflowY: 'auto', padding: '20px' }}>
               {messages?.map((msg) => (

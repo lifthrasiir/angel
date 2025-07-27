@@ -81,7 +81,7 @@ func main() {
 	}
 
 	// API handlers
-	router.HandleFunc("/api/chat/new", newChatSession).Methods("POST")
+	router.HandleFunc("/new", newChatSession).Methods("GET")
 	router.HandleFunc("/api/chat/message", chatMessage).Methods("POST")
 	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")       // New endpoint to load chat session
 	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")  // New endpoint to list all chat sessions
@@ -217,8 +217,8 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal error, continue with response
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"sessionId": sessionId, "message": "New chat session started."})
+	// Redirect to the new session URL
+	http.Redirect(w, r, fmt.Sprintf("/%s", sessionId), http.StatusSeeOther)
 }
 
 // Chat message handler
@@ -320,6 +320,17 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	sessionId := r.URL.Query().Get("sessionId")
 	if sessionId == "" {
 		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if session exists
+	exists, err := SessionExists(sessionId)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to check session existence: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
 
@@ -460,7 +471,13 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func generateSessionID() string {
-	return uuid.New().String()
+	b := make([]byte, 8) // 8 bytes will result in an 11-character base64 string
+	if _, err := rand.Read(b); err != nil {
+		log.Printf("Error generating random session ID: %v", err)
+		// Fallback to UUID or handle error appropriately
+		return uuid.New().String() // Fallback to UUID if random generation fails
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func GetSessionHistoryForGeminiAPI(sessionId string) ([]Content, error) {

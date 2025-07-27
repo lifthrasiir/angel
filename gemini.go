@@ -243,15 +243,31 @@ var (
 func InitGeminiClient() {
 	ctx := context.Background()
 	var httpClient *http.Client
+	var err error // Declare err here
 
 	switch SelectedAuthType {
 	case AuthTypeLoginWithGoogle:
-
 		if Token == nil || !Token.Valid() {
 			log.Println("OAuth token is invalid. Login required.")
 			return
 		}
-		httpClient = GoogleOauthConfig.Client(ctx, Token)
+		// If ProjectID is not set, try to fetch it using the existing token
+		if ProjectID == "" {
+			log.Println("InitGeminiClient: ProjectID is empty, attempting to fetch using existing token.")
+			if err = FetchProjectID(Token); err != nil {
+				log.Printf("InitGeminiClient: Failed to retrieve Project ID using existing token: %v", err)
+				// Do not return, allow GeminiClient to be nil if ProjectID cannot be fetched
+			} else {
+				log.Printf("InitGeminiClient: Successfully fetched Project ID: %s", ProjectID)
+			}
+		}
+		if ProjectID != "" { // Only proceed if ProjectID is now available
+			httpClient = GoogleOauthConfig.Client(ctx, Token)
+		} else {
+			log.Println("InitGeminiClient: ProjectID still empty, Gemini client not initialized.")
+			GeminiClient = nil
+			return // Return early if ProjectID is not available
+		}
 	case AuthTypeUseGemini:
 		log.Println("Gemini API Key method does not use Code Assist API.")
 		return
@@ -264,7 +280,7 @@ func InitGeminiClient() {
 		log.Fatalf("Unsupported authentication type: %s", SelectedAuthType)
 	}
 
-	GeminiClient = NewCodeAssistClient(httpClient, ProjectID) // Changed from CodeAssistClient to GeminiClient
+	GeminiClient = NewCodeAssistClient(httpClient, ProjectID)
 
 	log.Println("CodeAssist client initialized.")
 }
