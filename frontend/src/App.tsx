@@ -11,6 +11,7 @@ import {
 import ChatMessage from './components/ChatMessage';
 
 interface ChatMessage {
+  id: string; // Add id field
   role: string;
   parts: { text: string }[];
 }
@@ -57,7 +58,8 @@ function ChatApp() {
           if (response.ok) {
             const data = await response.json();
             setChatSessionId(data.sessionId);
-            setMessages(data.history);
+            // Ensure loaded messages have an ID
+            setMessages(data.history.map((msg: any) => ({ ...msg, id: msg.id || crypto.randomUUID() })));
             setIsLoggedIn(true);
           } else if (response.status === 401) {
             handleLogin();
@@ -80,19 +82,19 @@ function ChatApp() {
         if (response.ok) {
           const data = await response.json();
           setChatSessionId(data.sessionId);
-          setMessages([{ role: 'system', parts: [{ text: data.message }] }]);
+          setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: data.message }] }]);
           setIsLoggedIn(true);
           navigate(`/${data.sessionId}`);
         } else if (response.status === 401) {
           handleLogin();
         } else {
           setIsLoggedIn(false);
-          setMessages([{ role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
+          setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
         }
       } catch (error) {
         console.error('Error starting new chat session:', error);
         setIsLoggedIn(false);
-        setMessages([{ role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
+        setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
       }
     };
 
@@ -119,29 +121,29 @@ function ChatApp() {
       if (response.ok) {
         const data = await response.json();
         setChatSessionId(data.sessionId);
-        setMessages([{ role: 'system', parts: [{ text: data.message }] }]);
+        setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: data.message }] }]);
         navigate(`/${data.sessionId}`);
       } else if (response.status === 401) {
         handleLogin();
       } else {
-        setMessages([{ role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
+        setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Failed to start new session.' }] }]);
       }
     } catch (error) {
       console.error('Error starting new chat session:', error);
-      setMessages([{ role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
+      setMessages([{ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error starting new session.' }] }]);
     }
   };
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !chatSessionId) return;
 
-    const userMessage: ChatMessage = { role: 'user', parts: [{ text: inputMessage }] };
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ text: inputMessage }] };
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
 
     let agentMessageIndex = -1;
     setMessages((prev) => {
-      const newMessages = [...prev, { role: 'model', parts: [{ text: '' }] }];
+      const newMessages = [...prev, { id: crypto.randomUUID(), role: 'model', parts: [{ text: '' }] }];
       agentMessageIndex = newMessages.length - 1;
       return newMessages;
     });
@@ -162,7 +164,7 @@ function ChatApp() {
         setMessages((prev) => {
           const newMessages = [...prev];
           if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-            newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: 'Failed to send message or receive stream.' }] };
+            newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: 'Failed to send message or receive stream.' }] };
           }
           return newMessages;
         });
@@ -175,7 +177,7 @@ function ChatApp() {
         setMessages((prev) => {
           const newMessages = [...prev];
           if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-            newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: 'Failed to get readable stream reader.' }] };
+            newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: 'Failed to get readable stream reader.' }] };
           }
           return newMessages;
         });
@@ -227,7 +229,7 @@ function ChatApp() {
             setMessages((prev) => {
               const newMessages = [...prev];
               if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-                newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: `Error: ${data}` }] };
+                newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: `Error: ${data}` }] };
               }
               return newMessages;
             });
@@ -241,9 +243,9 @@ function ChatApp() {
       setMessages((prev) => {
         const newMessages = [...prev];
         if (agentMessageIndex !== -1 && newMessages[agentMessageIndex]) {
-          newMessages[agentMessageIndex] = { role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] };
+          newMessages[agentMessageIndex] = { id: newMessages[agentMessageIndex].id, role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] };
         } else {
-          newMessages.push({ role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] });
+          newMessages.push({ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }] });
         }
         return newMessages;
       });
@@ -263,8 +265,8 @@ function ChatApp() {
           <p>Logged in. Session ID: {chatSessionId || 'None'}</p>
           <button onClick={handleNewChatSession}>Start New Chat Session</button>
           <div style={{ border: '1px solid #ccc', padding: '10px', marginTop: '20px', height: '300px', overflowY: 'scroll' }}>
-            {messages.map((msg, index) => (
-              <ChatMessage key={index} role={msg.role} text={msg.parts[0].text} />
+            {messages.map((msg) => (
+              <ChatMessage key={msg.id} role={msg.role} text={msg.parts[0].text} />
             ))}
             <div ref={messagesEndRef} />
           </div>
@@ -305,3 +307,4 @@ function App() {
 }
 
 export default App;
+

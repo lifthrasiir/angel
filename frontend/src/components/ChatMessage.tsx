@@ -3,6 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import breaks from 'remark-breaks';
 import remarkHtml from 'remark-html';
+import remarkMath from 'remark-math'; // Add this import
+import rehypeKatex from 'rehype-katex'; // Add this import
+import 'katex/dist/katex.min.css'; // Add this import for KaTeX CSS
 import { smartPreprocessMarkdown } from '../lib/markdown-preprocessor';
 import { rehypeHandleRawNodes } from '../lib/rehype/rehype-handle-raw-nodes';
 
@@ -11,7 +14,7 @@ interface ChatMessageProps {
   text: string;
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ role, text }) => {
+const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ role, text }) => {
   if (role === 'user') {
     return (
       <div className="message">
@@ -25,8 +28,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ role, text }) => {
   return (
     <div className="message">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, breaks, remarkHtml]}
-        rehypePlugins={[rehypeHandleRawNodes]}
+        remarkPlugins={[remarkGfm, breaks, remarkHtml, remarkMath]} // Add remarkMath
+        rehypePlugins={[rehypeHandleRawNodes, rehypeKatex]} // Add rehypeKatex
         components={{
           p: ({ node, ...props }) => {
             const children = React.Children.toArray(props.children);
@@ -44,6 +47,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ role, text }) => {
       </ReactMarkdown>
     </div>
   );
-};
+}); // Correct closing for React.memo wrapped functional component
 
 export default ChatMessage;
