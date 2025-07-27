@@ -47,7 +47,7 @@ func InitDB() {
 
 // Session struct to hold session data
 type Session struct {
-	ID         string `json:"id"`
+	ID          string `json:"id"`
 	LastUpdated string `json:"last_updated_at"`
 }
 
@@ -89,38 +89,6 @@ func GetAllSessions() ([]Session, error) {
 	return sessions, nil
 }
 
-func GetSessionHistory(sessionID string) ([]Content, error) {
-	rows, err := db.Query("SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get session history: %w", err)
-	}
-	defer rows.Close()
-
-	var history []Content
-	for rows.Next() {
-		var role, text string
-		if err := rows.Scan(&role, &text); err != nil {
-			return nil, fmt.Errorf("failed to scan message: %w", err)
-		}
-
-		switch role {
-		case "user", "model":
-			// acceptable
-		case "thought":
-			continue // should be omitted from the history
-		default:
-			log.Printf("GetSessionHistory: unexpected role %q", role)
-			continue
-		}
-
-		history = append(history, Content{
-			Role:  role,
-			Parts: []Part{{Text: text}},
-		})
-	}
-	return history, nil
-}
-
 func AddMessageToSession(sessionID string, role string, text string) error {
 	_, err := db.Exec("INSERT INTO messages (session_id, role, text) VALUES (?, ?, ?)", sessionID, role, text)
 	if err != nil {
@@ -157,4 +125,52 @@ func SessionExists(sessionID string) (bool, error) {
 		return false, fmt.Errorf("failed to check session existence: %w", err)
 	}
 	return exists, nil
+}
+
+func GetSessionHistoryForGeminiAPI(sessionId string) ([]Content, error) {
+	rows, err := db.Query("SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query chat history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []Content
+	for rows.Next() {
+		var role, message string
+		if err := rows.Scan(&role, &message); err != nil {
+			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
+		}
+		// Filter out "thought" messages when retrieving history for the model
+		if role == "thought" {
+			continue
+		}
+		history = append(history, Content{
+			Role:  role,
+			Parts: []Part{{Text: message}},
+		})
+	}
+
+	return history, nil
+}
+
+func GetSessionHistoryForWebAPI(sessionId string) ([]Content, error) {
+	rows, err := db.Query("SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query chat history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []Content
+	for rows.Next() {
+		var role, message string
+		if err := rows.Scan(&role, &message); err != nil {
+			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
+		}
+		history = append(history, Content{
+			Role:  role,
+			Parts: []Part{{Text: message}},
+		})
+	}
+
+	return history, nil
 }

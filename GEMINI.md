@@ -5,3 +5,4 @@
 - **Development:** Features may require modifications to both the Go and TypeScript code. `go fmt` after any Go modifications.
 - **Build:** `npm run build-frontend`, `npm run build-backend`, `npm run build` (both). Never run `npm start`, the user will.
 - **Dependency:** Minimize. Clearly explain why any new dependency is required.
+- Never, ever remove the intentionally hard-coded GoogleOauthConfig!!!!
