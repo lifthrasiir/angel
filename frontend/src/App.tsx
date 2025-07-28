@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -9,6 +9,7 @@ import {
 } from 'react-router-dom';
 
 import ChatMessage from './components/ChatMessage';
+import { ThoughtGroup } from './components/ThoughtGroup'; // Import ThoughtGroup
 
 interface ChatMessage {
   id: string; // Add id field
@@ -28,6 +29,7 @@ function ChatApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [sessions, setSessions] = useState<Session[]>([]); // New state for sessions
+  const [lastAutoDisplayedThoughtId, setLastAutoDisplayedThoughtId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null); // Add this ref
   const navigate = useNavigate();
@@ -262,17 +264,20 @@ function ChatApp() {
               }
               return newMessages;
             });
+            setLastAutoDisplayedThoughtId(null);
           } else if (data.startsWith('T\n')) {
             const thoughtText = data.substring(2);
+            const newThoughtId = crypto.randomUUID();
 
             setMessages((prev) => {
               const newMessages = [...prev];
               const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
               if (agentMessageIndex !== -1) {
-                newMessages.splice(agentMessageIndex, 0, { id: crypto.randomUUID(), role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage);
+                newMessages.splice(agentMessageIndex, 0, { id: newThoughtId, role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage);
               }
               return newMessages;
             });
+            setLastAutoDisplayedThoughtId(newThoughtId);
           } else if (data.startsWith('F\n')) {
             const [functionName, functionArgsJson] = data.substring(2).split('\n', 2);
             const functionArgs = JSON.parse(functionArgsJson);
@@ -288,6 +293,7 @@ function ChatApp() {
               }
               return newMessages;
             });
+            setLastAutoDisplayedThoughtId(null);
           } else if (data.startsWith('R\n')) {
             const functionResponseRaw = JSON.parse(data.substring(2));
 
@@ -297,13 +303,13 @@ function ChatApp() {
               const message = { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: { response: functionResponseRaw } }], type: 'function_response' } as ChatMessage;
               if (agentMessageIndex !== -1) {
                 newMessages.splice(agentMessageIndex, 0, message);
-              } else {
-                newMessages.push(message);
               }
               return newMessages;
             });
+            setLastAutoDisplayedThoughtId(null);
           } else if (data === 'Q') {
             // End of content signal
+            setLastAutoDisplayedThoughtId(null);
             break;
           } else {
             console.warn('Unknown protocol:', data);
@@ -328,6 +334,38 @@ function ChatApp() {
       });
     }
   };
+
+  // Logic to group consecutive thought messages
+  const renderedMessages = useMemo(() => {
+    const renderedElements: JSX.Element[] = [];
+    let i = 0;
+    while (i < messages.length) {
+      const currentMessage = messages[i];
+      if (currentMessage.type === 'thought') {
+        const thoughtGroup: ChatMessage[] = [];
+        let j = i;
+        while (j < messages.length && messages[j].type === 'thought') {
+          thoughtGroup.push(messages[j]);
+          j++;
+        }
+        renderedElements.push(<ThoughtGroup key={`thought-group-${i}`} groupId={`thought-group-${i}`} thoughts={thoughtGroup} isAutoDisplayMode={true} lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId} />);
+        i = j; // Move index past the grouped thoughts
+      } else {
+        renderedElements.push(
+          <ChatMessage
+            key={currentMessage.id}
+            role={currentMessage.role}
+            text={currentMessage.parts[0].text}
+            type={currentMessage.type}
+            functionCall={currentMessage.parts[0].functionCall}
+            functionResponse={currentMessage.parts[0].functionResponse}
+          />
+        );
+        i++;
+      }
+    }
+    return renderedElements;
+  }, [messages, lastAutoDisplayedThoughtId]);
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -395,16 +433,7 @@ function ChatApp() {
           <>
             <div style={{ flexGrow: 1, overflowY: 'auto' }}>
               <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
-                {messages?.map((msg) => (
-                  <ChatMessage
-                    key={msg.id}
-                    role={msg.role}
-                    text={msg.parts[0].text}
-                    type={msg.type}
-                    functionCall={msg.parts[0].functionCall}
-                    functionResponse={msg.parts[0].functionResponse}
-                  />
-                ))}
+                {renderedMessages} {/* Call the new renderMessages function */}
                 <div ref={messagesEndRef} />
               </div>
             </div>

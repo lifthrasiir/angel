@@ -1,3 +1,10 @@
+:root {
+  --color-agent-light: #e0f2f7;
+  --color-agent-dark: #a0d9ff;
+  --color-user-light: #dcf8c6;
+  --color-user-dark: #b7eb8f;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -87,11 +94,11 @@ textarea {
 }
 
 .function-call-title-bar {
-  background-color: #a0d9ff; /* Darker blue for function call title */
+  background-color: var(--color-agent-dark); /* Darker blue for function call title */
 }
 
 .function-response-title-bar {
-  background-color: #b7eb8f; /* Darker green for function response title */
+  background-color: var(--color-user-dark); /* Darker green for function response title */
 }
 
 /* Override for function messages where the title bar handles the top spacing */
@@ -122,19 +129,35 @@ textarea {
 }
 
 .user-message .chat-bubble {
-  background-color: #dcf8c6; /* Light green */
+  background-color: var(--color-user-light); /* Light green */
   color: #333;
+  border: 2px solid var(--color-user-dark);
 }
 
 .agent-message .chat-bubble {
-  background-color: #e0f2f7; /* Very light blue */
+  background-color: var(--color-agent-light); /* Very light blue */
   color: #333;
+  border: 2px solid var(--color-agent-dark);
 }
 
 /* Specific styles for agent's internal messages */
-.agent-thought .chat-bubble {
-  background-color: #f0f0f0; /* Lighter grey for thoughts */
+.agent-thought.chat-bubble {
+  background-color: white;
+  border: 2px solid var(--color-agent-dark);
   font-style: italic;
   color: #555;
-  opacity: 0.5;
 }
+
+.thought-circle {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.2); /* Unselected: 20% white */
+  border: 2px solid var(--color-agent-dark);
+  cursor: pointer;
+}
+
+.thought-circle.selected {
+  background-color: var(--color-agent-dark);
+}
+
