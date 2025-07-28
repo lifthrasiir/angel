@@ -13,8 +13,8 @@ import ChatMessage from './components/ChatMessage';
 interface ChatMessage {
   id: string; // Add id field
   role: string;
-  parts: { text: string }[];
-  type?: "model" | "thought" | "system" | "user"; // Add type field
+  parts: { text?: string; functionCall?: any; functionResponse?: any; }[];
+  type?: "model" | "thought" | "system" | "user" | "function_call" | "function_response"; // Add type field
 }
 
 interface Session {
@@ -89,16 +89,19 @@ function ChatApp() {
                 return;
             }
             setChatSessionId(data.sessionId);
-            // Ensure loaded messages have an ID
+            // Ensure loaded messages have an ID and correct type
             setMessages((data.history || []).map((msg: any) => {
               const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID() };
-              if (chatMessage.role === 'thought') {
+              if (msg.type === 'thought') {
                 chatMessage.type = 'thought';
-                // Reconstruct the thought message text for display
-                const parts = chatMessage.parts[0].text.split('\n');
-                const subject = parts[0];
-                const description = parts.slice(1).join('\n');
-                chatMessage.parts[0].text = `**Thought: ${subject}**\n${description}`;
+              } else if (msg.parts[0].functionCall) { // Check for functionCall object
+                chatMessage.type = 'function_call';
+                chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
+              } else if (msg.parts[0].functionResponse) { // Check for functionResponse object
+                chatMessage.type = 'function_response';
+                chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
+              } else {
+                chatMessage.type = msg.role; // Default to role for other types
               }
               return chatMessage;
             }));
@@ -158,7 +161,7 @@ function ChatApp() {
 
     let agentMessageId = crypto.randomUUID();
     setMessages((prev) => {
-      const newMessages = [...prev, { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage];
+      const newMessages = [...prev, { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' }] as ChatMessage[];
       return newMessages;
     });
 
@@ -234,16 +237,42 @@ function ChatApp() {
               return newMessages;
             });
           } else if (data.startsWith('T\n')) {
-            const parts = data.substring(2).split('\n'); // Remove "T\n" and split by newline
-            const subject = parts[0];
-            const description = parts.slice(1).join('\n');
+            const thoughtText = data.substring(2);
 
             setMessages((prev) => {
               const newMessages = [...prev];
               const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
               if (agentMessageIndex !== -1) {
-                newMessages.splice(agentMessageIndex, 0, { id: crypto.randomUUID(), role: 'system', parts: [{ text: `**Thought: ${subject}**
-${description}` }], type: 'thought' } as ChatMessage);
+                newMessages.splice(agentMessageIndex, 0, { id: crypto.randomUUID(), role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage);
+              }
+              return newMessages;
+            });
+          } else if (data.startsWith('F\n')) {
+            const [functionName, functionArgsJson] = data.substring(2).split('\n', 2);
+            const functionArgs = JSON.parse(functionArgsJson);
+
+            setMessages((prev) => {
+              const newMessages = [...prev];
+              const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
+              const message = { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: functionArgs } }], type: 'function_call' } as ChatMessage;
+              if (agentMessageIndex !== -1) {
+                newMessages.splice(agentMessageIndex, 0, message);
+              } else {
+                newMessages.push(message);
+              }
+              return newMessages;
+            });
+          } else if (data.startsWith('R\n')) {
+            const functionResponseRaw = JSON.parse(data.substring(2));
+
+            setMessages((prev) => {
+              const newMessages = [...prev];
+              const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
+              const message = { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: { response: functionResponseRaw } }], type: 'function_response' } as ChatMessage;
+              if (agentMessageIndex !== -1) {
+                newMessages.splice(agentMessageIndex, 0, message);
+              } else {
+                newMessages.push(message);
               }
               return newMessages;
             });
@@ -264,7 +293,7 @@ ${description}` }], type: 'thought' } as ChatMessage);
         const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
         if (agentMessage) {
           agentMessage.role = 'system';
-          agentMessage.parts[0].text = 'Error sending message or receiving stream.';
+          agentMessage.parts[0].text = 'Failed to send message or receive stream.';
           agentMessage.type = 'system';
         } else {
           newMessages.push({ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }], type: 'system' });
@@ -340,7 +369,14 @@ ${description}` }], type: 'thought' } as ChatMessage);
           <>
             <div style={{ flexGrow: 1, overflowY: 'auto', padding: '20px' }}>
               {messages?.map((msg) => (
-                <ChatMessage key={msg.id} role={msg.role} text={msg.parts[0].text} type={msg.type} />
+                <ChatMessage
+                  key={msg.id}
+                  role={msg.role}
+                  text={msg.parts[0].text}
+                  type={msg.type}
+                  functionCall={msg.parts[0].functionCall}
+                  functionResponse={msg.parts[0].functionResponse}
+                />
               ))}
               <div ref={messagesEndRef} />
             </div>
@@ -380,4 +416,3 @@ function App() {
 }
 
 export default App;
-

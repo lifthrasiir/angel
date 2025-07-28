@@ -183,7 +183,7 @@ type ToolConfig struct {
 }
 
 type FunctionCallingConfig struct {
-	Mode             string   `json:"mode,omitempty"`
+	Mode                 string   `json:"mode,omitempty"`
 	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
@@ -211,7 +211,7 @@ type CAGenerateContentRequest struct {
 }
 
 type PromptFeedback struct {
-	BlockReason string `json:"blockReason,omitempty"`
+	BlockReason   string         `json:"blockReason,omitempty"`
 	SafetyRatings []SafetyRating `json:"safetyRatings,omitempty"`
 }
 

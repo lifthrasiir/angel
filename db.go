@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 
@@ -29,8 +30,8 @@ func InitDB() {
 		session_id TEXT NOT NULL,
 		role TEXT NOT NULL,
 		text TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (session_id) REFERENCES sessions(id)
+		type TEXT NOT NULL DEFAULT 'text',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS oauth_tokens (
@@ -42,6 +43,7 @@ func InitDB() {
 	if err != nil {
 		log.Fatalf("Failed to create tables: %v", err)
 	}
+
 	log.Println("Database initialized and tables created.")
 }
 
@@ -89,8 +91,9 @@ func GetAllSessions() ([]Session, error) {
 	return sessions, nil
 }
 
-func AddMessageToSession(sessionID string, role string, text string) error {
-	_, err := db.Exec("INSERT INTO messages (session_id, role, text) VALUES (?, ?, ?)", sessionID, role, text)
+// AddMessageToSession now accepts a message type
+func AddMessageToSession(sessionID string, role string, text string, msgType string) error {
+	_, err := db.Exec("INSERT INTO messages (session_id, role, text, type) VALUES (?, ?, ?, ?)", sessionID, role, text, msgType)
 	if err != nil {
 		return fmt.Errorf("failed to add message to session: %w", err)
 	}
@@ -128,7 +131,7 @@ func SessionExists(sessionID string) (bool, error) {
 }
 
 func GetSessionHistoryForGeminiAPI(sessionId string) ([]Content, error) {
-	rows, err := db.Query("SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+	rows, err := db.Query("SELECT role, text, type FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query chat history: %w", err)
 	}
@@ -136,17 +139,38 @@ func GetSessionHistoryForGeminiAPI(sessionId string) ([]Content, error) {
 
 	var history []Content
 	for rows.Next() {
-		var role, message string
-		if err := rows.Scan(&role, &message); err != nil {
+		var role, message, msgType string
+		if err := rows.Scan(&role, &message, &msgType); err != nil {
 			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
 		}
 		// Filter out "thought" messages when retrieving history for the model
 		if role == "thought" {
 			continue
 		}
+
+		var part Part
+		switch msgType {
+		case "function_call":
+			var fc FunctionCall
+			if err := json.Unmarshal([]byte(message), &fc); err != nil {
+				log.Printf("Failed to unmarshal FunctionCall: %v", err)
+				continue
+			}
+			part = Part{FunctionCall: &fc}
+		case "function_response":
+			var fr FunctionResponse
+			if err := json.Unmarshal([]byte(message), &fr); err != nil {
+				log.Printf("Failed to unmarshal FunctionResponse: %v", err)
+				continue
+			}
+			part = Part{FunctionResponse: &fr}
+		default:
+			part = Part{Text: message}
+		}
+
 		history = append(history, Content{
 			Role:  role,
-			Parts: []Part{{Text: message}},
+			Parts: []Part{part},
 		})
 	}
 
@@ -154,7 +178,7 @@ func GetSessionHistoryForGeminiAPI(sessionId string) ([]Content, error) {
 }
 
 func GetSessionHistoryForWebAPI(sessionId string) ([]Content, error) {
-	rows, err := db.Query("SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+	rows, err := db.Query("SELECT role, text, type FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query chat history: %w", err)
 	}
@@ -162,15 +186,44 @@ func GetSessionHistoryForWebAPI(sessionId string) ([]Content, error) {
 
 	var history []Content
 	for rows.Next() {
-		var role, message string
-		if err := rows.Scan(&role, &message); err != nil {
+		var role, message, msgType string
+		if err := rows.Scan(&role, &message, &msgType); err != nil {
 			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
 		}
+
+		var part Part
+		switch msgType {
+		case "function_call":
+			var fc FunctionCall
+			if err := json.Unmarshal([]byte(message), &fc); err != nil {
+				log.Printf("Failed to unmarshal FunctionCall: %v", err)
+				continue
+			}
+			part = Part{FunctionCall: &fc}
+		case "function_response":
+			var fr FunctionResponse
+			if err := json.Unmarshal([]byte(message), &fr); err != nil {
+				log.Printf("Failed to unmarshal FunctionResponse: %v", err)
+				continue
+			}
+			part = Part{FunctionResponse: &fr}
+		default:
+			part = Part{Text: message}
+		}
+
 		history = append(history, Content{
 			Role:  role,
-			Parts: []Part{{Text: message}},
+			Parts: []Part{part},
 		})
 	}
 
 	return history, nil
+}
+
+func formatJSON(data interface{}) string {
+	prettyJSON, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", data)
+	}
+	return string(prettyJSON)
 }

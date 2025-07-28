@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"iter"
 )
 
 var oauthStates = make(map[string]string) // Stores randomState -> originalQueryString
@@ -88,6 +87,8 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/%s", sessionId), http.StatusSeeOther)
 }
 
+var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)$`)
+
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
 	if GeminiClient == nil {
@@ -117,7 +118,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	userMessage := requestBody.Message
 
 	// Add user message to current chat history in DB
-	if err := AddMessageToSession(sessionId, "user", userMessage); err != nil {
+	if err := AddMessageToSession(sessionId, "user", userMessage, "text"); err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
@@ -127,14 +128,6 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	if err := UpdateSessionLastUpdated(sessionId); err != nil {
 		log.Printf("Failed to update last_updated_at for session %s: %v", sessionId, err)
 		// Non-fatal error, continue with response
-	}
-
-	// Retrieve session history from DB for Gemini API
-	historyContents, err := GetSessionHistoryForGeminiAPI(sessionId)
-	if err != nil {
-		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
-		return
 	}
 
 	modelName := "gemini-2.5-flash"
@@ -151,21 +144,133 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seq, closer, err := GeminiClient.SendMessageStream(context.Background(), historyContents, modelName)
+	// Retrieve session history from DB for Gemini API
+	historyContents, err := GetSessionHistoryForGeminiAPI(sessionId)
 	if err != nil {
-		log.Printf("chatMessage: CodeAssist API call failed: %v", err)
-		http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
+		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer closer.Close()
 
 	var agentResponseText string
-	if err := processStreamingJsonResponse(seq, w, flusher, &agentResponseText, sessionId); err != nil {
-		log.Printf("chatMessage: Error processing streaming response: %v", err)
-		return
+	var currentHistory = historyContents
+
+	for {
+		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName)
+		if err != nil {
+			log.Printf("chatMessage: CodeAssist API call failed: %v", err)
+			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer closer.Close()
+
+		var functionCalls []FunctionCall // Changed to slice
+		var modelResponseParts []Part
+
+		for caResp := range seq {
+			if len(caResp.Response.Candidates) == 0 {
+				continue
+			}
+			if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
+				continue
+			}
+			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+				if part.FunctionCall != nil {
+					functionCalls = append(functionCalls, *part.FunctionCall) // Append to slice
+					// Send FunctionCall to frontend
+					argsJson, _ := json.Marshal(part.FunctionCall.Args)
+					sendServerEvent(w, flusher, fmt.Sprintf("F\n%s\n%s", part.FunctionCall.Name, string(argsJson)))
+					continue
+				}
+
+				// Check if it's a thought part
+				if part.Thought { // If it's a thought
+					// Parse subject and description from part.Text
+					rawText := part.Text
+					subject := "Thinking..."
+					description := rawText
+
+					// Use regexp to extract subject and description
+					matches := thoughtPattern.FindStringSubmatch(rawText)
+					if len(matches) > 2 {
+						subject = matches[1]
+						description = matches[2]
+					}
+
+					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s\n%s", subject, description))
+					// Add thought message to chat history in DB
+					if err := AddMessageToSession(sessionId, "thought", fmt.Sprintf("%s\n%s", subject, description), "thought"); err != nil {
+						log.Printf("Failed to save thought message: %v", err)
+					}
+					continue // Skip further processing for thought parts
+				}
+
+				if part.Text != "" {
+					sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
+					agentResponseText += part.Text
+					modelResponseParts = append(modelResponseParts, part)
+				}
+			}
+			// If any function calls were found in this caResp, break the seq loop
+			if len(functionCalls) > 0 {
+				break
+			}
+		}
+
+		if len(functionCalls) > 0 {
+			// Process all collected function calls
+			for _, fc := range functionCalls {
+				functionResponseValue, err := callFunction(fc)
+				if err != nil {
+					log.Printf("Error executing function %s: %v", fc.Name, err)
+					functionResponseValue = map[string]interface{}{"error": err.Error()}
+				}
+
+				// Send FunctionResponse to frontend
+				responseJson, err := json.Marshal(functionResponseValue)
+				if err != nil {
+					log.Printf("Failed to marshal function response for frontend: %v", err)
+					responseJson = []byte(fmt.Sprintf("{\"error\": \"%v\"}", err))
+				}
+				sendServerEvent(w, flusher, fmt.Sprintf("R\n%s", string(responseJson)))
+
+				// Add FunctionCall to history
+				fcJson, _ := json.Marshal(fc)
+				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call"); err != nil {
+					log.Printf("Failed to save function call: %v", err)
+				}
+				currentHistory = append(currentHistory, Content{
+					Role: "model",
+					Parts: []Part{
+						{FunctionCall: &fc},
+					},
+				})
+
+				// Add FunctionResponse to history
+				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
+				frJson, _ := json.Marshal(fr)
+				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response"); err != nil {
+					log.Printf("Failed to save function response: %v", err)
+				}
+				currentHistory = append(currentHistory, Content{
+					Role: "user",
+					Parts: []Part{
+						{FunctionResponse: &fr},
+					},
+				})
+			}
+			// Continue the outer loop to send the function response back to the model
+		} else {
+			// No function calls, break the outer loop
+			break
+		}
 	}
+
+	// Send 'Q' to signal end of content
+	sendServerEvent(w, flusher, "Q")
+
 	// Add agent response to chat history in DB
-	if err := AddMessageToSession(sessionId, "model", agentResponseText); err != nil {
+	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text"); err != nil {
 		log.Printf("chatMessage: Failed to save agent response: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save agent response: %v", err), http.StatusInternalServerError)
 		return
@@ -240,55 +345,6 @@ func sendServerEvent(w http.ResponseWriter, flusher http.Flusher, data string) {
 	flusher.Flush()
 }
 
-func processStreamingJsonResponse(seq iter.Seq[CaGenerateContentResponse], w http.ResponseWriter, flusher http.Flusher, agentResponseText *string, sessionId string) (err error) {
-	for caResp := range seq {
-		if len(caResp.Response.Candidates) == 0 {
-			continue
-		}
-		if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
-			continue
-		}
-		for _, part := range caResp.Response.Candidates[0].Content.Parts {
-			if part.FunctionCall != nil {
-				// TODO
-			}
-
-			// Check if it's a thought part
-			if part.Thought { // If it's a thought
-				// Parse subject and description from part.Text
-				rawText := part.Text
-				subject := ""
-				description := rawText
-
-				// Use regexp to extract subject and description
-				re := regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
-				matches := re.FindStringSubmatch(rawText)
-				if len(matches) > 2 {
-					subject = matches[1]
-					description = matches[2]
-				}
-
-				sendServerEvent(w, flusher, fmt.Sprintf("T\n%s\n%s", subject, description))
-				// Add thought message to chat history in DB
-				if err := AddMessageToSession(sessionId, "thought", fmt.Sprintf("%s\n%s", subject, description)); err != nil {
-					log.Printf("Failed to save thought message: %v", err)
-				}
-				continue // Skip further processing for thought parts
-			}
-
-			if part.Text != "" {
-				sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
-				*agentResponseText += part.Text
-			}
-		}
-	}
-
-	// Send 'Q' to signal end of content
-	sendServerEvent(w, flusher, "Q")
-
-	return
-}
-
 // Add countTokens handler
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 	if GeminiClient == nil {
@@ -323,6 +379,34 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]int{"totalTokens": resp.TotalTokens})
+}
+
+func callFunction(fc FunctionCall) (map[string]interface{}, error) {
+	switch fc.Name {
+	case "list_directory":
+		// Assuming args are map[string]interface{}
+		_, ok := fc.Args["path"].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid path argument for list_directory")
+		}
+		// TODO: Call the actual list_directory function from sandbox
+		// For now, let's mock it
+		// result, err := sandbox.ListDirectory(path) // Assuming sandbox.ListDirectory exists
+		result := []string{"file1.txt", "file2.txt", "subdir/"} // Mock result
+		return map[string]interface{}{"files": result}, nil
+	case "read_file":
+		_, ok := fc.Args["absolute_path"].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid absolute_path argument for read_file")
+		}
+		// TODO: Call the actual read_file function from sandbox
+		// For now, let's mock it
+		// content, err := sandbox.ReadFile(path) // Assuming sandbox.ReadFile exists
+		content := "Mock file content for " + fc.Args["absolute_path"].(string) // Mock content
+		return map[string]interface{}{"content": content}, nil
+	default:
+		return nil, fmt.Errorf("unknown function: %s", fc.Name)
+	}
 }
 
 func GenerateSessionID() string {

@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"log"
 	"net/http"
 
 	"golang.org/x/oauth2"
-	"iter"
 )
 
 // Define CodeAssistClient struct
