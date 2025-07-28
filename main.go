@@ -87,7 +87,7 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/%s", sessionId), http.StatusSeeOther)
 }
 
-var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)$`)
+var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +145,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve session history from DB for Gemini API
-	historyContents, err := GetSessionHistoryForGeminiAPI(sessionId)
+	historyContents, err := GetSessionHistory(sessionId, true)
 	if err != nil {
 		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
@@ -186,20 +186,17 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 				// Check if it's a thought part
 				if part.Thought { // If it's a thought
 					// Parse subject and description from part.Text
-					rawText := part.Text
-					subject := "Thinking..."
-					description := rawText
-
-					// Use regexp to extract subject and description
-					matches := thoughtPattern.FindStringSubmatch(rawText)
+					var thoughtText string
+					matches := thoughtPattern.FindStringSubmatch(part.Text)
 					if len(matches) > 2 {
-						subject = matches[1]
-						description = matches[2]
+						thoughtText = fmt.Sprintf("%s\n%s", matches[1], matches[2])
+					} else {
+						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text) // Placeholder subject
 					}
 
-					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s\n%s", subject, description))
+					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s", thoughtText))
 					// Add thought message to chat history in DB
-					if err := AddMessageToSession(sessionId, "thought", fmt.Sprintf("%s\n%s", subject, description), "thought"); err != nil {
+					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought"); err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
 					continue // Skip further processing for thought parts
@@ -230,7 +227,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 				responseJson, err := json.Marshal(functionResponseValue)
 				if err != nil {
 					log.Printf("Failed to marshal function response for frontend: %v", err)
-					responseJson = []byte(fmt.Sprintf("{\"error\": \"%v\"}", err))
+					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
 				}
 				sendServerEvent(w, flusher, fmt.Sprintf("R\n%s", string(responseJson)))
 
@@ -239,12 +236,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call"); err != nil {
 					log.Printf("Failed to save function call: %v", err)
 				}
-				currentHistory = append(currentHistory, Content{
-					Role: "model",
-					Parts: []Part{
-						{FunctionCall: &fc},
-					},
-				})
+				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
 
 				// Add FunctionResponse to history
 				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
@@ -252,12 +244,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response"); err != nil {
 					log.Printf("Failed to save function response: %v", err)
 				}
-				currentHistory = append(currentHistory, Content{
-					Role: "user",
-					Parts: []Part{
-						{FunctionResponse: &fr},
-					},
-				})
+				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
 			}
 			// Continue the outer loop to send the function response back to the model
 		} else {
@@ -306,7 +293,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history, err := GetSessionHistoryForWebAPI(sessionId) // Use the new function for web API
+	history, err := GetSessionHistory(sessionId, false)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
 		return
