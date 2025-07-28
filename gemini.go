@@ -104,6 +104,11 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Con
 		Project: c.projectID,
 		Request: VertexGenerateContentRequest{
 			Contents: contents,
+			SystemInstruction: &Content{
+				Parts: []Part{
+					{Text: GetCoreSystemPrompt()},
+				},
+			},
 			GenerationConfig: &GenerationConfig{
 				ThinkingConfig: &ThinkingConfig{
 					IncludeThoughts: true,
