@@ -9,3 +9,132 @@ html, body {
   width: 100vw;
   overflow: hidden; /* Prevent scrollbars */
 }
+
+.chat-message-container {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.user-message {
+  justify-content: flex-end;
+}
+
+.agent-message {
+  justify-content: flex-start;
+}
+
+.chat-bubble {
+  max-width: 80%;
+  padding: 10px 15px; /* Restore padding-top */
+  border-radius: 18px;
+  line-height: 1.4;
+  word-wrap: break-word;
+  white-space: pre-wrap; /* Preserve whitespace and line breaks */
+  overflow: hidden; /* Ensure border-radius clips content */
+}
+
+.chat-bubble p {
+  margin: 0; /* Reset all p margins */
+}
+
+.chat-bubble p:first-child {
+  margin-top: 0.5em; /* Add top margin for the first paragraph in any chat bubble */
+}
+
+.chat-bubble p + p {
+  margin-top: 0.5em; /* Spacing between subsequent paragraphs */
+}
+
+textarea {
+  max-height: 14em; /* Approximately 10 lines of text */
+}
+
+.chat-bubble pre {
+  background-color: rgba(0, 0, 0, 0.05); /* Slightly darker background for code */
+  padding: 10px;
+  border-radius: 5px;
+  overflow-x: auto; /* Enable horizontal scrolling for long lines */
+  font-family: monospace;
+  font-size: 0.9em;
+  margin-top: 0.5em; /* Adjust to reduce space after a paragraph */
+  margin-bottom: 0;
+  max-height: 30vh; /* Limit height to 30% of viewport height */
+  overflow-y: auto; /* Add vertical scrollbar if content exceeds max-height */
+}
+
+.chat-bubble code {
+  background-color: rgba(0, 0, 0, 0.05); /* Subtle background for inline code */
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+.chat-bubble pre code {
+  background-color: transparent; /* Code inside pre should not have its own background */
+  padding: 0;
+  border-radius: 0;
+}
+
+/* New styles for function call/response title bar */
+.function-title-bar {
+  padding: 5px 15px; /* Padding inside the title bar */
+  margin: -10px -15px 10px -15px; /* Negative top margin to pull it up, negative side margins to extend to bubble edges, and margin-bottom for spacing */
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  font-weight: bold; /* Keep bold for title */
+  color: #333; /* Default text color for title */
+}
+
+.function-call-title-bar {
+  background-color: #a0d9ff; /* Darker blue for function call title */
+}
+
+.function-response-title-bar {
+  background-color: #b7eb8f; /* Darker green for function response title */
+}
+
+/* Override for function messages where the title bar handles the top spacing */
+.function-message-bubble p:first-child {
+  margin-top: 0;
+}
+
+/* New styles for function code block */
+.function-code-block {
+  background-color: rgba(0, 0, 0, 0.05); /* Slightly darker background for code */
+  padding: 10px;
+  border-radius: 5px;
+  overflow-x: auto; /* Enable horizontal scrolling for long lines */
+  font-family: monospace;
+  font-size: 0.9em;
+  margin: 0; /* Remove default pre margins */
+  max-height: 30vh; /* Limit height to 30% of viewport height */
+  overflow-y: auto; /* Add vertical scrollbar if content exceeds max-height */
+}
+
+/* Adjust border-left for the whole container */
+.agent-function-call.chat-message-container {
+  border-left: 4px solid #1890ff;
+}
+
+.agent-function-response.chat-message-container {
+  border-left: 4px solid #52c41a;
+}
+
+.user-message .chat-bubble {
+  background-color: #dcf8c6; /* Light green */
+  color: #333;
+}
+
+.agent-message .chat-bubble {
+  background-color: #e0f2f7; /* Very light blue */
+  color: #333;
+}
+
+/* Specific styles for agent's internal messages */
+.agent-thought .chat-bubble {
+  background-color: #f0f0f0; /* Lighter grey for thoughts */
+  font-style: italic;
+  color: #555;
+  opacity: 0.5;
+}

@@ -33,73 +33,146 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ role, text, type, 
     });
   }, []);
 
-  const messageStyle: React.CSSProperties = {};
-  if (type === 'thought') {
-    messageStyle.opacity = 0.5;
-  } else if (type === 'function_call') {
-    messageStyle.backgroundColor = '#e6f7ff'; // Light blue background
-    messageStyle.borderLeft = '4px solid #1890ff'; // Blue left border
-    messageStyle.padding = '10px';
-    messageStyle.marginBottom = '10px';
-  } else if (type === 'function_response') {
-    messageStyle.backgroundColor = '#f6ffed'; // Light green background
-    messageStyle.borderLeft = '4px solid #52c41a'; // Green left border
-    messageStyle.padding = '10px';
-    messageStyle.marginBottom = '10px';
-  }
-
   let contentText = text;
-  if (type === 'thought') {
-    const [subject, description] = (text || '').split('\n', 2);
-    contentText = `**Thought: ${subject}**\n${description || ''}`;
-  } else if (type === 'function_call' && functionCall) {
-    contentText = `**Function Call:** ${functionCall.name}\n\`\`\`json\n${JSON.stringify(functionCall.args, null, 2)}\n\`\`\``;
-  } else if (type === 'function_response' && functionResponse) {
-    let responseText = functionResponse.response;
-    try {
-      // Attempt to parse as JSON, then re-stringify for consistent formatting
-      const parsedResponse = typeof functionResponse.response === 'string' ? JSON.parse(functionResponse.response) : functionResponse.response;
-      responseText = JSON.stringify(parsedResponse, null, 2);
-    } catch (e) {
-      // If not valid JSON, use the raw string
-      console.warn("Function response is not valid JSON:", functionResponse.response);
+  let containerClassName = "chat-message-container";
+  let bubbleClassName = "chat-bubble";
+
+  if (role === 'user') {
+    containerClassName += " user-message";
+    if (type === 'function_response' && functionResponse) {
+      bubbleClassName += " agent-function-response"; // Use agent-function-response style
+      let responseData = functionResponse.response;
+      let responseText: string;
+
+      if (responseData === null || responseData === undefined || responseData === "") {
+        responseText = "(empty response)";
+      } else if (typeof responseData === 'string') {
+        try {
+          responseData = JSON.parse(responseData);
+          responseText = JSON.stringify(responseData, null, 2);
+        } catch (e) {
+          console.warn("Function response is not valid JSON string, using raw string:", functionResponse.response);
+          responseText = responseData; // Use the raw string if parsing fails
+        }
+      } else {
+        responseText = JSON.stringify(responseData, null, 2);
+      }
+      const codeContent = responseText;
+
+      return (
+        <div className={containerClassName}>
+          <div className={`${bubbleClassName} function-message-bubble`}>
+            <div className="function-title-bar function-response-title-bar">
+              Function Response:
+            </div>
+            <pre className="function-code-block">
+              {codeContent}
+            </pre>
+          </div>
+        </div>
+      );
+    } else {
+      // For regular user messages, we don't use ReactMarkdown, just render plain text
+      return (
+        <div className={containerClassName}>
+          <div className={bubbleClassName}>
+            {text}
+          </div>
+        </div>
+      );
     }
-    contentText = `**Function Response:**\n\`\`\`json\n${responseText}\n\`\`\``;
-  } else if (role === 'user') {
-    // No Markdown formatting on user inputs
+  } else { // role === 'model' or 'system'
+    containerClassName += " agent-message";
+    if (type === 'thought') {
+      bubbleClassName += " agent-thought";
+      const [subject, description] = (text || '').split('\n', 2);
+      contentText = `**Thought: ${subject}**\n${description || ''}`;
+      const preprocessedText = smartPreprocessMarkdown(contentText || '');
+      return (
+        <div className={containerClassName}>
+          <div className={bubbleClassName}>
+            <ReactMarkdown
+              remarkPlugins={katexLoaded ? [remarkGfm, breaks, remarkHtml, remarkMath] : [remarkGfm, breaks, remarkHtml]}
+              rehypePlugins={katexLoaded ? [rehypeHandleRawNodes, rehypeKatex] : [rehypeHandleRawNodes]}
+              components={{
+                p: ({ node, ...props }) => {
+                  return <p {...props} />;
+                },
+              }}
+            >
+              {preprocessedText}
+            </ReactMarkdown>
+          </div>
+        </div>
+      );
+    } else if (type === 'function_call' && functionCall) {
+      bubbleClassName += " agent-function-call";
+      const codeContent = JSON.stringify(functionCall.args, null, 2);
+      return (
+        <div className={containerClassName}>
+          <div className={`${bubbleClassName} function-message-bubble`}>
+            <div className="function-title-bar function-call-title-bar">
+              Function Call: {functionCall.name}
+            </div>
+            <pre className="function-code-block">
+              {codeContent}
+            </pre>
+          </div>
+        </div>
+      );
+    } else if (type === 'function_response' && functionResponse) {
+      bubbleClassName += " agent-function-response";
+      let responseData = functionResponse.response;
+      let responseText: string;
+
+      if (responseData === null || responseData === undefined || responseData === "") {
+        responseText = "(empty response)";
+      } else if (typeof responseData === 'string') {
+        try {
+          responseData = JSON.parse(responseData);
+          responseText = JSON.stringify(responseData, null, 2);
+        } catch (e) {
+          console.warn("Function response is not valid JSON string, using raw string:", functionResponse.response);
+          responseText = responseData; // Use the raw string if parsing fails
+        }
+      } else {
+        responseText = JSON.stringify(responseData, null, 2);
+      }
+      const codeContent = responseText;
+      return (
+        <div className={containerClassName}>
+          <div className={`${bubbleClassName} function-message-bubble`}>
+            <div className="function-title-bar function-response-title-bar">
+              Function Response:
+            </div>
+            <pre className="function-code-block">
+              {codeContent}
+            </pre>
+          </div>
+        </div>
+      );
+    }
+    // For other model/system messages, we use ReactMarkdown
+    const preprocessedText = smartPreprocessMarkdown(contentText || '');
+
     return (
-      <div className="message" style={messageStyle}>
-        <strong>You:</strong> {text}
+      <div className={containerClassName}>
+        <div className={bubbleClassName}>
+          <ReactMarkdown
+            remarkPlugins={katexLoaded ? [remarkGfm, breaks, remarkHtml, remarkMath] : [remarkGfm, breaks, remarkHtml]}
+            rehypePlugins={katexLoaded ? [rehypeHandleRawNodes, rehypeKatex] : [rehypeHandleRawNodes]}
+            components={{
+              p: ({ node, ...props }) => {
+                return <p {...props} />;
+              },
+            }}
+          >
+            {preprocessedText}
+          </ReactMarkdown>
+        </div>
       </div>
     );
-  } else {
-    contentText = `**Agent:** ${text}`;
   }
-
-  const preprocessedText = smartPreprocessMarkdown(contentText);
-
-  return (
-    <div className="message" style={messageStyle}>
-      <ReactMarkdown
-        remarkPlugins={katexLoaded ? [remarkGfm, breaks, remarkHtml, remarkMath] : [remarkGfm, breaks, remarkHtml]} // Conditionally add remarkMath
-        rehypePlugins={katexLoaded ? [rehypeHandleRawNodes, rehypeKatex] : [rehypeHandleRawNodes]} // Conditionally add rehypeKatex
-        components={{
-          p: ({ node, ...props }) => {
-            const children = React.Children.toArray(props.children);
-            if (children.length > 0 && typeof children[0] === 'string') {
-              const firstChild = children[0] as string;
-              if (firstChild.startsWith('Agent:')) {
-                return <p {...props} />;
-              }
-            }
-            return <p {...props} />;
-          },
-        }}
-      >
-        {preprocessedText}
-      </ReactMarkdown>
-    </div>
-  );
 }); // Correct closing for React.memo wrapped functional component
 
 export default ChatMessage;

@@ -29,13 +29,39 @@ function ChatApp() {
   const [inputMessage, setInputMessage] = useState('');
   const [sessions, setSessions] = useState<Session[]>([]); // New state for sessions
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null); // Add this ref
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
 
+  // Debounce utility function
+  const debounce = (func: Function, delay: number) => {
+    let timeout: NodeJS.Timeout;
+    return (...args: any[]) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), delay);
+    };
+  };
+
+  // Debounced function for textarea height adjustment
+  const debouncedAdjustTextareaHeight = useRef(
+    debounce((target: HTMLTextAreaElement) => {
+      target.style.height = 'auto';
+      target.style.height = target.scrollHeight + 'px';
+    }, 100) // 100ms debounce delay
+  ).current;
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Adjust textarea height when inputMessage changes (e.g., after sending message)
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  }, [inputMessage]);
 
   const fetchSessions = async () => {
     try {
@@ -306,14 +332,14 @@ function ChatApp() {
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       {/* Sidebar */}
-      <div style={{ width: '200px', background: '#f0f0f0', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRight: '1px solid #ccc', boxSizing: 'border-box', overflowY: 'auto', flexShrink: 0 }}>
+      <div style={{ width: '200px', background: '#f0f0f0', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRight: '1px solid #ccc', boxSizing: 'border-box', overflowY: 'hidden', flexShrink: 0 }}>
         <div style={{ fontSize: '3em', marginBottom: '20px' }}>😇</div>
         {!isLoggedIn ? (
           <button onClick={handleLogin} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Login</button>
         ) : (
           <button onClick={handleCreateNewSession} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
         )}
-        <div style={{ width: '100%', marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px' }}>
+        <div style={{ width: '100%', marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px', flexGrow: 1, overflowY: 'auto' }}>
           <h3>Sessions</h3>
           {sessions && sessions.length === 0 ? (
             <p>No sessions yet.</p>
@@ -347,7 +373,7 @@ function ChatApp() {
 
       {/* Main Chat Area */}
       <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        <h1 style={{ textAlign: 'center', padding: '10px 0', margin: 0, borderBottom: '1px solid #eee' }}>Angel CLI Web</h1>
+        
         {!isLoggedIn && (
           <div style={{ padding: '20px', textAlign: 'center' }}>
             <p>Login required to start chatting.</p>
@@ -367,31 +393,38 @@ function ChatApp() {
         )}
         {isLoggedIn && chatSessionId && (
           <>
-            <div style={{ flexGrow: 1, overflowY: 'auto', padding: '20px' }}>
-              {messages?.map((msg) => (
-                <ChatMessage
-                  key={msg.id}
-                  role={msg.role}
-                  text={msg.parts[0].text}
-                  type={msg.type}
-                  functionCall={msg.parts[0].functionCall}
-                  functionResponse={msg.parts[0].functionResponse}
-                />
-              ))}
-              <div ref={messagesEndRef} />
+            <div style={{ flexGrow: 1, overflowY: 'auto' }}>
+              <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
+                {messages?.map((msg) => (
+                  <ChatMessage
+                    key={msg.id}
+                    role={msg.role}
+                    text={msg.parts[0].text}
+                    type={msg.type}
+                    functionCall={msg.parts[0].functionCall}
+                    functionResponse={msg.parts[0].functionResponse}
+                  />
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
             <div style={{ padding: '10px 20px', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', position: 'sticky', bottom: 0, background: 'white' }}>
-              <input
-                type="text"
+              <textarea
+                ref={textareaRef}
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
+                onInput={(e) => {
+                  debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.ctrlKey) {
+                    e.preventDefault(); // Prevent default Ctrl-Enter behavior
                     handleSendMessage();
                   }
                 }}
                 placeholder="Enter your message..."
-                style={{ flexGrow: 1, padding: '10px', marginRight: '10px', border: '1px solid #eee', borderRadius: '5px' }}
+                rows={1} // Start with 1 row
+                style={{ flexGrow: 1, padding: '10px', marginRight: '10px', border: '1px solid #eee', borderRadius: '5px', resize: 'none', overflowY: 'hidden' }}
               />
               <button onClick={handleSendMessage} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
                 Send
