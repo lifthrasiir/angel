@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"iter"
 )
 
 var oauthStates = make(map[string]string) // Stores randomState -> originalQueryString
@@ -151,16 +151,16 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respBody, err := GeminiClient.SendMessageStream(context.Background(), historyContents, modelName)
+	seq, closer, err := GeminiClient.SendMessageStream(context.Background(), historyContents, modelName)
 	if err != nil {
 		log.Printf("chatMessage: CodeAssist API call failed: %v", err)
 		http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer respBody.Close()
+	defer closer.Close()
 
 	var agentResponseText string
-	if err := processStreamingJsonResponse(respBody, w, flusher, &agentResponseText, sessionId); err != nil {
+	if err := processStreamingJsonResponse(seq, w, flusher, &agentResponseText, sessionId); err != nil {
 		log.Printf("chatMessage: Error processing streaming response: %v", err)
 		return
 	}
@@ -240,59 +240,47 @@ func sendServerEvent(w http.ResponseWriter, flusher http.Flusher, data string) {
 	flusher.Flush()
 }
 
-// NOTE: This function is intentionally designed to parse a specific JSON stream format, not standard SSE. Do not modify without understanding its purpose.
-func processStreamingJsonResponse(r io.Reader, w http.ResponseWriter, flusher http.Flusher, agentResponseText *string, sessionId string) (err error) {
-	dec := json.NewDecoder(r)
-
-	// Read the opening bracket of the JSON array
-	_, err = dec.Token()
-	if err != nil {
-		return fmt.Errorf("expected opening bracket '[', but got %w", err)
-	}
-
-	for dec.More() {
-		var caResp CaGenerateContentResponse
-		if err := dec.Decode(&caResp); err != nil {
-			log.Printf("Failed to decode JSON object from stream: %v", err)
+func processStreamingJsonResponse(seq iter.Seq[CaGenerateContentResponse], w http.ResponseWriter, flusher http.Flusher, agentResponseText *string, sessionId string) (err error) {
+	for caResp := range seq {
+		if len(caResp.Response.Candidates) == 0 {
 			continue
 		}
+		if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
+			continue
+		}
+		for _, part := range caResp.Response.Candidates[0].Content.Parts {
+			if part.FunctionCall != nil {
+				// TODO
+			}
 
-		if len(caResp.Response.Candidates) > 0 && len(caResp.Response.Candidates[0].Content.Parts) > 0 {
-			for _, part := range caResp.Response.Candidates[0].Content.Parts {
-				// Check if it's a thought part
-				if part.Thought { // If it's a thought
-					// Parse subject and description from part.Text
-					rawText := part.Text
-					subject := ""
-					description := rawText
+			// Check if it's a thought part
+			if part.Thought { // If it's a thought
+				// Parse subject and description from part.Text
+				rawText := part.Text
+				subject := ""
+				description := rawText
 
-					// Use regexp to extract subject and description
-					re := regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
-					matches := re.FindStringSubmatch(rawText)
-					if len(matches) > 2 {
-						subject = matches[1]
-						description = matches[2]
-					}
-
-					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s\n%s", subject, description))
-					// Add thought message to chat history in DB
-					if err := AddMessageToSession(sessionId, "thought", fmt.Sprintf("%s\n%s", subject, description)); err != nil {
-						log.Printf("Failed to save thought message: %v", err)
-					}
-					continue // Skip further processing for thought parts
+				// Use regexp to extract subject and description
+				re := regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
+				matches := re.FindStringSubmatch(rawText)
+				if len(matches) > 2 {
+					subject = matches[1]
+					description = matches[2]
 				}
-				if part.Text != "" {
-					sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
-					*agentResponseText += part.Text
+
+				sendServerEvent(w, flusher, fmt.Sprintf("T\n%s\n%s", subject, description))
+				// Add thought message to chat history in DB
+				if err := AddMessageToSession(sessionId, "thought", fmt.Sprintf("%s\n%s", subject, description)); err != nil {
+					log.Printf("Failed to save thought message: %v", err)
 				}
+				continue // Skip further processing for thought parts
+			}
+
+			if part.Text != "" {
+				sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
+				*agentResponseText += part.Text
 			}
 		}
-	}
-
-	// Read the closing bracket of the JSON array
-	_, err = dec.Token()
-	if err != nil {
-		return fmt.Errorf("expected closing bracket ']', but got %w", err)
 	}
 
 	// Send 'Q' to signal end of content

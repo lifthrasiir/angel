@@ -10,78 +10,8 @@ import (
 	"net/http"
 
 	"golang.org/x/oauth2"
+	"iter"
 )
-
-// AuthType enum definition (matches AuthType in TypeScript)
-type AuthType string
-
-const (
-	AuthTypeLoginWithGoogle AuthType = "oauth-personal"
-	AuthTypeUseGemini       AuthType = "gemini-api-key"
-	AuthTypeUseVertexAI     AuthType = "vertex-ai"
-	AuthTypeCloudShell      AuthType = "cloud-shell"
-)
-
-// Define Go structs to match the structs defined in gemini-cli's converter.ts
-type Part struct {
-	Text    string `json:"text,omitempty"`
-	Thought bool   `json:"thought,omitempty"` // Change to bool
-	// TODO: Add other part types like inlineData, functionCall, functionResponse if needed
-}
-
-type Content struct {
-	Role  string `json:"role"`
-	Parts []Part `json:"parts"`
-}
-
-type ThinkingConfig struct {
-	IncludeThoughts bool `json:"includeThoughts,omitempty"`
-}
-
-type GenerationConfig struct {
-	ThinkingConfig *ThinkingConfig `json:"thinkingConfig,omitempty"`
-	// TODO: Add other generation config fields like temperature, topP if needed
-}
-
-type VertexGenerateContentRequest struct {
-	Contents          []Content         `json:"contents"`
-	SystemInstruction *Content          `json:"systemInstruction,omitempty"`
-	SessionID         string            `json:"session_id,omitempty"`
-	GenerationConfig  *GenerationConfig `json:"generationConfig,omitempty"` // Add this field
-	// TODO: Add other fields from VertexGenerateContentRequest if needed
-}
-
-type CAGenerateContentRequest struct {
-	Model   string                       `json:"model"`
-	Project string                       `json:"project,omitempty"`
-	Request VertexGenerateContentRequest `json:"request"`
-}
-
-type Candidate struct {
-	Content Content `json:"content"`
-	// TODO: Add other fields from Candidate if needed
-}
-
-type VertexGenerateContentResponse struct {
-	Candidates []Candidate `json:"candidates"`
-}
-
-type CaGenerateContentResponse struct {
-	Response VertexGenerateContentResponse `json:"response"`
-}
-
-type VertexCountTokenRequest struct {
-	Model    string    `json:"model"`
-	Contents []Content `json:"contents"`
-}
-
-type CaCountTokenRequest struct {
-	Request VertexCountTokenRequest `json:"request"`
-}
-
-type CaCountTokenResponse struct {
-	TotalTokens int `json:"totalTokens"`
-}
 
 // Define CodeAssistClient struct
 type CodeAssistClient struct {
@@ -97,8 +27,8 @@ func NewCodeAssistClient(httpClient *http.Client, projectID string) *CodeAssistC
 	}
 }
 
-// SendMessageStream calls the streamGenerateContent of Code Assist API.
-func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string) (io.ReadCloser, error) {
+// streamGenerateContent calls the streamGenerateContent of Code Assist API.
+func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents []Content, modelName string) (io.ReadCloser, error) {
 	reqBody := CAGenerateContentRequest{
 		Model:   modelName,
 		Project: c.projectID,
@@ -107,6 +37,26 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Con
 			SystemInstruction: &Content{
 				Parts: []Part{
 					{Text: GetCoreSystemPrompt()},
+				},
+			},
+			Tools: []Tool{
+				{
+					FunctionDeclarations: []FunctionDeclaration{
+						{
+							Name:        "list_directory",
+							Description: "Lists a directory.",
+							Parameters: &Schema{
+								Type: TypeObject,
+								Properties: map[string]*Schema{
+									"path": {
+										Type:        TypeString,
+										Description: "The absolute path to the directory to list.",
+									},
+								},
+								Required: []string{"path"},
+							},
+						},
+					},
 				},
 			},
 			GenerationConfig: &GenerationConfig{
@@ -142,6 +92,40 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Con
 	}
 
 	return resp.Body, nil // Return the response body directly
+}
+
+// SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
+func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	respBody, err := c.streamGenerateContent(ctx, contents, modelName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	dec := json.NewDecoder(respBody)
+
+	// NOTE: This function is intentionally designed to parse a specific JSON stream format, not standard SSE. Do not modify without understanding its purpose.
+	// Read the opening bracket of the JSON array
+	_, err = dec.Token()
+	if err != nil {
+		respBody.Close()
+		return nil, nil, fmt.Errorf("expected opening bracket '[', but got %w", err)
+	}
+
+	// Create an iter.Seq that yields CaGenerateContentResponse
+	seq := func(yield func(CaGenerateContentResponse) bool) {
+		for dec.More() {
+			var caResp CaGenerateContentResponse
+			if err := dec.Decode(&caResp); err != nil {
+				log.Printf("Failed to decode JSON object from stream: %v", err)
+				return // Or handle error more robustly
+			}
+			if !yield(caResp) {
+				return
+			}
+		}
+	}
+
+	return seq, respBody, nil
 }
 
 // CountTokens calls the countTokens of Code Assist API.
@@ -182,55 +166,6 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content, 
 	}
 
 	return &caResp, nil
-}
-
-// Define ChatSession struct (used instead of genai.ChatSession)
-type ChatSession struct {
-	History []*Content
-}
-
-// GeminiEventType enum definition (matches GeminiEventType in TypeScript)
-type GeminiEventType string
-
-const (
-	GeminiEventTypeContent              GeminiEventType = "content"
-	GeminiEventTypeToolCode             GeminiEventType = "tool_code"
-	GeminiEventTypeToolCallConfirmation GeminiEventType = "tool_call_confirmation"
-	GeminiEventTypeToolCallResponse     GeminiEventType = "tool_call_response"
-	GeminiTypeError                     GeminiEventType = "error"
-	GeminiTypeFinished                  GeminiEventType = "finished"
-	GeminiEventTypeThought              GeminiEventType = "thought"
-)
-
-// ServerGeminiContentEvent matches ServerGeminiContentEvent in TypeScript
-type ServerGeminiContentEvent struct {
-	Type  GeminiEventType `json:"type"`
-	Value Content         `json:"value"`
-}
-
-// ThoughtSummary matches ThoughtSummary in TypeScript
-type ThoughtSummary struct {
-	Subject     string `json:"subject"`
-	Description string `json:"description"`
-}
-
-// ServerGeminiThoughtEvent matches ServerGeminiThoughtEvent in TypeScript
-type ServerGeminiThoughtEvent struct {
-	Type  GeminiEventType `json:"type"`
-	Value ThoughtSummary  `json:"value"`
-}
-
-// ServerGeminiFinishedEvent matches ServerGeminiFinishedEvent in TypeScript
-type ServerGeminiFinishedEvent struct {
-	Type GeminiEventType `json:"type"`
-}
-
-// ServerGeminiErrorEvent matches ServerGeminiErrorEvent in TypeScript
-type ServerGeminiErrorEvent struct {
-	Type  GeminiEventType `json:"type"`
-	Value struct {
-		Message string `json:"message"`
-	} `json:"value"`
 }
 
 // Declare global variables (accessible from main.go)
