@@ -3,12 +3,15 @@ import ChatMessage from './ChatMessage';
 import { ThoughtGroup } from './ThoughtGroup';
 import SystemPromptEditor from './SystemPromptEditor';
 import ChatInput from './ChatInput';
+import FileAttachmentPreview from './FileAttachmentPreview';
+import { FileAttachment } from './FileAttachmentPreview';
 
 interface ChatMessage {
   id: string;
   role: string;
   parts: { text?: string; functionCall?: any; functionResponse?: any; }[];
   type?: "model" | "thought" | "system" | "user" | "function_call" | "function_response";
+  attachments?: FileAttachment[]; // New field
 }
 
 interface ChatAreaProps {
@@ -23,6 +26,9 @@ interface ChatAreaProps {
   setInputMessage: React.Dispatch<React.SetStateAction<string>>;
   handleSendMessage: () => void;
   isStreaming: boolean;
+  onFilesSelected: (files: File[]) => void;
+  selectedFiles: File[]; // New prop
+  handleRemoveFile: (index: number) => void; // New prop
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -37,6 +43,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   setInputMessage,
   handleSendMessage,
   isStreaming,
+  onFilesSelected,
+  selectedFiles, // Destructure new prop
+  handleRemoveFile, // Destructure new prop
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +77,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             type={currentMessage.type}
             functionCall={currentMessage.parts[0].functionCall}
             functionResponse={currentMessage.parts[0].functionResponse}
+            attachments={currentMessage.attachments}
           />
         );
         i++;
@@ -99,11 +109,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               <div ref={messagesEndRef} />
             </div>
           </div>
+          {selectedFiles.length > 0 && (
+            <div style={{ padding: '5px 20px', borderTop: '1px solid #eee', background: '#f9f9f9', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+              {selectedFiles.map((file, index) => (
+                <FileAttachmentPreview key={index} file={file} onRemove={() => handleRemoveFile(index)} />
+              ))}
+            </div>
+          )}
           <ChatInput
             inputMessage={inputMessage}
             setInputMessage={setInputMessage}
             handleSendMessage={handleSendMessage}
             isStreaming={isStreaming}
+            onFilesSelected={onFilesSelected}
           />
         </>
       )}

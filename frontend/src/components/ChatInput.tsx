@@ -5,6 +5,7 @@ interface ChatInputProps {
   setInputMessage: React.Dispatch<React.SetStateAction<string>>;
   handleSendMessage: () => void;
   isStreaming: boolean;
+  onFilesSelected: (files: File[]) => void; // New prop for file selection
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -12,8 +13,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
   setInputMessage,
   handleSendMessage,
   isStreaming,
+  onFilesSelected,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Debounce utility function
   const debounce = (func: Function, delay: number) => {
@@ -40,8 +43,29 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [inputMessage]);
 
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      onFilesSelected(Array.from(event.target.files));
+      event.target.value = ''; // Clear the input after selection
+    }
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <div style={{ padding: '10px 20px', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', position: 'sticky', bottom: 0, background: 'white' }}>
+      <input
+        type="file"
+        multiple
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        style={{ display: 'none' }} // Hide the actual file input
+      />
+      <button onClick={triggerFileInput} style={{ padding: '10px', marginRight: '10px', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer' }}>
+        📎
+      </button>
       <textarea
         ref={textareaRef}
         value={inputMessage}

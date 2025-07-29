@@ -98,8 +98,9 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var requestBody struct {
-		Message      string `json:"message"`
-		SystemPrompt string `json:"systemPrompt"`
+		Message      string           `json:"message"`
+		SystemPrompt string           `json:"systemPrompt"`
+		Attachments  []FileAttachment `json:"attachments"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -125,7 +126,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	userMessage := requestBody.Message
 
 	// Add user message to current chat history in DB
-	if err := AddMessageToSession(sessionId, "user", userMessage, "text"); err != nil {
+	if err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments); err != nil {
 		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
@@ -153,12 +154,15 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	sendServerEvent(w, flusher, fmt.Sprintf("S\n%s", sessionId))
 
 	// Retrieve session history from DB for Gemini API
-	historyContents, err := GetSessionHistory(sessionId, true)
+	frontendHistory, err := GetSessionHistory(sessionId, true)
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// Convert FrontendMessage to Content for Gemini API
+	historyContents := convertFrontendMessagesToContent(frontendHistory)
 
 	// Goroutine to infer session name
 	go func(sID string, uMsg string, sPrompt string, initialAgentResponse string) {
@@ -228,8 +232,9 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var requestBody struct {
-		SessionID string `json:"sessionId"`
-		Message   string `json:"message"`
+		SessionID   string           `json:"sessionId"`
+		Message     string           `json:"message"`
+		Attachments []FileAttachment `json:"attachments"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -263,19 +268,22 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	userMessage := requestBody.Message
 
 	// Add user message to current chat history in DB
-	if err := AddMessageToSession(sessionId, "user", userMessage, "text"); err != nil {
+	if err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments); err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Retrieve session history from DB for Gemini API
-	historyContents, err := GetSessionHistory(sessionId, true)
+	frontendHistory, err := GetSessionHistory(sessionId, true)
 	if err != nil {
 		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// Convert FrontendMessage to Content for Gemini API
+	historyContents := convertFrontendMessagesToContent(frontendHistory)
 
 	// Handle streaming response from Gemini
 	if err := streamGeminiResponse(w, r, sessionId, systemPrompt, historyContents); err != nil {
@@ -329,7 +337,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	// Ensure history is an empty slice if no messages are found, not nil
 	if history == nil {
-		history = []Content{}
+		history = []FrontendMessage{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -426,6 +434,41 @@ func GenerateSessionID() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// Helper function to convert FrontendMessage to Content for Gemini API
+func convertFrontendMessagesToContent(frontendMessages []FrontendMessage) []Content {
+	var contents []Content
+	for _, fm := range frontendMessages {
+		var parts []Part
+		// Add text part if present
+		if fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
+			parts = append(parts, Part{Text: fm.Parts[0].Text})
+		}
+
+		// Add attachments as InlineData
+		for _, att := range fm.Attachments {
+			parts = append(parts, Part{
+				InlineData: &InlineData{
+					MimeType: att.MimeType,
+					Data:     att.Data,
+				},
+			})
+		}
+
+		// Handle function calls and responses (these should override text/attachments for their specific message types)
+		if fm.Type == "function_call" && fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
+			parts = []Part{{FunctionCall: fm.Parts[0].FunctionCall}}
+		} else if fm.Type == "function_response" && fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
+			parts = []Part{{FunctionResponse: fm.Parts[0].FunctionResponse}}
+		}
+
+		contents = append(contents, Content{
+			Role:  fm.Role,
+			Parts: parts,
+		})
+	}
+	return contents
+}
+
 // New handler to update session name
 func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
@@ -493,7 +536,7 @@ func streamGeminiResponse(w http.ResponseWriter, r *http.Request, sessionId stri
 					}
 
 					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s", thoughtText))
-					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought"); err != nil {
+					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought", nil); err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
 					continue
@@ -526,14 +569,14 @@ func streamGeminiResponse(w http.ResponseWriter, r *http.Request, sessionId stri
 				sendServerEvent(w, flusher, fmt.Sprintf("R\n%s", string(responseJson)))
 
 				fcJson, _ := json.Marshal(fc)
-				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call"); err != nil {
+				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call", nil); err != nil {
 					log.Printf("Failed to save function call: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
 
 				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
 				frJson, _ := json.Marshal(fr)
-				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response"); err != nil {
+				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response", nil); err != nil {
 					log.Printf("Failed to save function response: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
@@ -545,7 +588,7 @@ func streamGeminiResponse(w http.ResponseWriter, r *http.Request, sessionId stri
 
 	sendServerEvent(w, flusher, "Q")
 
-	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text"); err != nil {
+	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text", nil); err != nil {
 		return fmt.Errorf("failed to save agent response: %w", err)
 	}
 	return nil

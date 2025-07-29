@@ -33,6 +33,7 @@ func InitDB() {
 		role TEXT NOT NULL,
 		text TEXT NOT NULL,
 		type TEXT NOT NULL DEFAULT 'text',
+		attachments TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -55,6 +56,33 @@ type Session struct {
 	LastUpdated  string `json:"last_updated_at"`
 	SystemPrompt string `json:"system_prompt"`
 	Name         string `json:"name"`
+}
+
+// FileAttachment struct to hold file attachment data
+type FileAttachment struct {
+	FileName string `json:"fileName"`
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // Base64 encoded file content
+}
+
+// Message struct to hold message data for database interaction
+type Message struct {
+	ID          int              `json:"id"`
+	SessionID   string           `json:"session_id"`
+	Role        string           `json:"role"`
+	Text        string           `json:"text"`
+	Type        string           `json:"type"`
+	Attachments []FileAttachment `json:"attachments,omitempty"` // New field
+	CreatedAt   string           `json:"created_at"`
+}
+
+// FrontendMessage struct to match the frontend's ChatMessage interface
+type FrontendMessage struct {
+	ID          string           `json:"id"`
+	Role        string           `json:"role"`
+	Parts       []Part           `json:"parts"`
+	Type        string           `json:"type"`
+	Attachments []FileAttachment `json:"attachments,omitempty"`
 }
 
 func CreateSession(sessionID string, systemPrompt string) error {
@@ -111,9 +139,14 @@ func GetAllSessions() ([]Session, error) {
 	return sessions, nil
 }
 
-// AddMessageToSession now accepts a message type
-func AddMessageToSession(sessionID string, role string, text string, msgType string) error {
-	_, err := db.Exec("INSERT INTO messages (session_id, role, text, type) VALUES (?, ?, ?, ?)", sessionID, role, text, msgType)
+// AddMessageToSession now accepts a message type and attachments
+func AddMessageToSession(sessionID string, role string, text string, msgType string, attachments []FileAttachment) error {
+	attachmentsJSON, err := json.Marshal(attachments)
+	if err != nil {
+		return fmt.Errorf("failed to marshal attachments: %w", err)
+	}
+
+	_, err = db.Exec("INSERT INTO messages (session_id, role, text, type, attachments) VALUES (?, ?, ?, ?, ?)", sessionID, role, text, msgType, string(attachmentsJSON))
 	if err != nil {
 		return fmt.Errorf("failed to add message to session: %w", err)
 	}
@@ -159,17 +192,19 @@ func GetSession(sessionID string) (Session, error) {
 	return s, nil
 }
 
-func GetSessionHistory(sessionId string, discardThoughts bool) ([]Content, error) {
-	rows, err := db.Query("SELECT role, text, type FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessage, error) {
+	rows, err := db.Query("SELECT id, role, text, type, attachments FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query chat history: %w", err)
 	}
 	defer rows.Close()
 
-	var history []Content
+	var history []FrontendMessage
 	for rows.Next() {
+		var id int
 		var role, message, msgType string
-		if err := rows.Scan(&role, &message, &msgType); err != nil {
+		var attachmentsJSON sql.NullString
+		if err := rows.Scan(&id, &role, &message, &msgType, &attachmentsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
 		}
 		// Filter out "thought" messages when retrieving history for the model
@@ -177,7 +212,23 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]Content, error
 			continue
 		}
 
-		var part Part
+		var parts []Part
+		var attachments []FileAttachment
+
+		// Add text part
+		if message != "" {
+			parts = append(parts, Part{Text: message})
+		}
+
+		// Unmarshal attachments if present
+		if attachmentsJSON.Valid && attachmentsJSON.String != "" {
+			if err := json.Unmarshal([]byte(attachmentsJSON.String), &attachments); err != nil {
+				log.Printf("Failed to unmarshal attachments: %v", err)
+			} else {
+				// For FrontendMessage, attachments are directly assigned
+			}
+		}
+
 		switch msgType {
 		case "function_call":
 			var fc FunctionCall
@@ -185,21 +236,22 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]Content, error
 				log.Printf("Failed to unmarshal FunctionCall: %v", err)
 				continue
 			}
-			part = Part{FunctionCall: &fc}
+			parts = []Part{{FunctionCall: &fc}}
 		case "function_response":
 			var fr FunctionResponse
 			if err := json.Unmarshal([]byte(message), &fr); err != nil {
 				log.Printf("Failed to unmarshal FunctionResponse: %v", err)
 				continue
 			}
-			part = Part{FunctionResponse: &fr}
-		default:
-			part = Part{Text: message}
+			parts = []Part{{FunctionResponse: &fr}}
 		}
 
-		history = append(history, Content{
-			Role:  role,
-			Parts: []Part{part},
+		history = append(history, FrontendMessage{
+			ID:          fmt.Sprintf("%d", id),
+			Role:        role,
+			Parts:       parts,
+			Type:        msgType,
+			Attachments: attachments,
 		})
 	}
 

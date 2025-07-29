@@ -9,15 +9,16 @@ import {
   Navigate,
 } from 'react-router-dom';
 
-import ChatMessage from './components/ChatMessage';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
+import { FileAttachment } from './components/FileAttachmentPreview';
 
 interface ChatMessage {
   id: string; // Add id field
   role: string;
   parts: { text?: string; functionCall?: any; functionResponse?: any; }[];
   type?: "model" | "thought" | "system" | "user" | "function_call" | "function_response"; // Add type field
+  attachments?: FileAttachment[]; // New field
 }
 
 interface Session {
@@ -38,11 +39,41 @@ function ChatApp() {
   const [systemPrompt, setSystemPrompt] = useState<string>(''); // 시스템 프롬프트 상태 추가
   const [isSystemPromptEditing, setIsSystemPromptEditing] = useState(false); // 시스템 프롬프트 편집 모드 상태 추가
   const [sessionName, setSessionName] = useState(''); // 세션 이름 상태 추가
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]); // New state for selected files
   
   const isNavigatingFromNewSession = useRef(false); // New ref to track navigation from new session
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
+
+  // Helper function to update messages state
+  const updateMessagesState = (
+    newMessage: ChatMessage,
+    options?: { replaceId?: string; insertBeforeAgentId?: string }
+  ) => {
+    setMessages((prev) => {
+      const newMessages = [...prev];
+      let insertIndex = newMessages.length; // Default to appending
+
+      if (options?.replaceId) {
+        const indexToReplace = newMessages.findIndex(msg => msg.id === options.replaceId);
+        if (indexToReplace !== -1) {
+          newMessages[indexToReplace] = newMessage;
+          return newMessages; // Return early if replaced
+        }
+      }
+
+      if (options?.insertBeforeAgentId) {
+        const agentMessageIndex = newMessages.findIndex(msg => msg.id === options.insertBeforeAgentId);
+        if (agentMessageIndex !== -1) {
+          insertIndex = agentMessageIndex;
+        }
+      }
+
+      newMessages.splice(insertIndex, 0, newMessage);
+      return newMessages;
+    });
+  };
 
   const fetchDefaultSystemPrompt = async () => {
     try {
@@ -117,12 +148,18 @@ function ChatApp() {
         setSystemPrompt(''); // Clear system prompt for a new session
         setIsSystemPromptEditing(true); // Enable editing for new session
         setSessionName(''); // Clear session name for a new session
+        setSelectedFiles([]); // Clear selected files for a new session
         fetchDefaultSystemPrompt(); // Fetch default prompt for new session
         // Set flag if directly accessing /new to prevent immediate re-load
         if (location.pathname === '/new') {
           isNavigatingFromNewSession.current = true;
         }
         return; // Crucially, exit here to prevent any fetch calls
+      }
+
+      // If currentSessionId changes, clear selected files
+      if (currentSessionId !== chatSessionId) {
+        setSelectedFiles([]);
       }
 
       if (currentSessionId) {
@@ -143,7 +180,7 @@ function ChatApp() {
             setSessionName(data.name || ''); // Load session name
             // Ensure loaded messages have an ID and correct type
             setMessages((data.history || []).map((msg: any) => {
-              const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID() };
+              const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID(), attachments: msg.attachments };
               if (msg.type === 'thought') {
                 chatMessage.type = 'thought';
               } else if (msg.parts[0].functionCall) { // Check for functionCall object
@@ -182,7 +219,8 @@ function ChatApp() {
         setIsSystemPromptEditing(true); // Enable editing for new session
         setSessionName(''); // Clear session name on error
         }
-      } else {
+      }
+ else {
         // No session ID in URL, clear current session state
         setChatSessionId(null);
         setMessages([]);
@@ -208,32 +246,53 @@ function ChatApp() {
     window.location.href = redirectToUrl;
   };
 
-  
+  const handleFilesSelected = (files: File[]) => {
+    setSelectedFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim()) return; // Only check for empty message
+    if (!inputMessage.trim() && selectedFiles.length === 0) return; // Check for empty message AND no files
 
     setIsStreaming(true); // Start streaming
-
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ text: inputMessage }], type: 'user' };
-    setMessages((prev) => [...prev, userMessage]);
-    setInputMessage('');
-
-    let agentMessageId = crypto.randomUUID();
-    setMessages((prev) => [...prev, { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' }]);
 
     try {
       let apiUrl = '';
       let requestBody: any = {};
 
+      const attachments: FileAttachment[] = await Promise.all(
+        selectedFiles.map(async (file) => {
+          const data = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              resolve(reader.result?.toString().split(',')[1] || ''); // Get base64 part
+            };
+            reader.readAsDataURL(file);
+          });
+          return { fileName: file.name, mimeType: file.type, data };
+        })
+      );
+
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ text: inputMessage }], type: 'user', attachments: attachments };
+    updateMessagesState(userMessage); // Use helper
+    setInputMessage('');
+    setSelectedFiles([]); // Clear selected files immediately after sending message
+
+    let agentMessageId = crypto.randomUUID();
+    updateMessagesState({ id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage); // Use helper
+
+
       if (chatSessionId) {
         // Existing session
         apiUrl = '/api/chat/message';
-        requestBody = { sessionId: chatSessionId, message: inputMessage };
+        requestBody = { sessionId: chatSessionId, message: inputMessage, attachments };
       } else {
         // New session
         apiUrl = '/api/chat/newSessionAndMessage'; // New endpoint
-        requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: sessionName };
+        requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: sessionName, attachments };
           }
 
           // 첫 메시지 전송 후 시스템 프롬프트 편집 비활성화
@@ -253,16 +312,12 @@ function ChatApp() {
       }
 
       if (!response.ok) {
-        setMessages((prev) => {
-          const newMessages = [...prev];
-          const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
-          if (agentMessage) {
-            agentMessage.role = 'system';
-            agentMessage.parts[0].text = 'Failed to send message or receive stream.';
-            agentMessage.type = 'system';
-          }
-          return newMessages;
-        });
+        updateMessagesState({
+          id: agentMessageId, // Use the agentMessageId to replace the placeholder
+          role: 'system',
+          parts: [{ text: 'Failed to send message or receive stream.' }],
+          type: 'system',
+        } as ChatMessage, { replaceId: agentMessageId });
         return;
       }
 
@@ -270,16 +325,12 @@ function ChatApp() {
 
       const reader = response.body?.getReader();
       if (!reader) {
-        setMessages((prev) => {
-          const newMessages = [...prev];
-          const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
-          if (agentMessage) {
-            agentMessage.role = 'system';
-            agentMessage.parts[0].text = 'Failed to get readable stream reader.';
-            agentMessage.type = 'system';
-          }
-          return newMessages;
-        });
+        updateMessagesState({
+          id: agentMessageId, // Use the agentMessageId to replace the placeholder
+          role: 'system',
+          parts: [{ text: 'Failed to get readable stream reader.' }],
+          type: 'system',
+        }, { replaceId: agentMessageId });
         return;
       }
 
@@ -304,7 +355,7 @@ function ChatApp() {
           if (data.startsWith('M\n')) {
             currentAgentText += data.substring(2); // Remove "M\n"
 
-            setMessages((prev) => {
+            setMessages((prev) => { // This one is an update, not a push/splice
               const newMessages = [...prev];
               const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
               if (agentMessage) {
@@ -317,45 +368,29 @@ function ChatApp() {
             const thoughtText = data.substring(2);
             const newThoughtId = crypto.randomUUID();
 
-            setMessages((prev) => {
-              const newMessages = [...prev];
-              const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
-              if (agentMessageIndex !== -1) {
-                newMessages.splice(agentMessageIndex, 0, { id: newThoughtId, role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage);
-              }
-              return newMessages;
-            });
+            updateMessagesState(
+              { id: newThoughtId, role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage,
+              { insertBeforeAgentId: agentMessageId }
+            );
             setLastAutoDisplayedThoughtId(newThoughtId);
           } else if (data.startsWith('F\n')) {
             const [functionName, functionArgsJson] = data.substring(2).split('\n', 2);
             const functionArgs = JSON.parse(functionArgsJson);
+            const message: ChatMessage = { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: functionArgs } }], type: 'function_call' };
 
-            setMessages((prev) => {
-              const newMessages = [...prev];
-              const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
-              const message: ChatMessage = { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: functionArgs } }], type: 'function_call' };
-              if (agentMessageIndex !== -1) {
-                newMessages.splice(agentMessageIndex, 0, message);
-              } else {
-                newMessages.push(message);
-              }
-              return newMessages;
-            });
+            updateMessagesState(
+              message,
+              { insertBeforeAgentId: agentMessageId }
+            );
             setLastAutoDisplayedThoughtId(null);
-          } else if (data.startsWith('R\n')) {
+          } else if (data.startsWith('R')) { // Changed from 'R\n' to 'R' to catch all R events
             const functionResponseRaw = JSON.parse(data.substring(2));
+            const message: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: { response: functionResponseRaw } }], type: 'function_response' };
 
-            setMessages((prev) => {
-              const newMessages = [...prev];
-              const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
-              const message: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: { response: functionResponseRaw } }], type: 'function_response' };
-              if (agentMessageIndex !== -1) {
-                newMessages.splice(agentMessageIndex, 0, message);
-              } else {
-                newMessages.push(message);
-              }
-              return newMessages;
-            });
+            updateMessagesState(
+              message,
+              { insertBeforeAgentId: agentMessageId }
+            );
             setLastAutoDisplayedThoughtId(null);
           } else if (data.startsWith('S\n')) {
             const newSessionId = data.substring(2);
@@ -381,26 +416,19 @@ function ChatApp() {
       }
       fetchSessions(); // Refresh sessions after sending message
       setIsStreaming(false); // End streaming
+      setSelectedFiles([]); // Clear selected files after sending
 
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
-      setMessages((prev) => {
-        const newMessages = [...prev];
-        const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
-        if (agentMessage) {
-          agentMessage.role = 'system';
-          agentMessage.parts[0].text = 'Failed to send message or receive stream.';
-          agentMessage.type = 'system';
-        } else {
-          newMessages.push({ id: crypto.randomUUID(), role: 'system', parts: [{ text: 'Error sending message or receiving stream.' }], type: 'system' });
-        }
-        return newMessages;
-      });
+      updateMessagesState({
+        id: crypto.randomUUID(),
+        role: 'system',
+        parts: [{ text: 'Error sending message or receiving stream.' }],
+        type: 'system',
+      } as ChatMessage);
       setIsStreaming(false); // End streaming on error
     }
   };
-
-  
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -425,8 +453,12 @@ function ChatApp() {
         setInputMessage={setInputMessage}
         handleSendMessage={handleSendMessage}
         isStreaming={isStreaming}
+        onFilesSelected={handleFilesSelected}
+        selectedFiles={selectedFiles}
+        handleRemoveFile={handleRemoveFile}
       />
-    </div>
+      
+      </div>
   );
 }
 

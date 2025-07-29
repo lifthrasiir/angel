@@ -7,21 +7,23 @@ import ModelTextMessage from './ModelTextMessage';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
 import SystemMessage from './SystemMessage';
+import { FileAttachment } from './FileAttachmentPreview';
 
-interface ChatMessageProps {
+export interface ChatMessage {
   role: string;
   text?: string;
   type?: "model" | "thought" | "system" | "user" | "function_call" | "function_response";
   functionCall?: any;
   functionResponse?: any;
+  attachments?: FileAttachment[]; // New prop
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ role, text, type, functionCall, functionResponse }) => {
+const ChatMessage: React.FC<ChatMessage> = React.memo(({ role, text, type, functionCall, functionResponse, attachments }) => {
 
   if (type === 'function_response') {
     return <FunctionResponseMessage functionResponse={functionResponse} isUserRole={role === 'user'} />;
   } else if (type === 'user') {
-    return <UserTextMessage text={text} />;
+    return <UserTextMessage text={text} attachments={attachments} />;
   } else if (type === 'thought') {
     // Thought messages are handled by ThoughtGroup, which passes them to ChatMessage.
     // We need to render them as a ModelTextMessage with special styling.
