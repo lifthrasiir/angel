@@ -18,20 +18,26 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var oauthStates = make(map[string]string) // Stores randomState -> originalQueryString
+var (
+	oauthStates       = make(map[string]string) // Stores randomState -> originalQueryString
+	GlobalGeminiState GeminiState
+)
 
 func init() {
 	InitDB()
-	InitAuth()
+	GlobalGeminiState.OAuthState = "random"
+	GlobalGeminiState.LoadToken()
+	InitAuth(&GlobalGeminiState)
+	GlobalGeminiState.InitGeminiClient()
 }
 
 func main() {
 	router := mux.NewRouter()
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
-	if SelectedAuthType == AuthTypeLoginWithGoogle {
-		router.HandleFunc("/login", HandleGoogleLogin).Methods("GET")
-		router.HandleFunc("/oauth2callback", HandleGoogleCallback).Methods("GET")
+	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle {
+		router.HandleFunc("/login", makeAuthHandler(&GlobalGeminiState, HandleGoogleLogin)).Methods("GET")
+		router.HandleFunc("/oauth2callback", makeAuthHandler(&GlobalGeminiState, HandleGoogleCallback)).Methods("GET")
 	}
 
 	// API handlers
@@ -63,6 +69,12 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
+func makeAuthHandler(gs *GeminiState, handler func(gs *GeminiState, w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handler(gs, w, r)
+	}
+}
+
 // New chat session start handler
 func newChatSession(w http.ResponseWriter, r *http.Request) {
 	frontendPath := filepath.Join(".", "frontend", "dist")
@@ -73,13 +85,13 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`) // Corrected: `
 
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
-	if GeminiClient == nil {
+	if GlobalGeminiState.GeminiClient == nil {
 		log.Println("newSessionAndMessage: GeminiClient not initialized.")
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
 	// Add ProjectID validation for OAuth method
-	if SelectedAuthType == AuthTypeLoginWithGoogle && ProjectID == "" {
+	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
 		log.Println("newSessionAndMessage: Project ID is not set. Please log in again.")
 		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
 		return
@@ -125,8 +137,6 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal error, continue with response
 	}
 
-	modelName := "gemini-2.5-flash"
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -150,9 +160,6 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var agentResponseText string
-	var currentHistory = historyContents
-
 	// Goroutine to infer session name
 	go func(sID string, uMsg string, sPrompt string, initialAgentResponse string) {
 		// Check if session name is already set (user might have set it manually)
@@ -172,10 +179,10 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
 		defer cancel()
 
-		inferredName, err := GeminiClient.GenerateContentOneShot(ctx, []Content{{
+		inferredName, err := GlobalGeminiState.GeminiClient.GenerateContentOneShot(ctx, []Content{{
 			Role:  "user",
 			Parts: []Part{{Text: nameInputPrompt}},
-		}}, modelName, nameSystemPrompt, &ThinkingConfig{IncludeThoughts: false})
+		}}, DefaultGeminiModel, nameSystemPrompt, &ThinkingConfig{IncludeThoughts: false})
 		if err != nil {
 			log.Printf("Failed to infer session name for %s: %v", sID, err)
 			return
@@ -196,126 +203,25 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 		// Notify frontend about name update
 		sendServerEvent(w, flusher, fmt.Sprintf("N\n%s\n%s", sID, inferredName))
-	}(sessionId, userMessage, systemPrompt, agentResponseText)
+	}(sessionId, userMessage, systemPrompt, "") // Pass empty string for initialAgentResponse, it will be filled by streamGeminiResponse
 
-	for {
-		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt, &ThinkingConfig{IncludeThoughts: true})
-		if err != nil {
-			log.Printf("newSessionAndMessage: CodeAssist API call failed: %v", err)
-			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
-			return
-		}
-		defer closer.Close()
-
-		var functionCalls []FunctionCall // Changed to slice
-		var modelResponseParts []Part
-
-		for caResp := range seq {
-			if len(caResp.Response.Candidates) == 0 {
-				continue
-			}
-			if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
-				continue
-			}
-			for _, part := range caResp.Response.Candidates[0].Content.Parts {
-				if part.FunctionCall != nil {
-					functionCalls = append(functionCalls, *part.FunctionCall) // Append to slice
-					// Send FunctionCall to frontend
-					argsJson, _ := json.Marshal(part.FunctionCall.Args)
-					sendServerEvent(w, flusher, fmt.Sprintf("F\n%s\n%s", part.FunctionCall.Name, string(argsJson)))
-					continue
-				}
-
-				// Check if it's a thought part
-				if part.Thought { // If it's a thought
-					// Parse subject and description from part.Text
-					var thoughtText string
-					matches := thoughtPattern.FindStringSubmatch(part.Text)
-					if len(matches) > 2 {
-						thoughtText = fmt.Sprintf("%s\n%s", matches[1], matches[2])
-					} else {
-						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text) // Placeholder subject
-					}
-
-					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s", thoughtText))
-					// Add thought message to chat history in DB
-					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought"); err != nil {
-						log.Printf("Failed to save thought message: %v", err)
-					}
-					continue // Skip further processing for thought parts
-				}
-
-				if part.Text != "" {
-					sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
-					agentResponseText += part.Text
-					modelResponseParts = append(modelResponseParts, part)
-				}
-			}
-			// If any function calls were found in this caResp, break the seq loop
-			if len(functionCalls) > 0 {
-				break
-			}
-		}
-
-		if len(functionCalls) > 0 {
-			// Process all collected function calls
-			for _, fc := range functionCalls {
-				functionResponseValue, err := callFunction(fc)
-				if err != nil {
-					log.Printf("Error executing function %s: %v", fc.Name, err)
-					functionResponseValue = map[string]interface{}{"error": err.Error()}
-				}
-
-				// Send FunctionResponse to frontend
-				responseJson, err := json.Marshal(functionResponseValue)
-				if err != nil {
-					log.Printf("Failed to marshal function response for frontend: %v", err)
-					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
-				}
-				sendServerEvent(w, flusher, fmt.Sprintf("R\n%s", string(responseJson)))
-
-				// Add FunctionCall to history
-				fcJson, _ := json.Marshal(fc)
-				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call"); err != nil {
-					log.Printf("Failed to save function call: %v", err)
-				}
-				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
-
-				// Add FunctionResponse to history
-				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
-				frJson, _ := json.Marshal(fr)
-				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response"); err != nil {
-					log.Printf("Failed to save function response: %v", err)
-				}
-				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
-			}
-			// Continue the outer loop to send the function response back to the model
-		} else {
-			// No function calls, break the outer loop
-			break
-		}
-	}
-
-	// Send 'Q' to signal end of content
-	sendServerEvent(w, flusher, "Q")
-
-	// Add agent response to chat history in DB
-	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text"); err != nil {
-		log.Printf("newSessionAndMessage: Failed to save agent response: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to save agent response: %v", err), http.StatusInternalServerError)
+	// Handle streaming response from Gemini
+	if err := streamGeminiResponse(w, r, sessionId, systemPrompt, historyContents); err != nil {
+		log.Printf("newSessionAndMessage: Error streaming Gemini response: %v", err)
+		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
 }
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
-	if GeminiClient == nil {
+	if GlobalGeminiState.GeminiClient == nil {
 		log.Println("chatMessage: GeminiClient not initialized.")
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
 	// Add ProjectID validation for OAuth method
-	if SelectedAuthType == AuthTypeLoginWithGoogle && ProjectID == "" {
+	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
 		log.Println("chatMessage: Project ID is not set. Please log in again.")
 		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
 		return
@@ -342,14 +248,12 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	systemPrompt := session.SystemPrompt
 
-	modelName := "gemini-2.5-flash"
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		log.Println("chatMessage: Streaming unsupported!")
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
@@ -373,126 +277,22 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var agentResponseText string
-	var currentHistory = historyContents
-
-	for {
-		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt, &ThinkingConfig{IncludeThoughts: true})
-		if err != nil {
-			log.Printf("chatMessage: CodeAssist API call failed: %v", err)
-			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
-			return
-		}
-		defer closer.Close()
-
-		var functionCalls []FunctionCall // Changed to slice
-		var modelResponseParts []Part
-
-		for caResp := range seq {
-			if len(caResp.Response.Candidates) == 0 {
-				continue
-			}
-			if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
-				continue
-			}
-			for _, part := range caResp.Response.Candidates[0].Content.Parts {
-				if part.FunctionCall != nil {
-					functionCalls = append(functionCalls, *part.FunctionCall) // Append to slice
-					// Send FunctionCall to frontend
-					argsJson, _ := json.Marshal(part.FunctionCall.Args)
-					sendServerEvent(w, flusher, fmt.Sprintf("F\n%s\n%s", part.FunctionCall.Name, string(argsJson)))
-					continue
-				}
-
-				// Check if it's a thought part
-				if part.Thought { // If it's a thought
-					// Parse subject and description from part.Text
-					var thoughtText string
-					matches := thoughtPattern.FindStringSubmatch(part.Text)
-					if len(matches) > 2 {
-						thoughtText = fmt.Sprintf("%s\n%s", matches[1], matches[2])
-					} else {
-						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text) // Placeholder subject
-					}
-
-					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s", thoughtText))
-					// Add thought message to chat history in DB
-					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought"); err != nil {
-						log.Printf("Failed to save thought message: %v", err)
-					}
-					continue // Skip further processing for thought parts
-				}
-
-				if part.Text != "" {
-					sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
-					agentResponseText += part.Text
-					modelResponseParts = append(modelResponseParts, part)
-				}
-			}
-			// If any function calls were found in this caResp, break the seq loop
-			if len(functionCalls) > 0 {
-				break
-			}
-		}
-
-		if len(functionCalls) > 0 {
-			// Process all collected function calls
-			for _, fc := range functionCalls {
-				functionResponseValue, err := callFunction(fc)
-				if err != nil {
-					log.Printf("Error executing function %s: %v", fc.Name, err)
-					functionResponseValue = map[string]interface{}{"error": err.Error()}
-				}
-
-				// Send FunctionResponse to frontend
-				responseJson, err := json.Marshal(functionResponseValue)
-				if err != nil {
-					log.Printf("Failed to marshal function response for frontend: %v", err)
-					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
-				}
-				sendServerEvent(w, flusher, fmt.Sprintf("R\n%s", string(responseJson)))
-
-				// Add FunctionCall to history
-				fcJson, _ := json.Marshal(fc)
-				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call"); err != nil {
-					log.Printf("Failed to save function call: %v", err)
-				}
-				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
-
-				// Add FunctionResponse to history
-				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
-				frJson, _ := json.Marshal(fr)
-				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response"); err != nil {
-					log.Printf("Failed to save function response: %v", err)
-				}
-				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
-			}
-			// Continue the outer loop to send the function response back to the model
-		} else {
-			// No function calls, break the outer loop
-			break
-		}
-	}
-
-	// Send 'Q' to signal end of content
-	sendServerEvent(w, flusher, "Q")
-
-	// Add agent response to chat history in DB
-	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text"); err != nil {
-		log.Printf("chatMessage: Failed to save agent response: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to save agent response: %v", err), http.StatusInternalServerError)
+	// Handle streaming response from Gemini
+	if err := streamGeminiResponse(w, r, sessionId, systemPrompt, historyContents); err != nil {
+		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
+		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
 }
 
 // New endpoint to load chat session history
 func loadChatSession(w http.ResponseWriter, r *http.Request) {
-	if GeminiClient == nil {
+	if GlobalGeminiState.GeminiClient == nil {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
 	// Add ProjectID validation for OAuth method
-	if SelectedAuthType == AuthTypeLoginWithGoogle && ProjectID == "" {
+	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
 		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
 		return
 	}
@@ -538,7 +338,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 // New endpoint to list all chat sessions
 func listChatSessions(w http.ResponseWriter, r *http.Request) {
-	if GeminiClient == nil {
+	if GlobalGeminiState.GeminiClient == nil {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
@@ -578,7 +378,7 @@ func getDefaultSystemPrompt(w http.ResponseWriter, r *http.Request) {
 // Add countTokens handler
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
-	if GeminiClient == nil {
+	if GlobalGeminiState.GeminiClient == nil {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
@@ -592,7 +392,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	modelName := "gemini-2.5-flash"
+	modelName := DefaultGeminiModel
 
 	contents := []Content{
 		{
@@ -601,7 +401,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp, err := GeminiClient.CountTokens(context.Background(), contents, modelName)
+	resp, err := GlobalGeminiState.GeminiClient.CountTokens(context.Background(), contents, modelName)
 	if err != nil {
 		log.Printf("CountTokens API call failed: %v", err)
 		http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", err), http.StatusInternalServerError)
@@ -613,31 +413,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func callFunction(fc FunctionCall) (map[string]interface{}, error) {
-	switch fc.Name {
-	case "list_directory":
-		// Assuming args are map[string]interface{}
-		_, ok := fc.Args["path"].(string)
-		if !ok {
-			return nil, fmt.Errorf("invalid path argument for list_directory")
-		}
-		// TODO: Call the actual list_directory function from sandbox
-		// For now, let's mock it
-		// result, err := sandbox.ListDirectory(path) // Assuming sandbox.ListDirectory exists
-		result := []string{"file1.txt", "file2.txt", "subdir/"} // Mock result
-		return map[string]interface{}{"files": result}, nil
-	case "read_file":
-		_, ok := fc.Args["absolute_path"].(string)
-		if !ok {
-			return nil, fmt.Errorf("invalid absolute_path argument for read_file")
-		}
-		// TODO: Call the actual read_file function from sandbox
-		// For now, let's mock it
-		// content, err := sandbox.ReadFile(path) // Assuming sandbox.ReadFile exists
-		content := "Mock file content for " + fc.Args["absolute_path"].(string) // Mock content
-		return map[string]interface{}{"content": content}, nil
-	default:
-		return nil, fmt.Errorf("unknown function: %s", fc.Name)
-	}
+	return CallToolFunction(fc)
 }
 
 func GenerateSessionID() string {
@@ -670,4 +446,107 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Session name updated successfully")
+}
+
+// Helper function to stream Gemini API response
+func streamGeminiResponse(w http.ResponseWriter, r *http.Request, sessionId string, systemPrompt string, initialHistory []Content) error {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("streaming unsupported")
+	}
+
+	var agentResponseText string
+	var currentHistory = initialHistory
+
+	for {
+		seq, closer, err := GlobalGeminiState.GeminiClient.SendMessageStream(context.Background(), currentHistory, DefaultGeminiModel, systemPrompt, &ThinkingConfig{IncludeThoughts: true})
+		if err != nil {
+			return fmt.Errorf("CodeAssist API call failed: %w", err)
+		}
+		defer closer.Close()
+
+		var functionCalls []FunctionCall
+		var modelResponseParts []Part
+
+		for caResp := range seq {
+			if len(caResp.Response.Candidates) == 0 {
+				continue
+			}
+			if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
+				continue
+			}
+			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+				if part.FunctionCall != nil {
+					functionCalls = append(functionCalls, *part.FunctionCall)
+					argsJson, _ := json.Marshal(part.FunctionCall.Args)
+					sendServerEvent(w, flusher, fmt.Sprintf("F\n%s\n%s", part.FunctionCall.Name, string(argsJson)))
+					continue
+				}
+
+				if part.Thought {
+					var thoughtText string
+					matches := thoughtPattern.FindStringSubmatch(part.Text)
+					if len(matches) > 2 {
+						thoughtText = fmt.Sprintf("%s\n%s", matches[1], matches[2])
+					} else {
+						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
+					}
+
+					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s", thoughtText))
+					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought"); err != nil {
+						log.Printf("Failed to save thought message: %v", err)
+					}
+					continue
+				}
+
+				if part.Text != "" {
+					sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
+					agentResponseText += part.Text
+					modelResponseParts = append(modelResponseParts, part)
+				}
+			}
+			if len(functionCalls) > 0 {
+				break
+			}
+		}
+
+		if len(functionCalls) > 0 {
+			for _, fc := range functionCalls {
+				functionResponseValue, err := callFunction(fc)
+				if err != nil {
+					log.Printf("Error executing function %s: %v", fc.Name, err)
+					functionResponseValue = map[string]interface{}{"error": err.Error()}
+				}
+
+				responseJson, err := json.Marshal(functionResponseValue)
+				if err != nil {
+					log.Printf("Failed to marshal function response for frontend: %v", err)
+					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+				}
+				sendServerEvent(w, flusher, fmt.Sprintf("R\n%s", string(responseJson)))
+
+				fcJson, _ := json.Marshal(fc)
+				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call"); err != nil {
+					log.Printf("Failed to save function call: %v", err)
+				}
+				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
+
+				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
+				frJson, _ := json.Marshal(fr)
+				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response"); err != nil {
+					log.Printf("Failed to save function response: %v", err)
+				}
+				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
+			}
+		} else {
+			break
+		}
+	}
+
+	sendServerEvent(w, flusher, "Q")
+
+	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text"); err != nil {
+		return fmt.Errorf("failed to save agent response: %w", err)
+	}
+	return nil
 }

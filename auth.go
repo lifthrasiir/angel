@@ -15,24 +15,24 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
-func InitAuth() {
+func InitAuth(gs *GeminiState) {
 	// Select authentication method from environment variables
 	if os.Getenv("GEMINI_API_KEY") != "" {
-		SelectedAuthType = AuthTypeUseGemini
+		gs.SelectedAuthType = AuthTypeUseGemini
 		log.Println("Authentication method: Using Gemini API Key")
 	} else if os.Getenv("GOOGLE_API_KEY") != "" || (os.Getenv("GOOGLE_CLOUD_PROJECT") != "" && os.Getenv("GOOGLE_CLOUD_LOCATION") != "") {
-		SelectedAuthType = AuthTypeUseVertexAI
+		gs.SelectedAuthType = AuthTypeUseVertexAI
 		log.Println("Authentication method: Using Vertex AI")
 	} else {
-		SelectedAuthType = AuthTypeLoginWithGoogle
+		gs.SelectedAuthType = AuthTypeLoginWithGoogle
 		log.Println("Authentication method: Using Google Login (OAuth)")
 	}
 
 	// Branch initialization logic based on authentication method
-	switch SelectedAuthType {
+	switch gs.SelectedAuthType {
 	case AuthTypeLoginWithGoogle:
 		// THIS IS INTENTIONALLY HARD-CODED TO MATCH GEMINI-CLI!
-		GoogleOauthConfig = &oauth2.Config{
+		gs.GoogleOauthConfig = &oauth2.Config{
 			ClientID:     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
 			ClientSecret: "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",
 			RedirectURL:  "http://localhost:8080/oauth2callback", // Web app redirect URI
@@ -45,22 +45,22 @@ func InitAuth() {
 		}
 
 		// Attempt to load existing token on startup
-		LoadToken()
+		gs.LoadToken()
 
 		// Initialize GenAI service if token is loaded
-		if Token != nil && Token.Valid() {
-			InitGeminiClient()
+		if gs.Token != nil && gs.Token.Valid() {
+			gs.InitGeminiClient()
 		}
 	case AuthTypeUseGemini:
-		InitGeminiClient() // GEMINI_API_KEY is handled inside InitGeminiClient
+		gs.InitGeminiClient() // GEMINI_API_KEY is handled inside InitGeminiClient
 	case AuthTypeUseVertexAI:
-		InitGeminiClient() // GOOGLE_API_KEY or GCP environment variables are handled inside InitGeminiClient
+		gs.InitGeminiClient() // GOOGLE_API_KEY or GCP environment variables are handled inside InitGeminiClient
 	case AuthTypeCloudShell:
-		InitGeminiClient() // Cloud Shell authentication is handled inside InitGeminiClient
+		gs.InitGeminiClient() // Cloud Shell authentication is handled inside InitGeminiClient
 	}
 }
 
-func HandleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+func HandleGoogleLogin(gs *GeminiState, w http.ResponseWriter, r *http.Request) {
 	// Capture the entire raw query string from the /login request.
 	// This will contain both 'redirect_to' and 'draft_message'.
 	redirectToQueryString := r.URL.RawQuery
@@ -80,11 +80,11 @@ func HandleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	randomState := base64.URLEncoding.EncodeToString(b)
 	oauthStates[randomState] = redirectToQueryString // Store the original query string with the random state
 
-	url := GoogleOauthConfig.AuthCodeURL(randomState)
+	url := gs.GoogleOauthConfig.AuthCodeURL(randomState)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
-func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
+func HandleGoogleCallback(gs *GeminiState, w http.ResponseWriter, r *http.Request) {
 	stateParam := r.FormValue("state")
 
 	// Validate the random part of the state against the stored value
@@ -123,7 +123,7 @@ func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := r.FormValue("code")
-	Token, err := GoogleOauthConfig.Exchange(context.Background(), code)
+	Token, err := gs.GoogleOauthConfig.Exchange(context.Background(), code)
 	if err != nil {
 		log.Printf("Failed to exchange token: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -131,17 +131,17 @@ func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve Project ID using the token
-	if err = FetchProjectID(Token); err != nil {
+	if err = gs.FetchProjectID(Token); err != nil {
 		log.Printf("Failed to retrieve Project ID: %v", err)
 		http.Error(w, "Could not retrieve Project ID.", http.StatusInternalServerError)
 		return
 	}
 
 	// Save token to file
-	SaveToken(Token)
+	gs.SaveToken(Token)
 
 	// Initialize GenAI service
-	InitGeminiClient()
+	gs.InitGeminiClient()
 
 	// Redirect to the original path after successful authentication
 	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)

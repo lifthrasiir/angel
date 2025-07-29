@@ -13,6 +13,18 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const DefaultGeminiModel = "gemini-2.5-flash"
+
+// GeminiState encapsulates the global state related to Gemini client and authentication.
+type GeminiState struct {
+	GoogleOauthConfig *oauth2.Config
+	OAuthState        string
+	Token             *oauth2.Token
+	GeminiClient      *CodeAssistClient
+	ProjectID         string
+	SelectedAuthType  AuthType
+}
+
 // Define CodeAssistClient struct
 type CodeAssistClient struct {
 	client    *http.Client
@@ -39,26 +51,7 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 					{Text: systemPrompt},
 				},
 			},
-			Tools: []Tool{
-				{
-					FunctionDeclarations: []FunctionDeclaration{
-						{
-							Name:        "list_directory",
-							Description: "Lists a directory.",
-							Parameters: &Schema{
-								Type: TypeObject,
-								Properties: map[string]*Schema{
-									"path": {
-										Type:        TypeString,
-										Description: "The absolute path to the directory to list.",
-									},
-								},
-								Required: []string{"path"},
-							},
-						},
-					},
-				},
-			},
+			Tools: GetToolsForGemini(),
 			GenerationConfig: &GenerationConfig{
 				ThinkingConfig: thinkingConfig,
 			},
@@ -186,44 +179,33 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content, 
 	return &caResp, nil
 }
 
-// Declare global variables (accessible from main.go)
-var (
-	GoogleOauthConfig *oauth2.Config
-	OAuthState        = "random"
-	Token             *oauth2.Token
-	GeminiClient      *CodeAssistClient // Changed from CodeAssistClient to GeminiClient
-
-	ProjectID        string
-	SelectedAuthType AuthType
-)
-
 // InitGeminiClient initializes the CodeAssistClient.
-func InitGeminiClient() {
+func (gs *GeminiState) InitGeminiClient() {
 	ctx := context.Background()
 	var httpClient *http.Client
 	var err error // Declare err here
 
-	switch SelectedAuthType {
+	switch gs.SelectedAuthType {
 	case AuthTypeLoginWithGoogle:
-		if Token == nil || !Token.Valid() {
+		if gs.Token == nil || !gs.Token.Valid() {
 			log.Println("OAuth token is invalid. Login required.")
 			return
 		}
 		// If ProjectID is not set, try to fetch it using the existing token
-		if ProjectID == "" {
+		if gs.ProjectID == "" {
 			log.Println("InitGeminiClient: ProjectID is empty, attempting to fetch using existing token.")
-			if err = FetchProjectID(Token); err != nil {
+			if err = gs.FetchProjectID(gs.Token); err != nil {
 				log.Printf("InitGeminiClient: Failed to retrieve Project ID using existing token: %v", err)
 				// Do not return, allow GeminiClient to be nil if ProjectID cannot be fetched
 			} else {
-				log.Printf("InitGeminiClient: Successfully fetched Project ID: %s", ProjectID)
+				log.Printf("InitGeminiClient: Successfully fetched Project ID: %s", gs.ProjectID)
 			}
 		}
-		if ProjectID != "" { // Only proceed if ProjectID is now available
-			httpClient = GoogleOauthConfig.Client(ctx, Token)
+		if gs.ProjectID != "" { // Only proceed if ProjectID is now available
+			httpClient = gs.GoogleOauthConfig.Client(ctx, gs.Token)
 		} else {
 			log.Println("InitGeminiClient: ProjectID still empty, Gemini client not initialized.")
-			GeminiClient = nil
+			gs.GeminiClient = nil
 			return // Return early if ProjectID is not available
 		}
 	case AuthTypeUseGemini:
@@ -235,16 +217,16 @@ func InitGeminiClient() {
 	case AuthTypeCloudShell:
 		httpClient = &http.Client{}
 	default:
-		log.Fatalf("Unsupported authentication type: %s", SelectedAuthType)
+		log.Fatalf("Unsupported authentication type: %s", gs.SelectedAuthType)
 	}
 
-	GeminiClient = NewCodeAssistClient(httpClient, ProjectID)
+	gs.GeminiClient = NewCodeAssistClient(httpClient, gs.ProjectID)
 
 	log.Println("CodeAssist client initialized.")
 }
 
 // saveToken saves the OAuth token to the database.
-func SaveToken(t *oauth2.Token) {
+func (gs *GeminiState) SaveToken(t *oauth2.Token) {
 	tokenJSON, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		log.Printf("Failed to marshal token: %v", err)
@@ -256,11 +238,11 @@ func SaveToken(t *oauth2.Token) {
 		return
 	}
 	log.Println("OAuth token saved to DB.")
-	Token = t // Update global token variable
+	gs.Token = t // Update global token variable
 }
 
 // loadToken loads the OAuth token from the database.
-func LoadToken() {
+func (gs *GeminiState) LoadToken() {
 	tokenJSON, err := LoadOAuthToken()
 	if err != nil {
 		log.Printf("Failed to load OAuth token from DB: %v", err)
@@ -272,7 +254,7 @@ func LoadToken() {
 		return
 	}
 
-	if err := json.Unmarshal([]byte(tokenJSON), &Token); err != nil {
+	if err := json.Unmarshal([]byte(tokenJSON), &gs.Token); err != nil {
 		log.Printf("Failed to decode token from DB: %v", err)
 		return
 	}
@@ -280,8 +262,8 @@ func LoadToken() {
 }
 
 // fetchProjectID retrieves the Google Cloud Project ID with the OAuth token.
-func FetchProjectID(t *oauth2.Token) error {
-	client := GoogleOauthConfig.Client(context.Background(), t)
+func (gs *GeminiState) FetchProjectID(t *oauth2.Token) error {
+	client := gs.GoogleOauthConfig.Client(context.Background(), t)
 	resp, err := client.Get("https://cloudresourcemanager.googleapis.com/v1/projects?filter=lifecycleState:ACTIVE")
 	if err != nil {
 		return fmt.Errorf("failed to fetch project list: %w", err)
@@ -304,8 +286,8 @@ func FetchProjectID(t *oauth2.Token) error {
 	}
 
 	if len(projectsResponse.Projects) > 0 {
-		ProjectID = projectsResponse.Projects[0].ProjectID
-		log.Printf("Project ID set: %s", ProjectID)
+		gs.ProjectID = projectsResponse.Projects[0].ProjectID
+		log.Printf("Project ID set: %s", gs.ProjectID)
 		return nil
 	}
 

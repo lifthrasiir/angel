@@ -206,10 +206,4 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]Content, error
 	return history, nil
 }
 
-func formatJSON(data interface{}) string {
-	prettyJSON, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("%v", data)
-	}
-	return string(prettyJSON)
-}
+
