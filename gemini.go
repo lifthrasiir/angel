@@ -28,7 +28,7 @@ func NewCodeAssistClient(httpClient *http.Client, projectID string) *CodeAssistC
 }
 
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
-func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents []Content, modelName string) (io.ReadCloser, error) {
+func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents []Content, modelName string, systemPrompt string) (io.ReadCloser, error) {
 	reqBody := CAGenerateContentRequest{
 		Model:   modelName,
 		Project: c.projectID,
@@ -36,7 +36,7 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 			Contents: contents,
 			SystemInstruction: &Content{
 				Parts: []Part{
-					{Text: GetCoreSystemPrompt()},
+					{Text: systemPrompt},
 				},
 			},
 			Tools: []Tool{
@@ -95,8 +95,8 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
-func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
-	respBody, err := c.streamGenerateContent(ctx, contents, modelName)
+func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string, systemPrompt string) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	respBody, err := c.streamGenerateContent(ctx, contents, modelName, systemPrompt)
 	if err != nil {
 		return nil, nil, err
 	}

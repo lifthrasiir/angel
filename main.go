@@ -40,6 +40,7 @@ func main() {
 	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")                  // New endpoint to list all chat sessions
 	router.HandleFunc("/api/chat/countTokens", countTokensHandler).Methods("POST")            // Add countTokens handler
 	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST") // New endpoint to create a new session and send the first message
+	router.HandleFunc("/api/default-system-prompt", getDefaultSystemPrompt).Methods("GET")    // New endpoint to get the default system prompt
 
 	// Serve frontend static files
 	frontendPath := filepath.Join(".", "frontend", "dist")
@@ -66,7 +67,7 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
 }
 
-var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
+var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`) // Corrected: `^\*\*(.*?)\*\*\s*(.*)`
 
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +84,8 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var requestBody struct {
-		Message string `json:"message"`
+		Message      string `json:"message"`
+		SystemPrompt string `json:"systemPrompt"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -93,7 +95,14 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionId := GenerateSessionID() // Generate new session ID
-	if err := CreateSession(sessionId); err != nil {
+
+	// Use provided system prompt or default
+	systemPrompt := requestBody.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = GetDefaultSystemPrompt()
+	}
+
+	if err := CreateSession(sessionId, systemPrompt); err != nil {
 		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to create new session: %v", err), http.StatusInternalServerError)
 		return
@@ -143,7 +152,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	var currentHistory = historyContents
 
 	for {
-		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName)
+		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt)
 		if err != nil {
 			log.Printf("newSessionAndMessage: CodeAssist API call failed: %v", err)
 			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
@@ -277,20 +286,14 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionId := requestBody.SessionID
-	userMessage := requestBody.Message
 
-	// Add user message to current chat history in DB
-	if err := AddMessageToSession(sessionId, "user", userMessage, "text"); err != nil {
-		log.Printf("chatMessage: Failed to save user message: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
+	session, err := GetSession(sessionId)
+	if err != nil {
+		log.Printf("chatMessage: Failed to load session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	// Update last_updated_at for the current session
-	if err := UpdateSessionLastUpdated(sessionId); err != nil {
-		log.Printf("Failed to update last_updated_at for session %s: %v", sessionId, err)
-		// Non-fatal error, continue with response
-	}
+	systemPrompt := session.SystemPrompt
 
 	modelName := "gemini-2.5-flash"
 
@@ -306,6 +309,15 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userMessage := requestBody.Message
+
+	// Add user message to current chat history in DB
+	if err := AddMessageToSession(sessionId, "user", userMessage, "text"); err != nil {
+		log.Printf("chatMessage: Failed to save user message: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	// Retrieve session history from DB for Gemini API
 	historyContents, err := GetSessionHistory(sessionId, true)
 	if err != nil {
@@ -318,7 +330,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	var currentHistory = historyContents
 
 	for {
-		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName)
+		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt)
 		if err != nil {
 			log.Printf("chatMessage: CodeAssist API call failed: %v", err)
 			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
@@ -455,6 +467,12 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session, err := GetSession(sessionId)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	history, err := GetSessionHistory(sessionId, false)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
@@ -468,7 +486,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"sessionId": sessionId, "history": history})
+	json.NewEncoder(w).Encode(map[string]interface{}{"sessionId": sessionId, "history": history, "systemPrompt": session.SystemPrompt})
 }
 
 // New endpoint to list all chat sessions
@@ -494,7 +512,14 @@ func sendServerEvent(w http.ResponseWriter, flusher http.Flusher, data string) {
 	flusher.Flush()
 }
 
+// New endpoint to get the default system prompt
+func getDefaultSystemPrompt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, GetDefaultSystemPrompt())
+}
+
 // Add countTokens handler
+
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 	if GeminiClient == nil {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)

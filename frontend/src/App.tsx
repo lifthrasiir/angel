@@ -32,6 +32,9 @@ function ChatApp() {
   const [sessions, setSessions] = useState<Session[]>([]); // New state for sessions
   const [lastAutoDisplayedThoughtId, setLastAutoDisplayedThoughtId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false); // New state for streaming status
+  const [systemPrompt, setSystemPrompt] = useState<string>(''); // 시스템 프롬프트 상태 추가
+  const [isSystemPromptEditing, setIsSystemPromptEditing] = useState(false); // 시스템 프롬프트 편집 모드 상태 추가
+  const systemPromptTextareaRef = useRef<HTMLTextAreaElement>(null); // 시스템 프롬프트 textarea ref 추가
   
   const isNavigatingFromNewSession = useRef(false); // New ref to track navigation from new session
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -39,6 +42,20 @@ function ChatApp() {
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
+
+  const fetchDefaultSystemPrompt = async () => {
+    try {
+      const response = await fetch('/api/default-system-prompt');
+      if (response.ok) {
+        const data = await response.text();
+        setSystemPrompt(data);
+      } else {
+        console.error('Failed to fetch default system prompt:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('Error fetching default system prompt:', error);
+    }
+  };
 
   // Debounce utility function
   const debounce = (func: Function, delay: number) => {
@@ -68,6 +85,21 @@ function ChatApp() {
       textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
   }, [inputMessage]);
+
+  const adjustSystemPromptTextareaHeight = () => {
+    if (systemPromptTextareaRef.current) {
+      const textarea = systemPromptTextareaRef.current;
+      textarea.style.height = 'auto';
+      textarea.style.height = textarea.scrollHeight + 'px';
+    }
+  };
+
+  // Adjust system prompt textarea height
+  useEffect(() => {
+    adjustSystemPromptTextareaHeight();
+  }, [systemPrompt, isSystemPromptEditing]);
+
+  
 
   const fetchSessions = async () => {
     
@@ -117,11 +149,17 @@ function ChatApp() {
       }
 
       let currentSessionId = urlSessionId;
+      if (!currentSessionId && location.pathname === '/new') {
+        currentSessionId = 'new';
+      }
 
       // If the URL is /new, we don't try to load a session.
       if (currentSessionId === 'new') {
         setChatSessionId(null);
         setMessages([]); // Clear messages for a truly new session
+        setSystemPrompt(''); // Clear system prompt for a new session
+        setIsSystemPromptEditing(true); // Enable editing for new session
+        fetchDefaultSystemPrompt(); // Fetch default prompt for new session
         // Set flag if directly accessing /new to prevent immediate re-load
         if (location.pathname === '/new') {
           isNavigatingFromNewSession.current = true;
@@ -139,6 +177,11 @@ function ChatApp() {
                 return;
             }
             setChatSessionId(data.sessionId);
+            setSystemPrompt(data.systemPrompt); // Load system prompt directly
+            if (!data.systemPrompt) { // If system prompt is empty, fetch default
+              fetchDefaultSystemPrompt();
+            }
+            setIsSystemPromptEditing(false); // Disable editing for existing session
             // Ensure loaded messages have an ID and correct type
             setMessages((data.history || []).map((msg: any) => {
               const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID() };
@@ -147,9 +190,6 @@ function ChatApp() {
               } else if (msg.parts[0].functionCall) { // Check for functionCall object
                 chatMessage.type = 'function_call';
                 chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
-              } else if (msg.parts[0].functionResponse) { // Check for functionResponse object
-                chatMessage.type = 'function_response';
-                chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
               } else {
                 chatMessage.type = msg.role; // Default to role for other types
               }
@@ -165,20 +205,28 @@ function ChatApp() {
             console.warn('Session not found:', currentSessionId);
             setChatSessionId(null);
             setMessages([]);
+            setSystemPrompt(''); // Clear system prompt on session not found
+            setIsSystemPromptEditing(true); // Enable editing for new session
           } else {
             console.error('Failed to load session:', response.status, response.statusText);
             setChatSessionId(null);
             setMessages([]);
+            setSystemPrompt(''); // Clear system prompt on error
+            setIsSystemPromptEditing(true); // Enable editing for new session
           }
         } catch (error) {
           console.error('Error loading session:', error);
         setChatSessionId(null);
         setMessages([]);
+        setSystemPrompt(''); // Clear system prompt on error
+        setIsSystemPromptEditing(true); // Enable editing for new session
         }
       } else {
         // No session ID in URL, clear current session state
         setChatSessionId(null);
         setMessages([]);
+        setSystemPrompt(''); // Clear system prompt
+        setIsSystemPromptEditing(true); // Enable editing
       }
     };
 
@@ -210,10 +258,7 @@ function ChatApp() {
     setInputMessage('');
 
     let agentMessageId = crypto.randomUUID();
-    setMessages((prev) => {
-      const newMessages = [...prev, { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' }] as ChatMessage[];
-      return newMessages;
-    });
+    setMessages((prev) => [...prev, { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' }]);
 
     try {
       let apiUrl = '';
@@ -226,7 +271,12 @@ function ChatApp() {
       } else {
         // New session
         apiUrl = '/api/chat/newSessionAndMessage'; // New endpoint
-        requestBody = { message: inputMessage };
+        requestBody = { message: inputMessage, systemPrompt: systemPrompt };
+      }
+
+      // 첫 메시지 전송 후 시스템 프롬프트 편집 비활성화
+      if (chatSessionId === null) {
+        setIsSystemPromptEditing(false);
       }
 
       const response = await fetch(apiUrl, {
@@ -313,7 +363,7 @@ function ChatApp() {
               }
               return newMessages;
             });
-            setLastAutoDisplayedThoughtId(newThoughtId);
+            setLastAutoDisplayedThoughtId(null);
           } else if (data.startsWith('F\n')) {
             const [functionName, functionArgsJson] = data.substring(2).split('\n', 2);
             const functionArgs = JSON.parse(functionArgsJson);
@@ -321,7 +371,7 @@ function ChatApp() {
             setMessages((prev) => {
               const newMessages = [...prev];
               const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
-              const message = { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: functionArgs } }], type: 'function_call' } as ChatMessage;
+              const message: ChatMessage = { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: functionArgs } }], type: 'function_call' };
               if (agentMessageIndex !== -1) {
                 newMessages.splice(agentMessageIndex, 0, message);
               } else {
@@ -336,7 +386,7 @@ function ChatApp() {
             setMessages((prev) => {
               const newMessages = [...prev];
               const agentMessageIndex = newMessages.findIndex(msg => msg.id === agentMessageId);
-              const message = { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: { response: functionResponseRaw } }], type: 'function_response' } as ChatMessage;
+              const message: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: { response: functionResponseRaw } }], type: 'function_response' };
               if (agentMessageIndex !== -1) {
                 newMessages.splice(agentMessageIndex, 0, message);
               } else {
@@ -467,6 +517,50 @@ function ChatApp() {
           <>
             <div style={{ flexGrow: 1, overflowY: 'auto' }}>
               <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
+                {/* System Prompt Display/Edit */}
+                <div className="chat-message-container system-prompt-message">
+                  <div className="chat-bubble system-prompt-bubble">
+                    {isSystemPromptEditing && messages.length === 0 ? (
+                      <>
+                        <textarea
+                          ref={systemPromptTextareaRef}
+                          value={systemPrompt}
+                          onChange={(e) => setSystemPrompt(e.target.value)}
+                          onInput={(e) => {
+                            const target = e.target as HTMLTextAreaElement;
+                            target.style.height = 'auto';
+                            target.style.height = target.scrollHeight + 'px';
+                          }}
+                          disabled={messages.length !== 0} // Disable if session exists
+                          className={isSystemPromptEditing ? "system-prompt-textarea-editable" : ""}
+                          style={{ width: '100%', resize: 'none', border: 'none', background: 'transparent', outline: 'none' }}
+                        />
+                        
+                      </>
+                    ) : (
+                      <>
+                        <div className="system-prompt-display-non-editable" style={{ whiteSpace: 'pre-wrap' }}>{systemPrompt}</div>
+                        {messages.length === 0 && ( // Only show edit button if no messages have been sent
+                          <button
+                            onClick={() => setIsSystemPromptEditing(true)}
+                            style={{
+                              marginTop: '10px',
+                              padding: '5px 10px',
+                              background: '#f0f0f0',
+                              border: '1px solid #ccc',
+                              borderRadius: '5px',
+                              cursor: 'pointer',
+                              marginLeft: 'auto',
+                              display: 'block',
+                            }}
+                          >
+                            Edit System Prompt
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
                 {renderedMessages} {/* Call the new renderMessages function */}
                 <div ref={messagesEndRef} />
               </div>

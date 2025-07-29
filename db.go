@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -22,7 +23,8 @@ func InitDB() {
 	CREATE TABLE IF NOT EXISTS sessions (
 		id TEXT PRIMARY KEY,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		system_prompt TEXT
 	);
 
 	CREATE TABLE IF NOT EXISTS messages (
@@ -44,19 +46,34 @@ func InitDB() {
 		log.Fatalf("Failed to create tables: %v", err)
 	}
 
+	// Add system_prompt column if it doesn't exist
+	_, err = db.Exec("ALTER TABLE sessions ADD COLUMN system_prompt TEXT")
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Fatalf("Failed to add system_prompt column: %v", err)
+	}
+
 	log.Println("Database initialized and tables created.")
 }
 
 // Session struct to hold session data
 type Session struct {
-	ID          string `json:"id"`
-	LastUpdated string `json:"last_updated_at"`
+	ID           string `json:"id"`
+	LastUpdated  string `json:"last_updated_at"`
+	SystemPrompt string `json:"system_prompt"`
 }
 
-func CreateSession(sessionID string) error {
-	_, err := db.Exec("INSERT INTO sessions (id) VALUES (?)", sessionID)
+func CreateSession(sessionID string, systemPrompt string) error {
+	_, err := db.Exec("INSERT INTO sessions (id, system_prompt) VALUES (?, ?)", sessionID, systemPrompt)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
+	}
+	return nil
+}
+
+func UpdateSessionSystemPrompt(sessionID string, systemPrompt string) error {
+	_, err := db.Exec("UPDATE sessions SET system_prompt = ? WHERE id = ?", systemPrompt, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update session system prompt: %w", err)
 	}
 	return nil
 }
@@ -70,7 +87,7 @@ func UpdateSessionLastUpdated(sessionID string) error {
 }
 
 func GetAllSessions() ([]Session, error) {
-	rows, err := db.Query("SELECT id, last_updated_at FROM sessions ORDER BY last_updated_at DESC")
+	rows, err := db.Query("SELECT id, last_updated_at, system_prompt FROM sessions ORDER BY last_updated_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query all sessions: %w", err)
 	}
@@ -79,7 +96,7 @@ func GetAllSessions() ([]Session, error) {
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		if err := rows.Scan(&s.ID, &s.LastUpdated); err != nil {
+		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 		sessions = append(sessions, s)
@@ -128,6 +145,15 @@ func SessionExists(sessionID string) (bool, error) {
 		return false, fmt.Errorf("failed to check session existence: %w", err)
 	}
 	return exists, nil
+}
+
+func GetSession(sessionID string) (Session, error) {
+	var s Session
+	err := db.QueryRow("SELECT id, last_updated_at, system_prompt FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt)
+	if err != nil {
+		return s, fmt.Errorf("failed to get session: %w", err)
+	}
+	return s, nil
 }
 
 func GetSessionHistory(sessionId string, discardThoughts bool) ([]Content, error) {

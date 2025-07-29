@@ -115,7 +115,7 @@ textarea {
   font-family: monospace;
   font-size: 0.9em;
   margin: 0; /* Remove default pre margins */
-  max-height: 30vh; /* Limit height to 30% of viewport height */
+  max-height: min(30vh, 400px); /* Limit height to 30% of viewport height */
   overflow-y: auto; /* Add vertical scrollbar if content exceeds max-height */
 }
 
@@ -161,3 +161,35 @@ textarea {
   background-color: var(--color-agent-dark);
 }
 
+.system-prompt-message {
+  justify-content: flex-end;
+}
+
+.system-prompt-message .chat-bubble {
+  background-color: #ffe0b2; /* Light orange */
+  color: #333;
+  border: 2px solid #ff9800; /* Orange */
+}
+
+.system-prompt-message .chat-bubble:has(textarea) {
+  width: 80%;
+  min-height: 50px; /* 최소 높이 */
+}
+
+.system-prompt-message .chat-bubble textarea {
+  background-color: transparent;
+  border: none;
+  resize: none;
+  margin: 0 auto;
+  min-height: 50px;
+}
+
+.system-prompt-textarea-editable {
+  max-height: min(50vh, 400px);
+  overflow-y: auto;
+}
+
+.system-prompt-display-non-editable {
+  max-height: min(20vh, 150px);
+  overflow-y: auto;
+}

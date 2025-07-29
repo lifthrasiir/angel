@@ -151,8 +151,28 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ role, text, type, 
           </div>
         </div>
       );
+    } else if (type === 'system') {
+      bubbleClassName += " system-prompt-bubble"; // New class for system prompt
+      const preprocessedText = smartPreprocessMarkdown(contentText || '');
+      return (
+        <div className={containerClassName}>
+          <div className={bubbleClassName}>
+            <ReactMarkdown
+              remarkPlugins={katexLoaded ? [remarkGfm, breaks, remarkHtml, remarkMath] : [remarkGfm, breaks, remarkHtml]}
+              rehypePlugins={katexLoaded ? [rehypeHandleRawNodes, rehypeKatex] : [rehypeHandleRawNodes]}
+              components={{
+                p: ({ node, ...props }) => {
+                  return <p {...props} />;
+                },
+              }}
+            >
+              {preprocessedText}
+            </ReactMarkdown>
+          </div>
+        </div>
+      );
     }
-    // For other model/system messages, we use ReactMarkdown
+    // For other model messages, we use ReactMarkdown
     const preprocessedText = smartPreprocessMarkdown(contentText || '');
 
     return (
