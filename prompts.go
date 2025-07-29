@@ -232,3 +232,11 @@ The structure MUST be as follows:
 </state_snapshot>
 `, "`")
 }
+
+func GetSessionNameInferencePrompts(userMessage, agentMessage string) (systemPrompt, inputPrompt string) {
+	systemPrompt = `You are a helpful assistant that summarizes conversations. Your task is to provide a concise, single-line summary of the given conversation, suitable for a chat session title. The summary should be 5 words or less, or 12 characters or less if words don't make sense in that language. Use the primary language of the conversation. Do not include any conversational filler or discussion.`
+	inputPrompt = fmt.Sprintf(`> %s
+
+< %s`, userMessage, agentMessage)
+	return systemPrompt, inputPrompt
+}

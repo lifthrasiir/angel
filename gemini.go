@@ -28,7 +28,7 @@ func NewCodeAssistClient(httpClient *http.Client, projectID string) *CodeAssistC
 }
 
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
-func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents []Content, modelName string, systemPrompt string) (io.ReadCloser, error) {
+func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents []Content, modelName string, systemPrompt string, thinkingConfig *ThinkingConfig) (io.ReadCloser, error) {
 	reqBody := CAGenerateContentRequest{
 		Model:   modelName,
 		Project: c.projectID,
@@ -60,9 +60,7 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 				},
 			},
 			GenerationConfig: &GenerationConfig{
-				ThinkingConfig: &ThinkingConfig{
-					IncludeThoughts: true,
-				},
+				ThinkingConfig: thinkingConfig,
 			},
 		},
 	}
@@ -95,8 +93,8 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
-func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string, systemPrompt string) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
-	respBody, err := c.streamGenerateContent(ctx, contents, modelName, systemPrompt)
+func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string, systemPrompt string, thinkingConfig *ThinkingConfig) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	respBody, err := c.streamGenerateContent(ctx, contents, modelName, systemPrompt, thinkingConfig)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,6 +124,26 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Con
 	}
 
 	return seq, respBody, nil
+}
+
+// GenerateContentOneShot calls the streamGenerateContent of Code Assist API and returns a single response.
+func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, contents []Content, modelName string, systemPrompt string, thinkingConfig *ThinkingConfig) (string, error) {
+	seq, closer, err := c.SendMessageStream(ctx, contents, modelName, systemPrompt, thinkingConfig)
+	if err != nil {
+		return "", err
+	}
+	defer closer.Close()
+
+	for caResp := range seq {
+		if len(caResp.Response.Candidates) > 0 && len(caResp.Response.Candidates[0].Content.Parts) > 0 {
+			textPart := caResp.Response.Candidates[0].Content.Parts[0].Text
+			if textPart != "" {
+				return textPart, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no text content found in LLM response")
 }
 
 // CountTokens calls the countTokens of Code Assist API.

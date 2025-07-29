@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -36,11 +37,12 @@ func main() {
 	// API handlers
 	router.HandleFunc("/new", newChatSession).Methods("GET")
 	router.HandleFunc("/api/chat/message", chatMessage).Methods("POST")
-	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")                       // New endpoint to load chat session
-	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")                  // New endpoint to list all chat sessions
-	router.HandleFunc("/api/chat/countTokens", countTokensHandler).Methods("POST")            // Add countTokens handler
-	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST") // New endpoint to create a new session and send the first message
-	router.HandleFunc("/api/default-system-prompt", getDefaultSystemPrompt).Methods("GET")    // New endpoint to get the default system prompt
+	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")                        // New endpoint to load chat session
+	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")                   // New endpoint to list all chat sessions
+	router.HandleFunc("/api/chat/countTokens", countTokensHandler).Methods("POST")             // Add countTokens handler
+	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST")  // New endpoint to create a new session and send the first message
+	router.HandleFunc("/api/default-system-prompt", getDefaultSystemPrompt).Methods("GET")     // New endpoint to get the default system prompt
+	router.HandleFunc("/api/chat/updateSessionName", updateSessionNameHandler).Methods("POST") // New endpoint to update session name
 
 	// Serve frontend static files
 	frontendPath := filepath.Join(".", "frontend", "dist")
@@ -151,8 +153,53 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	var agentResponseText string
 	var currentHistory = historyContents
 
+	// Goroutine to infer session name
+	go func(sID string, uMsg string, sPrompt string, initialAgentResponse string) {
+		// Check if session name is already set (user might have set it manually)
+		session, err := GetSession(sID)
+		if err != nil {
+			log.Printf("Failed to get session %s for name inference: %v", sID, err)
+			return
+		}
+		if session.Name != "" { // If name is not empty, user has set it, do not infer
+			return
+		}
+
+		// Construct the prompt for name inference
+		nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(uMsg, initialAgentResponse)
+
+		// Call LLM to infer name
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
+		defer cancel()
+
+		inferredName, err := GeminiClient.GenerateContentOneShot(ctx, []Content{{
+			Role:  "user",
+			Parts: []Part{{Text: nameInputPrompt}},
+		}}, modelName, nameSystemPrompt, &ThinkingConfig{IncludeThoughts: false})
+		if err != nil {
+			log.Printf("Failed to infer session name for %s: %v", sID, err)
+			return
+		}
+
+		// Validate inferred name
+		inferredName = strings.TrimSpace(inferredName)
+		if len(inferredName) > 100 || strings.Contains(inferredName, "\n") {
+			log.Printf("Inferred name for session %s is invalid (too long or multi-line): %s", sID, inferredName)
+			return
+		}
+
+		// Update session name in DB
+		if err := UpdateSessionName(sID, inferredName); err != nil {
+			log.Printf("Failed to update session name for %s: %v", sID, err)
+			return
+		}
+
+		// Notify frontend about name update
+		sendServerEvent(w, flusher, fmt.Sprintf("N\n%s\n%s", sID, inferredName))
+	}(sessionId, userMessage, systemPrompt, agentResponseText)
+
 	for {
-		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt)
+		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt, &ThinkingConfig{IncludeThoughts: true})
 		if err != nil {
 			log.Printf("newSessionAndMessage: CodeAssist API call failed: %v", err)
 			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
@@ -330,7 +377,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	var currentHistory = historyContents
 
 	for {
-		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt)
+		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName, systemPrompt, &ThinkingConfig{IncludeThoughts: true})
 		if err != nil {
 			log.Printf("chatMessage: CodeAssist API call failed: %v", err)
 			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
@@ -509,7 +556,17 @@ func listChatSessions(w http.ResponseWriter, r *http.Request) {
 func sendServerEvent(w http.ResponseWriter, flusher http.Flusher, data string) {
 	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
 	fmt.Fprintf(w, "data: %s\n\n", escapedData)
-	flusher.Flush()
+
+	// Add a recover block to catch panics during Flush()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic during Flush: %v", r)
+		}
+	}()
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // New endpoint to get the default system prompt
@@ -591,4 +648,26 @@ func GenerateSessionID() string {
 		return uuid.New().String() // Fallback to UUID if random generation fails
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// New handler to update session name
+func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		SessionID string `json:"sessionId"`
+		Name      string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := UpdateSessionName(requestBody.SessionID, requestBody.Name); err != nil {
+		log.Printf("Failed to update session name for %s: %v", requestBody.SessionID, err)
+		http.Error(w, fmt.Sprintf("Failed to update session name: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Session name updated successfully")
 }

@@ -257,6 +257,7 @@ type CaCountTokenResponse struct {
 // Define ChatSession struct (used instead of genai.ChatSession)
 type ChatSession struct {
 	History []*Content
+	Name    string `json:"name"`
 }
 
 // GeminiEventType enum definition (matches GeminiEventType in TypeScript)

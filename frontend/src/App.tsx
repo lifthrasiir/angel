@@ -22,6 +22,8 @@ interface ChatMessage {
 interface Session {
   id: string;
   last_updated_at: string;
+  name?: string;
+  isEditing?: boolean;
 }
 
 function ChatApp() {
@@ -34,6 +36,7 @@ function ChatApp() {
   const [isStreaming, setIsStreaming] = useState(false); // New state for streaming status
   const [systemPrompt, setSystemPrompt] = useState<string>(''); // 시스템 프롬프트 상태 추가
   const [isSystemPromptEditing, setIsSystemPromptEditing] = useState(false); // 시스템 프롬프트 편집 모드 상태 추가
+  const [sessionName, setSessionName] = useState(''); // 세션 이름 상태 추가
   const systemPromptTextareaRef = useRef<HTMLTextAreaElement>(null); // 시스템 프롬프트 textarea ref 추가
   
   const isNavigatingFromNewSession = useRef(false); // New ref to track navigation from new session
@@ -159,6 +162,7 @@ function ChatApp() {
         setMessages([]); // Clear messages for a truly new session
         setSystemPrompt(''); // Clear system prompt for a new session
         setIsSystemPromptEditing(true); // Enable editing for new session
+        setSessionName(''); // Clear session name for a new session
         fetchDefaultSystemPrompt(); // Fetch default prompt for new session
         // Set flag if directly accessing /new to prevent immediate re-load
         if (location.pathname === '/new') {
@@ -182,6 +186,7 @@ function ChatApp() {
               fetchDefaultSystemPrompt();
             }
             setIsSystemPromptEditing(false); // Disable editing for existing session
+            setSessionName(data.name || ''); // Load session name
             // Ensure loaded messages have an ID and correct type
             setMessages((data.history || []).map((msg: any) => {
               const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID() };
@@ -207,12 +212,14 @@ function ChatApp() {
             setMessages([]);
             setSystemPrompt(''); // Clear system prompt on session not found
             setIsSystemPromptEditing(true); // Enable editing for new session
+            setSessionName(''); // Clear session name on session not found
           } else {
             console.error('Failed to load session:', response.status, response.statusText);
             setChatSessionId(null);
             setMessages([]);
             setSystemPrompt(''); // Clear system prompt on error
             setIsSystemPromptEditing(true); // Enable editing for new session
+            setSessionName(''); // Clear session name on error
           }
         } catch (error) {
           console.error('Error loading session:', error);
@@ -220,6 +227,7 @@ function ChatApp() {
         setMessages([]);
         setSystemPrompt(''); // Clear system prompt on error
         setIsSystemPromptEditing(true); // Enable editing for new session
+        setSessionName(''); // Clear session name on error
         }
       } else {
         // No session ID in URL, clear current session state
@@ -227,6 +235,7 @@ function ChatApp() {
         setMessages([]);
         setSystemPrompt(''); // Clear system prompt
         setIsSystemPromptEditing(true); // Enable editing
+        setSessionName(''); // Clear session name
       }
     };
 
@@ -271,13 +280,13 @@ function ChatApp() {
       } else {
         // New session
         apiUrl = '/api/chat/newSessionAndMessage'; // New endpoint
-        requestBody = { message: inputMessage, systemPrompt: systemPrompt };
-      }
+        requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: sessionName };
+          }
 
-      // 첫 메시지 전송 후 시스템 프롬프트 편집 비활성화
-      if (chatSessionId === null) {
-        setIsSystemPromptEditing(false);
-      }
+          // 첫 메시지 전송 후 시스템 프롬프트 편집 비활성화
+          if (chatSessionId === null) {
+            setIsSystemPromptEditing(false);
+          }
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -363,7 +372,7 @@ function ChatApp() {
               }
               return newMessages;
             });
-            setLastAutoDisplayedThoughtId(null);
+            setLastAutoDisplayedThoughtId(newThoughtId);
           } else if (data.startsWith('F\n')) {
             const [functionName, functionArgsJson] = data.substring(2).split('\n', 2);
             const functionArgs = JSON.parse(functionArgsJson);
@@ -400,6 +409,14 @@ function ChatApp() {
             setChatSessionId(newSessionId);
             isNavigatingFromNewSession.current = true; // Set flag before navigating
             navigate(`/${newSessionId}`, { replace: true }); // Navigate immediately
+          } else if (data.startsWith('N\n')) { // New: Session Name Update
+            const [sessionIdToUpdate, newName] = data.substring(2).split('\n', 2);
+            setSessions(prevSessions =>
+              prevSessions.map(s =>
+                s.id === sessionIdToUpdate ? { ...s, name: newName } : s
+              )
+            );
+            // No need to call fetchSessions() here, as setSessions already updates the state.
           } else if (data === 'Q') {
             // End of content signal
             setLastAutoDisplayedThoughtId(null);
@@ -479,23 +496,81 @@ function ChatApp() {
           ) : (
             <ul style={{ listStyle: 'none', padding: 0, width: '100%' }}>
               {sessions.map((session) => (
-                <li key={session.id} style={{ marginBottom: '5px' }}>
+                <li key={session.id} style={{ marginBottom: '5px', display: 'flex', alignItems: 'center' }}>
+                  {session.isEditing ? (
+                    <input
+                      type="text"
+                      value={session.name || ''}
+                      onChange={(e) => {
+                        setSessions(prevSessions =>
+                          prevSessions.map(s =>
+                            s.id === session.id ? { ...s, name: e.target.value } : s
+                          )
+                        );
+                      }}
+                      onBlur={async () => {
+                        if (session.id) {
+                          try {
+                            await fetch('/api/chat/updateSessionName', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ sessionId: session.id, name: session.name || '' }),
+                            });
+                            fetchSessions();
+                          } catch (error) {
+                            console.error('Error updating session name:', error);
+                          }
+                        }
+                        setSessions(prevSessions =>
+                          prevSessions.map(s =>
+                            s.id === session.id ? { ...s, isEditing: false } : s
+                          )
+                        );
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      style={{ flexGrow: 1, padding: '8px', border: '1px solid #ddd', borderRadius: '5px' }}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => navigate(`/${session.id}`)}
+                      style={{
+                        flexGrow: 1,
+                        padding: '8px',
+                        textAlign: 'left',
+                        border: '1px solid #ddd',
+                        borderRadius: '5px',
+                        background: session.id === chatSessionId ? '#e0e0e0' : 'white',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {session.name || 'New Chat'}
+                    </button>
+                  )}
                   <button
-                    onClick={() => navigate(`/${session.id}`)}
+                    onClick={() => {
+                      setSessions(prevSessions =>
+                        prevSessions.map(s =>
+                          s.id === session.id ? { ...s, isEditing: true } : s
+                        )
+                      );
+                    }}
                     style={{
-                      width: '100%',
-                      padding: '8px',
-                      textAlign: 'left',
-                      border: '1px solid #ddd',
+                      marginLeft: '5px',
+                      padding: '5px 8px',
+                      background: '#f0f0f0',
+                      border: '1px solid #ccc',
                       borderRadius: '5px',
-                      background: session.id === chatSessionId ? '#e0e0e0' : 'white',
                       cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
                     }}
                   >
-                    {session.id}
+                    Edit
                   </button>
                 </li>
               ))}
@@ -506,7 +581,6 @@ function ChatApp() {
 
       {/* Main Chat Area */}
       <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        
         {!isLoggedIn && (
           <div style={{ padding: '20px', textAlign: 'center' }}>
             <p>Login required to start chatting.</p>
@@ -517,7 +591,6 @@ function ChatApp() {
           <>
             <div style={{ flexGrow: 1, overflowY: 'auto' }}>
               <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
-                {/* System Prompt Display/Edit */}
                 <div className="chat-message-container system-prompt-message">
                   <div className="chat-bubble system-prompt-bubble">
                     {isSystemPromptEditing && messages.length === 0 ? (
