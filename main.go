@@ -36,9 +36,10 @@ func main() {
 	// API handlers
 	router.HandleFunc("/new", newChatSession).Methods("GET")
 	router.HandleFunc("/api/chat/message", chatMessage).Methods("POST")
-	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")       // New endpoint to load chat session
-	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")  // New endpoint to list all chat sessions
-	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST") // Add countTokens handler
+	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")                       // New endpoint to load chat session
+	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")                  // New endpoint to list all chat sessions
+	router.HandleFunc("/api/chat/countTokens", countTokensHandler).Methods("POST")            // Add countTokens handler
+	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST") // New endpoint to create a new session and send the first message
 
 	// Serve frontend static files
 	frontendPath := filepath.Join(".", "frontend", "dist")
@@ -61,19 +62,49 @@ func main() {
 
 // New chat session start handler
 func newChatSession(w http.ResponseWriter, r *http.Request) {
+	frontendPath := filepath.Join(".", "frontend", "dist")
+	http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
+}
+
+var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
+
+// New session and message handler
+func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	if GeminiClient == nil {
+		log.Println("newSessionAndMessage: GeminiClient not initialized.")
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
-	// Skip ProjectID validation if not OAuth method.
+	// Add ProjectID validation for OAuth method
 	if SelectedAuthType == AuthTypeLoginWithGoogle && ProjectID == "" {
+		log.Println("newSessionAndMessage: Project ID is not set. Please log in again.")
 		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
 		return
 	}
 
-	sessionId := GenerateSessionID() // Generate session ID
+	var requestBody struct {
+		Message string `json:"message"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		log.Printf("newSessionAndMessage: Invalid request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	sessionId := GenerateSessionID() // Generate new session ID
 	if err := CreateSession(sessionId); err != nil {
+		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to create new session: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	userMessage := requestBody.Message
+
+	// Add user message to current chat history in DB
+	if err := AddMessageToSession(sessionId, "user", userMessage, "text"); err != nil {
+		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -83,11 +114,142 @@ func newChatSession(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal error, continue with response
 	}
 
-	// Redirect to the new session URL
-	http.Redirect(w, r, fmt.Sprintf("/%s", sessionId), http.StatusSeeOther)
-}
+	modelName := "gemini-2.5-flash"
 
-var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Println("newSessionAndMessage: Streaming unsupported!")
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	// Send the new session ID as the first event
+	sendServerEvent(w, flusher, fmt.Sprintf("S\n%s", sessionId))
+
+	// Retrieve session history from DB for Gemini API
+	historyContents, err := GetSessionHistory(sessionId, true)
+	if err != nil {
+		log.Printf("newSessionAndMessage: Failed to retrieve session history: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var agentResponseText string
+	var currentHistory = historyContents
+
+	for {
+		seq, closer, err := GeminiClient.SendMessageStream(context.Background(), currentHistory, modelName)
+		if err != nil {
+			log.Printf("newSessionAndMessage: CodeAssist API call failed: %v", err)
+			http.Error(w, fmt.Sprintf("CodeAssist API call failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer closer.Close()
+
+		var functionCalls []FunctionCall // Changed to slice
+		var modelResponseParts []Part
+
+		for caResp := range seq {
+			if len(caResp.Response.Candidates) == 0 {
+				continue
+			}
+			if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
+				continue
+			}
+			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+				if part.FunctionCall != nil {
+					functionCalls = append(functionCalls, *part.FunctionCall) // Append to slice
+					// Send FunctionCall to frontend
+					argsJson, _ := json.Marshal(part.FunctionCall.Args)
+					sendServerEvent(w, flusher, fmt.Sprintf("F\n%s\n%s", part.FunctionCall.Name, string(argsJson)))
+					continue
+				}
+
+				// Check if it's a thought part
+				if part.Thought { // If it's a thought
+					// Parse subject and description from part.Text
+					var thoughtText string
+					matches := thoughtPattern.FindStringSubmatch(part.Text)
+					if len(matches) > 2 {
+						thoughtText = fmt.Sprintf("%s\n%s", matches[1], matches[2])
+					} else {
+						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text) // Placeholder subject
+					}
+
+					sendServerEvent(w, flusher, fmt.Sprintf("T\n%s", thoughtText))
+					// Add thought message to chat history in DB
+					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought"); err != nil {
+						log.Printf("Failed to save thought message: %v", err)
+					}
+					continue // Skip further processing for thought parts
+				}
+
+				if part.Text != "" {
+					sendServerEvent(w, flusher, fmt.Sprintf("M\n%s", part.Text))
+					agentResponseText += part.Text
+					modelResponseParts = append(modelResponseParts, part)
+				}
+			}
+			// If any function calls were found in this caResp, break the seq loop
+			if len(functionCalls) > 0 {
+				break
+			}
+		}
+
+		if len(functionCalls) > 0 {
+			// Process all collected function calls
+			for _, fc := range functionCalls {
+				functionResponseValue, err := callFunction(fc)
+				if err != nil {
+					log.Printf("Error executing function %s: %v", fc.Name, err)
+					functionResponseValue = map[string]interface{}{"error": err.Error()}
+				}
+
+				// Send FunctionResponse to frontend
+				responseJson, err := json.Marshal(functionResponseValue)
+				if err != nil {
+					log.Printf("Failed to marshal function response for frontend: %v", err)
+					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+				}
+				sendServerEvent(w, flusher, fmt.Sprintf("R\n%s", string(responseJson)))
+
+				// Add FunctionCall to history
+				fcJson, _ := json.Marshal(fc)
+				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call"); err != nil {
+					log.Printf("Failed to save function call: %v", err)
+				}
+				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
+
+				// Add FunctionResponse to history
+				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
+				frJson, _ := json.Marshal(fr)
+				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response"); err != nil {
+					log.Printf("Failed to save function response: %v", err)
+				}
+				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
+			}
+			// Continue the outer loop to send the function response back to the model
+		} else {
+			// No function calls, break the outer loop
+			break
+		}
+	}
+
+	// Send 'Q' to signal end of content
+	sendServerEvent(w, flusher, "Q")
+
+	// Add agent response to chat history in DB
+	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text"); err != nil {
+		log.Printf("newSessionAndMessage: Failed to save agent response: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to save agent response: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {

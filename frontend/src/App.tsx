@@ -6,6 +6,7 @@ import {
   useNavigate,
   useParams,
   useLocation,
+  Navigate,
 } from 'react-router-dom';
 
 import ChatMessage from './components/ChatMessage';
@@ -30,6 +31,9 @@ function ChatApp() {
   const [inputMessage, setInputMessage] = useState('');
   const [sessions, setSessions] = useState<Session[]>([]); // New state for sessions
   const [lastAutoDisplayedThoughtId, setLastAutoDisplayedThoughtId] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false); // New state for streaming status
+  
+  const isNavigatingFromNewSession = useRef(false); // New ref to track navigation from new session
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null); // Add this ref
   const navigate = useNavigate();
@@ -66,12 +70,14 @@ function ChatApp() {
   }, [inputMessage]);
 
   const fetchSessions = async () => {
+    
     try {
       const response = await fetch('/api/chat/sessions');
       if (response.ok) {
         const data: Session[] = await response.json();
         setSessions(data);
         setIsLoggedIn(true); // Set isLoggedIn to true on successful fetch
+        
       } else if (response.status === 401) {
         // Not logged in, clear sessions
         setSessions([]);
@@ -105,7 +111,23 @@ function ChatApp() {
     }
 
     const initializeChatSession = async () => {
+      if (isNavigatingFromNewSession.current) {
+        isNavigatingFromNewSession.current = false; // Reset flag
+        return; // Skip session loading as we are navigating from a new session
+      }
+
       let currentSessionId = urlSessionId;
+
+      // If the URL is /new, we don't try to load a session.
+      if (currentSessionId === 'new') {
+        setChatSessionId(null);
+        setMessages([]); // Clear messages for a truly new session
+        // Set flag if directly accessing /new to prevent immediate re-load
+        if (location.pathname === '/new') {
+          isNavigatingFromNewSession.current = true;
+        }
+        return; // Crucially, exit here to prevent any fetch calls
+      }
 
       if (currentSessionId) {
         try {
@@ -133,9 +155,10 @@ function ChatApp() {
               }
               return chatMessage;
             }));
-            if (currentSessionId !== data.sessionId) {
-                navigate(`/${data.sessionId}`, { replace: true });
-            }
+            // This part might be problematic if currentSessionId is already set from URL
+            // if (!currentSessionId) {
+            //     navigate(`/${data.sessionId}`, { replace: true });
+            // }
           } else if (response.status === 401) {
             handleLogin();
           } else if (response.status === 404) {
@@ -149,8 +172,8 @@ function ChatApp() {
           }
         } catch (error) {
           console.error('Error loading session:', error);
-          setChatSessionId(null);
-          setMessages([]);
+        setChatSessionId(null);
+        setMessages([]);
         }
       } else {
         // No session ID in URL, clear current session state
@@ -161,7 +184,7 @@ function ChatApp() {
 
     initializeChatSession();
     fetchSessions(); // Fetch sessions on initial load
-  }, [urlSessionId, navigate, location.search]);
+  }, [urlSessionId, navigate, location.search, location.pathname]);
 
 
   const handleLogin = () => {
@@ -175,13 +198,12 @@ function ChatApp() {
     window.location.href = redirectToUrl;
   };
 
-  const handleCreateNewSession = async () => {
-    // Directly navigate to the new session endpoint, backend will handle creation and redirect
-    window.location.href = '/new';
-  };
+  
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !chatSessionId) return;
+    if (!inputMessage.trim()) return; // Only check for empty message
+
+    setIsStreaming(true); // Start streaming
 
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', parts: [{ text: inputMessage }], type: 'user' };
     setMessages((prev) => [...prev, userMessage]);
@@ -194,10 +216,23 @@ function ChatApp() {
     });
 
     try {
-      const response = await fetch('/api/chat/message', {
+      let apiUrl = '';
+      let requestBody: any = {};
+
+      if (chatSessionId) {
+        // Existing session
+        apiUrl = '/api/chat/message';
+        requestBody = { sessionId: chatSessionId, message: inputMessage };
+      } else {
+        // New session
+        apiUrl = '/api/chat/newSessionAndMessage'; // New endpoint
+        requestBody = { message: inputMessage };
+      }
+
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: chatSessionId, message: inputMessage }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.status === 401) {
@@ -219,9 +254,10 @@ function ChatApp() {
         return;
       }
 
+      
+
       const reader = response.body?.getReader();
       if (!reader) {
-        console.error('Failed to get readable stream reader.');
         setMessages((prev) => {
           const newMessages = [...prev];
           const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
@@ -303,10 +339,17 @@ function ChatApp() {
               const message = { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: { response: functionResponseRaw } }], type: 'function_response' } as ChatMessage;
               if (agentMessageIndex !== -1) {
                 newMessages.splice(agentMessageIndex, 0, message);
+              } else {
+                newMessages.push(message);
               }
               return newMessages;
             });
             setLastAutoDisplayedThoughtId(null);
+          } else if (data.startsWith('S\n')) {
+            const newSessionId = data.substring(2);
+            setChatSessionId(newSessionId);
+            isNavigatingFromNewSession.current = true; // Set flag before navigating
+            navigate(`/${newSessionId}`, { replace: true }); // Navigate immediately
           } else if (data === 'Q') {
             // End of content signal
             setLastAutoDisplayedThoughtId(null);
@@ -317,6 +360,7 @@ function ChatApp() {
         }
       }
       fetchSessions(); // Refresh sessions after sending message
+      setIsStreaming(false); // End streaming
 
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
@@ -332,6 +376,7 @@ function ChatApp() {
         }
         return newMessages;
       });
+      setIsStreaming(false); // End streaming on error
     }
   };
 
@@ -375,7 +420,7 @@ function ChatApp() {
         {!isLoggedIn ? (
           <button onClick={handleLogin} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Login</button>
         ) : (
-          <button onClick={handleCreateNewSession} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
+          <button onClick={() => navigate('/new')} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
         )}
         <div style={{ width: '100%', marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px', flexGrow: 1, overflowY: 'auto' }}>
           <h3>Sessions</h3>
@@ -417,19 +462,8 @@ function ChatApp() {
             <p>Login required to start chatting.</p>
           </div>
         )}
-        {isLoggedIn && !chatSessionId && (
-          <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-            <h2>Welcome to Angel CLI Web!</h2>
-            <p>Start a new conversation by creating a new session.</p>
-            <button
-              onClick={handleCreateNewSession}
-              style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginTop: '20px' }}
-            >
-              Create New Session
-            </button>
-          </div>
-        )}
-        {isLoggedIn && chatSessionId && (
+        
+        {isLoggedIn && (
           <>
             <div style={{ flexGrow: 1, overflowY: 'auto' }}>
               <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
@@ -446,7 +480,7 @@ function ChatApp() {
                   debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && e.ctrlKey) {
+                  if (e.key === 'Enter' && e.ctrlKey && !isStreaming) {
                     e.preventDefault(); // Prevent default Ctrl-Enter behavior
                     handleSendMessage();
                   }
@@ -455,7 +489,7 @@ function ChatApp() {
                 rows={1} // Start with 1 row
                 style={{ flexGrow: 1, padding: '10px', marginRight: '10px', border: '1px solid #eee', borderRadius: '5px', resize: 'none', overflowY: 'hidden' }}
               />
-              <button onClick={handleSendMessage} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+              <button onClick={handleSendMessage} disabled={isStreaming} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: isStreaming ? 'not-allowed' : 'pointer', opacity: isStreaming ? 0.5 : 1 }}>
                 Send
               </button>
             </div>
@@ -470,7 +504,8 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<ChatApp />} />
+        <Route path="/" element={<Navigate to="/new" replace />} />
+        <Route path="/new" element={<ChatApp />} />
         <Route path="/:sessionId" element={<ChatApp />} />
       </Routes>
     </Router>
