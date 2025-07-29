@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -29,9 +27,15 @@ func init() {
 	GlobalGeminiState.LoadToken()
 	InitAuth(&GlobalGeminiState)
 	GlobalGeminiState.InitGeminiClient()
+	initEmbeddedZip()
 }
 
 func main() {
+	defer func() {
+		if exeFile != nil {
+			exeFile.Close()
+		}
+	}()
 	router := mux.NewRouter()
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
@@ -51,19 +55,7 @@ func main() {
 	router.HandleFunc("/api/chat/updateSessionName", updateSessionNameHandler).Methods("POST") // New endpoint to update session name
 
 	// Serve frontend static files
-	frontendPath := filepath.Join(".", "frontend", "dist")
-	// Serve static files and fallback to index.html for client-side routing
-	router.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Try to serve the requested file
-		fs := http.FileServer(http.Dir(frontendPath))
-		// Check if the file exists
-		if _, err := os.Stat(filepath.Join(frontendPath, r.URL.Path)); os.IsNotExist(err) {
-			// If not, serve index.html for client-side routing
-			http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
-			return
-		}
-		fs.ServeHTTP(w, r)
-	}))
+	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
 
 	fmt.Println("Server started at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
@@ -77,8 +69,7 @@ func makeAuthHandler(gs *GeminiState, handler func(gs *GeminiState, w http.Respo
 
 // New chat session start handler
 func newChatSession(w http.ResponseWriter, r *http.Request) {
-	frontendPath := filepath.Join(".", "frontend", "dist")
-	http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
+	serveStaticFiles(w, r)
 }
 
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`) // Corrected: `^\*\*(.*?)\*\*\s*(.*)`

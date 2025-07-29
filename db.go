@@ -13,7 +13,7 @@ var db *sql.DB
 
 func InitDB() {
 	var err error
-	db, err = sql.Open("sqlite3", "X:/angel.db")
+	db, err = sql.Open("sqlite3", "angel.db")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
@@ -257,5 +257,3 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessag
 
 	return history, nil
 }
-
-
