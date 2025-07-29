@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -10,7 +10,8 @@ import {
 } from 'react-router-dom';
 
 import ChatMessage from './components/ChatMessage';
-import { ThoughtGroup } from './components/ThoughtGroup'; // Import ThoughtGroup
+import Sidebar from './components/Sidebar';
+import ChatArea from './components/ChatArea';
 
 interface ChatMessage {
   id: string; // Add id field
@@ -37,11 +38,8 @@ function ChatApp() {
   const [systemPrompt, setSystemPrompt] = useState<string>(''); // 시스템 프롬프트 상태 추가
   const [isSystemPromptEditing, setIsSystemPromptEditing] = useState(false); // 시스템 프롬프트 편집 모드 상태 추가
   const [sessionName, setSessionName] = useState(''); // 세션 이름 상태 추가
-  const systemPromptTextareaRef = useRef<HTMLTextAreaElement>(null); // 시스템 프롬프트 textarea ref 추가
   
   const isNavigatingFromNewSession = useRef(false); // New ref to track navigation from new session
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null); // Add this ref
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
@@ -59,50 +57,6 @@ function ChatApp() {
       console.error('Error fetching default system prompt:', error);
     }
   };
-
-  // Debounce utility function
-  const debounce = (func: Function, delay: number) => {
-    let timeout: NodeJS.Timeout;
-    return (...args: any[]) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func(...args), delay);
-    };
-  };
-
-  // Debounced function for textarea height adjustment
-  const debouncedAdjustTextareaHeight = useRef(
-    debounce((target: HTMLTextAreaElement) => {
-      target.style.height = 'auto';
-      target.style.height = target.scrollHeight + 'px';
-    }, 100) // 100ms debounce delay
-  ).current;
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Adjust textarea height when inputMessage changes (e.g., after sending message)
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-    }
-  }, [inputMessage]);
-
-  const adjustSystemPromptTextareaHeight = () => {
-    if (systemPromptTextareaRef.current) {
-      const textarea = systemPromptTextareaRef.current;
-      textarea.style.height = 'auto';
-      textarea.style.height = textarea.scrollHeight + 'px';
-    }
-  };
-
-  // Adjust system prompt textarea height
-  useEffect(() => {
-    adjustSystemPromptTextareaHeight();
-  }, [systemPrompt, isSystemPromptEditing]);
-
-  
 
   const fetchSessions = async () => {
     
@@ -195,16 +149,15 @@ function ChatApp() {
               } else if (msg.parts[0].functionCall) { // Check for functionCall object
                 chatMessage.type = 'function_call';
                 chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
+              } else if (msg.parts[0].functionResponse) { // Check for functionResponse object
+                chatMessage.type = 'function_response';
+                chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
               } else {
                 chatMessage.type = msg.role; // Default to role for other types
               }
               return chatMessage;
             }));
-            // This part might be problematic if currentSessionId is already set from URL
-            // if (!currentSessionId) {
-            //     navigate(`/${data.sessionId}`, { replace: true });
-            // }
-          } else if (response.status === 401) {
+            } else if (response.status === 401) {
             handleLogin();
           } else if (response.status === 404) {
             console.warn('Session not found:', currentSessionId);
@@ -447,222 +400,32 @@ function ChatApp() {
     }
   };
 
-  // Logic to group consecutive thought messages
-  const renderedMessages = useMemo(() => {
-    const renderedElements: JSX.Element[] = [];
-    let i = 0;
-    while (i < messages.length) {
-      const currentMessage = messages[i];
-      if (currentMessage.type === 'thought') {
-        const thoughtGroup: ChatMessage[] = [];
-        let j = i;
-        while (j < messages.length && messages[j].type === 'thought') {
-          thoughtGroup.push(messages[j]);
-          j++;
-        }
-        renderedElements.push(<ThoughtGroup key={`thought-group-${i}`} groupId={`thought-group-${i}`} thoughts={thoughtGroup} isAutoDisplayMode={true} lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId} />);
-        i = j; // Move index past the grouped thoughts
-      } else {
-        renderedElements.push(
-          <ChatMessage
-            key={currentMessage.id}
-            role={currentMessage.role}
-            text={currentMessage.parts[0].text}
-            type={currentMessage.type}
-            functionCall={currentMessage.parts[0].functionCall}
-            functionResponse={currentMessage.parts[0].functionResponse}
-          />
-        );
-        i++;
-      }
-    }
-    return renderedElements;
-  }, [messages, lastAutoDisplayedThoughtId]);
+  
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      {/* Sidebar */}
-      <div style={{ width: '200px', background: '#f0f0f0', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRight: '1px solid #ccc', boxSizing: 'border-box', overflowY: 'hidden', flexShrink: 0 }}>
-        <div style={{ fontSize: '3em', marginBottom: '20px' }}>😇</div>
-        {!isLoggedIn ? (
-          <button onClick={handleLogin} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Login</button>
-        ) : (
-          <button onClick={() => navigate('/new')} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
-        )}
-        <div style={{ width: '100%', marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px', flexGrow: 1, overflowY: 'auto' }}>
-          <h3>Sessions</h3>
-          {sessions && sessions.length === 0 ? (
-            <p>No sessions yet.</p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0, width: '100%' }}>
-              {sessions.map((session) => (
-                <li key={session.id} style={{ marginBottom: '5px', display: 'flex', alignItems: 'center' }}>
-                  {session.isEditing ? (
-                    <input
-                      type="text"
-                      value={session.name || ''}
-                      onChange={(e) => {
-                        setSessions(prevSessions =>
-                          prevSessions.map(s =>
-                            s.id === session.id ? { ...s, name: e.target.value } : s
-                          )
-                        );
-                      }}
-                      onBlur={async () => {
-                        if (session.id) {
-                          try {
-                            await fetch('/api/chat/updateSessionName', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ sessionId: session.id, name: session.name || '' }),
-                            });
-                            fetchSessions();
-                          } catch (error) {
-                            console.error('Error updating session name:', error);
-                          }
-                        }
-                        setSessions(prevSessions =>
-                          prevSessions.map(s =>
-                            s.id === session.id ? { ...s, isEditing: false } : s
-                          )
-                        );
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.currentTarget.blur();
-                        }
-                      }}
-                      style={{ flexGrow: 1, padding: '8px', border: '1px solid #ddd', borderRadius: '5px' }}
-                    />
-                  ) : (
-                    <button
-                      onClick={() => navigate(`/${session.id}`)}
-                      style={{
-                        flexGrow: 1,
-                        padding: '8px',
-                        textAlign: 'left',
-                        border: '1px solid #ddd',
-                        borderRadius: '5px',
-                        background: session.id === chatSessionId ? '#e0e0e0' : 'white',
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {session.name || 'New Chat'}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setSessions(prevSessions =>
-                        prevSessions.map(s =>
-                          s.id === session.id ? { ...s, isEditing: true } : s
-                        )
-                      );
-                    }}
-                    style={{
-                      marginLeft: '5px',
-                      padding: '5px 8px',
-                      background: '#f0f0f0',
-                      border: '1px solid #ccc',
-                      borderRadius: '5px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Edit
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+      <Sidebar
+        isLoggedIn={isLoggedIn}
+        handleLogin={handleLogin}
+        sessions={sessions}
+        setSessions={setSessions}
+        chatSessionId={chatSessionId}
+        fetchSessions={fetchSessions}
+      />
 
-      {/* Main Chat Area */}
-      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        {!isLoggedIn && (
-          <div style={{ padding: '20px', textAlign: 'center' }}>
-            <p>Login required to start chatting.</p>
-          </div>
-        )}
-        
-        {isLoggedIn && (
-          <>
-            <div style={{ flexGrow: 1, overflowY: 'auto' }}>
-              <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
-                <div className="chat-message-container system-prompt-message">
-                  <div className="chat-bubble system-prompt-bubble">
-                    {isSystemPromptEditing && messages.length === 0 ? (
-                      <>
-                        <textarea
-                          ref={systemPromptTextareaRef}
-                          value={systemPrompt}
-                          onChange={(e) => setSystemPrompt(e.target.value)}
-                          onInput={(e) => {
-                            const target = e.target as HTMLTextAreaElement;
-                            target.style.height = 'auto';
-                            target.style.height = target.scrollHeight + 'px';
-                          }}
-                          disabled={messages.length !== 0} // Disable if session exists
-                          className={isSystemPromptEditing ? "system-prompt-textarea-editable" : ""}
-                          style={{ width: '100%', resize: 'none', border: 'none', background: 'transparent', outline: 'none' }}
-                        />
-                        
-                      </>
-                    ) : (
-                      <>
-                        <div className="system-prompt-display-non-editable" style={{ whiteSpace: 'pre-wrap' }}>{systemPrompt}</div>
-                        {messages.length === 0 && ( // Only show edit button if no messages have been sent
-                          <button
-                            onClick={() => setIsSystemPromptEditing(true)}
-                            style={{
-                              marginTop: '10px',
-                              padding: '5px 10px',
-                              background: '#f0f0f0',
-                              border: '1px solid #ccc',
-                              borderRadius: '5px',
-                              cursor: 'pointer',
-                              marginLeft: 'auto',
-                              display: 'block',
-                            }}
-                          >
-                            Edit System Prompt
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-                {renderedMessages} {/* Call the new renderMessages function */}
-                <div ref={messagesEndRef} />
-              </div>
-            </div>
-            <div style={{ padding: '10px 20px', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', position: 'sticky', bottom: 0, background: 'white' }}>
-              <textarea
-                ref={textareaRef}
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onInput={(e) => {
-                  debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && e.ctrlKey && !isStreaming) {
-                    e.preventDefault(); // Prevent default Ctrl-Enter behavior
-                    handleSendMessage();
-                  }
-                }}
-                placeholder="Enter your message..."
-                rows={1} // Start with 1 row
-                style={{ flexGrow: 1, padding: '10px', marginRight: '10px', border: '1px solid #eee', borderRadius: '5px', resize: 'none', overflowY: 'hidden' }}
-              />
-              <button onClick={handleSendMessage} disabled={isStreaming} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: isStreaming ? 'not-allowed' : 'pointer', opacity: isStreaming ? 0.5 : 1 }}>
-                Send
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      <ChatArea
+        isLoggedIn={isLoggedIn}
+        messages={messages}
+        lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId}
+        systemPrompt={systemPrompt}
+        setSystemPrompt={setSystemPrompt}
+        isSystemPromptEditing={isSystemPromptEditing}
+        setIsSystemPromptEditing={setIsSystemPromptEditing}
+        inputMessage={inputMessage}
+        setInputMessage={setInputMessage}
+        handleSendMessage={handleSendMessage}
+        isStreaming={isStreaming}
+      />
     </div>
   );
 }

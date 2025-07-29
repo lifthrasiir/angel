@@ -119,6 +119,11 @@ textarea {
   overflow-y: auto; /* Add vertical scrollbar if content exceeds max-height */
 }
 
+.chat-bubble.function-message-bubble {
+  background-color: #f0f0f0; /* Light gray for function messages */
+  border: 1px solid #ccc; /* Light gray border */
+}
+
 /* Adjust border-left for the whole container */
 .agent-function-call.chat-message-container {
   border-left: 4px solid #1890ff;
