@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -41,7 +41,6 @@ function ChatApp() {
   const [sessionName, setSessionName] = useState(''); // 세션 이름 상태 추가
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]); // New state for selected files
   
-  const isNavigatingFromNewSession = useRef(false); // New ref to track navigation from new session
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
@@ -131,11 +130,6 @@ function ChatApp() {
     }
 
     const initializeChatSession = async () => {
-      if (isNavigatingFromNewSession.current) {
-        isNavigatingFromNewSession.current = false; // Reset flag
-        return; // Skip session loading as we are navigating from a new session
-      }
-
       let currentSessionId = urlSessionId;
       if (!currentSessionId && location.pathname === '/new') {
         currentSessionId = 'new';
@@ -150,16 +144,13 @@ function ChatApp() {
         setSessionName(''); // Clear session name for a new session
         setSelectedFiles([]); // Clear selected files for a new session
         fetchDefaultSystemPrompt(); // Fetch default prompt for new session
-        // Set flag if directly accessing /new to prevent immediate re-load
-        if (location.pathname === '/new') {
-          isNavigatingFromNewSession.current = true;
-        }
         return; // Crucially, exit here to prevent any fetch calls
       }
 
-      // If currentSessionId changes, clear selected files
+      // If currentSessionId changes, clear selected files and reset streaming state
       if (currentSessionId !== chatSessionId) {
         setSelectedFiles([]);
+        setIsStreaming(false); // Reset streaming state when session changes
       }
 
       if (currentSessionId) {
@@ -395,7 +386,6 @@ function ChatApp() {
           } else if (data.startsWith('S\n')) {
             const newSessionId = data.substring(2);
             setChatSessionId(newSessionId);
-            isNavigatingFromNewSession.current = true; // Set flag before navigating
             navigate(`/${newSessionId}`, { replace: true }); // Navigate immediately
           } else if (data.startsWith('N\n')) { // New: Session Name Update
             const [sessionIdToUpdate, newName] = data.substring(2).split('\n', 2);

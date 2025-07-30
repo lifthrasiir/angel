@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { FaPaperclip } from 'react-icons/fa';
 
 interface ChatInputProps {
   inputMessage: string;
@@ -64,7 +65,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
         style={{ display: 'none' }} // Hide the actual file input
       />
       <button onClick={triggerFileInput} style={{ padding: '10px', marginRight: '10px', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer' }}>
-        📎
+        <FaPaperclip />
       </button>
       <textarea
         ref={textareaRef}

@@ -19,7 +19,6 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) 
         {text}
         {attachments && attachments.length > 0 && (
           <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '5px' }}>
-            <strong>Attached Files:</strong>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '5px' }}>
               {attachments.map((file, index) => (
                 <FileAttachmentPreview key={index} file={file} />

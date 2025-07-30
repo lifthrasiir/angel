@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FaEdit, FaFeatherAlt } from 'react-icons/fa';
 
 interface Session {
   id: string;
@@ -28,15 +29,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   const navigate = useNavigate();
 
   return (
-    <div style={{ width: '200px', background: '#f0f0f0', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRight: '1px solid #ccc', boxSizing: 'border-box', overflowY: 'hidden', flexShrink: 0 }}>
-      <div style={{ fontSize: '3em', marginBottom: '20px' }}>😇</div>
+    <div style={{ width: '200px', background: '#f0f0f0', padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRight: '1px solid #ccc', boxSizing: 'border-box', overflowY: 'hidden', flexShrink: 0 }}>
+      <div style={{ fontSize: '3em', marginBottom: '20px' }}><FaFeatherAlt /></div>
       {!isLoggedIn ? (
         <button onClick={handleLogin} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Login</button>
       ) : (
         <button onClick={() => navigate('/new')} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
       )}
-      <div style={{ width: '100%', marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px', flexGrow: 1, overflowY: 'auto' }}>
-        <h3>Sessions</h3>
+      <div style={{ width: '100%', marginTop: '0px', borderTop: '1px solid #eee', paddingTop: '0px', flexGrow: 1, overflowY: 'auto' }}>
         {sessions && sessions.length === 0 ? (
           <p>No sessions yet.</p>
         ) : (
@@ -109,14 +109,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                   }}
                   style={{
                     marginLeft: '5px',
-                    padding: '5px 8px',
-                    background: '#f0f0f0',
-                    border: '1px solid #ccc',
-                    borderRadius: '5px',
+                    padding: '5px',
+                    background: 'none',
+                    border: 'none',
                     cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#555',
                   }}
                 >
-                  Edit
+                  <FaEdit size={16} />
                 </button>
               </li>
             ))}
