@@ -13,12 +13,7 @@ try {
 
   fs.writeFileSync(fullExePath, Buffer.concat([exeBuffer, zipBuffer]));
   console.log(`Successfully appended ${zipPath} to ${exePath}`);
-
-  // Delete the zip file after appending
-  fs.unlinkSync(fullZipPath);
-  console.log(`Deleted: ${fullZipPath}`);
-
 } catch (error) {
-  console.error(`Error during zip append or deletion: ${error.message}`);
+  console.error(`Error during zip append: ${error.message}`);
   process.exit(1);
 }

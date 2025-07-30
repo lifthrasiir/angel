@@ -10,6 +10,7 @@
 # Specific instructions
 
 - Never, ever remove the intentionally hard-coded GoogleOauthConfig!!!!
+- You do NOT need to export anything in the same package!!!!
 - Feel free to use `git checkout` to roll your modification back.
 - When using `replace` or `write_file`, pay close attention to newlines and whitespace. These tools demand exact literal matches.
   - **`replace`:** `old_string`/`new_string` must exactly match, including all whitespace, indentation, and newlines (`\n` or `\r\n`). Read sufficient context (via `read_file` with `limit`, or `type`/`cat`) to form accurate `old_string` and respect file's newline convention.

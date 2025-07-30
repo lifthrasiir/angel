@@ -79,7 +79,7 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 		// Find the file in the embedded zip
 		for _, file := range embeddedZipReader.File {
 			if file.Name == zipPath {
-								rc, err := file.Open()
+				rc, err := file.Open()
 				if err != nil {
 					log.Printf("Failed to open embedded zip file %s: %v", file.Name, err)
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -121,7 +121,7 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 	if embeddedZipReader != nil {
 		for _, file := range embeddedZipReader.File {
 			if file.Name == "index.html" {
-								rc, err := file.Open()
+				rc, err := file.Open()
 				if err != nil {
 					log.Printf("Failed to open embedded index.html: %v", err)
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
