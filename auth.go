@@ -131,13 +131,6 @@ func HandleGoogleCallback(gs *GeminiState, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Retrieve Project ID using the token
-	if err = gs.FetchProjectID(Token); err != nil {
-		log.Printf("Failed to retrieve Project ID: %v", err)
-		http.Error(w, "Could not retrieve Project ID.", http.StatusInternalServerError)
-		return
-	}
-
 	// Save token to file
 	gs.SaveToken(Token)
 
@@ -160,9 +153,6 @@ func HandleGoogleCallback(gs *GeminiState, w http.ResponseWriter, r *http.Reques
 			log.Printf("User email: %s", gs.UserEmail)
 		}
 	}
-
-	// Initialize GenAI service
-	gs.InitGeminiClient()
 
 	// Redirect to the original path after successful authentication
 	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)

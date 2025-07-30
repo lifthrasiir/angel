@@ -23,7 +23,7 @@ func init() {
 	GlobalGeminiState.OAuthState = "random"
 	GlobalGeminiState.LoadToken()
 	InitAuth(&GlobalGeminiState)
-	GlobalGeminiState.InitGeminiClient()
+
 	initEmbeddedZip()
 }
 

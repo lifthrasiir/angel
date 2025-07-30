@@ -303,3 +303,76 @@ type ServerGeminiErrorEvent struct {
 		Message string `json:"message"`
 	} `json:"value"`
 }
+
+type ClientMetadata struct {
+	IdeType       string `json:"ideType,omitempty"`
+	IdeVersion    string `json:"ideVersion,omitempty"`
+	PluginVersion string `json:"pluginVersion,omitempty"`
+	Platform      string `json:"platform,omitempty"`
+	UpdateChannel string `json:"updateChannel,omitempty"`
+	DuetProject   string `json:"duetProject,omitempty"`
+	PluginType    string `json:"pluginType,omitempty"`
+	IdeName       string `json:"ideName,omitempty"`
+}
+
+type LoadCodeAssistRequest struct {
+	CloudaicompanionProject string          `json:"cloudaicompanionProject,omitempty"`
+	Metadata                *ClientMetadata `json:"metadata,omitempty"`
+}
+
+type LoadCodeAssistResponse struct {
+	CurrentTier             *GeminiUserTier   `json:"currentTier,omitempty"`
+	AllowedTiers            []*GeminiUserTier `json:"allowedTiers,omitempty"`
+	IneligibleTiers         []*IneligibleTier `json:"ineligibleTiers,omitempty"`
+	CloudaicompanionProject string            `json:"cloudaicompanionProject,omitempty"`
+}
+
+type GeminiUserTier struct {
+	ID                                 UserTierID     `json:"id"`
+	Name                               string         `json:"name"`
+	Description                        string         `json:"description"`
+	UserDefinedCloudaicompanionProject *bool          `json:"userDefinedCloudaicompanionProject,omitempty"`
+	IsDefault                          *bool          `json:"isDefault,omitempty"`
+	PrivacyNotice                      *PrivacyNotice `json:"privacyNotice,omitempty"`
+	HasAcceptedTos                     *bool          `json:"hasAcceptedTos,omitempty"`
+	HasOnboardedPreviously             *bool          `json:"hasOnboardedPreviously,omitempty"`
+}
+
+type UserTierID string
+
+const (
+	UserTierIDFree     UserTierID = "free-tier"
+	UserTierIDLegacy   UserTierID = "legacy-tier"
+	UserTierIDStandard UserTierID = "standard-tier"
+)
+
+type IneligibleTier struct {
+	ReasonCode    string     `json:"reasonCode"`
+	ReasonMessage string     `json:"reasonMessage"`
+	TierID        UserTierID `json:"tierId"`
+	TierName      string     `json:"tierName"`
+}
+
+type PrivacyNotice struct {
+	ShowNotice bool   `json:"showNotice"`
+	NoticeText string `json:"noticeText,omitempty"`
+}
+
+type OnboardUserRequest struct {
+	TierID                  *UserTierID     `json:"tierId,omitempty"`
+	CloudaicompanionProject string          `json:"cloudaicompanionProject,omitempty"`
+	Metadata                *ClientMetadata `json:"metadata,omitempty"`
+}
+
+type LongRunningOperationResponse struct {
+	Name     string               `json:"name"`
+	Done     *bool                `json:"done,omitempty"`
+	Response *OnboardUserResponse `json:"response,omitempty"`
+}
+
+type OnboardUserResponse struct {
+	CloudaicompanionProject *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"cloudaicompanionProject,omitempty"`
+}

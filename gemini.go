@@ -9,6 +9,7 @@ import (
 	"iter"
 	"log"
 	"net/http"
+	"strings"
 
 	"golang.org/x/oauth2"
 )
@@ -185,11 +186,113 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content, 
 	return &caResp, nil
 }
 
+// LoadCodeAssist calls the loadCodeAssist of Code Assist API.
+func (c *CodeAssistClient) LoadCodeAssist(ctx context.Context, req LoadCodeAssistRequest) (*LoadCodeAssistResponse, error) {
+	jsonBody, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	url := "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	resp.Body.Close() // Close the body after reading
+
+	var loadRes LoadCodeAssistResponse
+	if err := json.Unmarshal(bodyBytes, &loadRes); err != nil {
+		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	}
+
+	// If cloudaicompanionProject is not set, generate an accurate error indicating that the free tier cannot be used based on the contents of ineligibleTiers.
+	if loadRes.CloudaicompanionProject == "" {
+		if len(loadRes.IneligibleTiers) > 0 {
+			var errorMessages []string
+			for _, tier := range loadRes.IneligibleTiers {
+				if tier.TierID == "free-tier" {
+					errorMessages = append(errorMessages, fmt.Sprintf("Free tier (%s) is not available: %s (Reason Code: %s)", tier.TierName, tier.ReasonMessage, tier.ReasonCode))
+				}
+			}
+			if len(errorMessages) > 0 {
+				return nil, fmt.Errorf("failed to load code assist: %s", strings.Join(errorMessages, "; "))
+			}
+		}
+		// This means that the initial CloudAICompanion project will be assigned soon. (TODO: restart required for some reason)
+		return nil, fmt.Errorf("failed to load code assist: cloudaicompanionProject is not set and no specific ineligible tiers found. This still means that you are going to get assigned for the project, try to restart the application to take the effect.")
+	}
+
+	// If cloudaicompanionProject is set and showNotice is true, print the privacy notice to the console and a message indicating that continuing to use it automatically accepts the notice.
+	if loadRes.CurrentTier != nil && loadRes.CurrentTier.PrivacyNotice != nil && loadRes.CurrentTier.PrivacyNotice.ShowNotice {
+		log.Println("--- Privacy Notice ---")
+		log.Println(loadRes.CurrentTier.PrivacyNotice.NoticeText)
+		log.Println("----------------------")
+		log.Println("By continuing to use Gemini Code Assist, you automatically accept the privacy notice.")
+	}
+
+	return &loadRes, nil
+}
+
+// OnboardUser calls the onboardUser of Code Assist API.
+func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserRequest) (*LongRunningOperationResponse, error) {
+	jsonBody, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	url := "https://cloudcode-pa.googleapis.com/v1internal:onboardUser"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	resp.Body.Close() // Close the body after reading
+
+	var lroRes LongRunningOperationResponse
+	if err := json.Unmarshal(bodyBytes, &lroRes); err != nil {
+		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	}
+
+	return &lroRes, nil
+}
+
 // InitGeminiClient initializes the CodeAssistClient.
 func (gs *GeminiState) InitGeminiClient() {
 	ctx := context.Background()
 	var httpClient *http.Client
-	var err error // Declare err here
 
 	switch gs.SelectedAuthType {
 	case AuthTypeLoginWithGoogle:
@@ -197,22 +300,70 @@ func (gs *GeminiState) InitGeminiClient() {
 			log.Println("OAuth token is invalid. Login required.")
 			return
 		}
-		// If ProjectID is not set, try to fetch it using the existing token
-		if gs.ProjectID == "" {
-			log.Println("InitGeminiClient: ProjectID is empty, attempting to fetch using existing token.")
-			if err = gs.FetchProjectID(gs.Token); err != nil {
-				log.Printf("InitGeminiClient: Failed to retrieve Project ID using existing token: %v", err)
-				// Do not return, allow GeminiClient to be nil if ProjectID cannot be fetched
-			} else {
-				log.Printf("InitGeminiClient: Successfully fetched Project ID: %s", gs.ProjectID)
+		httpClient = gs.GoogleOauthConfig.Client(ctx, gs.Token)
+		caClient := NewCodeAssistClient(httpClient, "") // Initialize with empty projectID for now
+
+		// LoadCodeAssist
+		loadReq := LoadCodeAssistRequest{
+			CloudaicompanionProject: gs.ProjectID,
+			Metadata: &ClientMetadata{
+				IdeType:     "IDE_UNSPECIFIED",
+				Platform:    "PLATFORM_UNSPECIFIED",
+				PluginType:  "GEMINI",
+				DuetProject: gs.ProjectID,
+			},
+		}
+		loadRes, loadErr := caClient.LoadCodeAssist(ctx, loadReq)
+		if loadErr != nil {
+			log.Printf("InitGeminiClient: Failed to load code assist: %v", loadErr)
+			gs.GeminiClient = nil
+			return
+		}
+
+		// Update ProjectID after LoadCodeAssist call
+		if loadRes.CloudaicompanionProject != "" {
+			gs.ProjectID = loadRes.CloudaicompanionProject
+		}
+
+		var userTierID UserTierID
+		if loadRes.CurrentTier != nil {
+			userTierID = loadRes.CurrentTier.ID
+		} else {
+			// Find default tier if currentTier is not set
+			for _, tier := range loadRes.AllowedTiers {
+				if tier.IsDefault != nil && *tier.IsDefault {
+					userTierID = tier.ID
+					break
+				}
 			}
 		}
-		if gs.ProjectID != "" { // Only proceed if ProjectID is now available
-			httpClient = gs.GoogleOauthConfig.Client(ctx, gs.Token)
-		} else {
-			log.Println("InitGeminiClient: ProjectID still empty, Gemini client not initialized.")
+
+		// OnboardUser
+		onboardReq := OnboardUserRequest{
+			CloudaicompanionProject: gs.ProjectID,
+			Metadata: &ClientMetadata{
+				IdeType:     "IDE_UNSPECIFIED",
+				Platform:    "PLATFORM_UNSPECIFIED",
+				PluginType:  "GEMINI",
+				DuetProject: gs.ProjectID,
+			},
+		}
+		if userTierID != "" {
+			onboardReq.TierID = &userTierID
+		}
+		lroRes, onboardErr := caClient.OnboardUser(ctx, onboardReq)
+		if onboardErr != nil {
+			log.Printf("InitGeminiClient: Failed to onboard user: %v", onboardErr)
 			gs.GeminiClient = nil
-			return // Return early if ProjectID is not available
+			return
+		}
+
+		if lroRes.Response != nil && lroRes.Response.CloudaicompanionProject != nil {
+			gs.ProjectID = lroRes.Response.CloudaicompanionProject.ID
+		} else {
+			log.Println("InitGeminiClient: No project ID returned from onboardUser, Gemini client not initialized.")
+			gs.GeminiClient = nil
+			return
 		}
 	case AuthTypeUseGemini:
 		log.Println("Gemini API Key method does not use Code Assist API.")
@@ -265,37 +416,4 @@ func (gs *GeminiState) LoadToken() {
 		return
 	}
 	log.Println("OAuth token loaded from DB.")
-}
-
-// fetchProjectID retrieves the Google Cloud Project ID with the OAuth token.
-func (gs *GeminiState) FetchProjectID(t *oauth2.Token) error {
-	client := gs.GoogleOauthConfig.Client(context.Background(), t)
-	resp, err := client.Get("https://cloudresourcemanager.googleapis.com/v1/projects?filter=lifecycleState:ACTIVE")
-	if err != nil {
-		return fmt.Errorf("failed to fetch project list: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("project list API error: %s, response: %s", resp.Status, string(bodyBytes))
-	}
-
-	var projectsResponse struct {
-		Projects []struct {
-			ProjectID string `json:"projectId"`
-		} `json:"projects"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&projectsResponse); err != nil {
-		return fmt.Errorf("failed to parse project response: %w", err)
-	}
-
-	if len(projectsResponse.Projects) > 0 {
-		gs.ProjectID = projectsResponse.Projects[0].ProjectID
-		log.Printf("Project ID set: %s", gs.ProjectID)
-		return nil
-	}
-
-	return fmt.Errorf("no active project found.")
 }
