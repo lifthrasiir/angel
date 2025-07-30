@@ -16,14 +16,7 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
 
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
-	if !ensureGeminiClientInitialized("newSessionAndMessage") {
-		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
-		return
-	}
-	// Add ProjectID validation for OAuth method
-	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
-		log.Println("newSessionAndMessage: Project ID is not set. Please log in again.")
-		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
+	if !validateAuthAndProject("newSessionAndMessage", w) {
 		return
 	}
 
@@ -33,9 +26,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		Attachments  []FileAttachment `json:"attachments"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		log.Printf("newSessionAndMessage: Invalid request body: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
 		return
 	}
 
@@ -65,10 +56,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal error, continue with response
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setupSSEHeaders(w)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -147,14 +135,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
-	if !ensureGeminiClientInitialized("chatMessage") {
-		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
-		return
-	}
-	// Add ProjectID validation for OAuth method
-	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
-		log.Println("chatMessage: Project ID is not set. Please log in again.")
-		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
+	if !validateAuthAndProject("chatMessage", w) {
 		return
 	}
 
@@ -164,9 +145,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Attachments []FileAttachment `json:"attachments"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		log.Printf("chatMessage: Invalid request body: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
 		return
 	}
 
@@ -180,10 +159,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	systemPrompt := session.SystemPrompt
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	setupSSEHeaders(w)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -223,13 +199,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 // New endpoint to load chat session history
 func loadChatSession(w http.ResponseWriter, r *http.Request) {
-	if !ensureGeminiClientInitialized("loadChatSession") {
-		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
-		return
-	}
-	// Add ProjectID validation for OAuth method
-	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
-		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
+	if !validateAuthAndProject("loadChatSession", w) {
 		return
 	}
 
@@ -262,20 +232,17 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	// Ensure history is an empty slice if no messages are found, not nil
 	if history == nil {
 		history = []FrontendMessage{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"sessionId": sessionId, "history": history, "systemPrompt": session.SystemPrompt})
+	sendJSONResponse(w, map[string]interface{}{"sessionId": sessionId, "history": history, "systemPrompt": session.SystemPrompt})
 }
 
 // New endpoint to list all chat sessions
 func listChatSessions(w http.ResponseWriter, r *http.Request) {
-	if !ensureGeminiClientInitialized("listChatSessions") {
-		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
+	if !validateAuthAndProject("listChatSessions", w) {
 		return
 	}
 
@@ -285,8 +252,7 @@ func listChatSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sessions)
+	sendJSONResponse(w, sessions)
 }
 
 // sseWriter wraps http.ResponseWriter and http.Flusher to handle client disconnections gracefully.

@@ -18,8 +18,9 @@ var (
 	GlobalGeminiState GeminiState
 )
 
-// ensureGeminiClientInitialized checks if GeminiClient is initialized and attempts to re-initialize if needed
-func ensureGeminiClientInitialized(handlerName string) bool {
+// validateAuthAndProject performs common auth and project validation for handlers
+func validateAuthAndProject(handlerName string, w http.ResponseWriter) bool {
+	// Check if GeminiClient is initialized and attempt to re-initialize if needed
 	if GlobalGeminiState.GeminiClient == nil {
 		log.Printf("%s: GeminiClient not initialized, attempting to re-initialize...", handlerName)
 		if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.Token != nil && GlobalGeminiState.Token.Valid() {
@@ -27,10 +28,41 @@ func ensureGeminiClientInitialized(handlerName string) bool {
 		}
 		if GlobalGeminiState.GeminiClient == nil {
 			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
+			http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 			return false
 		}
 	}
+
+	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
+		log.Printf("%s: Project ID is not set. Please log in again.", handlerName)
+		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
+		return false
+	}
 	return true
+}
+
+// setupSSEHeaders sets up Server-Sent Events headers
+func setupSSEHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+}
+
+// decodeJSONRequest decodes JSON request body with error handling
+func decodeJSONRequest(r *http.Request, w http.ResponseWriter, target interface{}, handlerName string) bool {
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		log.Printf("%s: Invalid request body: %v", handlerName, err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// sendJSONResponse sets JSON headers and encodes response
+func sendJSONResponse(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }
 
 func init() {
@@ -128,8 +160,7 @@ func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"email": GlobalGeminiState.UserEmail})
+	sendJSONResponse(w, map[string]string{"email": GlobalGeminiState.UserEmail})
 }
 
 // New handler to update session name
@@ -139,8 +170,7 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 		Name      string `json:"name"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if !decodeJSONRequest(r, w, &requestBody, "updateSessionNameHandler") {
 		return
 	}
 
@@ -174,8 +204,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 // Add countTokens handler
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
-	if !ensureGeminiClientInitialized("countTokensHandler") {
-		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
+	if !validateAuthAndProject("countTokensHandler", w) {
 		return
 	}
 
@@ -183,8 +212,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		Text string `json:"text"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if !decodeJSONRequest(r, w, &requestBody, "countTokensHandler") {
 		return
 	}
 
@@ -204,8 +232,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"totalTokens": resp.TotalTokens})
+	sendJSONResponse(w, map[string]int{"totalTokens": resp.TotalTokens})
 }
 
 func callFunction(fc FunctionCall) (map[string]interface{}, error) {

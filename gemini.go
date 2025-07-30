@@ -41,6 +41,37 @@ func NewCodeAssistClient(httpClient *http.Client, projectID string) *CodeAssistC
 	}
 }
 
+// makeAPIRequest creates and executes an HTTP request with common error handling
+func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBody interface{}, headers map[string]string) (*http.Response, error) {
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		httpReq.Header.Set(key, value)
+	}
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
+	}
+
+	return resp, nil
+}
+
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
 func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents []Content, modelName string, systemPrompt string, thinkingConfig *ThinkingConfig) (io.ReadCloser, error) {
 	reqBody := CAGenerateContentRequest{
@@ -65,31 +96,15 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 		},
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
-	}
-
 	url := "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	headers := map[string]string{"Accept": "text/event-stream"}
+
+	resp, err := c.makeAPIRequest(ctx, url, reqBody, headers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream") // Indicate that we expect a stream
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close() // Close the body after reading for error logging
-		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
-	}
-
-	return resp.Body, nil // Return the response body directly
+	return resp.Body, nil
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
@@ -155,28 +170,12 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content, 
 		},
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
-	}
-
 	url := "https://cloudcode-pa.googleapis.com/v1internal:countTokens"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	resp, err := c.makeAPIRequest(ctx, url, reqBody, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
-	}
 
 	var caResp CaCountTokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&caResp); err != nil {
@@ -188,28 +187,12 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content, 
 
 // LoadCodeAssist calls the loadCodeAssist of Code Assist API.
 func (c *CodeAssistClient) LoadCodeAssist(ctx context.Context, req LoadCodeAssistRequest) (*LoadCodeAssistResponse, error) {
-	jsonBody, err := json.MarshalIndent(req, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
-	}
-
 	url := "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	resp, err := c.makeAPIRequest(ctx, url, req, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
-	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -252,28 +235,12 @@ func (c *CodeAssistClient) LoadCodeAssist(ctx context.Context, req LoadCodeAssis
 
 // OnboardUser calls the onboardUser of Code Assist API.
 func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserRequest) (*LongRunningOperationResponse, error) {
-	jsonBody, err := json.MarshalIndent(req, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
-	}
-
 	url := "https://cloudcode-pa.googleapis.com/v1internal:onboardUser"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	resp, err := c.makeAPIRequest(ctx, url, req, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
-	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
