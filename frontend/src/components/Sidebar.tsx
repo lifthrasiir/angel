@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaEdit, FaFeatherAlt } from 'react-icons/fa';
+import LogoAnimation from './LogoAnimation'; // LogoAnimation import
+import { FaEdit } from 'react-icons/fa';
 
 interface Session {
   id: string;
@@ -10,8 +11,6 @@ interface Session {
 }
 
 interface SidebarProps {
-  isLoggedIn: boolean;
-  handleLogin: () => void;
   sessions: Session[];
   setSessions: React.Dispatch<React.SetStateAction<Session[]>>;
   chatSessionId: string | null;
@@ -19,8 +18,6 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
-  isLoggedIn,
-  handleLogin,
   sessions,
   setSessions,
   chatSessionId,
@@ -30,12 +27,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div style={{ width: '200px', background: '#f0f0f0', padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRight: '1px solid #ccc', boxSizing: 'border-box', overflowY: 'hidden', flexShrink: 0 }}>
-      <div style={{ fontSize: '3em', marginBottom: '20px' }}><FaFeatherAlt /></div>
-      {!isLoggedIn ? (
-        <button onClick={handleLogin} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Login</button>
-      ) : (
-        <button onClick={() => navigate('/new')} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
-      )}
+      <div style={{ marginBottom: '20px' }}><LogoAnimation width="50px" height="50px" color="#007bff" /></div>
+      <button onClick={() => navigate('/new')} style={{ width: '100%', padding: '10px', marginBottom: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>New Session</button>
       <div style={{ width: '100%', marginTop: '0px', borderTop: '1px solid #eee', paddingTop: '0px', flexGrow: 1, overflowY: 'auto' }}>
         {sessions && sessions.length === 0 ? (
           <p>No sessions yet.</p>
@@ -125,6 +118,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             ))}
           </ul>
         )}
+      </div>
+      <div style={{ width: '100%', borderTop: '1px solid #eee', paddingTop: '10px', marginTop: '10px' }}>
+        <button onClick={() => navigate('/settings')} style={{ width: '100%', padding: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Settings</button>
       </div>
     </div>
   );

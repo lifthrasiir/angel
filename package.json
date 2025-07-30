@@ -5,9 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build-frontend": "npm run build --prefix frontend",
-    "zip-frontend": "node scripts/zip-frontend.js",
     "build-backend": "go build . && node scripts/append-zip.js",
-    "build": "npm run build-frontend && npm run zip-frontend && npm run build-backend",
+    "build": "npm run build-frontend && npm run build-backend",
     "start": "node -e \"require('child_process').execSync(process.platform === 'win32' ? 'angel.exe' : '.\\angel', { stdio: 'inherit' })"
   },
   "keywords": [],

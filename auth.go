@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -139,6 +140,26 @@ func HandleGoogleCallback(gs *GeminiState, w http.ResponseWriter, r *http.Reques
 
 	// Save token to file
 	gs.SaveToken(Token)
+
+	// Fetch user info (email)
+	userInfoClient := gs.GoogleOauthConfig.Client(context.Background(), Token)
+	userInfoResp, err := userInfoClient.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		log.Printf("Failed to fetch user info: %v", err)
+		// Non-fatal, continue without email
+	} else {
+		defer userInfoResp.Body.Close()
+		var userInfo struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(userInfoResp.Body).Decode(&userInfo); err != nil {
+			log.Printf("Failed to decode user info: %v", err)
+			// Non-fatal, continue without email
+		} else {
+			gs.UserEmail = userInfo.Email
+			log.Printf("User email: %s", gs.UserEmail)
+		}
+	}
 
 	// Initialize GenAI service
 	gs.InitGeminiClient()

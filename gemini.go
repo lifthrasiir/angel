@@ -23,6 +23,7 @@ type GeminiState struct {
 	GeminiClient      *CodeAssistClient
 	ProjectID         string
 	SelectedAuthType  AuthType
+	UserEmail         string
 }
 
 // Define CodeAssistClient struct

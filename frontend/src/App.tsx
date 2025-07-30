@@ -11,6 +11,8 @@ import {
 
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
+import LogoAnimation from './components/LogoAnimation'; // LogoAnimation import
+import SettingsPage from './pages/SettingsPage'; // SettingsPage import
 import { FileAttachment } from './components/FileAttachmentPreview';
 
 interface ChatMessage {
@@ -29,7 +31,7 @@ interface Session {
 }
 
 function ChatApp() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null); // 사용자 이메일 상태 추가
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -38,12 +40,23 @@ function ChatApp() {
   const [isStreaming, setIsStreaming] = useState(false); // New state for streaming status
   const [systemPrompt, setSystemPrompt] = useState<string>(''); // 시스템 프롬프트 상태 추가
   const [isSystemPromptEditing, setIsSystemPromptEditing] = useState(false); // 시스템 프롬프트 편집 모드 상태 추가
-  const [sessionName, setSessionName] = useState(''); // 세션 이름 상태 추가
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]); // New state for selected files
   
   const navigate = useNavigate();
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
+
+  // Update document title based on session
+  useEffect(() => {
+    const currentSession = sessions.find(s => s.id === urlSessionId);
+    if (location.pathname === '/new') {
+      document.title = 'Angel';
+    } else if (currentSession && currentSession.name) {
+      document.title = `Angel: ${currentSession.name}`;
+    } else if (urlSessionId) {
+      document.title = 'Angel: Loading...'; // Or a generic title while loading
+    }
+  }, [urlSessionId, sessions, location.pathname]);
 
   // Helper function to update messages state
   const updateMessagesState = (
@@ -95,15 +108,12 @@ function ChatApp() {
       if (response.ok) {
         const data: Session[] = await response.json();
         setSessions(data);
-        setIsLoggedIn(true); // Set isLoggedIn to true on successful fetch
         
       } else if (response.status === 401) {
         // Not logged in, clear sessions
         setSessions([]);
-        setIsLoggedIn(false); // Set isLoggedIn to false on 401
       } else {
         console.error('Failed to fetch sessions:', response.status, response.statusText);
-        setIsLoggedIn(false); // Also set to false on other errors
       }
     } catch (error) {
       console.error('Error fetching sessions:', error);
@@ -141,7 +151,6 @@ function ChatApp() {
         setMessages([]); // Clear messages for a truly new session
         setSystemPrompt(''); // Clear system prompt for a new session
         setIsSystemPromptEditing(true); // Enable editing for new session
-        setSessionName(''); // Clear session name for a new session
         setSelectedFiles([]); // Clear selected files for a new session
         fetchDefaultSystemPrompt(); // Fetch default prompt for new session
         return; // Crucially, exit here to prevent any fetch calls
@@ -168,23 +177,25 @@ function ChatApp() {
               fetchDefaultSystemPrompt();
             }
             setIsSystemPromptEditing(false); // Disable editing for existing session
-            setSessionName(data.name || ''); // Load session name
             // Ensure loaded messages have an ID and correct type
-            setMessages((data.history || []).map((msg: any) => {
-              const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID(), attachments: msg.attachments };
-              if (msg.type === 'thought') {
-                chatMessage.type = 'thought';
-              } else if (msg.parts[0].functionCall) { // Check for functionCall object
-                chatMessage.type = 'function_call';
-                chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
-              } else if (msg.parts[0].functionResponse) { // Check for functionResponse object
-                chatMessage.type = 'function_response';
-                chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
-              } else {
-                chatMessage.type = msg.role; // Default to role for other types
-              }
-              return chatMessage;
-            }));
+            // Only update messages if not currently streaming to avoid overwriting partial stream
+            if (!isStreaming) {
+              setMessages((data.history || []).map((msg: any) => {
+                const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID(), attachments: msg.attachments };
+                if (msg.type === 'thought') {
+                  chatMessage.type = 'thought';
+                } else if (msg.parts[0].functionCall) { // Check for functionCall object
+                  chatMessage.type = 'function_call';
+                  chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
+                } else if (msg.parts[0].functionResponse) { // Check for functionResponse object
+                  chatMessage.type = 'function_response';
+                  chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
+                } else {
+                  chatMessage.type = msg.role; // Default to role for other types
+                }
+                return chatMessage;
+              }));
+            }
             } else if (response.status === 401) {
             handleLogin();
           } else if (response.status === 404) {
@@ -193,14 +204,12 @@ function ChatApp() {
             setMessages([]);
             setSystemPrompt(''); // Clear system prompt on session not found
             setIsSystemPromptEditing(true); // Enable editing for new session
-            setSessionName(''); // Clear session name on session not found
           } else {
             console.error('Failed to load session:', response.status, response.statusText);
             setChatSessionId(null);
             setMessages([]);
             setSystemPrompt(''); // Clear system prompt on error
             setIsSystemPromptEditing(true); // Enable editing for new session
-            setSessionName(''); // Clear session name on error
           }
         } catch (error) {
           console.error('Error loading session:', error);
@@ -208,7 +217,6 @@ function ChatApp() {
         setMessages([]);
         setSystemPrompt(''); // Clear system prompt on error
         setIsSystemPromptEditing(true); // Enable editing for new session
-        setSessionName(''); // Clear session name on error
         }
       }
  else {
@@ -217,13 +225,33 @@ function ChatApp() {
         setMessages([]);
         setSystemPrompt(''); // Clear system prompt
         setIsSystemPromptEditing(true); // Enable editing
-        setSessionName(''); // Clear session name
       }
     };
 
     initializeChatSession();
     fetchSessions(); // Fetch sessions on initial load
-  }, [urlSessionId, navigate, location.search, location.pathname]);
+
+    const fetchUserInfo = async () => {
+      try {
+        const response = await fetch('/api/userinfo');
+        if (response.ok) {
+          const data = await response.json();
+          setUserEmail(data.email);
+        } else if (response.status === 401) {
+          setUserEmail(null);
+        } else {
+          console.error('Failed to fetch user info:', response.status, response.statusText);
+          setUserEmail(null);
+        }
+      } catch (error) {
+        console.error('Error fetching user info:', error);
+        setUserEmail(null);
+      }
+    };
+    fetchUserInfo();
+  }, [urlSessionId, navigate, location.search, location.pathname, isStreaming]);
+
+    
 
 
   const handleLogin = () => {
@@ -273,6 +301,7 @@ function ChatApp() {
     setSelectedFiles([]); // Clear selected files immediately after sending message
 
     let agentMessageId = crypto.randomUUID();
+    console.log('handleSendMessage: Adding initial agent message placeholder with ID:', agentMessageId);
     updateMessagesState({ id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage); // Use helper
 
 
@@ -283,7 +312,7 @@ function ChatApp() {
       } else {
         // New session
         apiUrl = '/api/chat/newSessionAndMessage'; // New endpoint
-        requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: sessionName, attachments };
+        requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: '', attachments };
           }
 
           // 첫 메시지 전송 후 시스템 프롬프트 편집 비활성화
@@ -416,39 +445,49 @@ function ChatApp() {
         parts: [{ text: 'Error sending message or receiving stream.' }],
         type: 'system',
       } as ChatMessage);
-      setIsStreaming(false); // End streaming on error
+    } finally {
+      setIsStreaming(false); // Ensure streaming state is reset
+      fetchSessions(); // Ensure sessions are refreshed
+      setSelectedFiles([]); // Ensure files are cleared
     }
   };
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar
-        isLoggedIn={isLoggedIn}
-        handleLogin={handleLogin}
-        sessions={sessions}
-        setSessions={setSessions}
-        chatSessionId={chatSessionId}
-        fetchSessions={fetchSessions}
-      />
+      {userEmail ? (
+        <>
+          <Sidebar
+            sessions={sessions}
+            setSessions={setSessions}
+            chatSessionId={chatSessionId}
+            fetchSessions={fetchSessions}
+          />
 
-      <ChatArea
-        isLoggedIn={isLoggedIn}
-        messages={messages}
-        lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId}
-        systemPrompt={systemPrompt}
-        setSystemPrompt={setSystemPrompt}
-        isSystemPromptEditing={isSystemPromptEditing}
-        setIsSystemPromptEditing={setIsSystemPromptEditing}
-        inputMessage={inputMessage}
-        setInputMessage={setInputMessage}
-        handleSendMessage={handleSendMessage}
-        isStreaming={isStreaming}
-        onFilesSelected={handleFilesSelected}
-        selectedFiles={selectedFiles}
-        handleRemoveFile={handleRemoveFile}
-      />
-      
-      </div>
+          <ChatArea
+            isLoggedIn={!!userEmail}
+            messages={messages}
+            lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId}
+            systemPrompt={systemPrompt}
+            setSystemPrompt={setSystemPrompt}
+            isSystemPromptEditing={isSystemPromptEditing}
+            setIsSystemPromptEditing={setIsSystemPromptEditing}
+            inputMessage={inputMessage}
+            setInputMessage={setInputMessage}
+            handleSendMessage={handleSendMessage}
+            isStreaming={isStreaming}
+            onFilesSelected={handleFilesSelected}
+            selectedFiles={selectedFiles}
+            handleRemoveFile={handleRemoveFile}
+          />
+        </>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%', fontSize: '1.2em' }}>
+          <LogoAnimation width="100px" height="100px" color="#007bff" />
+          <p style={{ marginTop: '20px' }}>Please log in to use the chat application.</p>
+          <button onClick={handleLogin} style={{ padding: '10px 20px', fontSize: '1em', cursor: 'pointer' }}>Login</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -459,6 +498,7 @@ function App() {
         <Route path="/" element={<Navigate to="/new" replace />} />
         <Route path="/new" element={<ChatApp />} />
         <Route path="/:sessionId" element={<ChatApp />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </Router>
   );

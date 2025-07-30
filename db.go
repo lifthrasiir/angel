@@ -173,6 +173,15 @@ func LoadOAuthToken() (string, error) {
 	return tokenJSON, nil
 }
 
+// DeleteOAuthToken deletes the OAuth token from the database.
+func DeleteOAuthToken() error {
+	_, err := db.Exec("DELETE FROM oauth_tokens WHERE id = 1")
+	if err != nil {
+		return fmt.Errorf("failed to delete OAuth token: %w", err)
+	}
+	return nil
+}
+
 // SessionExists checks if a session with the given ID exists.
 func SessionExists(sessionID string) (bool, error) {
 	var exists bool

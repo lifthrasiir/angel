@@ -53,6 +53,8 @@ func main() {
 	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST")  // New endpoint to create a new session and send the first message
 	router.HandleFunc("/api/default-system-prompt", getDefaultSystemPrompt).Methods("GET")     // New endpoint to get the default system prompt
 	router.HandleFunc("/api/chat/updateSessionName", updateSessionNameHandler).Methods("POST") // New endpoint to update session name
+	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET") // New endpoint to get user info
+	router.HandleFunc("/api/logout", handleLogout).Methods("POST") // New endpoint for logout
 
 	// Serve frontend static files
 	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
@@ -480,6 +482,35 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Session name updated successfully")
+}
+
+// New handler to get user info
+func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if logged in
+	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && (GlobalGeminiState.Token == nil || !GlobalGeminiState.Token.Valid()) {
+		http.Error(w, "Not logged in", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"email": GlobalGeminiState.UserEmail})
+}
+
+// Handle logout
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	GlobalGeminiState.Token = nil
+	GlobalGeminiState.UserEmail = ""
+	GlobalGeminiState.GeminiClient = nil
+
+	// Delete token from DB
+	if err := DeleteOAuthToken(); err != nil {
+		log.Printf("Failed to delete OAuth token from DB: %v", err)
+		http.Error(w, "Failed to logout", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Logged out successfully")
 }
 
 // Helper function to stream Gemini API response
