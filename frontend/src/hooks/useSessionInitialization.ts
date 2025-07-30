@@ -38,12 +38,18 @@ export const useSessionInitialization = ({
   const { sessionId: urlSessionId } = useParams();
   const location = useLocation();
 
-  const loadDefaultSystemPrompt = async () => {
-    const prompt = await fetchDefaultSystemPrompt();
-    setSystemPrompt(prompt);
+  const resetChatSessionState = () => {
+    setChatSessionId(null);
+    setMessages([]);
+    setSystemPrompt('');
+    setIsSystemPromptEditing(true);
+    setSelectedFiles([]);
   };
 
   useEffect(() => {
+    if (isStreaming) {
+      return;
+    }
     const params = new URLSearchParams(location.search);
     const redirectTo = params.get('redirect_to');
     const draftMessage = params.get('draft_message');
@@ -69,12 +75,9 @@ export const useSessionInitialization = ({
       }
 
       if (currentSessionId === 'new') {
-        setChatSessionId(null);
-        setMessages([]);
-        setSystemPrompt('');
-        setIsSystemPromptEditing(true);
-        setSelectedFiles([]);
-        loadDefaultSystemPrompt();
+        resetChatSessionState();
+        const defaultPrompt = await fetchDefaultSystemPrompt();
+        setSystemPrompt(defaultPrompt);
         return;
       }
 
@@ -110,26 +113,17 @@ export const useSessionInitialization = ({
               }));
             }
           } else {
-            setChatSessionId(null);
-            setMessages([]);
-            setSystemPrompt('');
-            setIsSystemPromptEditing(true);
+            resetChatSessionState();
           }
         } catch (error) {
           if (error instanceof Error && error.message === 'UNAUTHORIZED') {
             handleLoginRedirect();
           } else {
-            setChatSessionId(null);
-            setMessages([]);
-            setSystemPrompt('');
-            setIsSystemPromptEditing(true);
+            resetChatSessionState();
           }
         }
       } else {
-        setChatSessionId(null);
-        setMessages([]);
-        setSystemPrompt('');
-        setIsSystemPromptEditing(true);
+        resetChatSessionState();
       }
     };
 
