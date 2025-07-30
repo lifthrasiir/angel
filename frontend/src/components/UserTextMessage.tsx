@@ -1,11 +1,6 @@
 import React from 'react';
 import FileAttachmentPreview from './FileAttachmentPreview';
-
-interface FileAttachment {
-  fileName: string;
-  mimeType: string;
-  data: string; // Base64 encoded file content
-}
+import { FileAttachment } from '../hooks/useChatSession';
 
 interface UserTextMessageProps {
   text?: string;

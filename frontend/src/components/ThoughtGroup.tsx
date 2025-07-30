@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import ChatMessage from './ChatMessage';
+import { ChatMessage as ChatMessageType } from '../hooks/useChatSession';
 
 interface ThoughtGroupProps {
-  thoughts: any[]; // Array of thought messages
+  thoughts: ChatMessageType[]; // Array of thought messages
   groupId: string; // Unique ID for this thought group
   isAutoDisplayMode: boolean;
   lastAutoDisplayedThoughtId: string | null;
@@ -46,11 +47,7 @@ export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(({ thoughts,
       {activeThoughtIndex !== null && (
         <ChatMessage
           key={thoughts[activeThoughtIndex].id}
-          role={thoughts[activeThoughtIndex].role}
-          text={thoughts[activeThoughtIndex].parts[0].text}
-          type={thoughts[activeThoughtIndex].type}
-          functionCall={thoughts[activeThoughtIndex].parts[0].functionCall}
-          functionResponse={thoughts[activeThoughtIndex].parts[0].functionResponse}
+          message={thoughts[activeThoughtIndex]}
         />
       )}
     </div>

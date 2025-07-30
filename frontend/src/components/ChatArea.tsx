@@ -4,15 +4,6 @@ import { ThoughtGroup } from './ThoughtGroup';
 import SystemPromptEditor from './SystemPromptEditor';
 import ChatInput from './ChatInput';
 import FileAttachmentPreview from './FileAttachmentPreview';
-import { FileAttachment } from './FileAttachmentPreview';
-
-interface ChatMessage {
-  id: string;
-  role: string;
-  parts: { text?: string; functionCall?: any; functionResponse?: any; }[];
-  type?: "model" | "thought" | "system" | "user" | "function_call" | "function_response";
-  attachments?: FileAttachment[]; // New field
-}
 
 interface ChatAreaProps {
   isLoggedIn: boolean;
@@ -72,12 +63,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         renderedElements.push(
           <ChatMessage
             key={currentMessage.id}
-            role={currentMessage.role}
-            text={currentMessage.parts[0].text}
-            type={currentMessage.type}
-            functionCall={currentMessage.parts[0].functionCall}
-            functionResponse={currentMessage.parts[0].functionResponse}
-            attachments={currentMessage.attachments}
+            message={currentMessage}
           />
         );
         i++;

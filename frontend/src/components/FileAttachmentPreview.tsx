@@ -1,11 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FaDownload, FaTimes, FaFile } from 'react-icons/fa';
-
-export interface FileAttachment {
-  fileName: string;
-  mimeType: string;
-  data: string; // Base64 encoded file content
-}
+import { FileAttachment } from '../hooks/useChatSession';
 
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;

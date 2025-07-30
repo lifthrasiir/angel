@@ -7,18 +7,11 @@ import ModelTextMessage from './ModelTextMessage';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
 import SystemMessage from './SystemMessage';
-import { FileAttachment } from './FileAttachmentPreview';
+import type { ChatMessage } from '../hooks/useChatSession';
 
-export interface ChatMessage {
-  role: string;
-  text?: string;
-  type?: "model" | "thought" | "system" | "user" | "function_call" | "function_response";
-  functionCall?: any;
-  functionResponse?: any;
-  attachments?: FileAttachment[]; // New prop
-}
-
-const ChatMessage: React.FC<ChatMessage> = React.memo(({ role, text, type, functionCall, functionResponse, attachments }) => {
+const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
+  const { role, type, attachments } = message;
+  const { text, functionCall, functionResponse } = message.parts[0] || {};
 
   if (type === 'function_response') {
     return <FunctionResponseMessage functionResponse={functionResponse} isUserRole={role === 'user'} />;
