@@ -18,6 +18,21 @@ var (
 	GlobalGeminiState GeminiState
 )
 
+// ensureGeminiClientInitialized checks if GeminiClient is initialized and attempts to re-initialize if needed
+func ensureGeminiClientInitialized(handlerName string) bool {
+	if GlobalGeminiState.GeminiClient == nil {
+		log.Printf("%s: GeminiClient not initialized, attempting to re-initialize...", handlerName)
+		if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.Token != nil && GlobalGeminiState.Token.Valid() {
+			GlobalGeminiState.InitGeminiClient()
+		}
+		if GlobalGeminiState.GeminiClient == nil {
+			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
+			return false
+		}
+	}
+	return true
+}
+
 func init() {
 	InitDB()
 	GlobalGeminiState.OAuthState = "random"
@@ -89,6 +104,30 @@ func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If UserEmail is empty but token is valid, try to re-fetch user info
+	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.UserEmail == "" && GlobalGeminiState.Token != nil {
+		log.Println("getUserInfoHandler: UserEmail is empty, attempting to fetch from Google API...")
+		ctx := context.Background()
+		userInfoClient := GlobalGeminiState.GoogleOauthConfig.Client(ctx, GlobalGeminiState.Token)
+		userInfoResp, err := userInfoClient.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+		if err != nil {
+			log.Printf("getUserInfoHandler: Failed to fetch user info: %v", err)
+		} else {
+			defer userInfoResp.Body.Close()
+			var userInfo struct {
+				Email string `json:"email"`
+			}
+			if err := json.NewDecoder(userInfoResp.Body).Decode(&userInfo); err != nil {
+				log.Printf("getUserInfoHandler: Failed to decode user info JSON: %v", err)
+			} else {
+
+				GlobalGeminiState.UserEmail = userInfo.Email
+				// Update the token in DB with user email
+				GlobalGeminiState.SaveToken(GlobalGeminiState.Token)
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"email": GlobalGeminiState.UserEmail})
 }
@@ -135,7 +174,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 // Add countTokens handler
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
-	if GlobalGeminiState.GeminiClient == nil {
+	if !ensureGeminiClientInitialized("countTokensHandler") {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}

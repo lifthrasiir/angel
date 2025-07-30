@@ -291,19 +291,39 @@ func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserReque
 
 // InitGeminiClient initializes the CodeAssistClient.
 func (gs *GeminiState) InitGeminiClient() {
+	log.Println("InitGeminiClient: Function called.")
 	ctx := context.Background()
 	var httpClient *http.Client
 
 	switch gs.SelectedAuthType {
 	case AuthTypeLoginWithGoogle:
-		if gs.Token == nil || !gs.Token.Valid() {
-			log.Println("OAuth token is invalid. Login required.")
+		log.Println("InitGeminiClient: AuthTypeLoginWithGoogle selected.")
+		if gs.Token == nil {
+			log.Println("InitGeminiClient: OAuth token is nil. Cannot initialize client.")
 			return
+		}
+		log.Printf("InitGeminiClient: Current token valid: %t, RefreshToken present: %t", gs.Token.Valid(), gs.Token.RefreshToken != "")
+		if !gs.Token.Valid() {
+			if gs.Token.RefreshToken != "" {
+				log.Println("InitGeminiClient: Token expired, attempting to refresh...")
+				newToken, err := gs.GoogleOauthConfig.TokenSource(ctx, gs.Token).Token()
+				if err != nil {
+					log.Printf("InitGeminiClient: Failed to refresh token: %v. Client not initialized.", err)
+					gs.GeminiClient = nil
+					return
+				}
+				gs.Token = newToken
+				gs.SaveToken(newToken) // Save the new token
+				log.Println("InitGeminiClient: Token refreshed successfully.")
+			} else {
+				log.Println("InitGeminiClient: Token expired and no refresh token available. Client not initialized.")
+				return
+			}
 		}
 		httpClient = gs.GoogleOauthConfig.Client(ctx, gs.Token)
 		caClient := NewCodeAssistClient(httpClient, "") // Initialize with empty projectID for now
 
-		// LoadCodeAssist
+		log.Println("InitGeminiClient: Calling LoadCodeAssist...")
 		loadReq := LoadCodeAssistRequest{
 			CloudaicompanionProject: gs.ProjectID,
 			Metadata: &ClientMetadata{
@@ -315,12 +335,11 @@ func (gs *GeminiState) InitGeminiClient() {
 		}
 		loadRes, loadErr := caClient.LoadCodeAssist(ctx, loadReq)
 		if loadErr != nil {
-			log.Printf("InitGeminiClient: Failed to load code assist: %v", loadErr)
+			log.Printf("InitGeminiClient: LoadCodeAssist failed: %v. Client not initialized.", loadErr)
 			gs.GeminiClient = nil
 			return
 		}
 
-		// Update ProjectID after LoadCodeAssist call
 		if loadRes.CloudaicompanionProject != "" {
 			gs.ProjectID = loadRes.CloudaicompanionProject
 		}
@@ -329,7 +348,6 @@ func (gs *GeminiState) InitGeminiClient() {
 		if loadRes.CurrentTier != nil {
 			userTierID = loadRes.CurrentTier.ID
 		} else {
-			// Find default tier if currentTier is not set
 			for _, tier := range loadRes.AllowedTiers {
 				if tier.IsDefault != nil && *tier.IsDefault {
 					userTierID = tier.ID
@@ -338,7 +356,7 @@ func (gs *GeminiState) InitGeminiClient() {
 			}
 		}
 
-		// OnboardUser
+		log.Println("InitGeminiClient: Calling OnboardUser...")
 		onboardReq := OnboardUserRequest{
 			CloudaicompanionProject: gs.ProjectID,
 			Metadata: &ClientMetadata{
@@ -353,7 +371,7 @@ func (gs *GeminiState) InitGeminiClient() {
 		}
 		lroRes, onboardErr := caClient.OnboardUser(ctx, onboardReq)
 		if onboardErr != nil {
-			log.Printf("InitGeminiClient: Failed to onboard user: %v", onboardErr)
+			log.Printf("InitGeminiClient: OnboardUser failed: %v. Client not initialized.", onboardErr)
 			gs.GeminiClient = nil
 			return
 		}
@@ -361,25 +379,24 @@ func (gs *GeminiState) InitGeminiClient() {
 		if lroRes.Response != nil && lroRes.Response.CloudaicompanionProject != nil {
 			gs.ProjectID = lroRes.Response.CloudaicompanionProject.ID
 		} else {
-			log.Println("InitGeminiClient: No project ID returned from onboardUser, Gemini client not initialized.")
+			log.Println("InitGeminiClient: No project ID from OnboardUser. Client not initialized.")
 			gs.GeminiClient = nil
 			return
 		}
 	case AuthTypeUseGemini:
-		log.Println("Gemini API Key method does not use Code Assist API.")
+		log.Println("InitGeminiClient: Gemini API Key method. Code Assist API not used.")
 		return
 	case AuthTypeUseVertexAI:
-		log.Println("Vertex AI method does not use Code Assist API.")
+		log.Println("InitGeminiClient: Vertex AI method. Code Assist API not used.")
 		return
 	case AuthTypeCloudShell:
 		httpClient = &http.Client{}
 	default:
-		log.Fatalf("Unsupported authentication type: %s", gs.SelectedAuthType)
+		log.Fatalf("InitGeminiClient: Unsupported authentication type: %s", gs.SelectedAuthType)
 	}
 
 	gs.GeminiClient = NewCodeAssistClient(httpClient, gs.ProjectID)
-
-	log.Println("CodeAssist client initialized.")
+	log.Println("InitGeminiClient: CodeAssist client initialized successfully.")
 }
 
 // saveToken saves the OAuth token to the database.
@@ -390,7 +407,7 @@ func (gs *GeminiState) SaveToken(t *oauth2.Token) {
 		return
 	}
 
-	if err := SaveOAuthToken(string(tokenJSON)); err != nil {
+	if err := SaveOAuthToken(string(tokenJSON), gs.UserEmail); err != nil {
 		log.Printf("Failed to save OAuth token to DB: %v", err)
 		return
 	}
@@ -400,20 +417,21 @@ func (gs *GeminiState) SaveToken(t *oauth2.Token) {
 
 // loadToken loads the OAuth token from the database.
 func (gs *GeminiState) LoadToken() {
-	tokenJSON, err := LoadOAuthToken()
+	tokenJSON, userEmail, err := LoadOAuthToken()
 	if err != nil {
-		log.Printf("Failed to load OAuth token from DB: %v", err)
+		log.Printf("LoadToken: Failed to load OAuth token from DB: %v", err)
 		return
 	}
 
 	if tokenJSON == "" {
-		log.Println("No existing token in DB.")
+		log.Println("LoadToken: No existing token in DB.")
 		return
 	}
 
 	if err := json.Unmarshal([]byte(tokenJSON), &gs.Token); err != nil {
-		log.Printf("Failed to decode token from DB: %v", err)
+		log.Printf("LoadToken: Failed to decode token from DB: %v", err)
 		return
 	}
-	log.Println("OAuth token loaded from DB.")
+	gs.UserEmail = userEmail
+
 }

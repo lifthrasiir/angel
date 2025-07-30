@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -45,6 +46,19 @@ func InitDB() {
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
 		log.Fatalf("Failed to create tables: %v", err)
+	}
+
+	// Attempt to add user_email column, ignore if it already exists
+	alterTableSQL := `ALTER TABLE oauth_tokens ADD COLUMN user_email TEXT;`
+	_, err = db.Exec(alterTableSQL)
+	if err != nil {
+		// Check if the error is "duplicate column name"
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			log.Fatalf("Failed to add user_email column: %v", err)
+		}
+		log.Println("user_email column already exists, skipping migration.")
+	} else {
+		log.Println("user_email column added successfully.")
 	}
 
 	log.Println("Database initialized and tables created.")
@@ -153,24 +167,28 @@ func AddMessageToSession(sessionID string, role string, text string, msgType str
 	return nil
 }
 
-func SaveOAuthToken(tokenJSON string) error {
-	_, err := db.Exec("INSERT OR REPLACE INTO oauth_tokens (id, token_data) VALUES (1, ?)", tokenJSON)
+func SaveOAuthToken(tokenJSON string, userEmail string) error {
+	_, err := db.Exec("INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email) VALUES (1, ?, ?)", tokenJSON, userEmail)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token: %w", err)
 	}
 	return nil
 }
 
-func LoadOAuthToken() (string, error) {
+func LoadOAuthToken() (string, string, error) {
 	var tokenJSON string
-	err := db.QueryRow("SELECT token_data FROM oauth_tokens WHERE id = 1").Scan(&tokenJSON)
+	var nullUserEmail sql.NullString
+	err := db.QueryRow("SELECT token_data, user_email FROM oauth_tokens WHERE id = 1").Scan(&tokenJSON, &nullUserEmail)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", nil // No token found, not an error
+			log.Println("LoadOAuthToken: No existing token found in DB.")
+			return "", "", nil // No token found, not an error
 		}
-		return "", fmt.Errorf("failed to load OAuth token: %w", err)
+		return "", "", fmt.Errorf("failed to load OAuth token: %w", err)
 	}
-	return tokenJSON, nil
+	userEmail := nullUserEmail.String
+
+	return tokenJSON, userEmail, nil
 }
 
 // DeleteOAuthToken deletes the OAuth token from the database.

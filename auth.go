@@ -48,10 +48,8 @@ func InitAuth(gs *GeminiState) {
 		// Attempt to load existing token on startup
 		gs.LoadToken()
 
-		// Initialize GenAI service if token is loaded
-		if gs.Token != nil && gs.Token.Valid() {
-			gs.InitGeminiClient()
-		}
+		// Initialize GenAI service
+		gs.InitGeminiClient()
 	case AuthTypeUseGemini:
 		gs.InitGeminiClient() // GEMINI_API_KEY is handled inside InitGeminiClient
 	case AuthTypeUseVertexAI:
@@ -82,6 +80,7 @@ func HandleGoogleLogin(gs *GeminiState, w http.ResponseWriter, r *http.Request) 
 	oauthStates[randomState] = redirectToQueryString // Store the original query string with the random state
 
 	url := gs.GoogleOauthConfig.AuthCodeURL(randomState)
+
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
@@ -135,24 +134,30 @@ func HandleGoogleCallback(gs *GeminiState, w http.ResponseWriter, r *http.Reques
 	gs.SaveToken(Token)
 
 	// Fetch user info (email)
+
 	userInfoClient := gs.GoogleOauthConfig.Client(context.Background(), Token)
 	userInfoResp, err := userInfoClient.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 	if err != nil {
-		log.Printf("Failed to fetch user info: %v", err)
+		log.Printf("HandleGoogleCallback: Failed to fetch user info: %v", err)
 		// Non-fatal, continue without email
 	} else {
+
 		defer userInfoResp.Body.Close()
 		var userInfo struct {
 			Email string `json:"email"`
 		}
 		if err := json.NewDecoder(userInfoResp.Body).Decode(&userInfo); err != nil {
-			log.Printf("Failed to decode user info: %v", err)
+			log.Printf("HandleGoogleCallback: Failed to decode user info JSON: %v", err)
 			// Non-fatal, continue without email
 		} else {
+
 			gs.UserEmail = userInfo.Email
-			log.Printf("User email: %s", gs.UserEmail)
+
 		}
 	}
+
+	// Re-initialize GeminiClient after successful authentication and user info fetch
+	gs.InitGeminiClient()
 
 	// Redirect to the original path after successful authentication
 	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)

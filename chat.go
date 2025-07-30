@@ -16,8 +16,7 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
 
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
-	if GlobalGeminiState.GeminiClient == nil {
-		log.Println("newSessionAndMessage: GeminiClient not initialized.")
+	if !ensureGeminiClientInitialized("newSessionAndMessage") {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
@@ -148,8 +147,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
-	if GlobalGeminiState.GeminiClient == nil {
-		log.Println("chatMessage: GeminiClient not initialized.")
+	if !ensureGeminiClientInitialized("chatMessage") {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
@@ -225,7 +223,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 // New endpoint to load chat session history
 func loadChatSession(w http.ResponseWriter, r *http.Request) {
-	if GlobalGeminiState.GeminiClient == nil {
+	if !ensureGeminiClientInitialized("loadChatSession") {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
@@ -276,7 +274,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 // New endpoint to list all chat sessions
 func listChatSessions(w http.ResponseWriter, r *http.Request) {
-	if GlobalGeminiState.GeminiClient == nil {
+	if !ensureGeminiClientInitialized("listChatSessions") {
 		http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
 		return
 	}
@@ -347,7 +345,7 @@ func (s *sseWriter) flushUnsafe() {
 	// This happens before bufio.Writer.Reset(nil) which would cause panic
 	select {
 	case <-s.ctx.Done():
-		log.Printf("sseWriter: Context cancelled, marking disconnected")
+
 		s.disconnected = true
 		return
 	default:

@@ -56,7 +56,7 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !os.IsNotExist(err) {
 		// Some other error occurred when checking file existence
-		log.Printf("Error checking local file %s: %v", localFilePath, err)
+
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

@@ -131,8 +131,23 @@ export const useSessionInitialization = ({
     loadSessions();
 
     const loadUserInfo = async () => {
-      const userInfo = await fetchUserInfo();
-      setUserEmail(userInfo.email);
+      try {
+        const userInfo = await fetchUserInfo();
+        if (userInfo && userInfo.success) {
+          if (userInfo.email) {
+            setUserEmail(userInfo.email);
+          } else {
+            // 401 response - not authenticated, redirect to login
+            handleLoginRedirect();
+          }
+        } else {
+          // Network or other error, redirect to login
+          handleLoginRedirect();
+        }
+      } catch (error) {
+        console.error("Failed to fetch user info:", error);
+        handleLoginRedirect();
+      }
     };
     loadUserInfo();
   }, [urlSessionId, navigate, location.search, location.pathname, isStreaming]);

@@ -71,7 +71,6 @@ export const useMessageSending = ({
       setSelectedFiles([]);
 
       let agentMessageId = crypto.randomUUID();
-      console.log('handleSendMessage: Adding initial agent message placeholder with ID:', agentMessageId);
       updateMessages({ id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage);
 
       if (chatSessionId === null) {
