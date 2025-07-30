@@ -239,3 +239,33 @@ textarea {
 .file-attachment-preview button.remove-button {
   color: red;
 }
+
+@keyframes logoAnimation {
+  0% { transform: scaleX(1); }
+  1% { transform: scaleX(.9); }
+  2% { transform: scaleX(.5); }
+  3% { transform: scaleX(-.2); }
+  3.5% { transform: scaleX(-1); }
+  4.8% { transform: scaleX(1); }
+  5.5% { transform: scaleX(-1); }
+  6% { transform: scaleX(1); }
+  6.33% { transform: scaleX(-1); }
+  6.67% { transform: scaleX(1); }
+  7% { transform: scaleX(-1); }
+  7.25% { transform: scaleX(1); }
+  7.5% { transform: scaleX(-1); }
+  7.75% { transform: scaleX(1); }
+  8% { transform: scaleX(-1); }
+  8.25% { transform: scaleX(1); }
+  8.5% { transform: scaleX(-1); }
+  8.75% { transform: scaleX(1); }
+  9% { transform: scaleX(-1); }
+  9.33% { transform: scaleX(1); }
+  9.67% { transform: scaleX(-1); }
+  10.2% { transform: scaleX(1); }
+  11.5% { transform: scaleX(-1); }
+  12% { transform: scaleX(-.2); }
+  13% { transform: scaleX(.5); }
+  14% { transform: scaleX(.9); }
+  15% { transform: scaleX(1); }
+}
