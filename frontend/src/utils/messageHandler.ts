@@ -32,12 +32,11 @@ export const processStreamingMessage = (
   agentMessageId: string,
   currentAgentText: string
 ): ChatMessage[] => {
-  const newMessages = [...messages];
-  const agentMessage = newMessages.find(msg => msg.id === agentMessageId);
-  if (agentMessage) {
-    agentMessage.parts[0].text = currentAgentText;
-  }
-  return newMessages;
+  return messages.map(msg =>
+    msg.id === agentMessageId
+      ? { ...msg, parts: [{ text: currentAgentText }] } // Create a new object for the agent message
+      : msg
+  );
 };
 
 export const sendMessage = async (
