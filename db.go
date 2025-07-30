@@ -284,3 +284,28 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessag
 
 	return history, nil
 }
+
+// DeleteSession deletes a session and all its associated messages.
+func DeleteSession(sessionID string) error {
+	// Start a transaction to ensure atomicity
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	// Delete messages associated with the session
+	_, err = tx.Exec("DELETE FROM messages WHERE session_id = ?", sessionID)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete messages for session %s: %w", sessionID, err)
+	}
+
+	// Delete the session itself
+	_, err = tx.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete session %s: %w", sessionID, err)
+	}
+
+	return tx.Commit()
+}

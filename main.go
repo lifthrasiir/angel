@@ -97,6 +97,7 @@ func main() {
 	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST")  // New endpoint to create a new session and send the first message
 	router.HandleFunc("/api/default-system-prompt", getDefaultSystemPrompt).Methods("GET")     // New endpoint to get the default system prompt
 	router.HandleFunc("/api/chat/updateSessionName", updateSessionNameHandler).Methods("POST") // New endpoint to update session name
+	router.HandleFunc("/api/chat/deleteSession/{id}", deleteSession).Methods("DELETE")         // New endpoint to delete a session
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")                      // New endpoint to get user info
 	router.HandleFunc("/api/logout", handleLogout).Methods("POST")                             // New endpoint for logout
 

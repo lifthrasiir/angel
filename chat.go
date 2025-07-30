@@ -343,6 +343,27 @@ func getDefaultSystemPrompt(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, GetDefaultSystemPrompt())
 }
 
+// New endpoint to delete a chat session
+func deleteSession(w http.ResponseWriter, r *http.Request) {
+	if !validateAuthAndProject("deleteSession", w) {
+		return
+	}
+
+	sessionId := strings.TrimPrefix(r.URL.Path, "/api/chat/deleteSession/")
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := DeleteSession(sessionId); err != nil {
+		log.Printf("deleteSession: Failed to delete session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to delete session: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"status": "success", "message": "Session deleted successfully"})
+}
+
 // Helper function to convert FrontendMessage to Content for Gemini API
 func convertFrontendMessagesToContent(frontendMessages []FrontendMessage) []Content {
 	var contents []Content
