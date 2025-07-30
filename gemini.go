@@ -47,11 +47,16 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 		Project: c.projectID,
 		Request: VertexGenerateContentRequest{
 			Contents: contents,
-			SystemInstruction: &Content{
-				Parts: []Part{
-					{Text: systemPrompt},
-				},
-			},
+			SystemInstruction: func() *Content {
+				if systemPrompt == "" {
+					return nil
+				}
+				return &Content{
+					Parts: []Part{
+						{Text: systemPrompt},
+					},
+				}
+			}(),
 			Tools: GetToolsForGemini(),
 			GenerationConfig: &GenerationConfig{
 				ThinkingConfig: thinkingConfig,

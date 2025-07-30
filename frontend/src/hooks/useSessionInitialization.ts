@@ -89,9 +89,7 @@ export const useSessionInitialization = ({
           if (data) {
             setChatSessionId(data.sessionId);
             setSystemPrompt(data.systemPrompt);
-            if (!data.systemPrompt) {
-              loadDefaultSystemPrompt();
-            }
+            
             setIsSystemPromptEditing(false);
             
             if (!isStreaming) {

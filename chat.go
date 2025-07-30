@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,11 +42,8 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	sessionId := GenerateSessionID() // Generate new session ID
 
-	// Use provided system prompt or default
+	// Use provided system prompt as-is (including empty string if intentionally set)
 	systemPrompt := requestBody.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = GetDefaultSystemPrompt()
-	}
 
 	if err := CreateSession(sessionId, systemPrompt); err != nil {
 		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
@@ -79,7 +77,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher}
+	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context()}
 
 	// Send the new session ID as the first event
 	sseW.sendServerEvent(fmt.Sprintf("S\n%s", sessionId))
@@ -195,7 +193,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher}
+	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context()}
 
 	userMessage := requestBody.Message
 
@@ -294,15 +292,31 @@ func listChatSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // sseWriter wraps http.ResponseWriter and http.Flusher to handle client disconnections gracefully.
+//
+// Connection cleanup sequence analysis from Go stdlib net/http/server.go:
+// 1. defer cancelCtx() executes first -> context.Done() signal sent
+// 2. c.finalFlush() called -> c.bufw.Flush() executed
+// 3. putBufioWriter(c.bufw) called -> bufio.Writer.Reset(nil) -> panic if Flush() called after this
+//
+// Solution: Monitor request context to detect disconnection before Reset(nil) happens
 type sseWriter struct {
 	http.ResponseWriter
 	http.Flusher
+	mu           sync.Mutex
 	disconnected bool
+	ctx          context.Context
 }
 
 // Write implements the io.Writer interface for sseWriter.
 // It checks for write errors and marks the connection as disconnected if an error occurs.
 func (s *sseWriter) Write(p []byte) (n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeUnsafe(p)
+}
+
+// writeUnsafe performs the actual write without locking (must be called with mutex held)
+func (s *sseWriter) writeUnsafe(p []byte) (n int, err error) {
 	if s.disconnected {
 		return len(p), nil // Return nil error and assume all bytes are "written" to avoid stopping execution
 	}
@@ -318,16 +332,45 @@ func (s *sseWriter) Write(p []byte) (n int, err error) {
 // Flush implements the http.Flusher interface for sseWriter.
 // It only flushes if the connection is not marked as disconnected.
 func (s *sseWriter) Flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushUnsafe()
+}
+
+// flushUnsafe performs the actual flush without locking (must be called with mutex held)
+func (s *sseWriter) flushUnsafe() {
 	if s.disconnected {
 		return
 	}
+
+	// Check if context is cancelled (connection cleanup started)
+	// This happens before bufio.Writer.Reset(nil) which would cause panic
+	select {
+	case <-s.ctx.Done():
+		log.Printf("sseWriter: Context cancelled, marking disconnected")
+		s.disconnected = true
+		return
+	default:
+		// Context not cancelled, safe to flush
+	}
+
 	s.Flusher.Flush()
 }
 
 func (sseW *sseWriter) sendServerEvent(data string) {
+	sseW.mu.Lock()
+	defer sseW.mu.Unlock()
+
+	if sseW.disconnected {
+		return
+	}
+
 	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
-	fmt.Fprintf(sseW, "data: %s\n\n", escapedData)
-	sseW.Flush()
+	eventData := fmt.Sprintf("data: %s\n\n", escapedData)
+	_, err := sseW.writeUnsafe([]byte(eventData))
+	if err == nil {
+		sseW.flushUnsafe()
+	}
 }
 
 // New endpoint to get the default system prompt
