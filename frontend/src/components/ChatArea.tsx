@@ -4,10 +4,11 @@ import { ThoughtGroup } from './ThoughtGroup';
 import SystemPromptEditor from './SystemPromptEditor';
 import ChatInput from './ChatInput';
 import FileAttachmentPreview from './FileAttachmentPreview';
+import { ChatMessage as ChatMessageType } from '../types/chat';
 
 interface ChatAreaProps {
   isLoggedIn: boolean;
-  messages: ChatMessage[];
+  messages: ChatMessageType[];
   lastAutoDisplayedThoughtId: string | null;
   systemPrompt: string;
   setSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
@@ -51,7 +52,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     while (i < messages.length) {
       const currentMessage = messages[i];
       if (currentMessage.type === 'thought') {
-        const thoughtGroup: ChatMessage[] = [];
+        const thoughtGroup: ChatMessageType[] = [];
         let j = i;
         while (j < messages.length && messages[j].type === 'thought') {
           thoughtGroup.push(messages[j]);

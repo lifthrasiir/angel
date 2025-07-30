@@ -1,6 +1,6 @@
 import React from 'react';
 import FileAttachmentPreview from './FileAttachmentPreview';
-import { FileAttachment } from '../hooks/useChatSession';
+import { FileAttachment } from '../types/chat';
 
 interface UserTextMessageProps {
   text?: string;

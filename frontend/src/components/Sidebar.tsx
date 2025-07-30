@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import LogoAnimation from './LogoAnimation'; // LogoAnimation import
 import { FaEdit } from 'react-icons/fa';
-import { Session } from '../hooks/useChatSession';
+import { Session } from '../types/chat';
 
 interface SidebarProps {
   sessions: Session[];

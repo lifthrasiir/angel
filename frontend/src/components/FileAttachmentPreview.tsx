@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FaDownload, FaTimes, FaFile } from 'react-icons/fa';
-import { FileAttachment } from '../hooks/useChatSession';
+import { FileAttachment } from '../types/chat';
 
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;

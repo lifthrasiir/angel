@@ -7,7 +7,7 @@ import ModelTextMessage from './ModelTextMessage';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
 import SystemMessage from './SystemMessage';
-import type { ChatMessage } from '../hooks/useChatSession';
+import type { ChatMessage } from '../types/chat';
 
 const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
   const { role, type, attachments } = message;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import ChatMessage from './ChatMessage';
-import { ChatMessage as ChatMessageType } from '../hooks/useChatSession';
+import { ChatMessage as ChatMessageType } from '../types/chat';
 
 interface ThoughtGroupProps {
   thoughts: ChatMessageType[]; // Array of thought messages
