@@ -2,8 +2,10 @@ import React from 'react';
 import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import LogoAnimation from './LogoAnimation';
+import ToastMessage from './ToastMessage'; // Import ToastMessage
 import { useChatSession } from '../hooks/useChatSession';
 import { useChat } from '../hooks/ChatContext';
+import useEscToCancel from '../hooks/useEscToCancel'; // Import the new hook
 import {
   SET_INPUT_MESSAGE,
   SET_SYSTEM_PROMPT,
@@ -30,6 +32,11 @@ const ChatLayout: React.FC = () => {
     fetchSessions,
     cancelStreamingCall,
   } = useChatSession();
+
+  const { toastMessage, setToastMessage } = useEscToCancel({
+    isStreaming,
+    onCancel: cancelStreamingCall,
+  });
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -58,6 +65,7 @@ const ChatLayout: React.FC = () => {
             handleRemoveFile={handleRemoveFile}
             handleCancelStreaming={cancelStreamingCall}
           />
+          <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
         </>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%', fontSize: '1.2em' }}>
