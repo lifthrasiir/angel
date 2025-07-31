@@ -2,9 +2,9 @@ import React, { useRef, useEffect } from 'react';
 
 interface SystemPromptEditorProps {
   systemPrompt: string;
-  setSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
+  setSystemPrompt: (prompt: string) => void;
   isSystemPromptEditing: boolean;
-  setIsSystemPromptEditing: React.Dispatch<React.SetStateAction<boolean>>;
+  
   messagesLength: number;
 }
 
@@ -12,7 +12,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
   systemPrompt,
   setSystemPrompt,
   isSystemPromptEditing,
-  setIsSystemPromptEditing,
+  
   messagesLength,
 }) => {
   const systemPromptTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -51,23 +51,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
         ) : (
           <>
             <div className="system-prompt-display-non-editable" style={{ whiteSpace: 'pre-wrap' }}>{systemPrompt}</div>
-            {messagesLength === 0 && (
-              <button
-                onClick={() => setIsSystemPromptEditing(true)}
-                style={{
-                  marginTop: '10px',
-                  padding: '5px 10px',
-                  background: '#f0f0f0',
-                  border: '1px solid #ccc',
-                  borderRadius: '5px',
-                  cursor: 'pointer',
-                  marginLeft: 'auto',
-                  display: 'block',
-                }}
-              >
-                Edit System Prompt
-              </button>
-            )}
+            
           </>
         )}
       </div>

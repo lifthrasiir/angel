@@ -5,17 +5,23 @@ import { loadSession } from '../utils/sessionManager';
 import { fetchDefaultSystemPrompt } from '../utils/systemPromptManager';
 import { fetchUserInfo } from '../utils/userManager';
 
+import {
+  SET_INPUT_MESSAGE,
+  SET_CHAT_SESSION_ID,
+  SET_MESSAGES,
+  SET_SYSTEM_PROMPT,
+  SET_IS_SYSTEM_PROMPT_EDITING,
+  SET_SELECTED_FILES,
+  SET_IS_STREAMING,
+  SET_USER_EMAIL,
+  RESET_CHAT_SESSION_STATE,
+} from './chatReducer';
+import { ChatAction } from './chatReducer';
+
 interface UseSessionInitializationProps {
   chatSessionId: string | null;
   isStreaming: boolean;
-  setInputMessage: (message: string) => void;
-  setChatSessionId: (id: string | null) => void;
-  setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-  setSystemPrompt: (prompt: string) => void;
-  setIsSystemPromptEditing: (editing: boolean) => void;
-  setSelectedFiles: (files: File[]) => void;
-  setIsStreaming: (streaming: boolean) => void;
-  setUserEmail: (email: string | null) => void;
+  dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
   loadSessions: () => Promise<void>;
 }
@@ -23,14 +29,7 @@ interface UseSessionInitializationProps {
 export const useSessionInitialization = ({
   chatSessionId,
   isStreaming,
-  setInputMessage,
-  setChatSessionId,
-  setMessages,
-  setSystemPrompt,
-  setIsSystemPromptEditing,
-  setSelectedFiles,
-  setIsStreaming,
-  setUserEmail,
+  dispatch,
   handleLoginRedirect,
   loadSessions,
 }: UseSessionInitializationProps) => {
@@ -39,11 +38,7 @@ export const useSessionInitialization = ({
   const location = useLocation();
 
   const resetChatSessionState = () => {
-    setChatSessionId(null);
-    setMessages([]);
-    setSystemPrompt('');
-    setIsSystemPromptEditing(true);
-    setSelectedFiles([]);
+    dispatch({ type: RESET_CHAT_SESSION_STATE });
   };
 
   useEffect(() => {
@@ -55,7 +50,7 @@ export const useSessionInitialization = ({
     const draftMessage = params.get('draft_message');
 
     if (draftMessage) {
-      setInputMessage(draftMessage);
+      dispatch({ type: SET_INPUT_MESSAGE, payload: draftMessage });
     }
 
     if (redirectTo) {
@@ -77,29 +72,31 @@ export const useSessionInitialization = ({
       if (currentSessionId === 'new') {
         resetChatSessionState();
         const defaultPrompt = await fetchDefaultSystemPrompt();
-        setSystemPrompt(defaultPrompt);
+        dispatch({ type: SET_SYSTEM_PROMPT, payload: defaultPrompt });
         return;
       }
 
       if (currentSessionId !== chatSessionId) {
-        setSelectedFiles([]);
-        setIsStreaming(false);
+        dispatch({ type: SET_SELECTED_FILES, payload: [] });
+        dispatch({ type: SET_IS_STREAMING, payload: false });
       }
 
       if (currentSessionId) {
         try {
           const data = await loadSession(currentSessionId);
           if (data) {
-            setChatSessionId(data.sessionId);
-            setSystemPrompt(data.systemPrompt);
+            dispatch({ type: SET_CHAT_SESSION_ID, payload: data.sessionId });
+            dispatch({ type: SET_SYSTEM_PROMPT, payload: data.systemPrompt });
             
-            setIsSystemPromptEditing(false);
+            dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
             
             if (!isStreaming) {
-              setMessages((data.history || []).map((msg: any) => {
+              dispatch({ type: SET_MESSAGES, payload: (data.history || []).map((msg: any) => {
                 const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID(), attachments: msg.attachments };
                 if (msg.type === 'thought') {
                   chatMessage.type = 'thought';
+                } else if (msg.type === 'model_error') {
+                  chatMessage.type = 'model_error';
                 } else if (msg.parts[0].functionCall) {
                   chatMessage.type = 'function_call';
                   chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
@@ -110,7 +107,7 @@ export const useSessionInitialization = ({
                   chatMessage.type = msg.role;
                 }
                 return chatMessage;
-              }));
+              }) });
             }
           } else {
             resetChatSessionState();
@@ -135,7 +132,7 @@ export const useSessionInitialization = ({
         const userInfo = await fetchUserInfo();
         if (userInfo && userInfo.success) {
           if (userInfo.email) {
-            setUserEmail(userInfo.email);
+            dispatch({ type: SET_USER_EMAIL, payload: userInfo.email });
           } else {
             // 401 response - not authenticated, redirect to login
             handleLoginRedirect();
@@ -150,5 +147,5 @@ export const useSessionInitialization = ({
       }
     };
     loadUserInfo();
-  }, [urlSessionId, navigate, location.search, location.pathname, isStreaming]);
+  }, [urlSessionId, navigate, location.search, location.pathname, isStreaming, dispatch]);
 };

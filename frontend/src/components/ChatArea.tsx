@@ -11,11 +11,11 @@ interface ChatAreaProps {
   messages: ChatMessageType[];
   lastAutoDisplayedThoughtId: string | null;
   systemPrompt: string;
-  setSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
+  setSystemPrompt: (prompt: string) => void;
   isSystemPromptEditing: boolean;
-  setIsSystemPromptEditing: React.Dispatch<React.SetStateAction<boolean>>;
+  
   inputMessage: string;
-  setInputMessage: React.Dispatch<React.SetStateAction<string>>;
+  setInputMessage: (message: string) => void;
   handleSendMessage: () => void;
   isStreaming: boolean;
   onFilesSelected: (files: File[]) => void;
@@ -30,7 +30,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   systemPrompt,
   setSystemPrompt,
   isSystemPromptEditing,
-  setIsSystemPromptEditing,
+  
   inputMessage,
   setInputMessage,
   handleSendMessage,
@@ -89,7 +89,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 systemPrompt={systemPrompt}
                 setSystemPrompt={setSystemPrompt}
                 isSystemPromptEditing={isSystemPromptEditing}
-                setIsSystemPromptEditing={setIsSystemPromptEditing}
                 messagesLength={messages.length}
               />
               {renderedMessages}

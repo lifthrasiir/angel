@@ -1,5 +1,4 @@
 import React from 'react';
-import 'katex/dist/katex.min.css';
 import MarkdownRenderer from './MarkdownRenderer';
 
 interface SystemMessageProps {

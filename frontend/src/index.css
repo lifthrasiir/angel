@@ -146,8 +146,14 @@ textarea {
   border: 2px solid var(--color-agent-dark);
 }
 
+.agent-error-message .chat-bubble {
+  background-color: var(--color-agent-dark);
+  color: #333;
+  border: 2px solid var(--color-agent-dark);
+}
+
 /* Specific styles for agent's internal messages */
-.agent-thought.chat-bubble {
+.agent-thought .chat-bubble {
   background-color: white;
   border: 2px solid var(--color-agent-dark);
   font-style: italic;

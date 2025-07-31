@@ -1,5 +1,4 @@
 import React from 'react';
-import 'katex/dist/katex.min.css'; // Add this import for KaTeX CSS
 
 // Import new message components
 import UserTextMessage from './UserTextMessage';
@@ -27,8 +26,10 @@ const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message })
     return <FunctionCallMessage functionCall={functionCall} />;
   } else if (type === 'system') {
     return <SystemMessage text={text} />;
+  } else if (type === 'model_error') {
+    return <ModelTextMessage text={text} className="agent-error-message" />;
   } else if (type === 'model') {
-    return <ModelTextMessage text={text} />;
+    return <ModelTextMessage text={text} className="agent-message" />;
   }
 
   // Fallback for unknown types or if type is not explicitly set

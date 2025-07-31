@@ -1,43 +1,4 @@
-import { ChatMessage, FileAttachment } from '../types/chat';
-
-export const updateMessagesState = (
-  messages: ChatMessage[],
-  newMessage: ChatMessage,
-  options?: { replaceId?: string; insertBeforeAgentId?: string }
-): ChatMessage[] => {
-  const newMessages = [...messages];
-  let insertIndex = newMessages.length;
-
-  if (options?.replaceId) {
-    const indexToReplace = newMessages.findIndex(msg => msg.id === options.replaceId);
-    if (indexToReplace !== -1) {
-      newMessages[indexToReplace] = newMessage;
-      return newMessages;
-    }
-  }
-
-  if (options?.insertBeforeAgentId) {
-    const agentMessageIndex = newMessages.findIndex(msg => msg.id === options.insertBeforeAgentId);
-    if (agentMessageIndex !== -1) {
-      insertIndex = agentMessageIndex;
-    }
-  }
-
-  newMessages.splice(insertIndex, 0, newMessage);
-  return newMessages;
-};
-
-export const processStreamingMessage = (
-  messages: ChatMessage[],
-  agentMessageId: string,
-  currentAgentText: string
-): ChatMessage[] => {
-  return messages.map(msg =>
-    msg.id === agentMessageId
-      ? { ...msg, parts: [{ text: currentAgentText }] } // Create a new object for the agent message
-      : msg
-  );
-};
+import { FileAttachment } from '../types/chat';
 
 export const sendMessage = async (
   inputMessage: string,

@@ -1,5 +1,4 @@
 import React from 'react';
-import 'katex/dist/katex.min.css';
 import MarkdownRenderer from './MarkdownRenderer';
 
 interface ModelTextMessageProps {
@@ -9,8 +8,8 @@ interface ModelTextMessageProps {
 
 const ModelTextMessage: React.FC<ModelTextMessageProps> = ({ text, className }) => {
   return (
-    <div className="chat-message-container agent-message">
-      <div className={`chat-bubble ${className || ''}`}>
+    <div className={`chat-message-container ${className || ''}`}>
+      <div className="chat-bubble">
         <MarkdownRenderer content={text || ''} />
       </div>
     </div>

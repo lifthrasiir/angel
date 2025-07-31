@@ -1,27 +1,30 @@
 import { useNavigate } from 'react-router-dom';
-import { ChatMessage, FileAttachment, Session } from '../types/chat';
+import { ChatMessage, FileAttachment } from '../types/chat';
 import { 
-  updateMessagesState, 
-  processStreamingMessage, 
   sendMessage, 
   processStreamResponse, 
   StreamEventHandlers 
 } from '../utils/messageHandler';
 import { convertFilesToAttachments } from '../utils/fileHandler';
+import { 
+  SET_INPUT_MESSAGE,
+  SET_SELECTED_FILES,
+  SET_IS_STREAMING,
+  SET_LAST_AUTO_DISPLAYED_THOUGHT_ID,
+  SET_CHAT_SESSION_ID,
+  
+  SET_IS_SYSTEM_PROMPT_EDITING,
+  ADD_MESSAGE,
+  UPDATE_AGENT_MESSAGE,
+} from './chatReducer';
+import { ChatAction } from './chatReducer';
 
 interface UseMessageSendingProps {
   inputMessage: string;
   selectedFiles: File[];
   chatSessionId: string | null;
   systemPrompt: string;
-  setInputMessage: (message: string) => void;
-  setSelectedFiles: (files: File[]) => void;
-  setIsStreaming: (streaming: boolean) => void;
-  setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-  setLastAutoDisplayedThoughtId: (id: string | null) => void;
-  setChatSessionId: (id: string) => void;
-  setSessions: (sessions: Session[] | ((prev: Session[]) => Session[])) => void;
-  setIsSystemPromptEditing: (editing: boolean) => void;
+  dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
   loadSessions: () => Promise<void>;
 }
@@ -31,30 +34,18 @@ export const useMessageSending = ({
   selectedFiles,
   chatSessionId,
   systemPrompt,
-  setInputMessage,
-  setSelectedFiles,
-  setIsStreaming,
-  setMessages,
-  setLastAutoDisplayedThoughtId,
-  setChatSessionId,
-  setSessions,
-  setIsSystemPromptEditing,
+  dispatch,
   handleLoginRedirect,
   loadSessions,
 }: UseMessageSendingProps) => {
   const navigate = useNavigate();
 
-  const updateMessages = (
-    newMessage: ChatMessage,
-    options?: { replaceId?: string; insertBeforeAgentId?: string }
-  ) => {
-    setMessages((prev) => updateMessagesState(prev, newMessage, options));
-  };
+  
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() && selectedFiles.length === 0) return;
 
-    setIsStreaming(true);
+    dispatch({ type: SET_IS_STREAMING, payload: true });
 
     try {
       const attachments: FileAttachment[] = await convertFilesToAttachments(selectedFiles);
@@ -66,15 +57,15 @@ export const useMessageSending = ({
         type: 'user', 
         attachments: attachments 
       };
-      updateMessages(userMessage);
-      setInputMessage('');
-      setSelectedFiles([]);
+      dispatch({ type: ADD_MESSAGE, payload: userMessage });
+      dispatch({ type: SET_INPUT_MESSAGE, payload: '' });
+      dispatch({ type: SET_SELECTED_FILES, payload: [] });
 
       let agentMessageId = crypto.randomUUID();
-      updateMessages({ id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage);
+      dispatch({ type: ADD_MESSAGE, payload: { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage });
 
       if (chatSessionId === null) {
-        setIsSystemPromptEditing(false);
+        dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
       }
 
       const response = await sendMessage(inputMessage, attachments, chatSessionId, systemPrompt);
@@ -85,12 +76,12 @@ export const useMessageSending = ({
       }
 
       if (!response.ok) {
-        updateMessages({
+        dispatch({ type: UPDATE_AGENT_MESSAGE, payload: {
           id: agentMessageId,
-          role: 'system',
+          role: 'model',
           parts: [{ text: 'Failed to send message or receive stream.' }],
-          type: 'system',
-        } as ChatMessage, { replaceId: agentMessageId });
+          type: 'model_error',
+        } as ChatMessage });
         return;
       }
 
@@ -99,15 +90,12 @@ export const useMessageSending = ({
       const handlers: StreamEventHandlers = {
         onMessage: (text: string) => {
           currentAgentText += text;
-          setMessages((prev) => processStreamingMessage(prev, agentMessageId, currentAgentText));
-          setLastAutoDisplayedThoughtId(null);
+          dispatch({ type: UPDATE_AGENT_MESSAGE, payload: { id: agentMessageId, role: 'model', parts: [{ text: currentAgentText }], type: 'model' } as ChatMessage });
+          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
         onThought: (thoughtText: string, thoughtId: string) => {
-          updateMessages(
-            { id: thoughtId, role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage,
-            { insertBeforeAgentId: agentMessageId }
-          );
-          setLastAutoDisplayedThoughtId(thoughtId);
+          dispatch({ type: ADD_MESSAGE, payload: { id: thoughtId, role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage });
+          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: thoughtId });
         },
         onFunctionCall: (functionName: string, functionArgs: any) => {
           const message: ChatMessage = { 
@@ -116,8 +104,8 @@ export const useMessageSending = ({
             parts: [{ functionCall: { name: functionName, args: functionArgs } }], 
             type: 'function_call' 
           };
-          updateMessages(message, { insertBeforeAgentId: agentMessageId });
-          setLastAutoDisplayedThoughtId(null);
+          dispatch({ type: ADD_MESSAGE, payload: message });
+          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
         onFunctionResponse: (functionResponse: any) => {
           const message: ChatMessage = { 
@@ -126,42 +114,38 @@ export const useMessageSending = ({
             parts: [{ functionResponse: { response: functionResponse } }], 
             type: 'function_response' 
           };
-          updateMessages(message, { insertBeforeAgentId: agentMessageId });
-          setLastAutoDisplayedThoughtId(null);
+          dispatch({ type: ADD_MESSAGE, payload: message });
+          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
         onSessionUpdate: (newSessionId: string) => {
-          setChatSessionId(newSessionId);
+          dispatch({ type: SET_CHAT_SESSION_ID, payload: newSessionId });
           navigate(`/${newSessionId}`, { replace: true });
         },
-        onSessionNameUpdate: (sessionIdToUpdate: string, newName: string) => {
-          setSessions(prevSessions =>
-            prevSessions.map(s =>
-              s.id === sessionIdToUpdate ? { ...s, name: newName } : s
-            )
-          );
+        onSessionNameUpdate: () => {
+          loadSessions();
         },
         onEnd: () => {
-          setLastAutoDisplayedThoughtId(null);
+          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         }
       };
 
       await processStreamResponse(response, handlers);
       loadSessions();
-      setIsStreaming(false);
-      setSelectedFiles([]);
+      dispatch({ type: SET_IS_STREAMING, payload: false });
+      dispatch({ type: SET_SELECTED_FILES, payload: [] });
 
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
-      updateMessages({
+      dispatch({ type: ADD_MESSAGE, payload: {
         id: crypto.randomUUID(),
-        role: 'system',
+        role: 'model',
         parts: [{ text: 'Error sending message or receiving stream.' }],
-        type: 'system',
-      } as ChatMessage);
+        type: 'model_error',
+      } as ChatMessage });
     } finally {
-      setIsStreaming(false);
+      dispatch({ type: SET_IS_STREAMING, payload: false });
       loadSessions();
-      setSelectedFiles([]);
+      dispatch({ type: SET_SELECTED_FILES, payload: [] });
     }
   };
 

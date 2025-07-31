@@ -3,23 +3,26 @@ import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import LogoAnimation from './LogoAnimation';
 import { useChatSession } from '../hooks/useChatSession';
+import { useChat } from '../hooks/ChatContext';
+import {
+  SET_INPUT_MESSAGE,
+  SET_SYSTEM_PROMPT,
+
+} from '../hooks/chatReducer';
 
 const ChatLayout: React.FC = () => {
+  const { dispatch } = useChat();
   const {
     userEmail,
     chatSessionId,
     messages,
     inputMessage,
     sessions,
-    setSessions,
     lastAutoDisplayedThoughtId,
     isStreaming,
     systemPrompt,
     isSystemPromptEditing,
     selectedFiles,
-    setInputMessage,
-    setSystemPrompt,
-    setIsSystemPromptEditing,
     handleLogin,
     handleFilesSelected,
     handleRemoveFile,
@@ -33,7 +36,7 @@ const ChatLayout: React.FC = () => {
         <>
           <Sidebar
             sessions={sessions}
-            setSessions={setSessions}
+            setSessions={fetchSessions} // Changed to fetchSessions
             chatSessionId={chatSessionId}
             fetchSessions={fetchSessions}
           />
@@ -43,11 +46,11 @@ const ChatLayout: React.FC = () => {
             messages={messages}
             lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId}
             systemPrompt={systemPrompt}
-            setSystemPrompt={setSystemPrompt}
+            setSystemPrompt={(prompt) => dispatch({ type: SET_SYSTEM_PROMPT, payload: prompt })}
             isSystemPromptEditing={isSystemPromptEditing}
-            setIsSystemPromptEditing={setIsSystemPromptEditing}
+            
             inputMessage={inputMessage}
-            setInputMessage={setInputMessage}
+            setInputMessage={(message) => dispatch({ type: SET_INPUT_MESSAGE, payload: message })}
             handleSendMessage={handleSendMessage}
             isStreaming={isStreaming}
             onFilesSelected={handleFilesSelected}

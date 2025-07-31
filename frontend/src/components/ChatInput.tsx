@@ -3,7 +3,7 @@ import { FaPaperclip } from 'react-icons/fa';
 
 interface ChatInputProps {
   inputMessage: string;
-  setInputMessage: React.Dispatch<React.SetStateAction<string>>;
+  setInputMessage: (message: string) => void;
   handleSendMessage: () => void;
   isStreaming: boolean;
   onFilesSelected: (files: File[]) => void; // New prop for file selection
