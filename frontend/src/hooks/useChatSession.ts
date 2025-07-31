@@ -56,7 +56,7 @@ export const useChatSession = () => {
     loadSessions,
   });
 
-  const { handleSendMessage } = useMessageSending({
+  const { handleSendMessage, cancelStreamingCall } = useMessageSending({
     inputMessage,
     selectedFiles,
     chatSessionId,
@@ -82,5 +82,6 @@ export const useChatSession = () => {
     handleRemoveFile: handleRemoveFileWrapper,
     handleSendMessage,
     fetchSessions: loadSessions,
+    cancelStreamingCall,
   };
 };

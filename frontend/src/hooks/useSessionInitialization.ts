@@ -15,6 +15,8 @@ import {
   SET_IS_STREAMING,
   SET_USER_EMAIL,
   RESET_CHAT_SESSION_STATE,
+  ADD_MESSAGE,
+  ADD_ERROR_MESSAGE,
 } from './chatReducer';
 import { ChatAction } from './chatReducer';
 
@@ -82,43 +84,95 @@ export const useSessionInitialization = ({
       }
 
       if (currentSessionId) {
+        let eventSource: EventSource | null = null;
         try {
-          const data = await loadSession(currentSessionId);
-          if (data) {
-            dispatch({ type: SET_CHAT_SESSION_ID, payload: data.sessionId });
-            dispatch({ type: SET_SYSTEM_PROMPT, payload: data.systemPrompt });
-            
-            dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
-            
-            if (!isStreaming) {
-              dispatch({ type: SET_MESSAGES, payload: (data.history || []).map((msg: any) => {
-                const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID(), attachments: msg.attachments };
-                if (msg.type === 'thought') {
-                  chatMessage.type = 'thought';
-                } else if (msg.type === 'model_error') {
-                  chatMessage.type = 'model_error';
-                } else if (msg.parts[0].functionCall) {
-                  chatMessage.type = 'function_call';
-                  chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
-                } else if (msg.parts[0].functionResponse) {
-                  chatMessage.type = 'function_response';
-                  chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
-                } else {
-                  chatMessage.type = msg.role;
+          eventSource = loadSession(
+            currentSessionId,
+            (event: MessageEvent) => {
+              const [eventType, eventData] = event.data.split('\n', 2);
+
+              if (eventType === '0' || eventType === '1') {
+                // Initial state
+                const data = JSON.parse(eventData);
+                dispatch({ type: SET_CHAT_SESSION_ID, payload: data.sessionId });
+                dispatch({ type: SET_SYSTEM_PROMPT, payload: data.systemPrompt });
+                dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
+                dispatch({ type: SET_MESSAGES, payload: (data.history || []).map((msg: any) => {
+                  const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID(), attachments: msg.attachments };
+                  if (msg.type === 'thought') {
+                    chatMessage.type = 'thought';
+                  } else if (msg.type === 'model_error') {
+                    chatMessage.type = 'model_error';
+                  } else if (msg.parts?.[0]?.functionCall) {
+                    chatMessage.type = 'function_call';
+                    chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
+                  } else if (msg.parts?.[0]?.functionResponse) {
+                    chatMessage.type = 'function_response';
+                    chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
+                  } else {
+                    chatMessage.type = msg.role;
+                  }
+                  return chatMessage;
+                }) });
+
+                // Set streaming state based on eventType
+                dispatch({ type: SET_IS_STREAMING, payload: eventType === '0' });
+                if (eventType === '1') { // If eventType is '1', close the EventSource
+                  eventSource?.close();
                 }
-                return chatMessage;
-              }) });
+
+              } else if (eventType === 'M') {
+                // Model message
+                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'model', parts: [{ text: eventData }], type: 'model' } });
+              } else if (eventType === 'F') {
+                // Function call
+                const [functionName, argsJson] = eventData.split('\n');
+                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: JSON.parse(argsJson) } }], type: 'function_call' } });
+              } else if (eventType === 'R') {
+                // Function response
+                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: JSON.parse(eventData) }], type: 'function_response' } });
+              } else if (eventType === 'T') {
+                // Thought
+                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'thought', parts: [{ text: eventData }], type: 'thought' } });
+              } else if (eventType === 'E') {
+                // Error
+                console.error('SSE Error:', eventData);
+                dispatch({ type: SET_IS_STREAMING, payload: false });
+                eventSource?.close(); // Close EventSource on error
+                dispatch({ type: ADD_ERROR_MESSAGE, payload: eventData });
+              } else if (eventType === 'Q') {
+                // Stream finished
+                dispatch({ type: SET_IS_STREAMING, payload: false });
+                eventSource?.close(); // Close EventSource on stream finished
+              }
+            },
+            (errorEvent: Event) => {
+              console.error('EventSource error:', errorEvent);
+              // Handle connection errors, e.g., redirect to login if unauthorized
+              if (errorEvent.target && (errorEvent.target as EventSource).readyState === EventSource.CLOSED) {
+                // Connection closed, might be due to server error or network issue
+                // Check if it's an auth issue by trying to fetch user info again
+                fetchUserInfo().then(userInfo => {
+                  if (!userInfo || !userInfo.success || !userInfo.email) {
+                    handleLoginRedirect();
+                  }
+                }).catch(() => {
+                  handleLoginRedirect();
+                });
+              }
+              dispatch({ type: SET_IS_STREAMING, payload: false });
             }
-          } else {
-            resetChatSessionState();
-          }
+          );
         } catch (error) {
-          if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-            handleLoginRedirect();
-          } else {
-            resetChatSessionState();
-          }
+          console.error('Failed to load session via SSE:', error);
+          resetChatSessionState();
         }
+
+        return () => {
+          if (eventSource) {
+            eventSource.close();
+          }
+        };
       } else {
         resetChatSessionState();
       }

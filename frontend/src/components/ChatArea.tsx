@@ -21,6 +21,7 @@ interface ChatAreaProps {
   onFilesSelected: (files: File[]) => void;
   selectedFiles: File[]; // New prop
   handleRemoveFile: (index: number) => void; // New prop
+  handleCancelStreaming: () => void; // New prop
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -38,6 +39,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onFilesSelected,
   selectedFiles, // Destructure new prop
   handleRemoveFile, // Destructure new prop
+  handleCancelStreaming, // Destructure new prop
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -108,6 +110,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             handleSendMessage={handleSendMessage}
             isStreaming={isStreaming}
             onFilesSelected={onFilesSelected}
+            handleCancelStreaming={handleCancelStreaming}
           />
         </>
       )}

@@ -3,21 +3,31 @@ import { useNavigate } from 'react-router-dom';
 import LogoAnimation from './LogoAnimation'; // LogoAnimation import
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import { Session } from '../types/chat';
+import { useChat } from '../hooks/ChatContext'; // Add this import
 
 interface SidebarProps {
   sessions: Session[];
-  setSessions: React.Dispatch<React.SetStateAction<Session[]>>;
   chatSessionId: string | null;
   fetchSessions: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   sessions,
-  setSessions,
+  // setSessions, // Remove this line
   chatSessionId,
   fetchSessions,
 }) => {
+  const { dispatch } = useChat();
   const navigate = useNavigate();
+
+  const updateSessionState = (sessionId: string, updateFn: (session: Session) => Session) => {
+    dispatch({
+      type: 'SET_SESSIONS',
+      payload: sessions.map(s =>
+        s.id === sessionId ? updateFn(s) : s
+      ),
+    });
+  };
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
@@ -50,11 +60,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       type="text"
                       value={session.name || ''}
                       onChange={(e) => {
-                        setSessions(prevSessions =>
-                          prevSessions.map(s =>
-                            s.id === session.id ? { ...s, name: e.target.value } : s
-                          )
-                        );
+                        updateSessionState(session.id, s => ({ ...s, name: e.target.value }));
                       }}
                       onBlur={async () => {
                         if (session.id) {
@@ -69,21 +75,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                             console.error('Error updating session name:', error);
                           }
                         }
-                        setSessions(prevSessions =>
-                          prevSessions.map(s =>
-                            s.id === session.id ? { ...s, isEditing: false } : s
-                          )
-                        );
+                        updateSessionState(session.id, s => ({ ...s, isEditing: false }));
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.currentTarget.blur();
                         } else if (e.key === 'Escape') {
-                          setSessions(prevSessions =>
-                            prevSessions.map(s =>
-                              s.id === session.id ? { ...s, isEditing: false } : s
-                            )
-                          );
+                          updateSessionState(session.id, s => ({ ...s, isEditing: false }));
                         }
                       }}
                       style={{ flexGrow: 1, padding: '8px', border: '1px solid #ddd', borderRadius: '5px', width: '100%', boxSizing: 'border-box' }}
@@ -131,11 +129,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {!session.isEditing && (
                   <button
                     onClick={() => {
-                      setSessions(prevSessions =>
-                        prevSessions.map(s =>
-                          s.id === session.id ? { ...s, isEditing: true } : s
-                        )
-                      );
+                      updateSessionState(session.id, s => ({ ...s, isEditing: true }));
                     }}
                     style={{
                       marginLeft: '5px',

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +12,12 @@ import (
 	"sync"
 	"time"
 )
+
+type InitialState struct {
+	SessionId    string            `json:"sessionId"`
+	History      []FrontendMessage `json:"history"`
+	SystemPrompt string            `json:"systemPrompt"`
+}
 
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
 
@@ -64,10 +71,15 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context()}
+	// Create a sseWriter for this client connection
+	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
 
 	// Send the new session ID as the first event
-	sseW.sendServerEvent(fmt.Sprintf("S\n%s", sessionId))
+	sseW.sendServerEvent("S", sessionId)
+
+	// Add this sseWriter to the active list for broadcasting subsequent events
+	addSseWriter(sessionId, sseW)
+	defer removeSseWriter(sessionId, sseW)
 
 	// Retrieve session history from DB for Gemini API
 	frontendHistory, err := GetSessionHistory(sessionId, true)
@@ -78,10 +90,9 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert FrontendMessage to Content for Gemini API
-	historyContents := convertFrontendMessagesToContent(frontendHistory)
 
 	// Goroutine to infer session name
-	go func(sID string, uMsg string, sPrompt string, initialAgentResponse string) {
+	go func(sID string, uMsg string, sPrompt string, sseW *sseWriter) {
 		// Check if session name is already set (user might have set it manually)
 		session, err := GetSession(sID)
 		if err != nil {
@@ -93,7 +104,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Construct the prompt for name inference
-		nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(uMsg, initialAgentResponse)
+		nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(uMsg, "")
 
 		// Call LLM to infer name
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
@@ -122,12 +133,18 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Notify frontend about name update
-		sseW.sendServerEvent(fmt.Sprintf("N\n%s\n%s", sID, inferredName))
-	}(sessionId, userMessage, systemPrompt, "") // Pass empty string for initialAgentResponse, it will be filled by streamGeminiResponse
+		sseW.sendServerEvent("N", fmt.Sprintf("%s\n%s", sID, inferredName))
+	}(sessionId, userMessage, systemPrompt, sseW) // Pass sseW to the goroutine
+
+	// Prepare initial state for streaming
+	initialState := InitialState{
+		SessionId:    sessionId,
+		History:      frontendHistory,
+		SystemPrompt: systemPrompt,
+	}
 
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(sseW, r, sessionId, systemPrompt, historyContents); err != nil {
-		log.Printf("newSessionAndMessage: Error streaming Gemini response: %v", err)
+	if err := streamGeminiResponse(initialState, sseW); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -167,7 +184,10 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context()}
+	// Add this sseWriter to the active list for broadcasting subsequent events
+	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
+	addSseWriter(sessionId, sseW)
+	defer removeSseWriter(sessionId, sseW)
 
 	userMessage := requestBody.Message
 
@@ -186,11 +206,15 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert FrontendMessage to Content for Gemini API
-	historyContents := convertFrontendMessagesToContent(frontendHistory)
-
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(sseW, r, sessionId, systemPrompt, historyContents); err != nil {
+	// Prepare initial state for streaming (similar to loadChatSession)
+	initialState := InitialState{
+		SessionId:    sessionId,
+		History:      frontendHistory,
+		SystemPrompt: systemPrompt,
+	}
+
+	if err := streamGeminiResponse(initialState, sseW); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
@@ -237,10 +261,60 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		history = []FrontendMessage{}
 	}
 
-	sendJSONResponse(w, map[string]interface{}{"sessionId": sessionId, "history": history, "systemPrompt": session.SystemPrompt})
+	// Prepare initial state as a single JSON object
+	initialState := InitialState{
+		SessionId:    sessionId,
+		History:      history,
+		SystemPrompt: session.SystemPrompt,
+	}
+
+	// Check if it's an SSE request
+	if r.Header.Get("Accept") == "text/event-stream" {
+		setupSSEHeaders(w)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			log.Println("loadChatSession: Streaming unsupported!")
+			http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+			return
+		}
+		sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
+		addSseWriter(sessionId, sseW)
+		defer removeSseWriter(sessionId, sseW)
+
+		initialStateJSON, err := json.Marshal(initialState)
+		if err != nil {
+			log.Printf("loadChatSession: Failed to marshal initial state: %v", err)
+			http.Error(w, "Failed to prepare initial state", http.StatusInternalServerError)
+			return
+		}
+		// Send initial state as a single SSE event (always send history first)
+		sseW.sendServerEvent("1", string(initialStateJSON)) // Event type 1: initial state with history
+
+		if hasActiveCall(sessionId) {
+			log.Printf("loadChatSession: Active call found for session %s, streaming response.", sessionId)
+			// Create a new initialState for streaming, without history, as history was already sent
+			streamingInitialState := InitialState{
+				SessionId:    sessionId,
+				History:      []FrontendMessage{}, // Clear history as it's already sent
+				SystemPrompt: session.SystemPrompt,
+			}
+			// Stream the response (this will broadcast to all connected clients for this session)
+			go streamGeminiResponse(streamingInitialState, sseW)
+
+			// Keep the connection open until client disconnects
+			<-r.Context().Done()
+			log.Printf("loadChatSession: Client disconnected from SSE for session %s.", sessionId)
+		} else {
+			// If no active call, close the SSE connection after sending initial state
+			log.Printf("loadChatSession: No active call for session %s, closing SSE connection.", sessionId)
+			sseW.Close()
+		}
+	} else {
+		// Original JSON response for non-SSE requests
+		sendJSONResponse(w, initialState)
+	}
 }
 
-// New endpoint to list all chat sessions
 func listChatSessions(w http.ResponseWriter, r *http.Request) {
 	if !validateAuthAndProject("listChatSessions", w) {
 		return
@@ -269,6 +343,73 @@ type sseWriter struct {
 	mu           sync.Mutex
 	disconnected bool
 	ctx          context.Context
+	sessionId    string // Add sessionId to sseWriter
+}
+
+// Close marks the sseWriter as disconnected and removes it from the active writers.
+func (s *sseWriter) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.disconnected {
+		s.disconnected = true
+		removeSseWriter(s.sessionId, s)
+		log.Printf("sseWriter for session %s explicitly closed.", s.sessionId)
+	}
+}
+
+var (
+	activeSseWriters = make(map[string][]*sseWriter) // sessionId -> list of sseWriters
+	sseWritersMutex  sync.Mutex
+)
+
+// addSseWriter adds an sseWriter to the activeSseWriters map.
+func addSseWriter(sessionId string, sseW *sseWriter) {
+	sseWritersMutex.Lock()
+	defer sseWritersMutex.Unlock()
+	activeSseWriters[sessionId] = append(activeSseWriters[sessionId], sseW)
+	log.Printf("Added sseWriter for session %s. Total writers: %d", sessionId, len(activeSseWriters[sessionId]))
+}
+
+// removeSseWriter removes an sseWriter from the activeSseWriters map.
+func removeSseWriter(sessionId string, sseW *sseWriter) {
+	sseWritersMutex.Lock()
+	defer sseWritersMutex.Unlock()
+	writers := activeSseWriters[sessionId]
+	for i, w := range writers {
+		if w == sseW {
+			activeSseWriters[sessionId] = append(writers[:i], writers[i+1:]...)
+			log.Printf("Removed sseWriter for session %s. Remaining writers: %d", sessionId, len(activeSseWriters[sessionId]))
+			return
+		}
+	}
+}
+
+// broadcastToSession sends an event to all active sseWriters for a given session.
+func broadcastToSession(sessionId string, eventType string, data string) {
+	sseWritersMutex.Lock()
+	defer sseWritersMutex.Unlock()
+
+	writers, ok := activeSseWriters[sessionId]
+	if !ok || len(writers) == 0 {
+		return
+	}
+
+	// Prepare the event data once
+	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
+	eventData := fmt.Sprintf("data: %s\ndata: %s\n\n", eventType, escapedData)
+
+	for _, sseW := range writers {
+		sseW.mu.Lock()
+		if !sseW.disconnected {
+			_, err := sseW.writeUnsafe([]byte(eventData))
+			if err == nil {
+				sseW.flushUnsafe()
+			}
+		} else {
+			log.Printf("Skipping broadcast to disconnected sseWriter for session %s", sessionId)
+		}
+		sseW.mu.Unlock()
+	}
 }
 
 // Write implements the io.Writer interface for sseWriter.
@@ -321,7 +462,7 @@ func (s *sseWriter) flushUnsafe() {
 	s.Flusher.Flush()
 }
 
-func (sseW *sseWriter) sendServerEvent(data string) {
+func (sseW *sseWriter) sendServerEvent(eventType, data string) {
 	sseW.mu.Lock()
 	defer sseW.mu.Unlock()
 
@@ -330,7 +471,7 @@ func (sseW *sseWriter) sendServerEvent(data string) {
 	}
 
 	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
-	eventData := fmt.Sprintf("data: %s\n\n", escapedData)
+	eventData := fmt.Sprintf("data: %s\ndata: %s\n\n", eventType, escapedData)
 	_, err := sseW.writeUnsafe([]byte(eventData))
 	if err == nil {
 		sseW.flushUnsafe()
@@ -400,13 +541,62 @@ func convertFrontendMessagesToContent(frontendMessages []FrontendMessage) []Cont
 }
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(sseW *sseWriter, r *http.Request, sessionId string, systemPrompt string, initialHistory []Content) error {
+func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 	var agentResponseText string
-	var currentHistory = initialHistory
+	currentHistory := convertFrontendMessagesToContent(initialState.History)
+
+	// Create a cancellable context for the Gemini API call
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Ensure context is cancelled when function exits
+
+	// Register the call with the call manager
+	if err := startCall(initialState.SessionId, cancel); err != nil {
+		log.Printf("streamGeminiResponse: Failed to start call for session %s: %v", initialState.SessionId, err)
+		broadcastToSession(initialState.SessionId, "E", err.Error())
+		return err
+	}
+	defer removeCall(initialState.SessionId) // Ensure call is removed from manager when function exits
+
+	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
+	initialStateJSON, err := json.Marshal(initialState) // initialState struct를 JSON으로 마샬링
+	if err != nil {
+		log.Printf("streamGeminiResponse: Failed to marshal initial state: %v", err)
+		return err
+	}
+	sseW.sendServerEvent("0", string(initialStateJSON))
+	log.Printf("streamGeminiResponse: Sent initial state for session %s.", initialState.SessionId)
+
+	// Goroutine to monitor client disconnection
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Gemini API call context was cancelled (e.g., by explicit cancel request)
+			// No need to do anything here, the main goroutine will handle it.
+		}
+	}()
 
 	for {
-		seq, closer, err := GlobalGeminiState.GeminiClient.SendMessageStream(context.Background(), currentHistory, DefaultGeminiModel, systemPrompt, &ThinkingConfig{IncludeThoughts: true})
+		select {
+		case <-ctx.Done():
+			// API call was cancelled (either by client disconnect or explicit cancel)
+			// Mark the call as cancelled in the manager
+			failCall(initialState.SessionId, ctx.Err())
+			return ctx.Err() // Return the context error
+		default:
+			// Continue with the Gemini API call
+		}
+
+		seq, closer, err := GlobalGeminiState.GeminiClient.SendMessageStream(ctx, currentHistory, DefaultGeminiModel, initialState.SystemPrompt, &ThinkingConfig{IncludeThoughts: true})
 		if err != nil {
+			failCall(initialState.SessionId, err) // Mark the call as failed
+			// Save a model_error message to the database
+			errorMessage := fmt.Sprintf("Gemini API call failed: %v", err)
+			if errors.Is(err, context.Canceled) {
+				errorMessage = "Request canceled by user"
+			}
+			if err := AddMessageToSession(initialState.SessionId, "model", errorMessage, "model_error", nil); err != nil {
+				log.Printf("Failed to save model_error message for API call failure: %v", err)
+			}
 			return fmt.Errorf("CodeAssist API call failed: %w", err)
 		}
 		defer closer.Close()
@@ -415,6 +605,14 @@ func streamGeminiResponse(sseW *sseWriter, r *http.Request, sessionId string, sy
 		var modelResponseParts []Part
 
 		for caResp := range seq {
+			select {
+			case <-ctx.Done():
+				// Context was canceled, send a message to the frontend
+				broadcastToSession(initialState.SessionId, "E", "Request canceled by user")
+				return ctx.Err() // Return the context error
+			default:
+				// Continue processing the response
+			}
 			if len(caResp.Response.Candidates) == 0 {
 				continue
 			}
@@ -425,7 +623,7 @@ func streamGeminiResponse(sseW *sseWriter, r *http.Request, sessionId string, sy
 				if part.FunctionCall != nil {
 					functionCalls = append(functionCalls, *part.FunctionCall)
 					argsJson, _ := json.Marshal(part.FunctionCall.Args)
-					sseW.sendServerEvent(fmt.Sprintf("F\n%s\n%s", part.FunctionCall.Name, string(argsJson)))
+					broadcastToSession(initialState.SessionId, "F", fmt.Sprintf("%s\n%s", part.FunctionCall.Name, string(argsJson)))
 					continue
 				}
 
@@ -438,15 +636,15 @@ func streamGeminiResponse(sseW *sseWriter, r *http.Request, sessionId string, sy
 						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
 					}
 
-					sseW.sendServerEvent(fmt.Sprintf("T\n%s", thoughtText))
-					if err := AddMessageToSession(sessionId, "thought", thoughtText, "thought", nil); err != nil {
+					broadcastToSession(initialState.SessionId, "T", thoughtText)
+					if err := AddMessageToSession(initialState.SessionId, "thought", thoughtText, "thought", nil); err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
 					continue
 				}
 
 				if part.Text != "" {
-					sseW.sendServerEvent(fmt.Sprintf("M\n%s", part.Text))
+					broadcastToSession(initialState.SessionId, "M", part.Text)
 					agentResponseText += part.Text
 					modelResponseParts = append(modelResponseParts, part)
 				}
@@ -469,17 +667,17 @@ func streamGeminiResponse(sseW *sseWriter, r *http.Request, sessionId string, sy
 					log.Printf("Failed to marshal function response for frontend: %v", err)
 					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
 				}
-				sseW.sendServerEvent(fmt.Sprintf("R\n%s", string(responseJson)))
+				broadcastToSession(initialState.SessionId, "R", string(responseJson))
 
 				fcJson, _ := json.Marshal(fc)
-				if err := AddMessageToSession(sessionId, "model", string(fcJson), "function_call", nil); err != nil {
+				if err := AddMessageToSession(initialState.SessionId, "model", string(fcJson), "function_call", nil); err != nil {
 					log.Printf("Failed to save function call: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
 
 				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
 				frJson, _ := json.Marshal(fr)
-				if err := AddMessageToSession(sessionId, "user", string(frJson), "function_response", nil); err != nil {
+				if err := AddMessageToSession(initialState.SessionId, "user", string(frJson), "function_response", nil); err != nil {
 					log.Printf("Failed to save function response: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
@@ -489,10 +687,18 @@ func streamGeminiResponse(sseW *sseWriter, r *http.Request, sessionId string, sy
 		}
 	}
 
-	sseW.sendServerEvent("Q")
+	broadcastToSession(initialState.SessionId, "Q", "")
 
-	if err := AddMessageToSession(sessionId, "model", agentResponseText, "text", nil); err != nil {
+	// Before saving the final agent response, delete any empty model messages
+	if err := DeleteLastEmptyModelMessage(initialState.SessionId); err != nil {
+		log.Printf("Failed to delete last empty model message: %v", err)
+	}
+
+	if err := AddMessageToSession(initialState.SessionId, "model", agentResponseText, "text", nil); err != nil {
+		failCall(initialState.SessionId, err) // Mark the call as failed
 		return fmt.Errorf("failed to save agent response: %w", err)
 	}
+
+	completeCall(initialState.SessionId) // Mark the call as completed
 	return nil
 }

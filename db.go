@@ -309,3 +309,30 @@ func DeleteSession(sessionID string) error {
 
 	return tx.Commit()
 }
+
+// DeleteLastEmptyModelMessage deletes the last message in a session if it's an empty "model" type.
+func DeleteLastEmptyModelMessage(sessionID string) error {
+	result, err := db.Exec(`
+		DELETE FROM messages
+		WHERE id = (
+			SELECT id FROM messages
+			WHERE session_id = ? AND role = 'model' AND type = 'text' AND TRIM(text) = ''
+			ORDER BY created_at DESC
+			LIMIT 1
+		);
+	`, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete last empty model message: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Failed to get rows affected after deleting empty model message: %v", err)
+	}
+
+	if rowsAffected > 0 {
+		log.Printf("Deleted %d empty model message(s) for session %s", rowsAffected, sessionID)
+	}
+
+	return nil
+}

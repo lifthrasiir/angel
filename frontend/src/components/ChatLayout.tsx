@@ -28,6 +28,7 @@ const ChatLayout: React.FC = () => {
     handleRemoveFile,
     handleSendMessage,
     fetchSessions,
+    cancelStreamingCall,
   } = useChatSession();
 
   return (
@@ -36,7 +37,6 @@ const ChatLayout: React.FC = () => {
         <>
           <Sidebar
             sessions={sessions}
-            setSessions={fetchSessions} // Changed to fetchSessions
             chatSessionId={chatSessionId}
             fetchSessions={fetchSessions}
           />
@@ -56,6 +56,7 @@ const ChatLayout: React.FC = () => {
             onFilesSelected={handleFilesSelected}
             selectedFiles={selectedFiles}
             handleRemoveFile={handleRemoveFile}
+            handleCancelStreaming={cancelStreamingCall}
           />
         </>
       ) : (

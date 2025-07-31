@@ -10,7 +10,7 @@ import type { ChatMessage } from '../types/chat';
 
 const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
   const { role, type, attachments } = message;
-  const { text, functionCall, functionResponse } = message.parts[0] || {};
+  const { text, functionCall, functionResponse } = message.parts?.[0] || {};
 
   if (type === 'function_response') {
     return <FunctionResponseMessage functionResponse={functionResponse} isUserRole={role === 'user'} />;

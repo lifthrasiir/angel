@@ -101,6 +101,9 @@ func main() {
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")                      // New endpoint to get user info
 	router.HandleFunc("/api/logout", handleLogout).Methods("POST")                             // New endpoint for logout
 
+	// Call management API endpoints
+	router.HandleFunc("/api/calls/{sessionId}", handleCall).Methods("GET", "DELETE")
+
 	// Serve frontend static files
 	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
 
@@ -238,4 +241,33 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 func callFunction(fc FunctionCall) (map[string]interface{}, error) {
 	return CallToolFunction(fc)
+}
+
+// handleCall handles GET and DELETE requests for /api/calls/{sessionId}
+func handleCall(w http.ResponseWriter, r *http.Request) {
+	if !validateAuthAndProject("handleCall", w) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		isActive := hasActiveCall(sessionId)
+		sendJSONResponse(w, map[string]bool{"isActive": isActive})
+	case "DELETE":
+		if err := cancelCall(sessionId); err != nil {
+			log.Printf("handleCall: Failed to cancel call for session %s: %v", sessionId, err)
+			http.Error(w, fmt.Sprintf("Failed to cancel call: %v", err), http.StatusInternalServerError)
+			return
+		}
+		sendJSONResponse(w, map[string]string{"status": "success", "message": "Call cancelled successfully"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }

@@ -14,6 +14,7 @@ export const SET_SELECTED_FILES = 'SET_SELECTED_FILES';
 export const ADD_MESSAGE = 'ADD_MESSAGE';
 export const UPDATE_AGENT_MESSAGE = 'UPDATE_AGENT_MESSAGE';
 export const RESET_CHAT_SESSION_STATE = 'RESET_CHAT_SESSION_STATE';
+export const ADD_ERROR_MESSAGE = 'ADD_ERROR_MESSAGE'; // New Action Type
 
 
 // State Interface
@@ -58,7 +59,8 @@ export type ChatAction =
   | { type: typeof SET_SELECTED_FILES; payload: File[] }
   | { type: typeof ADD_MESSAGE; payload: ChatMessage }
   | { type: typeof UPDATE_AGENT_MESSAGE; payload: ChatMessage }
-  | { type: typeof RESET_CHAT_SESSION_STATE };
+  | { type: typeof RESET_CHAT_SESSION_STATE }
+  | { type: typeof ADD_ERROR_MESSAGE; payload: string }; // New Action Payload
 
 
 // Reducer Function
@@ -110,13 +112,6 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
             ...lastMessage,
             parts: [{ text: (lastMessage.parts[0]?.text || '') + (newMessage.parts[0]?.text || '') }],
           };
-        } else if (newMessage.type === 'model_error') {
-          // If the last model message is empty, remove it
-          if (lastMessage.parts[0]?.text === '') {
-            newMessages.pop();
-          }
-          // Add the model_error message to the end
-          newMessages.push(newMessage);
         } else {
           console.error('UPDATE_AGENT_MESSAGE: Invalid newMessage type for a model lastMessage.');
           return state;
@@ -126,6 +121,26 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
         console.error('UPDATE_AGENT_MESSAGE: lastMessage must be type=model.');
         return state;
       }
+      return { ...state, messages: newMessages };
+    }
+    case ADD_ERROR_MESSAGE: { // New case for ADD_ERROR_MESSAGE
+      const errorMessageText = action.payload;
+      let newMessages = [...state.messages];
+      const lastMessage = newMessages[newMessages.length - 1];
+
+      // Check if the last message is an empty model message and remove it
+      if (lastMessage && lastMessage.type === 'model' && lastMessage.parts[0]?.text === '') {
+        newMessages.pop();
+      }
+
+      // Add the new error message
+      const errorMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'model', // Or 'system' if preferred for errors
+        parts: [{ text: errorMessageText }],
+        type: 'model_error', // Custom type for error messages
+      };
+      newMessages.push(errorMessage);
       return { ...state, messages: newMessages };
     }
     case RESET_CHAT_SESSION_STATE:

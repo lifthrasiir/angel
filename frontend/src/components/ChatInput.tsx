@@ -7,6 +7,7 @@ interface ChatInputProps {
   handleSendMessage: () => void;
   isStreaming: boolean;
   onFilesSelected: (files: File[]) => void; // New prop for file selection
+  handleCancelStreaming: () => void; // New prop for canceling streaming
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -15,6 +16,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   handleSendMessage,
   isStreaming,
   onFilesSelected,
+  handleCancelStreaming,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,9 +86,15 @@ const ChatInput: React.FC<ChatInputProps> = ({
         rows={1}
         style={{ flexGrow: 1, padding: '10px', marginRight: '10px', border: '1px solid #eee', borderRadius: '5px', resize: 'none', overflowY: 'hidden' }}
       />
-      <button onClick={handleSendMessage} disabled={isStreaming} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: isStreaming ? 'not-allowed' : 'pointer', opacity: isStreaming ? 0.5 : 1 }}>
-        Send
-      </button>
+      {isStreaming ? (
+        <button onClick={handleCancelStreaming} style={{ padding: '10px 20px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+          Cancel
+        </button>
+      ) : (
+        <button onClick={handleSendMessage} disabled={isStreaming} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: isStreaming ? 'not-allowed' : 'pointer', opacity: isStreaming ? 0.5 : 1 }}>
+          Send
+        </button>
+      )}
     </div>
   );
 };

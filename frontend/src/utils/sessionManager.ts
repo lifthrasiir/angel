@@ -18,30 +18,13 @@ export const fetchSessions = async (): Promise<Session[]> => {
   }
 };
 
-export const loadSession = async (sessionId: string) => {
-  try {
-    const response = await fetch(`/api/chat/load?sessionId=${sessionId}`);
-    if (response.ok) {
-      const data = await response.json();
-      if (!data) {
-        console.error('Received null data from API for session load');
-        return null;
-      }
-      return data;
-    } else if (response.status === 401) {
-      throw new Error('UNAUTHORIZED');
-    } else if (response.status === 404) {
-      console.warn('Session not found:', sessionId);
-      return null;
-    } else {
-      console.error('Failed to load session:', response.status, response.statusText);
-      return null;
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-      throw error;
-    }
-    console.error('Error loading session:', error);
-    return null;
-  }
+export const loadSession = (sessionId: string, onMessage: (event: MessageEvent) => void, onError: (event: Event) => void): EventSource => {
+  const eventSource = new EventSource(`/api/chat/load?sessionId=${sessionId}`, {
+    withCredentials: true,
+  });
+
+  eventSource.onmessage = onMessage;
+  eventSource.onerror = onError;
+
+  return eventSource;
 };

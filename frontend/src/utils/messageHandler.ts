@@ -1,5 +1,7 @@
 import { FileAttachment } from '../types/chat';
 
+// EventSource cannot be used directly here because it only supports GET requests,
+// and we need to send POST parameters (e.g., systemPrompt which can be very long).
 export const sendMessage = async (
   inputMessage: string,
   attachments: FileAttachment[],
@@ -34,6 +36,7 @@ export interface StreamEventHandlers {
   onSessionUpdate: (sessionId: string) => void;
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
+  onError: (errorData: string) => void; // Add this line
 }
 
 export const processStreamResponse = async (
@@ -60,28 +63,34 @@ export const processStreamResponse = async (
       const eventString = buffer.substring(0, newlineIndex);
       buffer = buffer.substring(newlineIndex + 2);
 
-      const data = eventString.slice(6).replace(/\ndata: /g, '\n');
+      const [type, data] = eventString.slice(6).replace(/\ndata: /g, '\n').split('\n', 2);
 
-      if (data.startsWith('M\n')) {
-        handlers.onMessage(data.substring(2));
-      } else if (data.startsWith('T\n')) {
-        const thoughtText = data.substring(2);
+      if (type === 'M') {
+        handlers.onMessage(data);
+      } else if (type === 'T') {
+        const thoughtText = data;
         const thoughtId = crypto.randomUUID();
         handlers.onThought(thoughtText, thoughtId);
-      } else if (data.startsWith('F\n')) {
-        const [functionName, functionArgsJson] = data.substring(2).split('\n', 2);
+      } else if (type === 'F') {
+        const [functionName, functionArgsJson] = data.split('\n', 2);
         const functionArgs = JSON.parse(functionArgsJson);
         handlers.onFunctionCall(functionName, functionArgs);
-      } else if (data.startsWith('R')) {
-        const functionResponseRaw = JSON.parse(data.substring(2));
+      } else if (type === 'R') {
+        const functionResponseRaw = JSON.parse(data);
         handlers.onFunctionResponse(functionResponseRaw);
-      } else if (data.startsWith('S\n')) {
-        const newSessionId = data.substring(2);
+      } else if (type === 'S') {
+        const newSessionId = data;
         handlers.onSessionUpdate(newSessionId);
-      } else if (data.startsWith('N\n')) {
-        const [sessionIdToUpdate, newName] = data.substring(2).split('\n', 2);
+      } else if (type === 'N') {
+        const [sessionIdToUpdate, newName] = data.split('\n', 2);
         handlers.onSessionNameUpdate(sessionIdToUpdate, newName);
-      } else if (data === 'Q') {
+      } else if (type === 'E') {
+        // Error
+        console.error('Stream Error:', data); // Log the error data
+        handlers.onError(data); // Call onError handler
+        handlers.onEnd(); // Call onEnd handler for cleanup
+        break; // Break the loop on error
+      } else if (type === 'Q') {
         handlers.onEnd();
         break;
       } else {

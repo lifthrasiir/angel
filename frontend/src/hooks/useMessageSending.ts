@@ -16,6 +16,7 @@ import {
   SET_IS_SYSTEM_PROMPT_EDITING,
   ADD_MESSAGE,
   UPDATE_AGENT_MESSAGE,
+  ADD_ERROR_MESSAGE,
 } from './chatReducer';
 import { ChatAction } from './chatReducer';
 
@@ -76,12 +77,10 @@ export const useMessageSending = ({
       }
 
       if (!response.ok) {
-        dispatch({ type: UPDATE_AGENT_MESSAGE, payload: {
-          id: agentMessageId,
-          role: 'model',
-          parts: [{ text: 'Failed to send message or receive stream.' }],
-          type: 'model_error',
-        } as ChatMessage });
+        const errorMessage = response.status === 499
+          ? 'Request cancelled by user.'
+          : 'Failed to send message or receive stream.';
+        dispatch({ type: ADD_ERROR_MESSAGE, payload: errorMessage });
         return;
       }
 
@@ -126,6 +125,9 @@ export const useMessageSending = ({
         },
         onEnd: () => {
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
+        },
+        onError: (errorData: string) => {
+          dispatch({ type: ADD_ERROR_MESSAGE, payload: errorData });
         }
       };
 
@@ -136,12 +138,7 @@ export const useMessageSending = ({
 
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
-      dispatch({ type: ADD_MESSAGE, payload: {
-        id: crypto.randomUUID(),
-        role: 'model',
-        parts: [{ text: 'Error sending message or receiving stream.' }],
-        type: 'model_error',
-      } as ChatMessage });
+      dispatch({ type: ADD_ERROR_MESSAGE, payload: 'Error sending message or receiving stream.' });
     } finally {
       dispatch({ type: SET_IS_STREAMING, payload: false });
       loadSessions();
@@ -149,5 +146,26 @@ export const useMessageSending = ({
     }
   };
 
-  return { handleSendMessage };
+  const cancelStreamingCall = async () => {
+    if (!chatSessionId) return;
+
+    try {
+      const response = await fetch(`/api/calls/${chatSessionId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        console.log(`Streaming call for session ${chatSessionId} cancelled.`);
+        dispatch({ type: SET_IS_STREAMING, payload: false });
+        dispatch({ type: ADD_ERROR_MESSAGE, payload: 'Request cancelled by user.' });
+      } else {
+        console.error(`Failed to cancel streaming call for session ${chatSessionId}:`, response.status, response.statusText);
+        dispatch({ type: ADD_ERROR_MESSAGE, payload: `Failed to cancel request: ${response.status} ${response.statusText}` });
+      }
+    } catch (error) {
+      console.error(`Error cancelling streaming call for session ${chatSessionId}:`, error);
+    }
+  };
+
+  return { handleSendMessage, cancelStreamingCall };
 };
