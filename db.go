@@ -40,7 +40,9 @@ func InitDB() {
 
 	CREATE TABLE IF NOT EXISTS oauth_tokens (
 		id INTEGER PRIMARY KEY,
-		token_data TEXT NOT NULL
+		token_data TEXT NOT NULL,
+		user_email TEXT,
+		project_id TEXT
 	);
 	`
 	_, err = db.Exec(createTableSQL)
@@ -49,16 +51,26 @@ func InitDB() {
 	}
 
 	// Attempt to add user_email column, ignore if it already exists
-	alterTableSQL := `ALTER TABLE oauth_tokens ADD COLUMN user_email TEXT;`
-	_, err = db.Exec(alterTableSQL)
+	// This is now part of the CREATE TABLE statement, but kept for migration of older dbs
+	alterTableSQLUserEmail := `ALTER TABLE oauth_tokens ADD COLUMN user_email TEXT;`
+	_, err = db.Exec(alterTableSQLUserEmail)
 	if err != nil {
 		// Check if the error is "duplicate column name"
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			log.Fatalf("Failed to add user_email column: %v", err)
 		}
 		log.Println("user_email column already exists, skipping migration.")
-	} else {
-		log.Println("user_email column added successfully.")
+	}
+
+	// Attempt to add project_id column, ignore if it already exists
+	alterTableSQLProjectID := `ALTER TABLE oauth_tokens ADD COLUMN project_id TEXT;`
+	_, err = db.Exec(alterTableSQLProjectID)
+	if err != nil {
+		// Check if the error is "duplicate column name"
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			log.Fatalf("Failed to add project_id column: %v", err)
+		}
+		log.Println("project_id column already exists, skipping migration.")
 	}
 
 	log.Println("Database initialized and tables created.")
@@ -167,28 +179,30 @@ func AddMessageToSession(sessionID string, role string, text string, msgType str
 	return nil
 }
 
-func SaveOAuthToken(tokenJSON string, userEmail string) error {
-	_, err := db.Exec("INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email) VALUES (1, ?, ?)", tokenJSON, userEmail)
+func SaveOAuthToken(tokenJSON string, userEmail string, projectID string) error {
+	_, err := db.Exec("INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id) VALUES (1, ?, ?, ?)", tokenJSON, userEmail, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token: %w", err)
 	}
 	return nil
 }
 
-func LoadOAuthToken() (string, string, error) {
+func LoadOAuthToken() (string, string, string, error) {
 	var tokenJSON string
 	var nullUserEmail sql.NullString
-	err := db.QueryRow("SELECT token_data, user_email FROM oauth_tokens WHERE id = 1").Scan(&tokenJSON, &nullUserEmail)
+	var nullProjectID sql.NullString
+	err := db.QueryRow("SELECT token_data, user_email, project_id FROM oauth_tokens WHERE id = 1").Scan(&tokenJSON, &nullUserEmail, &nullProjectID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Println("LoadOAuthToken: No existing token found in DB.")
-			return "", "", nil // No token found, not an error
+			return "", "", "", nil // No token found, not an error
 		}
-		return "", "", fmt.Errorf("failed to load OAuth token: %w", err)
+		return "", "", "", fmt.Errorf("failed to load OAuth token: %w", err)
 	}
 	userEmail := nullUserEmail.String
+	projectID := nullProjectID.String
 
-	return tokenJSON, userEmail, nil
+	return tokenJSON, userEmail, projectID, nil
 }
 
 // DeleteOAuthToken deletes the OAuth token from the database.

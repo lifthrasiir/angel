@@ -47,7 +47,7 @@ html, body {
   margin-top: 0;
 }
 
-.chat-bubble>*:last {
+.chat-bubble>*:last-child {
   margin-bottom: 0;
 }
 
