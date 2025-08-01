@@ -55,6 +55,7 @@ const ChatLayout: React.FC = () => {
             systemPrompt={systemPrompt}
             setSystemPrompt={(prompt) => dispatch({ type: SET_SYSTEM_PROMPT, payload: prompt })}
             isSystemPromptEditing={isSystemPromptEditing}
+            chatSessionId={chatSessionId}
             
             inputMessage={inputMessage}
             setInputMessage={(message) => dispatch({ type: SET_INPUT_MESSAGE, payload: message })}

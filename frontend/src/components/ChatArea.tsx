@@ -13,6 +13,7 @@ interface ChatAreaProps {
   systemPrompt: string;
   setSystemPrompt: (prompt: string) => void;
   isSystemPromptEditing: boolean;
+  chatSessionId: string | null; // New prop
   
   inputMessage: string;
   setInputMessage: (message: string) => void;
@@ -31,6 +32,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   systemPrompt,
   setSystemPrompt,
   isSystemPromptEditing,
+  chatSessionId, // Destructure new prop
   
   inputMessage,
   setInputMessage,
@@ -88,6 +90,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           <div style={{ flexGrow: 1, overflowY: 'auto' }}>
             <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
               <SystemPromptEditor
+                key={chatSessionId}
                 systemPrompt={systemPrompt}
                 setSystemPrompt={setSystemPrompt}
                 isSystemPromptEditing={isSystemPromptEditing}

@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { ChatMessage } from '../types/chat';
 import { loadSession } from '../utils/sessionManager';
-import { fetchDefaultSystemPrompt } from '../utils/systemPromptManager';
+
 import { fetchUserInfo } from '../utils/userManager';
 import {
   EventInitialState,
@@ -85,7 +85,7 @@ export const useSessionInitialization = ({
 
       if (currentSessionId === 'new') {
         resetChatSessionState();
-        const defaultPrompt = await fetchDefaultSystemPrompt();
+        const defaultPrompt = `{{.Builtin.SystemPrompt}}`;
         dispatch({ type: SET_SYSTEM_PROMPT, payload: defaultPrompt });
         return;
       }

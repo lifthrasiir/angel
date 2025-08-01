@@ -2,7 +2,7 @@ import { FileAttachment } from '../types/chat';
 import { splitOnceByNewline } from './stringUtils';
 
 // SSE Event Types
-export const EventSessionID = "S";
+
 export const EventInitialState = "0";
 export const EventInitialStateNoCall = "1";
 export const EventFunctionCall = "F";
@@ -46,7 +46,7 @@ export interface StreamEventHandlers {
   onThought: (thoughtText: string) => void;
   onFunctionCall: (functionName: string, functionArgs: any) => void;
   onFunctionResponse: (functionResponse: any) => void;
-  onSessionUpdate: (sessionId: string) => void;
+  onSessionStart: (sessionId: string, systemPrompt: string) => void;
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
   onError: (errorData: string) => void; // Add this line
@@ -93,9 +93,9 @@ export const processStreamResponse = async (
       } else if (type === EventFunctionReply) {
         const functionResponseRaw = JSON.parse(data);
         handlers.onFunctionResponse(functionResponseRaw);
-      } else if (type === EventSessionID) {
-        const newSessionId = data;
-        handlers.onSessionUpdate(newSessionId);
+      } else if (type === EventInitialState) { // New: Handle EventInitialState
+        const { sessionId, systemPrompt } = JSON.parse(data);
+        handlers.onSessionStart(sessionId, systemPrompt);
       } else if (type === EventSessionName) {
         const [sessionIdToUpdate, newName] = splitOnceByNewline(data);
         handlers.onSessionNameUpdate(sessionIdToUpdate, newName);

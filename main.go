@@ -95,11 +95,12 @@ func main() {
 	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")                   // New endpoint to list all chat sessions
 	router.HandleFunc("/api/chat/countTokens", countTokensHandler).Methods("POST")             // Add countTokens handler
 	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST")  // New endpoint to create a new session and send the first message
-	router.HandleFunc("/api/default-system-prompt", getDefaultSystemPrompt).Methods("GET")     // New endpoint to get the default system prompt
 	router.HandleFunc("/api/chat/updateSessionName", updateSessionNameHandler).Methods("POST") // New endpoint to update session name
 	router.HandleFunc("/api/chat/deleteSession/{id}", deleteSession).Methods("DELETE")         // New endpoint to delete a session
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")                      // New endpoint to get user info
 	router.HandleFunc("/api/logout", handleLogout).Methods("POST")                             // New endpoint for logout
+
+	router.HandleFunc("/api/evaluate-prompt", handleEvaluatePrompt).Methods("POST") // New endpoint to evaluate Go templates
 
 	// Call management API endpoints
 	router.HandleFunc("/api/calls/{sessionId}", handleCall).Methods("GET", "DELETE")
@@ -270,4 +271,24 @@ func handleCall(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleEvaluatePrompt evaluates a Go template string and returns the result
+func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		Template string `json:"template"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "handleEvaluatePrompt") {
+		return
+	}
+
+	evaluatedPrompt, err := EvaluatePrompt(requestBody.Template)
+	if err != nil {
+		log.Printf("Error evaluating prompt template: %v", err)
+		http.Error(w, fmt.Sprintf("Error evaluating prompt template: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"evaluatedPrompt": evaluatedPrompt})
 }

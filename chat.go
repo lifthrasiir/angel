@@ -32,8 +32,14 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	sessionId := GenerateSessionID() // Generate new session ID
 
-	// Use provided system prompt as-is (including empty string if intentionally set)
-	systemPrompt := requestBody.SystemPrompt
+	// Always evaluate the system prompt as a Go template
+	evaluatedSystemPrompt, err := GetEvaluatedSystemPrompt(requestBody.SystemPrompt)
+	if err != nil {
+		log.Printf("newSessionAndMessage: Error evaluating system prompt: %v", err)
+		http.Error(w, fmt.Sprintf("Error evaluating system prompt: %v", err), http.StatusBadRequest)
+		return
+	}
+	systemPrompt := evaluatedSystemPrompt
 
 	if err := CreateSession(sessionId, systemPrompt); err != nil {
 		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
@@ -67,8 +73,22 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Create a sseWriter for this client connection
 	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
 
-	// Send the new session ID as the first event
-	sseW.sendServerEvent(EventSessionID, sessionId)
+	// Prepare initial state for streaming with only SessionId and SystemPrompt
+	initialStateForClient := InitialState{
+		SessionId:    sessionId,
+		History:      []FrontendMessage{}, // Empty history for initial client state
+		SystemPrompt: systemPrompt,
+	}
+
+	initialStateJSON, err := json.Marshal(initialStateForClient)
+	if err != nil {
+		log.Printf("newSessionAndMessage: Failed to marshal initial state for client: %v", err)
+		http.Error(w, "Failed to prepare initial state for client", http.StatusInternalServerError)
+		return
+	}
+
+	// Send the initial state (SessionId and SystemPrompt) as the first event
+	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
 	// Add this sseWriter to the active list for broadcasting subsequent events
 	addSseWriter(sessionId, sseW)
@@ -268,12 +288,6 @@ func listChatSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, sessions)
-}
-
-// New endpoint to get the default system prompt
-func getDefaultSystemPrompt(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprint(w, GetDefaultSystemPrompt())
 }
 
 // New endpoint to delete a chat session

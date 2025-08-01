@@ -40,7 +40,7 @@ export const initialState: ChatState = {
   sessions: [],
   lastAutoDisplayedThoughtId: null,
   isStreaming: false,
-  systemPrompt: '',
+  systemPrompt: '{{.Builtin.SystemPrompt}}',
   isSystemPromptEditing: false,
   selectedFiles: [],
 };

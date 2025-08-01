@@ -12,7 +12,7 @@ import {
   SET_IS_STREAMING,
   SET_LAST_AUTO_DISPLAYED_THOUGHT_ID,
   SET_CHAT_SESSION_ID,
-  
+  SET_SYSTEM_PROMPT,
   SET_IS_SYSTEM_PROMPT_EDITING,
   ADD_MESSAGE,
   UPDATE_AGENT_MESSAGE,
@@ -112,9 +112,10 @@ export const useMessageSending = ({
           dispatch({ type: ADD_MESSAGE, payload: message });
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
-        onSessionUpdate: (newSessionId: string) => {
-          dispatch({ type: SET_CHAT_SESSION_ID, payload: newSessionId });
-          navigate(`/${newSessionId}`, { replace: true });
+        onSessionStart: (sessionId: string, systemPrompt: string) => {
+          dispatch({ type: SET_CHAT_SESSION_ID, payload: sessionId });
+          dispatch({ type: SET_SYSTEM_PROMPT, payload: systemPrompt });
+          navigate(`/${sessionId}`, { replace: true });
           loadSessions();
         },
         onSessionNameUpdate: (sessionId: string, newName: string) => {
