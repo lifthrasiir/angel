@@ -37,20 +37,39 @@ html, body {
   border-radius: 18px;
   line-height: 1.4;
   word-wrap: break-word;
-  white-space: pre-wrap; /* Preserve whitespace and line breaks */
   overflow: hidden; /* Ensure border-radius clips content */
 }
 
+.chat-bubble h1 {
+  font-size: 160%;
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+
+.chat-bubble h2 {
+  font-size: 140%;
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+
+.chat-bubble h3 {
+  font-size: 120%;
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+
 .chat-bubble p {
-  margin: 0; /* Reset all p margins */
+  margin: 0.5em 0;
 }
 
-.chat-bubble p:first-child {
-  margin-top: 0.5em; /* Add top margin for the first paragraph in any chat bubble */
+.chat-bubble ul,
+.chat-bubble ol {
+  margin: 0.5em 0;
+  padding-left: 20px;
 }
 
-.chat-bubble p + p {
-  margin-top: 0.5em; /* Spacing between subsequent paragraphs */
+.chat-bubble li {
+  margin-bottom: 0.25em;
 }
 
 textarea {
