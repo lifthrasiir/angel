@@ -40,22 +40,30 @@ html, body {
   overflow: hidden; /* Ensure border-radius clips content */
 }
 
+.chat-bubble>*:first-child {
+  margin-top: 0;
+}
+
+.chat-bubble>*:last {
+  margin-bottom: 0;
+}
+
 .chat-bubble h1 {
   font-size: 160%;
   font-weight: 700;
-  margin: 0.5rem 0;
+  margin: 1.2rem 0 0.5rem 0;
 }
 
 .chat-bubble h2 {
   font-size: 140%;
   font-weight: 700;
-  margin: 0.5rem 0;
+  margin: 1.0rem 0 0.5rem 0;
 }
 
 .chat-bubble h3 {
   font-size: 120%;
   font-weight: 700;
-  margin: 0.5rem 0;
+  margin: 0.8rem 0 0.5rem 0;
 }
 
 .chat-bubble p {
@@ -137,6 +145,23 @@ textarea {
   margin: 0; /* Remove default pre margins */
   max-height: min(30vh, 400px); /* Limit height to 30% of viewport height */
   overflow-y: auto; /* Add vertical scrollbar if content exceeds max-height */
+}
+
+.chat-bubble table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+.chat-bubble th,
+.chat-bubble td {
+  border: 1px solid #ccc;
+  padding: 8px;
+  text-align: left;
+}
+
+.chat-bubble th {
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .chat-bubble.function-message-bubble {
@@ -309,6 +334,140 @@ textarea {
   font-size: 0.9em;
   opacity: 0;
   animation: fadeInOut 3s forwards;
+}
+
+.sidebar-session-item {
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-session-edit-container {
+  display: flex;
+  flex-grow: 1;
+  align-items: center;
+}
+
+.sidebar-session-name-input {
+  flex-grow: 1;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sidebar-delete-button {
+  margin-left: 5px;
+  padding: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d9534f; /* Red color for delete */
+}
+
+.sidebar-session-button {
+  flex-grow: 1;
+  padding: 8px;
+  text-align: left;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background: white; /* Default background */
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-session-button.active {
+  background: #e0e0e0;
+}
+
+.sidebar-edit-button {
+  margin-left: 5px;
+  padding: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+}
+
+.sidebar-edit-button {
+  margin-left: 5px;
+  padding: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+}
+
+.thought-group-container {
+  margin-bottom: 10px;
+}
+
+.thought-circle-container {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 5px;
+  padding-left: 15px;
+}
+
+.thought-circle-container {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 5px;
+  padding-left: 15px;
+}
+
+.user-message-bubble-content {
+  position: relative;
+  white-space: pre-wrap;
+}
+
+.user-message-bubble-content.expanded {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.user-message-bubble-content.collapsed {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.user-message-attachments-container {
+  margin-top: 10px;
+  border-top: 1px solid #eee;
+  padding-top: 5px;
+}
+
+.user-message-attachments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.user-message-toggle-button {
+  position: sticky;
+  bottom: -10px;
+  left: 0;
+  width: 100%;
+  text-align: center;
+  cursor: pointer;
+  color: var(--color-user-verydark);
+  font-size: 1.2em;
+  z-index: 10;
+  background-color: var(--color-user-light);
+  padding-top: 10px;
 }
 
 @keyframes fadeInOut {

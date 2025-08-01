@@ -34,8 +34,8 @@ export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(({ thoughts,
   };
 
   return (
-    <div style={{ marginBottom: '10px' }}>
-      <div style={{ display: 'flex', gap: '5px', marginBottom: '5px', paddingLeft: '15px' }}>
+    <div className="thought-group-container">
+      <div className="thought-circle-container">
         {thoughts.map((thought, index) => (
           <div
             key={thought.id}

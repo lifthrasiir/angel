@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import LogoAnimation from './LogoAnimation'; // LogoAnimation import
-import { FaEdit, FaTrash } from 'react-icons/fa';
-import { Session } from '../types/chat';
 import { useChat } from '../hooks/ChatContext'; // Add this import
+import SessionList from './SessionList';
+import { Session } from '../types/chat';
 
 interface SidebarProps {
   sessions: Session[];
@@ -17,8 +17,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   chatSessionId,
   fetchSessions,
 }) => {
-  const { dispatch } = useChat();
   const navigate = useNavigate();
+  const { dispatch } = useChat();
 
   const updateSessionState = (sessionId: string, updateFn: (session: Session) => Session) => {
     dispatch({
@@ -51,104 +51,13 @@ const Sidebar: React.FC<SidebarProps> = ({
         {sessions && sessions.length === 0 ? (
           <p>No sessions yet.</p>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0, width: '100%' }}>
-            {sessions.map((session) => (
-              <li key={session.id} style={{ marginBottom: '5px', display: 'flex', alignItems: 'center' }}>
-                {session.isEditing ? (
-                  <div style={{ display: 'flex', flexGrow: 1, alignItems: 'center' }}>
-                    <input
-                      type="text"
-                      value={session.name || ''}
-                      onChange={(e) => {
-                        updateSessionState(session.id, s => ({ ...s, name: e.target.value }));
-                      }}
-                      onBlur={async () => {
-                        if (session.id) {
-                          try {
-                            await fetch('/api/chat/updateSessionName', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ sessionId: session.id, name: session.name || '' }),
-                            });
-                            fetchSessions();
-                          } catch (error) {
-                            console.error('Error updating session name:', error);
-                          }
-                        }
-                        updateSessionState(session.id, s => ({ ...s, isEditing: false }));
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.currentTarget.blur();
-                        } else if (e.key === 'Escape') {
-                          updateSessionState(session.id, s => ({ ...s, isEditing: false }));
-                        }
-                      }}
-                      style={{ flexGrow: 1, padding: '8px', border: '1px solid #ddd', borderRadius: '5px', width: '100%', boxSizing: 'border-box' }}
-                    />
-                    <button
-                      onClick={() => {
-                        if (session.id && window.confirm('Are you sure you want to delete this session?')) {
-                          handleDeleteSession(session.id);
-                        }
-                      }}
-                      style={{
-                        marginLeft: '5px',
-                        padding: '5px',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#d9534f', // Red color for delete
-                      }}
-                    >
-                      <FaTrash size={16} />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => navigate(`/${session.id}`)}
-                    style={{
-                      flexGrow: 1,
-                      padding: '8px',
-                      textAlign: 'left',
-                      border: '1px solid #ddd',
-                      borderRadius: '5px',
-                      background: session.id === chatSessionId ? '#e0e0e0' : 'white',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {session.name || 'New Chat'}
-                  </button>
-                )}
-                {!session.isEditing && (
-                  <button
-                    onClick={() => {
-                      updateSessionState(session.id, s => ({ ...s, isEditing: true }));
-                    }}
-                    style={{
-                      marginLeft: '5px',
-                      padding: '5px',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#555',
-                    }}
-                  >
-                    <FaEdit size={16} />
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <SessionList
+            sessions={sessions}
+            chatSessionId={chatSessionId}
+            fetchSessions={fetchSessions}
+            updateSessionState={updateSessionState}
+            handleDeleteSession={handleDeleteSession}
+          />
         )}
       </div>
       <div style={{ width: '100%', borderTop: '1px solid #eee', paddingTop: '10px', marginTop: '10px' }}>

@@ -13,8 +13,6 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) 
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
 
-  const maxHeight = '30vh';
-
   useEffect(() => {
     if (messageRef.current) {
       setShowToggle(messageRef.current.scrollHeight > messageRef.current.clientHeight);
@@ -28,18 +26,13 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) 
   return (
     <div className="chat-message-container user-message">
       <div
-        className="chat-bubble"
         ref={messageRef}
-        style={{
-          maxHeight: isExpanded ? 'none' : maxHeight,
-          overflowY: isExpanded ? 'visible' : 'auto',
-          position: 'relative',
-        }}
+        className={`chat-bubble user-message-bubble-content ${isExpanded ? 'expanded' : 'collapsed'}`}
       >
         {text}
         {attachments && attachments.length > 0 && (
-          <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '5px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '5px' }}>
+          <div className="user-message-attachments-container">
+            <div className="user-message-attachments-list">
               {attachments.map((file, index) => (
                 <FileAttachmentPreview key={index} file={file} />
               ))}
@@ -47,22 +40,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) 
           </div>
         )}
         {showToggle && (
-          <div
-            style={{
-              position: 'sticky',
-              bottom: '-10px',
-              left: '0',
-              width: '100%',
-              textAlign: 'center',
-              cursor: 'pointer',
-              color: 'var(--color-user-verydark)',
-              fontSize: '1.2em',
-              zIndex: 10,
-              backgroundColor: 'var(--color-user-light)',
-              paddingTop: '10px',
-            }}
-            onClick={toggleExpand}
-          >
+          <div className="user-message-toggle-button" onClick={toggleExpand}>
             {isExpanded ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
           </div>
         )}
