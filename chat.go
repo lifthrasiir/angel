@@ -13,13 +13,27 @@ import (
 	"time"
 )
 
+const (
+	// SSE Event Types
+	EventSessionID          = "S" // Initial session ID
+	EventInitialState       = "0" // Initial state with history (for active call)
+	EventInitialStateNoCall = "1" // Initial state with history (for load session when no active call)
+	EventFunctionCall       = "F" // Function call
+	EventThought            = "T" // Thought process
+	EventModelMessage       = "M" // Model message (text)
+	EventFunctionReply      = "R" // Function response
+	EventComplete           = "Q" // Query complete
+	EventSessionName        = "N" // Session name inferred/updated
+	EventError              = "E" // Error message
+)
+
 type InitialState struct {
 	SessionId    string            `json:"sessionId"`
 	History      []FrontendMessage `json:"history"`
 	SystemPrompt string            `json:"systemPrompt"`
 }
 
-var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\s*(.*)`)
+var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +89,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
 
 	// Send the new session ID as the first event
-	sseW.sendServerEvent("S", sessionId)
+	sseW.sendServerEvent(EventSessionID, sessionId)
 
 	// Add this sseWriter to the active list for broadcasting subsequent events
 	addSseWriter(sessionId, sseW)
@@ -90,51 +104,6 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert FrontendMessage to Content for Gemini API
-
-	// Goroutine to infer session name
-	go func(sID string, uMsg string, sPrompt string, sseW *sseWriter) {
-		// Check if session name is already set (user might have set it manually)
-		session, err := GetSession(sID)
-		if err != nil {
-			log.Printf("Failed to get session %s for name inference: %v", sID, err)
-			return
-		}
-		if session.Name != "" { // If name is not empty, user has set it, do not infer
-			return
-		}
-
-		// Construct the prompt for name inference
-		nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(uMsg, "")
-
-		// Call LLM to infer name
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
-		defer cancel()
-
-		inferredName, err := GlobalGeminiState.GeminiClient.GenerateContentOneShot(ctx, []Content{{
-			Role:  "user",
-			Parts: []Part{{Text: nameInputPrompt}},
-		}}, DefaultGeminiModel, nameSystemPrompt, &ThinkingConfig{IncludeThoughts: false})
-		if err != nil {
-			log.Printf("Failed to infer session name for %s: %v", sID, err)
-			return
-		}
-
-		// Validate inferred name
-		inferredName = strings.TrimSpace(inferredName)
-		if len(inferredName) > 100 || strings.Contains(inferredName, "\n") {
-			log.Printf("Inferred name for session %s is invalid (too long or multi-line): %s", sID, inferredName)
-			return
-		}
-
-		// Update session name in DB
-		if err := UpdateSessionName(sID, inferredName); err != nil {
-			log.Printf("Failed to update session name for %s: %v", sID, err)
-			return
-		}
-
-		// Notify frontend about name update
-		sseW.sendServerEvent("N", fmt.Sprintf("%s\n%s", sID, inferredName))
-	}(sessionId, userMessage, systemPrompt, sseW) // Pass sseW to the goroutine
 
 	// Prepare initial state for streaming
 	initialState := InitialState{
@@ -287,26 +256,19 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to prepare initial state", http.StatusInternalServerError)
 			return
 		}
-		// Send initial state as a single SSE event (always send history first)
-		sseW.sendServerEvent("1", string(initialStateJSON)) // Event type 1: initial state with history
 
 		if hasActiveCall(sessionId) {
 			log.Printf("loadChatSession: Active call found for session %s, streaming response.", sessionId)
-			// Create a new initialState for streaming, without history, as history was already sent
-			streamingInitialState := InitialState{
-				SessionId:    sessionId,
-				History:      []FrontendMessage{}, // Clear history as it's already sent
-				SystemPrompt: session.SystemPrompt,
-			}
-			// Stream the response (this will broadcast to all connected clients for this session)
-			go streamGeminiResponse(streamingInitialState, sseW)
+			sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
-			// Keep the connection open until client disconnects
+			// Keep the connection open until client disconnects.
+			// sseW will get any broadcasted messages over the course.
 			<-r.Context().Done()
 			log.Printf("loadChatSession: Client disconnected from SSE for session %s.", sessionId)
 		} else {
 			// If no active call, close the SSE connection after sending initial state
 			log.Printf("loadChatSession: No active call for session %s, closing SSE connection.", sessionId)
+			sseW.sendServerEvent(EventInitialStateNoCall, string(initialStateJSON))
 			sseW.Close()
 		}
 	} else {
@@ -357,6 +319,13 @@ func (s *sseWriter) Close() {
 	}
 }
 
+// prepareSSEEventData prepares the SSE event data string.
+// Note: `eventType` is for the logical message kind, not the browser event type!
+func prepareSSEEventData(eventType, data string) []byte {
+	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
+	return []byte(fmt.Sprintf("data: %s\ndata: %s\n\n", eventType, escapedData))
+}
+
 var (
 	activeSseWriters = make(map[string][]*sseWriter) // sessionId -> list of sseWriters
 	sseWritersMutex  sync.Mutex
@@ -395,13 +364,12 @@ func broadcastToSession(sessionId string, eventType string, data string) {
 	}
 
 	// Prepare the event data once
-	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
-	eventData := fmt.Sprintf("data: %s\ndata: %s\n\n", eventType, escapedData)
+	eventData := prepareSSEEventData(eventType, data)
 
 	for _, sseW := range writers {
 		sseW.mu.Lock()
 		if !sseW.disconnected {
-			_, err := sseW.writeUnsafe([]byte(eventData))
+			_, err := sseW.writeUnsafe(eventData)
 			if err == nil {
 				sseW.flushUnsafe()
 			}
@@ -470,9 +438,8 @@ func (sseW *sseWriter) sendServerEvent(eventType, data string) {
 		return
 	}
 
-	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
-	eventData := fmt.Sprintf("data: %s\ndata: %s\n\n", eventType, escapedData)
-	_, err := sseW.writeUnsafe([]byte(eventData))
+	eventData := prepareSSEEventData(eventType, data)
+	_, err := sseW.writeUnsafe(eventData)
 	if err == nil {
 		sseW.flushUnsafe()
 	}
@@ -552,7 +519,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {
 		log.Printf("streamGeminiResponse: Failed to start call for session %s: %v", initialState.SessionId, err)
-		broadcastToSession(initialState.SessionId, "E", err.Error())
+		broadcastToSession(initialState.SessionId, EventError, err.Error())
 		return err
 	}
 	defer removeCall(initialState.SessionId) // Ensure call is removed from manager when function exits
@@ -563,7 +530,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 		log.Printf("streamGeminiResponse: Failed to marshal initial state: %v", err)
 		return err
 	}
-	sseW.sendServerEvent("0", string(initialStateJSON))
+	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 	log.Printf("streamGeminiResponse: Sent initial state for session %s.", initialState.SessionId)
 
 	// Goroutine to monitor client disconnection
@@ -608,7 +575,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 			select {
 			case <-ctx.Done():
 				// Context was canceled, send a message to the frontend
-				broadcastToSession(initialState.SessionId, "E", "Request canceled by user")
+				broadcastToSession(initialState.SessionId, EventError, "Request canceled by user")
 				return ctx.Err() // Return the context error
 			default:
 				// Continue processing the response
@@ -623,7 +590,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 				if part.FunctionCall != nil {
 					functionCalls = append(functionCalls, *part.FunctionCall)
 					argsJson, _ := json.Marshal(part.FunctionCall.Args)
-					broadcastToSession(initialState.SessionId, "F", fmt.Sprintf("%s\n%s", part.FunctionCall.Name, string(argsJson)))
+					broadcastToSession(initialState.SessionId, EventFunctionCall, fmt.Sprintf("%s\n%s", part.FunctionCall.Name, string(argsJson)))
 					continue
 				}
 
@@ -636,7 +603,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
 					}
 
-					broadcastToSession(initialState.SessionId, "T", thoughtText)
+					broadcastToSession(initialState.SessionId, EventThought, thoughtText)
 					if err := AddMessageToSession(initialState.SessionId, "thought", thoughtText, "thought", nil); err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
@@ -644,7 +611,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 				}
 
 				if part.Text != "" {
-					broadcastToSession(initialState.SessionId, "M", part.Text)
+					broadcastToSession(initialState.SessionId, EventModelMessage, part.Text)
 					agentResponseText += part.Text
 					modelResponseParts = append(modelResponseParts, part)
 				}
@@ -667,7 +634,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 					log.Printf("Failed to marshal function response for frontend: %v", err)
 					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
 				}
-				broadcastToSession(initialState.SessionId, "R", string(responseJson))
+				broadcastToSession(initialState.SessionId, EventFunctionReply, string(responseJson))
 
 				fcJson, _ := json.Marshal(fc)
 				if err := AddMessageToSession(initialState.SessionId, "model", string(fcJson), "function_call", nil); err != nil {
@@ -687,12 +654,15 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 		}
 	}
 
-	broadcastToSession(initialState.SessionId, "Q", "")
+	broadcastToSession(initialState.SessionId, EventComplete, "")
 
 	// Before saving the final agent response, delete any empty model messages
 	if err := DeleteLastEmptyModelMessage(initialState.SessionId); err != nil {
-		log.Printf("Failed to delete last empty model message: %v", err)
+		log.Printf("Failed to save last empty model message: %v", err)
 	}
+
+	// Infer session name after streaming is complete
+	go inferAndSetSessionName(initialState.SessionId, initialState.History[0].Parts[0].Text, sseW)
 
 	if err := AddMessageToSession(initialState.SessionId, "model", agentResponseText, "text", nil); err != nil {
 		failCall(initialState.SessionId, err) // Mark the call as failed
@@ -701,4 +671,54 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 
 	completeCall(initialState.SessionId) // Mark the call as completed
 	return nil
+}
+
+// inferAndSetSessionName infers the session name using LLM and updates it in the DB.
+func inferAndSetSessionName(sessionId string, userMessage string, sseW *sseWriter) {
+	var inferredName string // Initialize to empty string
+
+	defer func() {
+		// This defer will execute at the end of the function, ensuring 'N' is sent.
+		// If inferredName is still empty, it means inference failed or was skipped.
+		sseW.sendServerEvent(EventSessionName, fmt.Sprintf("%s\n%s", sessionId, inferredName))
+	}()
+
+	session, err := GetSession(sessionId)
+	if err != nil {
+		log.Printf("Failed to get session %s for name inference: %v", sessionId, err)
+		return // inferredName remains empty
+	}
+	if session.Name != "" { // If name is not empty, user has set it, do not infer
+		inferredName = session.Name // Use existing name if already set
+		return
+	}
+
+	nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(userMessage, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	llmInferredName, err := GlobalGeminiState.GeminiClient.GenerateContentOneShot(ctx, []Content{{
+		Role:  "user",
+		Parts: []Part{{Text: nameInputPrompt}},
+	}}, DefaultGeminiModel, nameSystemPrompt, &ThinkingConfig{IncludeThoughts: false})
+	if err != nil {
+		log.Printf("Failed to infer session name for %s: %v", sessionId, err)
+		return // inferredName remains empty
+	}
+
+	llmInferredName = strings.TrimSpace(llmInferredName)
+	if len(llmInferredName) > 100 || strings.Contains(llmInferredName, "\n") {
+		log.Printf("Inferred name for session %s is invalid (too long or multi-line): %s", sessionId, llmInferredName)
+		return // inferredName remains empty
+	}
+
+	inferredName = llmInferredName // Set inferredName only if successful
+
+	if err := UpdateSessionName(sessionId, inferredName); err != nil {
+		log.Printf("Failed to update session name for %s: %v", sessionId, err)
+		// If DB update fails, inferredName is still the valid one, but DB might not reflect it.
+		// We still send the inferredName to frontend, as it's the best we have.
+		return
+	}
 }

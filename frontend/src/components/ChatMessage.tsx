@@ -7,6 +7,7 @@ import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
 import SystemMessage from './SystemMessage';
 import type { ChatMessage } from '../types/chat';
+import { splitOnceByNewline } from '../utils/stringUtils';
 
 const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
   const { role, type, attachments } = message;
@@ -19,7 +20,7 @@ const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message })
   } else if (type === 'thought') {
     // Thought messages are handled by ThoughtGroup, which passes them to ChatMessage.
     // We need to render them as a ModelTextMessage with special styling.
-    const [subject, description] = (text || '').split('\n', 2);
+    const [subject, description] = splitOnceByNewline(text || '');
     const thoughtText = `**Thought: ${subject}**\n${description || ''}`;
     return <ModelTextMessage text={thoughtText} className="agent-thought" />;
   } else if (type === 'function_call') {

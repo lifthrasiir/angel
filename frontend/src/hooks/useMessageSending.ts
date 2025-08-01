@@ -17,6 +17,7 @@ import {
   ADD_MESSAGE,
   UPDATE_AGENT_MESSAGE,
   ADD_ERROR_MESSAGE,
+  SET_SESSION_NAME,
 } from './chatReducer';
 import { ChatAction } from './chatReducer';
 
@@ -41,8 +42,6 @@ export const useMessageSending = ({
 }: UseMessageSendingProps) => {
   const navigate = useNavigate();
 
-  
-
   const handleSendMessage = async () => {
     if (!inputMessage.trim() && selectedFiles.length === 0) return;
 
@@ -62,8 +61,7 @@ export const useMessageSending = ({
       dispatch({ type: SET_INPUT_MESSAGE, payload: '' });
       dispatch({ type: SET_SELECTED_FILES, payload: [] });
 
-      let agentMessageId = crypto.randomUUID();
-      dispatch({ type: ADD_MESSAGE, payload: { id: agentMessageId, role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage });
+      dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'model', parts: [{ text: '' }], type: 'model' } as ChatMessage });
 
       if (chatSessionId === null) {
         dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
@@ -84,15 +82,13 @@ export const useMessageSending = ({
         return;
       }
 
-      let currentAgentText = '';
-
       const handlers: StreamEventHandlers = {
         onMessage: (text: string) => {
-          currentAgentText += text;
-          dispatch({ type: UPDATE_AGENT_MESSAGE, payload: { id: agentMessageId, role: 'model', parts: [{ text: currentAgentText }], type: 'model' } as ChatMessage });
+          dispatch({ type: UPDATE_AGENT_MESSAGE, payload: text });
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
-        onThought: (thoughtText: string, thoughtId: string) => {
+        onThought: (thoughtText: string) => {
+          const thoughtId = crypto.randomUUID();
           dispatch({ type: ADD_MESSAGE, payload: { id: thoughtId, role: 'model', parts: [{ text: thoughtText }], type: 'thought' } as ChatMessage });
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: thoughtId });
         },
@@ -119,30 +115,32 @@ export const useMessageSending = ({
         onSessionUpdate: (newSessionId: string) => {
           dispatch({ type: SET_CHAT_SESSION_ID, payload: newSessionId });
           navigate(`/${newSessionId}`, { replace: true });
-        },
-        onSessionNameUpdate: () => {
           loadSessions();
+        },
+        onSessionNameUpdate: (sessionId: string, newName: string) => {
+          dispatch({ type: SET_SESSION_NAME, payload: { sessionId, name: newName } });
         },
         onEnd: () => {
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
+          dispatch({ type: SET_IS_STREAMING, payload: false });
         },
         onError: (errorData: string) => {
           dispatch({ type: ADD_ERROR_MESSAGE, payload: errorData });
         }
       };
 
-      await processStreamResponse(response, handlers);
-      loadSessions();
-      dispatch({ type: SET_IS_STREAMING, payload: false });
-      dispatch({ type: SET_SELECTED_FILES, payload: [] });
+      const { qReceived, nReceived } = await processStreamResponse(response, handlers);
 
+      if (!qReceived || !nReceived) {
+        // This indicates a backend bug or unexpected stream termination
+        console.error("Backend bug: Stream ended without receiving both Q and N events.", { qReceived, nReceived });
+        dispatch({ type: ADD_ERROR_MESSAGE, payload: "An unexpected error occurred: Stream did not finalize correctly." });
+      }
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
       dispatch({ type: ADD_ERROR_MESSAGE, payload: 'Error sending message or receiving stream.' });
     } finally {
       dispatch({ type: SET_IS_STREAMING, payload: false });
-      loadSessions();
-      dispatch({ type: SET_SELECTED_FILES, payload: [] });
     }
   };
 

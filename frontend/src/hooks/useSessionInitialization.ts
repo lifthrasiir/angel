@@ -4,6 +4,17 @@ import { ChatMessage } from '../types/chat';
 import { loadSession } from '../utils/sessionManager';
 import { fetchDefaultSystemPrompt } from '../utils/systemPromptManager';
 import { fetchUserInfo } from '../utils/userManager';
+import {
+  EventInitialState,
+  EventInitialStateNoCall,
+  EventModelMessage,
+  EventFunctionCall,
+  EventFunctionReply,
+  EventThought,
+  EventError,
+  EventComplete,
+} from '../utils/messageHandler';
+import { splitOnceByNewline } from '../utils/stringUtils';
 
 import {
   SET_INPUT_MESSAGE,
@@ -17,6 +28,7 @@ import {
   RESET_CHAT_SESSION_STATE,
   ADD_MESSAGE,
   ADD_ERROR_MESSAGE,
+  UPDATE_AGENT_MESSAGE,
 } from './chatReducer';
 import { ChatAction } from './chatReducer';
 
@@ -89,10 +101,9 @@ export const useSessionInitialization = ({
           eventSource = loadSession(
             currentSessionId,
             (event: MessageEvent) => {
-              const [eventType, eventData] = event.data.split('\n', 2);
+              const [eventType, eventData] = splitOnceByNewline(event.data);
 
-              if (eventType === '0' || eventType === '1') {
-                // Initial state
+              if (eventType === EventInitialState || eventType === EventInitialStateNoCall) {
                 const data = JSON.parse(eventData);
                 dispatch({ type: SET_CHAT_SESSION_ID, payload: data.sessionId });
                 dispatch({ type: SET_SYSTEM_PROMPT, payload: data.systemPrompt });
@@ -115,33 +126,26 @@ export const useSessionInitialization = ({
                   return chatMessage;
                 }) });
 
-                // Set streaming state based on eventType
-                dispatch({ type: SET_IS_STREAMING, payload: eventType === '0' });
-                if (eventType === '1') { // If eventType is '1', close the EventSource
+                dispatch({ type: SET_IS_STREAMING, payload: eventType === EventInitialState });
+                if (eventType === EventInitialStateNoCall) {
                   eventSource?.close();
                 }
 
-              } else if (eventType === 'M') {
-                // Model message
-                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'model', parts: [{ text: eventData }], type: 'model' } });
-              } else if (eventType === 'F') {
-                // Function call
-                const [functionName, argsJson] = eventData.split('\n');
+              } else if (eventType === EventModelMessage) {
+                dispatch({ type: UPDATE_AGENT_MESSAGE, payload: eventData });
+              } else if (eventType === EventFunctionCall) {
+                const [functionName, argsJson] = splitOnceByNewline(eventData);
                 dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: JSON.parse(argsJson) } }], type: 'function_call' } });
-              } else if (eventType === 'R') {
-                // Function response
+              } else if (eventType === EventFunctionReply) {
                 dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: JSON.parse(eventData) }], type: 'function_response' } });
-              } else if (eventType === 'T') {
-                // Thought
+              } else if (eventType === EventThought) {
                 dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'thought', parts: [{ text: eventData }], type: 'thought' } });
-              } else if (eventType === 'E') {
-                // Error
+              } else if (eventType === EventError) {
                 console.error('SSE Error:', eventData);
                 dispatch({ type: SET_IS_STREAMING, payload: false });
                 eventSource?.close(); // Close EventSource on error
                 dispatch({ type: ADD_ERROR_MESSAGE, payload: eventData });
-              } else if (eventType === 'Q') {
-                // Stream finished
+              } else if (eventType === EventComplete) {
                 dispatch({ type: SET_IS_STREAMING, payload: false });
                 eventSource?.close(); // Close EventSource on stream finished
               }

@@ -1,4 +1,17 @@
 import { FileAttachment } from '../types/chat';
+import { splitOnceByNewline } from './stringUtils';
+
+// SSE Event Types
+export const EventSessionID = "S";
+export const EventInitialState = "0";
+export const EventInitialStateNoCall = "1";
+export const EventFunctionCall = "F";
+export const EventThought = "T";
+export const EventModelMessage = "M";
+export const EventFunctionReply = "R";
+export const EventComplete = "Q";
+export const EventSessionName = "N";
+export const EventError = "E";
 
 // EventSource cannot be used directly here because it only supports GET requests,
 // and we need to send POST parameters (e.g., systemPrompt which can be very long).
@@ -30,7 +43,7 @@ export const sendMessage = async (
 
 export interface StreamEventHandlers {
   onMessage: (text: string) => void;
-  onThought: (thoughtText: string, thoughtId: string) => void;
+  onThought: (thoughtText: string) => void;
   onFunctionCall: (functionName: string, functionArgs: any) => void;
   onFunctionResponse: (functionResponse: any) => void;
   onSessionUpdate: (sessionId: string) => void;
@@ -42,7 +55,7 @@ export interface StreamEventHandlers {
 export const processStreamResponse = async (
   response: Response,
   handlers: StreamEventHandlers
-) => {
+): Promise<{ qReceived: boolean; nReceived: boolean }> => {
   const reader = response.body?.getReader();
   if (!reader) {
     throw new Error('Failed to get readable stream reader.');
@@ -51,51 +64,53 @@ export const processStreamResponse = async (
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
 
+  let qReceived = false;
+  let nReceived = false;
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
-      break;
+      break; // Exit loop immediately if stream is done
     }
     buffer += decoder.decode(value, { stream: true });
 
     let newlineIndex;
     while ((newlineIndex = buffer.indexOf('\n\n')) !== -1) {
-      const eventString = buffer.substring(0, newlineIndex);
+      let eventString = buffer.substring(0, newlineIndex).slice(6).replace(/\ndata: /g, '\n');
       buffer = buffer.substring(newlineIndex + 2);
 
-      const [type, data] = eventString.slice(6).replace(/\ndata: /g, '\n').split('\n', 2);
+      const [type, data] = splitOnceByNewline(eventString);
 
-      if (type === 'M') {
+      if (type === EventModelMessage) {
         handlers.onMessage(data);
-      } else if (type === 'T') {
+      } else if (type === EventThought) {
         const thoughtText = data;
-        const thoughtId = crypto.randomUUID();
-        handlers.onThought(thoughtText, thoughtId);
-      } else if (type === 'F') {
-        const [functionName, functionArgsJson] = data.split('\n', 2);
+        handlers.onThought(thoughtText);
+      } else if (type === EventFunctionCall) {
+        const [functionName, functionArgsJson] = splitOnceByNewline(data);
         const functionArgs = JSON.parse(functionArgsJson);
         handlers.onFunctionCall(functionName, functionArgs);
-      } else if (type === 'R') {
+      } else if (type === EventFunctionReply) {
         const functionResponseRaw = JSON.parse(data);
         handlers.onFunctionResponse(functionResponseRaw);
-      } else if (type === 'S') {
+      } else if (type === EventSessionID) {
         const newSessionId = data;
         handlers.onSessionUpdate(newSessionId);
-      } else if (type === 'N') {
-        const [sessionIdToUpdate, newName] = data.split('\n', 2);
+      } else if (type === EventSessionName) {
+        const [sessionIdToUpdate, newName] = splitOnceByNewline(data);
         handlers.onSessionNameUpdate(sessionIdToUpdate, newName);
-      } else if (type === 'E') {
-        // Error
+        nReceived = true;
+      } else if (type === EventError) {
         console.error('Stream Error:', data); // Log the error data
         handlers.onError(data); // Call onError handler
-        handlers.onEnd(); // Call onEnd handler for cleanup
         break; // Break the loop on error
-      } else if (type === 'Q') {
+      } else if (type === EventComplete) {
         handlers.onEnd();
-        break;
+        qReceived = true;
       } else {
         console.warn('Unknown protocol:', data);
       }
     }
   }
+  return { qReceived, nReceived };
 };

@@ -15,7 +15,7 @@ export const ADD_MESSAGE = 'ADD_MESSAGE';
 export const UPDATE_AGENT_MESSAGE = 'UPDATE_AGENT_MESSAGE';
 export const RESET_CHAT_SESSION_STATE = 'RESET_CHAT_SESSION_STATE';
 export const ADD_ERROR_MESSAGE = 'ADD_ERROR_MESSAGE'; // New Action Type
-
+export const SET_SESSION_NAME = 'SET_SESSION_NAME';
 
 // State Interface
 export interface ChatState {
@@ -58,9 +58,10 @@ export type ChatAction =
   | { type: typeof SET_IS_SYSTEM_PROMPT_EDITING; payload: boolean }
   | { type: typeof SET_SELECTED_FILES; payload: File[] }
   | { type: typeof ADD_MESSAGE; payload: ChatMessage }
-  | { type: typeof UPDATE_AGENT_MESSAGE; payload: ChatMessage }
+  | { type: typeof UPDATE_AGENT_MESSAGE; payload: string }
   | { type: typeof RESET_CHAT_SESSION_STATE }
-  | { type: typeof ADD_ERROR_MESSAGE; payload: string }; // New Action Payload
+  | { type: typeof ADD_ERROR_MESSAGE; payload: string }
+  | { type: typeof SET_SESSION_NAME; payload: { sessionId: string; name: string } };
 
 
 // Reducer Function
@@ -101,29 +102,24 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
       }
     }
     case UPDATE_AGENT_MESSAGE: {
-      const newMessage = action.payload;
+      const newMessageText = action.payload;
       const lastMessage = state.messages[state.messages.length - 1];
-      let newMessages = [...state.messages];
 
       if (lastMessage && lastMessage.type === 'model') {
-        if (newMessage.type === 'model') {
-          // Append content to the last model message
-          newMessages[newMessages.length - 1] = {
-            ...lastMessage,
-            parts: [{ text: (lastMessage.parts[0]?.text || '') + (newMessage.parts[0]?.text || '') }],
-          };
-        } else {
-          console.error('UPDATE_AGENT_MESSAGE: Invalid newMessage type for a model lastMessage.');
-          return state;
-        }
+        // Append content to the last model message
+        let newMessages = [...state.messages];
+        newMessages[newMessages.length - 1] = {
+          ...lastMessage,
+          parts: [{ text: (lastMessage.parts[0]?.text || '') + newMessageText }],
+        };
+        return { ...state, messages: newMessages };
       } else {
-        // Error handling for invalid UPDATE_AGENT_MESSAGE calls
-        console.error('UPDATE_AGENT_MESSAGE: lastMessage must be type=model.');
-        return state;
+        // Otherwise, just add the message to the end
+        const newMessage = { id: crypto.randomUUID(), role: 'model', parts: [{ text: newMessageText }], type: 'model' } as ChatMessage;
+        return { ...state, messages: [...state.messages, newMessage] };
       }
-      return { ...state, messages: newMessages };
     }
-    case ADD_ERROR_MESSAGE: { // New case for ADD_ERROR_MESSAGE
+    case ADD_ERROR_MESSAGE: {
       const errorMessageText = action.payload;
       let newMessages = [...state.messages];
       const lastMessage = newMessages[newMessages.length - 1];
@@ -151,6 +147,15 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
         systemPrompt: '',
         isSystemPromptEditing: true,
         selectedFiles: [],
+      };
+    case SET_SESSION_NAME:
+      return {
+        ...state,
+        sessions: state.sessions.map(session =>
+          session.id === action.payload.sessionId
+            ? { ...session, name: action.payload.name }
+            : session
+        ),
       };
     default:
       return state;
