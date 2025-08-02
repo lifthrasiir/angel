@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useLayoutEffect } from 'react';
 import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import FileAttachmentPreview from './FileAttachmentPreview';
 import { FileAttachment } from '../types/chat';
+import { measureContentHeight } from '../utils/measurementUtils';
 
 interface UserTextMessageProps {
   text?: string;
@@ -13,9 +14,16 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) 
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (messageRef.current) {
-      setShowToggle(messageRef.current.scrollHeight > messageRef.current.clientHeight);
+      const contentHeight = measureContentHeight(
+        messageRef,
+        false, // showPrettyJson is false for UserTextMessage
+        text || '',
+        null, // data is not directly used for UserTextMessage
+      );
+      const collapsedHeight = window.innerHeight * 0.3;
+      setShowToggle(contentHeight > collapsedHeight);
     }
   }, [text, attachments]);
 
@@ -28,6 +36,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) 
       <div
         ref={messageRef}
         className={`chat-bubble user-message-bubble-content ${isExpanded ? 'expanded' : 'collapsed'}`}
+        style={showToggle && !isExpanded ? { maxHeight: '30vh', overflowY: 'auto' } : {}}
       >
         {text}
         {attachments && attachments.length > 0 && (

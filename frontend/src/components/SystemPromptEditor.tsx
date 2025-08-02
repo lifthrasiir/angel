@@ -96,9 +96,17 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
     // If 'custom', keep the current systemPrompt value
   };
 
+  const clickAnywhereToExpand = !isSystemPromptEditing && !isExpanded;
+
   return (
     <div className="chat-message-container system-prompt-message">
-      <div className={`chat-bubble system-prompt-bubble ${isExpanded || promptType === 'custom' ? 'expanded' : ''}`}>
+      <div
+        className={`chat-bubble system-prompt-bubble ${isExpanded || promptType === 'custom' ? 'expanded' : ''}`}
+        style={{
+          cursor: clickAnywhereToExpand ? 'pointer' : '',
+        }}
+        onClick={() => (clickAnywhereToExpand ? setIsExpanded(true) : null)}
+      >
         {isSystemPromptEditing ? (
           // Editable mode
           <div
@@ -137,6 +145,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
                   border: 'none',
                   cursor: 'pointer',
                   fontSize: '1.2em',
+                  marginLeft: '0.8ex',
                   color: 'var(--color-system-verydark)',
                 }}
               >
@@ -194,9 +203,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
               flexDirection: 'column',
               gap: '10px',
               width: '100%',
-              cursor: 'pointer',
             }}
-            onClick={() => setIsExpanded(!isExpanded)}
           >
             <div
               style={{
@@ -218,14 +225,20 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
                   style={{
                     fontSize: '1.2em',
                     color: 'var(--color-system-verydark)',
+                    cursor: 'pointer',
+                    marginLeft: '0.8ex',
                   }}
+                  onClick={() => setIsExpanded(false)}
                 />
               ) : (
                 <FaChevronDown
                   style={{
                     fontSize: '1.2em',
                     color: 'var(--color-system-verydark)',
+                    cursor: 'pointer',
+                    marginLeft: '0.8ex',
                   }}
+                  onClick={() => setIsExpanded(true)}
                 />
               )}
             </div>
