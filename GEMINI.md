@@ -3,9 +3,11 @@
 - **Language:** Code and comments should be in English. This very file should also be in English. Respond to the user in their requested language.
 - **Terminology:** The terms "agent" or "angel" refer to the LLM model.
 - **Development:** Features may require modifications to both the Go and TypeScript code. Try to refactor any significant duplications or similar structures.
-- **Build:** `npm run build-frontend`, `npm run build-backend`, `npm run build` (both). Strive to run the minimal command required. Never run `npm start`, the user will. Otherwise run without prompt.
+- **Build:** Always run the minimal necessary build command: `npm run build-frontend` (frontend-only), `npm run build-backend` (backend-only), or `npm run build` (both). Never `npm start` (user responsibility). Run without prompt.
 - **Dependency:** Minimize. Clearly explain why any new dependency is required.
 - **Comments:** Comments are strictly for future maintainers, explaining *why* complex or non-obvious code exists, not *what* it does. Avoid any comments that describe new features, temporary changes, or are only relevant during code generation (e.g., "new endpoint", "add foo"). Ensure comments provide essential context beyond the code itself.
+- **Modern Practices:** Prioritize current, idiomatic patterns and best practices for relevant frameworks/languages, ensuring up-to-date, performant, and maintainable solutions, unless contradicted by project conventions.
+- **Responsiveness:** Always prioritize and act on the user's *latest* input. If a new instruction arrives during an ongoing task, immediately halt and address the new instruction; do not assume continuation.
 
 # Specific instructions
 

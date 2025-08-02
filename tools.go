@@ -4,7 +4,61 @@ import (
 	"context"
 	"fmt"
 	"log"
+
+	"github.com/modelcontextprotocol/go-sdk/jsonschema"
 )
+
+func jsonSchemaTypeToGeminiType(jsonType string) Type {
+	switch jsonType {
+	case "string":
+		return TypeString
+	case "number":
+		return TypeNumber
+	case "integer":
+		return TypeInteger
+	case "boolean":
+		return TypeBoolean
+	case "array":
+		return TypeArray
+	case "object":
+		return TypeObject
+	case "null":
+		return TypeNull
+	default:
+		return TypeUnspecified
+	}
+}
+
+// convertJSONSchemaToGeminiSchema converts a jsonschema.Schema to a Gemini API compatible Schema.
+func convertJSONSchemaToGeminiSchema(jsonSchema *jsonschema.Schema) *Schema {
+	if jsonSchema == nil {
+		return nil
+	}
+
+	geminiSchema := &Schema{}
+
+	// Handle Type
+	if jsonSchema.Type != "" {
+		geminiSchema.Type = jsonSchemaTypeToGeminiType(jsonSchema.Type)
+	} else if len(jsonSchema.Types) > 0 {
+		geminiSchema.Type = jsonSchemaTypeToGeminiType(jsonSchema.Types[0]) // Take the first type if multiple are present
+	}
+
+	// Handle Properties recursively
+	if len(jsonSchema.Properties) > 0 {
+		geminiSchema.Properties = make(map[string]*Schema)
+		for key, propSchema := range jsonSchema.Properties {
+			geminiSchema.Properties[key] = convertJSONSchemaToGeminiSchema(propSchema)
+		}
+	}
+
+	// Handle Required
+	if len(jsonSchema.Required) > 0 {
+		geminiSchema.Required = jsonSchema.Required
+	}
+
+	return geminiSchema
+}
 
 // Define all available tools here
 var availableTools = map[string]ToolDefinition{
@@ -115,15 +169,7 @@ func GetToolsForGemini() []Tool {
 				functionDeclarations = append(functionDeclarations, FunctionDeclaration{
 					Name:        mappedName,
 					Description: tool.Description,
-					Parameters: &Schema{
-						Type: TypeObject,
-						Properties: map[string]*Schema{
-							"args": {
-								Type:        TypeObject,
-								Description: "Arguments for the tool.",
-							},
-						},
-					},
+					Parameters:  convertJSONSchemaToGeminiSchema(tool.InputSchema),
 				})
 			}
 		}
