@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
+
+	"github.com/gorilla/mux"
 )
 
 type InitialState struct {
@@ -124,8 +125,10 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+
 	var requestBody struct {
-		SessionID   string           `json:"sessionId"`
 		Message     string           `json:"message"`
 		Attachments []FileAttachment `json:"attachments"`
 	}
@@ -133,8 +136,6 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
 		return
 	}
-
-	sessionId := requestBody.SessionID
 
 	session, err := GetSession(sessionId)
 	if err != nil {
@@ -195,11 +196,8 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionId := r.URL.Query().Get("sessionId")
-	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
-		return
-	}
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
 
 	// Check if session exists
 	exists, err := SessionExists(sessionId)
@@ -296,11 +294,8 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionId := strings.TrimPrefix(r.URL.Path, "/api/chat/deleteSession/")
-	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
-		return
-	}
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
 
 	if err := DeleteSession(sessionId); err != nil {
 		log.Printf("deleteSession: Failed to delete session %s: %v", sessionId, err)

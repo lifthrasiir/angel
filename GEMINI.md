@@ -5,7 +5,7 @@
 - **Development:** Features may require modifications to both the Go and TypeScript code. Try to refactor any significant duplications or similar structures.
 - **Build:** `npm run build-frontend`, `npm run build-backend`, `npm run build` (both). Strive to run the minimal command required. Never run `npm start`, the user will. Otherwise run without prompt.
 - **Dependency:** Minimize. Clearly explain why any new dependency is required.
-- **Documentation:** Comments are for future me, do not say what is new. Conversely include as many contexts as needed besides from code itself.
+- **Comments:** Comments are strictly for future maintainers, explaining *why* complex or non-obvious code exists, not *what* it does. Avoid any comments that describe new features, temporary changes, or are only relevant during code generation (e.g., "new endpoint", "add foo"). Ensure comments provide essential context beyond the code itself.
 
 # Specific instructions
 

@@ -35,7 +35,7 @@ const SessionList: React.FC<SessionListProps> = ({
                 onBlur={async () => {
                   if (session.id) {
                     try {
-                      await fetch('/api/chat/updateSessionName', {
+                      await fetch(`/api/chat/${session.id}/name`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ sessionId: session.id, name: session.name || '' }),

@@ -43,7 +43,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
   // Function to evaluate the template
   const evaluateTemplate = async (template: string) => {
     try {
-      const response = await fetch('/api/evaluate-prompt', {
+      const response = await fetch('/api/evaluatePrompt', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

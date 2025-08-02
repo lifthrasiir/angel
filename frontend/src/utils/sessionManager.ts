@@ -2,7 +2,7 @@ import { Session } from '../types/chat';
 
 export const fetchSessions = async (): Promise<Session[]> => {
   try {
-    const response = await fetch('/api/chat/sessions');
+    const response = await fetch('/api/chat');
     if (response.ok) {
       const data: Session[] = await response.json();
       return data;
@@ -19,7 +19,7 @@ export const fetchSessions = async (): Promise<Session[]> => {
 };
 
 export const loadSession = (sessionId: string, onMessage: (event: MessageEvent) => void, onError: (event: Event) => void): EventSource => {
-  const eventSource = new EventSource(`/api/chat/load?sessionId=${sessionId}`, {
+  const eventSource = new EventSource(`/api/chat/${sessionId}`, {
     withCredentials: true,
   });
 

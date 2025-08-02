@@ -149,7 +149,7 @@ export const useMessageSending = ({
     if (!chatSessionId) return;
 
     try {
-      const response = await fetch(`/api/calls/${chatSessionId}`, {
+      const response = await fetch(`/api/chat/${chatSessionId}/call`, {
         method: 'DELETE',
       });
 

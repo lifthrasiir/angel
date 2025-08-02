@@ -3,20 +3,55 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
+//go:embed frontend/dist
+var embeddedFiles embed.FS
+
 var (
 	oauthStates       = make(map[string]string) // Stores randomState -> originalQueryString
 	GlobalGeminiState GeminiState
 )
+
+// serveStaticFiles serves static files from the filesystem first, then from embedded files
+func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
+	// Try to serve from filesystem first (for development)
+	fsPath := filepath.Join("frontend", "dist", r.URL.Path)
+
+	// Check if the requested path is for a file that exists on disk
+	if _, err := os.Stat(fsPath); err == nil {
+		http.ServeFile(w, r, fsPath)
+		return
+	}
+
+	// If not found on filesystem, try to serve from embedded files
+	// The embedded files are rooted at frontend/dist, so we need to strip the prefix
+	// We need to create a sub-filesystem that is rooted at "frontend/dist" within the embedded files.
+	// This ensures that http.FileServer correctly resolves paths like "/index.html" to "frontend/dist/index.html"
+	// within the embedded filesystem.
+	fsys, err := fs.Sub(embeddedFiles, "frontend/dist")
+	if err != nil {
+		log.Printf("Error creating sub-filesystem: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	http.FileServer(http.FS(fsys)).ServeHTTP(w, r)
+	return
+
+}
 
 // validateAuthAndProject performs common auth and project validation for handlers
 func validateAuthAndProject(handlerName string, w http.ResponseWriter) bool {
@@ -70,16 +105,9 @@ func init() {
 	GlobalGeminiState.OAuthState = "random"
 	GlobalGeminiState.LoadToken()
 	InitAuth(&GlobalGeminiState)
-
-	initEmbeddedZip()
 }
 
 func main() {
-	defer func() {
-		if exeFile != nil {
-			exeFile.Close()
-		}
-	}()
 	router := mux.NewRouter()
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
@@ -88,25 +116,25 @@ func main() {
 		router.HandleFunc("/oauth2callback", makeAuthHandler(&GlobalGeminiState, HandleGoogleCallback)).Methods("GET")
 	}
 
-	// API handlers
 	router.HandleFunc("/new", newChatSession).Methods("GET")
-	router.HandleFunc("/api/chat/message", chatMessage).Methods("POST")
-	router.HandleFunc("/api/chat/load", loadChatSession).Methods("GET")                        // New endpoint to load chat session
-	router.HandleFunc("/api/chat/sessions", listChatSessions).Methods("GET")                   // New endpoint to list all chat sessions
-	router.HandleFunc("/api/chat/countTokens", countTokensHandler).Methods("POST")             // Add countTokens handler
-	router.HandleFunc("/api/chat/newSessionAndMessage", newSessionAndMessage).Methods("POST")  // New endpoint to create a new session and send the first message
-	router.HandleFunc("/api/chat/updateSessionName", updateSessionNameHandler).Methods("POST") // New endpoint to update session name
-	router.HandleFunc("/api/chat/deleteSession/{id}", deleteSession).Methods("DELETE")         // New endpoint to delete a session
-	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")                      // New endpoint to get user info
-	router.HandleFunc("/api/logout", handleLogout).Methods("POST")                             // New endpoint for logout
+	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET") // New handler for /:sessionId
 
-	router.HandleFunc("/api/evaluate-prompt", handleEvaluatePrompt).Methods("POST") // New endpoint to evaluate Go templates
-
-	// Call management API endpoints
-	router.HandleFunc("/api/calls/{sessionId}", handleCall).Methods("GET", "DELETE")
+	// API handlers
+	router.HandleFunc("/api/chat", listChatSessions).Methods("GET")
+	router.HandleFunc("/api/chat", newSessionAndMessage).Methods("POST")
+	router.HandleFunc("/api/chat/{sessionId}", chatMessage).Methods("POST")
+	router.HandleFunc("/api/chat/{sessionId}", loadChatSession).Methods("GET")
+	router.HandleFunc("/api/chat/{sessionId}/name", updateSessionNameHandler).Methods("POST")
+	router.HandleFunc("/api/chat/{sessionId}/call", handleCall).Methods("GET", "DELETE")
+	router.HandleFunc("/api/chat/{sessionId}", deleteSession).Methods("DELETE")
+	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
+	router.HandleFunc("/api/logout", handleLogout).Methods("POST")
+	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
+	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
 
 	// Serve frontend static files
-	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
+	router.PathPrefix("/").Handler(http.HandlerFunc(serveStaticFiles))
+	router.NotFoundHandler = http.HandlerFunc(serveNotFound)
 
 	fmt.Println("Server started at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
@@ -120,17 +148,72 @@ func makeAuthHandler(gs *GeminiState, handler func(gs *GeminiState, w http.Respo
 
 // New chat session start handler
 func newChatSession(w http.ResponseWriter, r *http.Request) {
-	serveStaticFiles(w, r)
+	serveIndexHTML(w, r)
+}
+
+// handleSessionPage handles requests for /:sessionId
+func handleSessionPage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+
+	// Check if sessionId contains at least one uppercase letter
+	if !strings.ContainsAny(sessionId, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+		serveNotFound(w, r)
+		return
+	}
+
+	// Check if the session exists
+	_, err := GetSession(sessionId) // Use GetSession instead of GetChatSession
+	if err != nil {
+		log.Printf("Session %s not found: %v", sessionId, err)
+		serveNotFound(w, r)
+		return
+	}
+
+	// If session exists and is valid, serve index.html
+	serveIndexHTML(w, r)
+}
+
+// serveIndexHTML serves the embedded index.html file
+func serveIndexHTML(w http.ResponseWriter, r *http.Request) {
+	indexEmbedded, err := embeddedFiles.ReadFile("frontend/dist/index.html")
+	if err != nil {
+		log.Printf("Error reading embedded index.html: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(indexEmbedded)
+}
+
+// serveNotFound serves the custom 404.html page
+func serveNotFound(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotFound)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	// Read the embedded 404.html
+	page404, err := embeddedFiles.ReadFile("frontend/dist/404.html")
+	if err != nil {
+		log.Printf("Error reading embedded 404.html: %v", err)
+		http.Error(w, "404 Not Found", http.StatusNotFound)
+		return
+	}
+	w.Write(page404)
 }
 
 func GenerateSessionID() string {
-	b := make([]byte, 8) // 8 bytes will result in an 11-character base64 string
-	if _, err := rand.Read(b); err != nil {
-		log.Printf("Error generating random session ID: %v", err)
-		// Fallback to UUID or handle error appropriately
-		return uuid.New().String() // Fallback to UUID if random generation fails
+	for {
+		b := make([]byte, 8) // 8 bytes will result in an 11-character base64 string
+		if _, err := rand.Read(b); err != nil {
+			log.Printf("Error generating random session ID: %v", err)
+			// Fallback to UUID if random generation fails, as a last resort
+			return uuid.New().String()
+		}
+		sessionID := base64.RawURLEncoding.EncodeToString(b)
+		if strings.ContainsAny(sessionID, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+			return sessionID
+		}
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // New handler to get user info
@@ -205,8 +288,6 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Logged out successfully")
 }
-
-// Add countTokens handler
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 	if !validateAuthAndProject("countTokensHandler", w) {

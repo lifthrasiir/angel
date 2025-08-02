@@ -25,10 +25,10 @@ export const sendMessage = async (
   let requestBody: any = {};
 
   if (chatSessionId) {
-    apiUrl = '/api/chat/message';
-    requestBody = { sessionId: chatSessionId, message: inputMessage, attachments };
+    apiUrl = `/api/chat/${chatSessionId}`;
+    requestBody = { message: inputMessage, attachments };
   } else {
-    apiUrl = '/api/chat/newSessionAndMessage';
+    apiUrl = '/api/chat';
     requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: '', attachments };
   }
 

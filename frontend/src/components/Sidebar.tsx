@@ -31,7 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
-      await fetch(`/api/chat/deleteSession/${sessionId}`, {
+      await fetch(`/api/chat/${sessionId}`, {
         method: 'DELETE',
       });
       fetchSessions();

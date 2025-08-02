@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build --logLevel warn",
     "build-frontend": "npm run build",
-    "postbuild": "node ../scripts/clean-katex-fonts.js && node ../scripts/zip-frontend.js",
+    "postbuild": "node ../scripts/clean-katex-fonts.js",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
