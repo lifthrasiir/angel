@@ -6,7 +6,6 @@ import { Session } from '../types/chat';
 interface SessionListProps {
   sessions: Session[];
   chatSessionId: string | null;
-  fetchSessions: () => void;
   updateSessionState: (sessionId: string, updateFn: (session: Session) => Session) => void;
   handleDeleteSession: (sessionId: string) => Promise<void>;
 }
@@ -14,14 +13,13 @@ interface SessionListProps {
 const SessionList: React.FC<SessionListProps> = ({
   sessions,
   chatSessionId,
-  fetchSessions,
   updateSessionState,
   handleDeleteSession,
 }) => {
   const navigate = useNavigate();
 
   return (
-    <ul style={{ listStyle: 'none', padding: 0, width: '100%' }}>
+    <ul style={{ listStyle: 'none', margin: '0', padding: '10px 0', width: '100%' }}>
       {sessions.map((session) => (
         <li key={session.id} className="sidebar-session-item">
           {session.isEditing ? (
@@ -38,9 +36,9 @@ const SessionList: React.FC<SessionListProps> = ({
                       await fetch(`/api/chat/${session.id}/name`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sessionId: session.id, name: session.name || '' }),
+                        body: JSON.stringify({ name: session.name || '' }),
                       });
-                      fetchSessions();
+                      // No need to fetchSessions, name is already updated via updateSessionState
                     } catch (error) {
                       console.error('Error updating session name:', error);
                     }
@@ -58,7 +56,7 @@ const SessionList: React.FC<SessionListProps> = ({
               />
               <button
                 onClick={() => {
-                  if (session.id && window.confirm('Are you sure you want to delete this session?')) {
+                  if (window.confirm('Are you sure you want to delete this session?')) {
                     handleDeleteSession(session.id);
                   }
                 }}

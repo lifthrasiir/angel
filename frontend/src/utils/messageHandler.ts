@@ -19,7 +19,8 @@ export const sendMessage = async (
   inputMessage: string,
   attachments: FileAttachment[],
   chatSessionId: string | null,
-  systemPrompt: string
+  systemPrompt: string,
+  workspaceId?: string
 ) => {
   let apiUrl = '';
   let requestBody: any = {};
@@ -30,6 +31,9 @@ export const sendMessage = async (
   } else {
     apiUrl = '/api/chat';
     requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: '', attachments };
+    if (workspaceId) {
+      requestBody.workspaceId = workspaceId;
+    }
   }
 
   const response = await fetch(apiUrl, {

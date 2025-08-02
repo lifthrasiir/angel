@@ -17,4 +17,17 @@ export interface Session {
   last_updated_at: string;
   name?: string;
   isEditing?: boolean;
+  workspace_id?: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  default_system_prompt: string;
+  created_at: string;
+}
+
+export interface WorkspaceWithSessions {
+  workspace: Workspace;
+  sessions: Session[];
 }

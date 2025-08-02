@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -25,7 +24,8 @@ func InitDB() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		system_prompt TEXT,
-		name TEXT DEFAULT ''
+		name TEXT DEFAULT '',
+		workspace_id TEXT DEFAULT ''
 	);
 
 	CREATE TABLE IF NOT EXISTS messages (
@@ -44,33 +44,16 @@ func InitDB() {
 		user_email TEXT,
 		project_id TEXT
 	);
-	`
+
+	CREATE TABLE IF NOT EXISTS workspaces (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		default_system_prompt TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
 		log.Fatalf("Failed to create tables: %v", err)
-	}
-
-	// Attempt to add user_email column, ignore if it already exists
-	// This is now part of the CREATE TABLE statement, but kept for migration of older dbs
-	alterTableSQLUserEmail := `ALTER TABLE oauth_tokens ADD COLUMN user_email TEXT;`
-	_, err = db.Exec(alterTableSQLUserEmail)
-	if err != nil {
-		// Check if the error is "duplicate column name"
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			log.Fatalf("Failed to add user_email column: %v", err)
-		}
-		log.Println("user_email column already exists, skipping migration.")
-	}
-
-	// Attempt to add project_id column, ignore if it already exists
-	alterTableSQLProjectID := `ALTER TABLE oauth_tokens ADD COLUMN project_id TEXT;`
-	_, err = db.Exec(alterTableSQLProjectID)
-	if err != nil {
-		// Check if the error is "duplicate column name"
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			log.Fatalf("Failed to add project_id column: %v", err)
-		}
-		log.Println("project_id column already exists, skipping migration.")
 	}
 
 	log.Println("Database initialized and tables created.")
@@ -82,6 +65,7 @@ type Session struct {
 	LastUpdated  string `json:"last_updated_at"`
 	SystemPrompt string `json:"system_prompt"`
 	Name         string `json:"name"`
+	WorkspaceID  string `json:"workspace_id"`
 }
 
 // FileAttachment struct to hold file attachment data
@@ -111,8 +95,94 @@ type FrontendMessage struct {
 	Attachments []FileAttachment `json:"attachments,omitempty"`
 }
 
-func CreateSession(sessionID string, systemPrompt string) error {
-	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name) VALUES (?, ?, ?)", sessionID, systemPrompt, "")
+type Workspace struct {
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	DefaultSystemPrompt string `json:"default_system_prompt"`
+	CreatedAt           string `json:"created_at"`
+}
+
+type WorkspaceWithSessions struct {
+	Workspace Workspace `json:"workspace"`
+	Sessions  []Session `json:"sessions"`
+}
+
+// CreateWorkspace creates a new workspace in the database.
+func CreateWorkspace(workspaceID string, name string, defaultSystemPrompt string) error {
+	_, err := db.Exec("INSERT INTO workspaces (id, name, default_system_prompt) VALUES (?, ?, ?)", workspaceID, name, defaultSystemPrompt)
+	if err != nil {
+		return fmt.Errorf("failed to create workspace: %w", err)
+	}
+	return nil
+}
+
+// GetWorkspace retrieves a single workspace by its ID.
+func GetWorkspace(workspaceID string) (Workspace, error) {
+	var w Workspace
+	err := db.QueryRow("SELECT id, name, default_system_prompt, created_at FROM workspaces WHERE id = ?", workspaceID).Scan(&w.ID, &w.Name, &w.DefaultSystemPrompt, &w.CreatedAt)
+	if err != nil {
+		return w, fmt.Errorf("failed to get workspace: %w", err)
+	}
+	return w, nil
+}
+
+// GetAllWorkspaces retrieves all workspaces from the database.
+func GetAllWorkspaces() ([]Workspace, error) {
+	rows, err := db.Query("SELECT id, name, default_system_prompt, created_at FROM workspaces ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all workspaces: %w", err)
+	}
+	defer rows.Close()
+
+	var workspaces []Workspace
+	for rows.Next() {
+		var w Workspace
+		if err := rows.Scan(&w.ID, &w.Name, &w.DefaultSystemPrompt, &w.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan workspace: %w", err)
+		}
+		workspaces = append(workspaces, w)
+	}
+	// Ensure an empty slice is returned, not nil, for JSON marshaling
+	if workspaces == nil {
+		return []Workspace{}, nil
+	}
+	return workspaces, nil
+}
+
+// DeleteWorkspace deletes a workspace and all its associated sessions and messages.
+func DeleteWorkspace(workspaceID string) error {
+	// Start a transaction to ensure atomicity
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	// Delete messages associated with the sessions in the workspace
+	_, err = tx.Exec("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete messages for workspace %s: %w", workspaceID, err)
+	}
+
+	// Delete sessions associated with the workspace
+	_, err = tx.Exec("DELETE FROM sessions WHERE workspace_id = ?", workspaceID)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete sessions for workspace %s: %w", workspaceID, err)
+	}
+
+	// Delete the workspace itself
+	_, err = tx.Exec("DELETE FROM workspaces WHERE id = ?", workspaceID)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete workspace %s: %w", workspaceID, err)
+	}
+
+	return tx.Commit()
+}
+
+func CreateSession(sessionID string, systemPrompt string, workspaceID string) error {
+	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name, workspace_id) VALUES (?, ?, ?, ?)", sessionID, systemPrompt, "", workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
@@ -143,26 +213,57 @@ func UpdateSessionName(sessionID string, name string) error {
 	return nil
 }
 
-func GetAllSessions() ([]Session, error) {
-	rows, err := db.Query("SELECT id, last_updated_at, system_prompt, name FROM sessions ORDER BY last_updated_at DESC")
+func GetWorkspaceAndSessions(workspaceID string) (*WorkspaceWithSessions, error) {
+	var wsWithSessions WorkspaceWithSessions
+
+	// Get workspace information
+	var workspace Workspace
+	if workspaceID != "" {
+		err := db.QueryRow("SELECT id, name, default_system_prompt, created_at FROM workspaces WHERE id = ?", workspaceID).Scan(&workspace.ID, &workspace.Name, &workspace.DefaultSystemPrompt, &workspace.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get workspace: %w", err)
+		}
+	} else {
+		// Default workspace for sessions without a specific workspaceId
+		workspace = Workspace{
+			ID:   "",
+			Name: "",
+		}
+	}
+	wsWithSessions.Workspace = workspace
+
+	// Get sessions for the workspace
+	var query string
+	var args []interface{}
+
+	if workspaceID == "" {
+		query = "SELECT id, last_updated_at, system_prompt, name, workspace_id FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
+	} else {
+		query = "SELECT id, last_updated_at, system_prompt, name, workspace_id FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
+		args = append(args, workspaceID)
+	}
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query all sessions: %w", err)
+		return nil, fmt.Errorf("failed to query sessions: %w", err)
 	}
 	defer rows.Close()
 
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name); err != nil {
+		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 		sessions = append(sessions, s)
 	}
-	// Ensure an empty slice is returned, not nil, for JSON marshaling
 	if sessions == nil {
-		return []Session{}, nil
+		wsWithSessions.Sessions = []Session{}
+	} else {
+		wsWithSessions.Sessions = sessions
 	}
-	return sessions, nil
+
+	return &wsWithSessions, nil
 }
 
 // AddMessageToSession now accepts a message type and attachments
@@ -226,7 +327,7 @@ func SessionExists(sessionID string) (bool, error) {
 
 func GetSession(sessionID string) (Session, error) {
 	var s Session
-	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name)
+	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID)
 	if err != nil {
 		return s, fmt.Errorf("failed to get session: %w", err)
 	}

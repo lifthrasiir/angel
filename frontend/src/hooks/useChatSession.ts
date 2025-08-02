@@ -1,5 +1,6 @@
-import { useLocation } from 'react-router-dom';
-import { fetchSessions } from '../utils/sessionManager';
+import { useLocation, useParams } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
 import { handleLogin } from '../utils/userManager';
 import { useDocumentTitle } from './useDocumentTitle';
@@ -9,6 +10,8 @@ import { useChat } from './ChatContext';
 import {
   SET_SESSIONS,
   SET_SELECTED_FILES,
+  SET_WORKSPACE_NAME,
+  SET_WORKSPACE_ID,
 } from './chatReducer';
 
 export const useChatSession = () => {
@@ -24,14 +27,28 @@ export const useChatSession = () => {
     systemPrompt,
     isSystemPromptEditing,
     selectedFiles,
+    workspaceId: stateWorkspaceId, // Rename to avoid conflict with useParams
+    workspaceName,
   } = state;
 
   const location = useLocation();
+  const { workspaceId: urlWorkspaceId } = useParams<{ workspaceId?: string }>(); // Get workspaceId from URL
 
-  const loadSessions = async () => {
-    const sessionsData = await fetchSessions();
-    dispatch({ type: SET_SESSIONS, payload: sessionsData });
-  };
+  // Pass stateWorkspaceId to useWorkspaceAndSessions
+  const { currentWorkspace, sessions: fetchedSessions, error } = useWorkspaceAndSessions(stateWorkspaceId);
+
+  useEffect(() => {
+    if (currentWorkspace) {
+      dispatch({ type: SET_WORKSPACE_NAME, payload: currentWorkspace.name });
+    }
+    if (fetchedSessions) {
+      dispatch({ type: SET_SESSIONS, payload: fetchedSessions });
+    }
+    if (error) {
+      console.error("Failed to load sessions:", error);
+      // Optionally, dispatch an error state to your chatReducer
+    }
+  }, [currentWorkspace, fetchedSessions, error, dispatch]);
 
   const handleLoginRedirect = () => {
     const currentPath = location.pathname + location.search;
@@ -48,12 +65,15 @@ export const useChatSession = () => {
 
   useDocumentTitle(sessions);
 
+  useEffect(() => {
+    dispatch({ type: SET_WORKSPACE_ID, payload: urlWorkspaceId }); // Dispatch URL workspaceId to state
+  }, [urlWorkspaceId, dispatch]);
+
   useSessionInitialization({
     chatSessionId,
     isStreaming,
     dispatch,
     handleLoginRedirect,
-    loadSessions,
   });
 
   const { handleSendMessage, cancelStreamingCall } = useMessageSending({
@@ -63,7 +83,6 @@ export const useChatSession = () => {
     systemPrompt,
     dispatch,
     handleLoginRedirect,
-    loadSessions,
   });
 
   return {
@@ -77,11 +96,12 @@ export const useChatSession = () => {
     systemPrompt,
     isSystemPromptEditing,
     selectedFiles,
+    workspaceId: stateWorkspaceId, // Return stateWorkspaceId
+    workspaceName,
     handleLogin: handleLoginRedirect,
     handleFilesSelected: handleFilesSelectedWrapper,
     handleRemoveFile: handleRemoveFileWrapper,
     handleSendMessage,
-    fetchSessions: loadSessions,
     cancelStreamingCall,
   };
 };

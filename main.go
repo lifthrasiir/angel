@@ -7,15 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/google/uuid"
-	"github.com/gorilla/mux"
 )
 
 //go:embed frontend/dist
@@ -50,7 +49,36 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	http.FileServer(http.FS(fsys)).ServeHTTP(w, r)
 	return
+}
 
+// serveSPAIndex serves the index.html file for SPA fallback
+func serveSPAIndex(w http.ResponseWriter, r *http.Request) {
+	// Try to serve from filesystem first (for development)
+	fsPath := filepath.Join("frontend", "dist", "index.html")
+
+	if _, err := os.Stat(fsPath); err == nil {
+		http.ServeFile(w, r, fsPath)
+		return
+	}
+
+	// If not found on filesystem, try to serve from embedded files
+	file, err := embeddedFiles.Open("frontend/dist/index.html")
+	if err != nil {
+		log.Printf("Error opening embedded index.html: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("Error reading embedded index.html: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
 }
 
 // validateAuthAndProject performs common auth and project validation for handlers
@@ -116,11 +144,25 @@ func main() {
 		router.HandleFunc("/oauth2callback", makeAuthHandler(&GlobalGeminiState, HandleGoogleCallback)).Methods("GET")
 	}
 
-	router.HandleFunc("/new", newChatSession).Methods("GET")
+	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET") // New handler for /:sessionId
 
+	router.HandleFunc("/w", handleNotFound).Methods("GET")
+	router.HandleFunc("/w/new", serveSPAIndex).Methods("GET")
+	router.HandleFunc("/w/{workspaceId}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, fmt.Sprintf("/w/%s/new", mux.Vars(r)["workspaceId"]), http.StatusFound)
+	}).Methods("GET")
+	router.HandleFunc("/w/{workspaceId}/new", serveSPAIndex).Methods("GET")
+	router.HandleFunc("/w/{workspaceId}/{sessionId}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, fmt.Sprintf("/%s", mux.Vars(r)["sessionId"]), http.StatusFound)
+	}).Methods("GET")
+
 	// API handlers
-	router.HandleFunc("/api/chat", listChatSessions).Methods("GET")
+	router.HandleFunc("/api/workspaces", createWorkspaceHandler).Methods("POST")
+	router.HandleFunc("/api/workspaces", listWorkspacesHandler).Methods("GET")
+	router.HandleFunc("/api/workspaces/{id}", deleteWorkspaceHandler).Methods("DELETE")
+
+	router.HandleFunc("/api/chat", listSessionsByWorkspaceHandler).Methods("GET")
 	router.HandleFunc("/api/chat", newSessionAndMessage).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}", chatMessage).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}", loadChatSession).Methods("GET")
@@ -133,8 +175,7 @@ func main() {
 	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
 
 	// Serve frontend static files
-	router.PathPrefix("/").Handler(http.HandlerFunc(serveStaticFiles))
-	router.NotFoundHandler = http.HandlerFunc(serveNotFound)
+	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
 
 	fmt.Println("Server started at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
@@ -146,77 +187,55 @@ func makeAuthHandler(gs *GeminiState, handler func(gs *GeminiState, w http.Respo
 	}
 }
 
-// New chat session start handler
-func newChatSession(w http.ResponseWriter, r *http.Request) {
-	serveIndexHTML(w, r)
-}
-
-// handleSessionPage handles requests for /:sessionId
 func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 
-	// Check if sessionId contains at least one uppercase letter
-	if !strings.ContainsAny(sessionId, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-		serveNotFound(w, r)
+	if sessionId == "" {
+		http.NotFound(w, r)
 		return
 	}
 
-	// Check if the session exists
-	_, err := GetSession(sessionId) // Use GetSession instead of GetChatSession
+	exists, err := SessionExists(sessionId)
 	if err != nil {
-		log.Printf("Session %s not found: %v", sessionId, err)
-		serveNotFound(w, r)
-		return
-	}
-
-	// If session exists and is valid, serve index.html
-	serveIndexHTML(w, r)
-}
-
-// serveIndexHTML serves the embedded index.html file
-func serveIndexHTML(w http.ResponseWriter, r *http.Request) {
-	indexEmbedded, err := embeddedFiles.ReadFile("frontend/dist/index.html")
-	if err != nil {
-		log.Printf("Error reading embedded index.html: %v", err)
+		log.Printf("handleSessionPage: Failed to check session existence for %s: %v", sessionId, err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(indexEmbedded)
-}
 
-// serveNotFound serves the custom 404.html page
-func serveNotFound(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotFound)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	// Read the embedded 404.html
-	page404, err := embeddedFiles.ReadFile("frontend/dist/404.html")
-	if err != nil {
-		log.Printf("Error reading embedded 404.html: %v", err)
-		http.Error(w, "404 Not Found", http.StatusNotFound)
+	if !exists {
+		http.NotFound(w, r)
 		return
 	}
-	w.Write(page404)
+
+	serveSPAIndex(w, r)
 }
 
-func GenerateSessionID() string {
+func generateID() string {
 	for {
 		b := make([]byte, 8) // 8 bytes will result in an 11-character base64 string
 		if _, err := rand.Read(b); err != nil {
-			log.Printf("Error generating random session ID: %v", err)
-			// Fallback to UUID if random generation fails, as a last resort
-			return uuid.New().String()
+			log.Printf("Error generating random ID: %v", err)
+			// Fallback to UUID or handle error appropriately
+			return uuid.New().String() // Fallback to UUID if random generation fails
 		}
-		sessionID := base64.RawURLEncoding.EncodeToString(b)
-		if strings.ContainsAny(sessionID, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-			return sessionID
+		id := base64.RawURLEncoding.EncodeToString(b)
+		// Check if the ID contains any uppercase letters
+		hasUppercase := false
+		for _, r := range id {
+			if r >= 'A' && r <= 'Z' {
+				hasUppercase = true
+				break
+			}
 		}
+		// If it has at least one uppercase letter, it's unlikely to collide with /new or /w/new
+		if hasUppercase {
+			return id
+		}
+		log.Println("Generated ID without uppercase, regenerating to avoid collision with /new or /w/new.")
 	}
 }
 
-// New handler to get user info
 func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if logged in
 	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && (GlobalGeminiState.Token == nil || !GlobalGeminiState.Token.Valid()) {
@@ -251,19 +270,24 @@ func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]string{"email": GlobalGeminiState.UserEmail})
 }
 
-// New handler to update session name
 func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
 	var requestBody struct {
-		SessionID string `json:"sessionId"`
-		Name      string `json:"name"`
+		Name string `json:"name"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "updateSessionNameHandler") {
 		return
 	}
 
-	if err := UpdateSessionName(requestBody.SessionID, requestBody.Name); err != nil {
-		log.Printf("Failed to update session name for %s: %v", requestBody.SessionID, err)
+	if err := UpdateSessionName(sessionId, requestBody.Name); err != nil {
+		log.Printf("Failed to update session name for %s: %v", sessionId, err)
 		http.Error(w, fmt.Sprintf("Failed to update session name: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -287,6 +311,52 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Logged out successfully")
+}
+
+func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		Name string `json:"name"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "createWorkspaceHandler") {
+		return
+	}
+
+	workspaceID := generateID() // Reusing session ID generation for workspace ID
+
+	if err := CreateWorkspace(workspaceID, requestBody.Name, ""); err != nil {
+		log.Printf("Failed to create workspace %s: %v", requestBody.Name, err)
+		http.Error(w, fmt.Sprintf("Failed to create workspace: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"id": workspaceID, "name": requestBody.Name})
+}
+
+func listWorkspacesHandler(w http.ResponseWriter, r *http.Request) {
+	workspaces, err := GetAllWorkspaces()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve workspaces: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, workspaces)
+}
+
+func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	workspaceID := mux.Vars(r)["id"]
+	if workspaceID == "" {
+		http.Error(w, "Workspace ID is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := DeleteWorkspace(workspaceID); err != nil {
+		log.Printf("Failed to delete workspace %s: %v", workspaceID, err)
+		http.Error(w, fmt.Sprintf("Failed to delete workspace: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"status": "success", "message": "Workspace deleted successfully"})
 }
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
@@ -372,4 +442,8 @@ func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, map[string]string{"evaluatedPrompt": evaluatedPrompt})
+}
+
+func handleNotFound(w http.ResponseWriter, r *http.Request) {
+	http.NotFound(w, r)
 }

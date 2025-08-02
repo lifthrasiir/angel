@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ChatMessage, FileAttachment } from '../types/chat';
 import { 
   sendMessage, 
@@ -28,7 +28,6 @@ interface UseMessageSendingProps {
   systemPrompt: string;
   dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
-  loadSessions: () => Promise<void>;
 }
 
 export const useMessageSending = ({
@@ -38,9 +37,9 @@ export const useMessageSending = ({
   systemPrompt,
   dispatch,
   handleLoginRedirect,
-  loadSessions,
 }: UseMessageSendingProps) => {
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() && selectedFiles.length === 0) return;
@@ -67,7 +66,7 @@ export const useMessageSending = ({
         dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
       }
 
-      const response = await sendMessage(inputMessage, attachments, chatSessionId, systemPrompt);
+      const response = await sendMessage(inputMessage, attachments, chatSessionId, systemPrompt, workspaceId);
 
       if (response.status === 401) {
         handleLoginRedirect();
@@ -115,8 +114,7 @@ export const useMessageSending = ({
         onSessionStart: (sessionId: string, systemPrompt: string) => {
           dispatch({ type: SET_CHAT_SESSION_ID, payload: sessionId });
           dispatch({ type: SET_SYSTEM_PROMPT, payload: systemPrompt });
-          navigate(`/${sessionId}`, { replace: true });
-          loadSessions();
+          navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
         },
         onSessionNameUpdate: (sessionId: string, newName: string) => {
           dispatch({ type: SET_SESSION_NAME, payload: { sessionId, name: newName } });

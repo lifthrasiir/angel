@@ -1,21 +1,19 @@
-import { Session } from '../types/chat';
+import { WorkspaceWithSessions, Session } from '../types/chat';
 
-export const fetchSessions = async (): Promise<Session[]> => {
-  try {
-    const response = await fetch('/api/chat');
-    if (response.ok) {
-      const data: Session[] = await response.json();
-      return data;
-    } else if (response.status === 401) {
-      return [];
-    } else {
-      console.error('Failed to fetch sessions:', response.status, response.statusText);
-      return [];
-    }
-  } catch (error) {
-    console.error('Error fetching sessions:', error);
-    return [];
+export const fetchSessions = async (workspaceId?: string): Promise<WorkspaceWithSessions> => {
+  let url = '/api/chat';
+  if (workspaceId) {
+    url = `/api/chat?workspaceId=${workspaceId}`;
   }
+  const response = await fetch(url);
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('Unauthorized');
+    }
+    throw new Error(`Failed to fetch sessions: ${response.status} ${response.statusText}`);
+  }
+  const data: WorkspaceWithSessions = await response.json();
+  return data;
 };
 
 export const loadSession = (sessionId: string, onMessage: (event: MessageEvent) => void, onError: (event: Event) => void): EventSource => {
@@ -27,4 +25,16 @@ export const loadSession = (sessionId: string, onMessage: (event: MessageEvent) 
   eventSource.onerror = onError;
 
   return eventSource;
+};
+
+export const fetchSession = async (sessionId: string): Promise<Session | null> => {
+  const response = await fetch(`/api/chat/${sessionId}/info`); // Assuming an endpoint for single session info
+  if (!response.ok) {
+    if (response.status === 404) {
+      return null; // Session not found
+    }
+    throw new Error(`Failed to fetch session info: ${response.status} ${response.statusText}`);
+  }
+  const data: Session = await response.json();
+  return data;
 };

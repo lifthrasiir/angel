@@ -3,13 +3,12 @@ import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import LogoAnimation from './LogoAnimation';
 import ToastMessage from './ToastMessage'; // Import ToastMessage
-import { useChatSession } from '../hooks/useChatSession';
+import { useChatSession } from '../hooks/useChatSession'; // Re-import useChatSession
 import { useChat } from '../hooks/ChatContext';
 import useEscToCancel from '../hooks/useEscToCancel'; // Import the new hook
 import {
   SET_INPUT_MESSAGE,
   SET_SYSTEM_PROMPT,
-
 } from '../hooks/chatReducer';
 
 const ChatLayout: React.FC = () => {
@@ -25,11 +24,12 @@ const ChatLayout: React.FC = () => {
     systemPrompt,
     isSystemPromptEditing,
     selectedFiles,
+    workspaceId,
+    workspaceName,
     handleLogin,
     handleFilesSelected,
     handleRemoveFile,
     handleSendMessage,
-    fetchSessions,
     cancelStreamingCall,
   } = useChatSession();
 
@@ -45,7 +45,8 @@ const ChatLayout: React.FC = () => {
           <Sidebar
             sessions={sessions}
             chatSessionId={chatSessionId}
-            fetchSessions={fetchSessions}
+            workspaceName={workspaceName}
+            workspaceId={workspaceId}
           />
 
           <ChatArea

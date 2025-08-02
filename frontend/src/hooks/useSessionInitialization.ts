@@ -29,6 +29,7 @@ import {
   ADD_MESSAGE,
   ADD_ERROR_MESSAGE,
   UPDATE_AGENT_MESSAGE,
+  SET_WORKSPACE_ID, // Import SET_WORKSPACE_ID
 } from './chatReducer';
 import { ChatAction } from './chatReducer';
 
@@ -37,7 +38,6 @@ interface UseSessionInitializationProps {
   isStreaming: boolean;
   dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
-  loadSessions: () => Promise<void>;
 }
 
 export const useSessionInitialization = ({
@@ -45,10 +45,9 @@ export const useSessionInitialization = ({
   isStreaming,
   dispatch,
   handleLoginRedirect,
-  loadSessions,
 }: UseSessionInitializationProps) => {
   const navigate = useNavigate();
-  const { sessionId: urlSessionId } = useParams();
+  const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{ sessionId?: string; workspaceId?: string }>(); // Renamed to urlWorkspaceId
   const location = useLocation();
 
   const resetChatSessionState = () => {
@@ -79,12 +78,16 @@ export const useSessionInitialization = ({
 
     const initializeChatSession = async () => {
       let currentSessionId = urlSessionId;
-      if (!currentSessionId && location.pathname === '/new') {
-        currentSessionId = 'new';
-      }
-
-      if (currentSessionId === 'new') {
+      // If the path ends with /new and no sessionId is provided in the URL, treat it as a new session
+      if (location.pathname.endsWith('/new') && !currentSessionId) {
         resetChatSessionState();
+        // If navigating to /w/:workspaceId/new, set the workspaceId in state
+        if (urlWorkspaceId) {
+          dispatch({ type: SET_WORKSPACE_ID, payload: urlWorkspaceId });
+        } else {
+          // /new 경로일 경우, 기본 워크스페이스를 나타내기 위해 빈 문자열로 설정
+          dispatch({ type: SET_WORKSPACE_ID, payload: "" });
+        }
         const defaultPrompt = `{{.Builtin.SystemPrompt}}`;
         dispatch({ type: SET_SYSTEM_PROMPT, payload: defaultPrompt });
         return;
@@ -125,6 +128,7 @@ export const useSessionInitialization = ({
                   }
                   return chatMessage;
                 }) });
+                dispatch({ type: SET_WORKSPACE_ID, payload: data.workspaceId });
 
                 dispatch({ type: SET_IS_STREAMING, payload: eventType === EventInitialState });
                 if (eventType === EventInitialStateNoCall) {
@@ -183,7 +187,6 @@ export const useSessionInitialization = ({
     };
 
     initializeChatSession();
-    loadSessions();
 
     const loadUserInfo = async () => {
       try {
@@ -205,5 +208,5 @@ export const useSessionInitialization = ({
       }
     };
     loadUserInfo();
-  }, [urlSessionId, navigate, location.search, location.pathname, isStreaming, dispatch]);
+  }, [urlSessionId, urlWorkspaceId, navigate, location.search, location.pathname, isStreaming, dispatch]);
 };

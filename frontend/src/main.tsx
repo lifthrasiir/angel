@@ -1,8 +1,57 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.tsx'
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import './index.css'
 import ToastMessage from './components/ToastMessage.tsx';
+import { ChatProvider } from './hooks/ChatContext';
+
+import ChatLayout from './components/ChatLayout';
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
+
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <Navigate to="/new" replace />,
+  },
+  {
+    path: "/new",
+    element: <ChatLayout />,
+  },
+  {
+    path: "/:sessionId",
+    element: <ChatLayout />,
+  },
+  {
+    path: "/settings",
+    element: <SettingsPage />,
+  },
+  {
+    path: "/w",
+    element: <NotFoundPage />,
+  },
+  {
+    path: "/w/new",
+    element: <NewWorkspacePage />,
+  },
+  {
+    path: "/w/:workspaceId",
+    element: <Navigate to="new" replace />,
+  },
+  {
+    path: "/w/:workspaceId/new",
+    element: <ChatLayout />,
+  },
+  {
+    path: "/w/:workspaceId/:sessionId",
+    element: <Navigate to="/:sessionId" replace />,
+  },
+  {
+    path: "*",
+    element: <NotFoundPage />,
+  },
+]);
 
 const Root = () => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -28,7 +77,11 @@ const Root = () => {
 
   return (
     <React.StrictMode>
-      <App />
+      <ChatProvider>
+        <Suspense fallback={<div>Loading...</div>}>
+          <RouterProvider router={router} />
+        </Suspense>
+      </ChatProvider>
       <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
     </React.StrictMode>
   );

@@ -13,6 +13,7 @@ type InitialState struct {
 	SessionId    string            `json:"sessionId"`
 	History      []FrontendMessage `json:"history"`
 	SystemPrompt string            `json:"systemPrompt"`
+	WorkspaceID  string            `json:"workspaceId"`
 }
 
 // New session and message handler
@@ -25,24 +26,24 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		Message      string           `json:"message"`
 		SystemPrompt string           `json:"systemPrompt"`
 		Attachments  []FileAttachment `json:"attachments"`
+		WorkspaceID  string           `json:"workspaceId"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
 		return
 	}
 
-	sessionId := GenerateSessionID() // Generate new session ID
+	sessionId := generateID()
 
-	// Always evaluate the system prompt as a Go template
-	evaluatedSystemPrompt, err := GetEvaluatedSystemPrompt(requestBody.SystemPrompt)
+	// Evaluate system prompt
+	systemPrompt, err := GetEvaluatedSystemPrompt(requestBody.SystemPrompt)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Error evaluating system prompt: %v", err)
-		http.Error(w, fmt.Sprintf("Error evaluating system prompt: %v", err), http.StatusBadRequest)
+		log.Printf("newSessionAndMessage: Failed to evaluate system prompt: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to evaluate system prompt: %v", err), http.StatusInternalServerError)
 		return
 	}
-	systemPrompt := evaluatedSystemPrompt
 
-	if err := CreateSession(sessionId, systemPrompt); err != nil {
+	if err := CreateSession(sessionId, systemPrompt, requestBody.WorkspaceID); err != nil {
 		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to create new session: %v", err), http.StatusInternalServerError)
 		return
@@ -79,6 +80,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		SessionId:    sessionId,
 		History:      []FrontendMessage{}, // Empty history for initial client state
 		SystemPrompt: systemPrompt,
+		WorkspaceID:  requestBody.WorkspaceID,
 	}
 
 	initialStateJSON, err := json.Marshal(initialStateForClient)
@@ -105,11 +107,12 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Convert FrontendMessage to Content for Gemini API
 
-	// Prepare initial state for streaming
+	// Prepare initial state for streaming (similar to loadChatSession)
 	initialState := InitialState{
 		SessionId:    sessionId,
 		History:      frontendHistory,
 		SystemPrompt: systemPrompt,
+		WorkspaceID:  requestBody.WorkspaceID,
 	}
 
 	// Handle streaming response from Gemini
@@ -127,6 +130,10 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
 
 	var requestBody struct {
 		Message     string           `json:"message"`
@@ -181,6 +188,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		SessionId:    sessionId,
 		History:      frontendHistory,
 		SystemPrompt: systemPrompt,
+		WorkspaceID:  session.WorkspaceID,
 	}
 
 	if err := streamGeminiResponse(initialState, sseW); err != nil {
@@ -198,6 +206,10 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
 
 	// Check if session exists
 	exists, err := SessionExists(sessionId)
@@ -232,6 +244,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		SessionId:    sessionId,
 		History:      history,
 		SystemPrompt: session.SystemPrompt,
+		WorkspaceID:  session.WorkspaceID,
 	}
 
 	// Check if it's an SSE request
@@ -274,18 +287,20 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func listChatSessions(w http.ResponseWriter, r *http.Request) {
-	if !validateAuthAndProject("listChatSessions", w) {
+func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	if !validateAuthAndProject("listSessionsByWorkspaceHandler", w) {
 		return
 	}
 
-	sessions, err := GetAllSessions()
+	workspaceID := r.URL.Query().Get("workspaceId")
+
+	wsWithSessions, err := GetWorkspaceAndSessions(workspaceID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve sessions: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	sendJSONResponse(w, sessions)
+	sendJSONResponse(w, wsWithSessions)
 }
 
 // New endpoint to delete a chat session
@@ -296,6 +311,10 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
 
 	if err := DeleteSession(sessionId); err != nil {
 		log.Printf("deleteSession: Failed to delete session %s: %v", sessionId, err)
