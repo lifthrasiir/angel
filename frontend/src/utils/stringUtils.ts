@@ -11,4 +11,3 @@ export function splitOnceByNewline(str: string): [string, string] {
   }
   return [str, ''];
 }
-

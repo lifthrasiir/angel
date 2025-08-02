@@ -23,11 +23,7 @@ const ToastMessage: React.FC<ToastMessageProps> = ({ message, onClose }) => {
 
   if (!isVisible) return null;
 
-  return (
-    <div className="toast-message">
-      {message}
-    </div>
-  );
+  return <div className="toast-message">{message}</div>;
 };
 
 export default ToastMessage;

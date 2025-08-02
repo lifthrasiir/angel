@@ -24,7 +24,7 @@ export function smartPreprocessMarkdown(markdownText: string): string {
   }
 
   // Process each separated part
-  const processedParts = parts.map(part => {
+  const processedParts = parts.map((part) => {
     if (part.startsWith('```') && part.endsWith('```')) {
       // Return fenced block as is
       return part;
@@ -32,7 +32,7 @@ export function smartPreprocessMarkdown(markdownText: string): string {
       // `)**xxx` is not a valid right-flanking delimiter run in CommonMark which can't be preceded by punctuation,
       // but commonly occurs in the LLM-generated CJK text (cf. https://talk.commonmark.org/t/2528).
       // We relax the specification by allowing a certain closing punctuation before the delimiter run.
-      return part.replace(/([)\]])(\*\*|\*)(\p{L})/ug, '$1$2<!-- -->$3');
+      return part.replace(/([)\]])(\*\*|\*)(\p{L})/gu, '$1$2<!-- -->$3');
     }
   });
 

@@ -54,11 +54,18 @@ const SettingsPage: React.FC = () => {
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100%' }}>
       {/* Settings Sidebar/Header */}
-      <div style={{ width: '150px', background: '#f0f0f0', padding: '20px', borderRight: '1px solid #ccc' }}>
+      <div
+        style={{
+          width: '150px',
+          background: '#f0f0f0',
+          padding: '20px',
+          borderRight: '1px solid #ccc',
+        }}
+      >
         <h2 style={{ marginBottom: '20px' }}>Settings</h2>
         <ul style={{ listStyle: 'none', padding: 0 }}>
           <li style={{ marginBottom: '10px' }}>
-            <button 
+            <button
               onClick={() => setActiveTab('auth')}
               style={{
                 width: '100%',
@@ -74,7 +81,7 @@ const SettingsPage: React.FC = () => {
             </button>
           </li>
           <li style={{ marginBottom: '10px' }}>
-            <button 
+            <button
               onClick={() => setActiveTab('mcp')}
               style={{
                 width: '100%',
@@ -90,8 +97,14 @@ const SettingsPage: React.FC = () => {
             </button>
           </li>
         </ul>
-        <div style={{ marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #ccc' }}>
-          <button 
+        <div
+          style={{
+            marginTop: '20px',
+            paddingTop: '10px',
+            borderTop: '1px solid #ccc',
+          }}
+        >
+          <button
             onClick={() => navigate('/new')}
             style={{
               width: '100%',
@@ -117,12 +130,16 @@ const SettingsPage: React.FC = () => {
             {isLoggedIn ? (
               <p>
                 Logged in as: <strong>{userEmail}</strong>
-                <button onClick={handleLogout} style={{ marginLeft: '10px', padding: '5px 10px' }}>Logout</button>
+                <button onClick={handleLogout} style={{ marginLeft: '10px', padding: '5px 10px' }}>
+                  Logout
+                </button>
               </p>
             ) : (
               <p>
                 Not logged in.
-                <button onClick={handleLogin} style={{ marginLeft: '10px', padding: '5px 10px' }}>Login</button>
+                <button onClick={handleLogin} style={{ marginLeft: '10px', padding: '5px 10px' }}>
+                  Login
+                </button>
               </p>
             )}
           </div>

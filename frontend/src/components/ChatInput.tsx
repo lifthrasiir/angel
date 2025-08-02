@@ -36,7 +36,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     debounce((target: HTMLTextAreaElement) => {
       target.style.height = 'auto';
       target.style.height = target.scrollHeight + 'px';
-    }, 100) // 100ms debounce delay
+    }, 100), // 100ms debounce delay
   ).current;
 
   // Adjust textarea height when inputMessage changes (e.g., after sending message)
@@ -59,7 +59,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div style={{ padding: '10px 20px', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', position: 'sticky', bottom: 0, background: 'white' }}>
+    <div
+      style={{
+        padding: '10px 20px',
+        borderTop: '1px solid #ccc',
+        display: 'flex',
+        alignItems: 'center',
+        position: 'sticky',
+        bottom: 0,
+        background: 'white',
+      }}
+    >
       <input
         type="file"
         multiple
@@ -67,7 +77,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
         onChange={handleFileChange}
         style={{ display: 'none' }} // Hide the actual file input
       />
-      <button onClick={triggerFileInput} style={{ padding: '10px', marginRight: '10px', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer' }}>
+      <button
+        onClick={triggerFileInput}
+        style={{
+          padding: '10px',
+          marginRight: '10px',
+          background: '#f0f0f0',
+          border: '1px solid #ccc',
+          borderRadius: '5px',
+          cursor: 'pointer',
+        }}
+      >
         <FaPaperclip />
       </button>
       <textarea
@@ -85,14 +105,42 @@ const ChatInput: React.FC<ChatInputProps> = ({
         }}
         placeholder="Enter your message..."
         rows={1}
-        style={{ flexGrow: 1, padding: '10px', marginRight: '10px', border: '1px solid #eee', borderRadius: '5px', resize: 'none', overflowY: 'hidden' }}
+        style={{
+          flexGrow: 1,
+          padding: '10px',
+          marginRight: '10px',
+          border: '1px solid #eee',
+          borderRadius: '5px',
+          resize: 'none',
+          overflowY: 'hidden',
+        }}
       />
       {isStreaming ? (
-        <button onClick={handleCancelStreaming} style={{ padding: '10px 20px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+        <button
+          onClick={handleCancelStreaming}
+          style={{
+            padding: '10px 20px',
+            background: '#dc3545',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+          }}
+        >
           Cancel
         </button>
       ) : (
-        <button onClick={handleSendMessage} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+        <button
+          onClick={handleSendMessage}
+          style={{
+            padding: '10px 20px',
+            background: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+          }}
+        >
           Send
         </button>
       )}

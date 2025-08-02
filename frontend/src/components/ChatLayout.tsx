@@ -7,10 +7,7 @@ import { useChatSession } from '../hooks/useChatSession'; // Re-import useChatSe
 import { useChat } from '../hooks/ChatContext';
 import { useWorkspaces } from '../hooks/WorkspaceContext';
 import useEscToCancel from '../hooks/useEscToCancel'; // Import the new hook
-import {
-  SET_INPUT_MESSAGE,
-  SET_SYSTEM_PROMPT,
-} from '../hooks/chatReducer';
+import { SET_INPUT_MESSAGE, SET_SYSTEM_PROMPT } from '../hooks/chatReducer';
 
 interface ChatLayoutProps {
   children?: React.ReactNode;
@@ -46,12 +43,14 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     onCancel: cancelStreamingCall,
   });
 
-    useEffect(() => {
+  useEffect(() => {
     // ChatArea가 직접 렌더링될 때만 포커스 로직을 적용
     if (!children) {
-      if (chatSessionId === null || chatSessionId === undefined) { // /new 또는 /w/:workspaceId/new 경로
+      if (chatSessionId === null || chatSessionId === undefined) {
+        // /new 또는 /w/:workspaceId/new 경로
         chatInputRef.current?.focus();
-      } else { // 그 외의 경로 (기존 세션)
+      } else {
+        // 그 외의 경로 (기존 세션)
         chatAreaRef.current?.focus();
       }
     }
@@ -71,7 +70,14 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
           />
 
           {children ? (
-            <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            <div
+              style={{
+                flexGrow: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                position: 'relative',
+              }}
+            >
               {children}
             </div>
           ) : (
@@ -83,7 +89,6 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
               setSystemPrompt={(prompt) => dispatch({ type: SET_SYSTEM_PROMPT, payload: prompt })}
               isSystemPromptEditing={isSystemPromptEditing}
               chatSessionId={chatSessionId}
-              
               inputMessage={inputMessage}
               setInputMessage={(message) => dispatch({ type: SET_INPUT_MESSAGE, payload: message })}
               handleSendMessage={handleSendMessage}
@@ -99,10 +104,22 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
           <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
         </>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%', fontSize: '1.2em' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '100vh',
+            width: '100%',
+            fontSize: '1.2em',
+          }}
+        >
           <LogoAnimation width="100px" height="100px" color="#007bff" />
           <p style={{ marginTop: '20px' }}>Please log in to use the chat application.</p>
-          <button onClick={handleLogin} style={{ padding: '10px 20px', fontSize: '1em', cursor: 'pointer' }}>Login</button>
+          <button onClick={handleLogin} style={{ padding: '10px 20px', fontSize: '1em', cursor: 'pointer' }}>
+            Login
+          </button>
         </div>
       )}
     </div>

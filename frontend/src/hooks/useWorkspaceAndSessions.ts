@@ -10,12 +10,8 @@ interface UseWorkspaceAndSessionsResult {
 }
 
 // This hook now takes the workspaceId as a prop
-export const useWorkspaceAndSessions = (
-  workspaceIdFromState: string | undefined,
-): UseWorkspaceAndSessionsResult => {
-  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(
-    null,
-  );
+export const useWorkspaceAndSessions = (workspaceIdFromState: string | undefined): UseWorkspaceAndSessionsResult => {
+  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);

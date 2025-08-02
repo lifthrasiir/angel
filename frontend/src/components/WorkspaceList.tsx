@@ -16,7 +16,12 @@ interface WorkspaceListProps {
   refreshWorkspaces: () => Promise<void>;
 }
 
-const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSelectWorkspace, workspaces, refreshWorkspaces }) => {
+const WorkspaceList: React.FC<WorkspaceListProps> = ({
+  currentWorkspaceId,
+  onSelectWorkspace,
+  workspaces,
+  refreshWorkspaces,
+}) => {
   const navigate = useNavigate();
 
   const handleDeleteWorkspace = async (workspaceId: string) => {
@@ -39,10 +44,15 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSel
     }
   };
 
-  
-
   return (
-    <ul style={{ listStyle: 'none', margin: '0', padding: '10px 0', width: '100%' }}>
+    <ul
+      style={{
+        listStyle: 'none',
+        margin: '0',
+        padding: '10px 0',
+        width: '100%',
+      }}
+    >
       <li style={{ marginBottom: '10px', display: 'flex', alignItems: 'center' }}>
         <button
           onClick={() => onSelectWorkspace('')}
@@ -60,7 +70,14 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSel
         </button>
       </li>
       {workspaces.map((workspace) => (
-        <li key={workspace.id} style={{ marginBottom: '10px', display: 'flex', alignItems: 'center' }}>
+        <li
+          key={workspace.id}
+          style={{
+            marginBottom: '10px',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
           <button
             onClick={() => onSelectWorkspace(workspace.id)}
             style={{
@@ -75,10 +92,7 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSel
           >
             {workspace.name}
           </button>
-          <button
-            onClick={() => handleDeleteWorkspace(workspace.id)}
-            className="sidebar-delete-button"
-          >
+          <button onClick={() => handleDeleteWorkspace(workspace.id)} className="sidebar-delete-button">
             <FaTrash size={16} />
           </button>
         </li>

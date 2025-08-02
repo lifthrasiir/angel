@@ -17,16 +17,15 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
   const [rehypeKatex, setRehypeKatex] = useState<any>(null);
 
   useEffect(() => {
-    Promise.all([
-      import('remark-math'),
-      import('rehype-katex'),
-    ]).then(([remarkMathModule, rehypeKatexModule]) => {
-      setRemarkMath(() => remarkMathModule.default);
-      setRehypeKatex(() => rehypeKatexModule.default);
-      setKatexLoaded(true);
-    }).catch(error => {
-      console.error("Failed to load KaTeX modules:", error);
-    });
+    Promise.all([import('remark-math'), import('rehype-katex')])
+      .then(([remarkMathModule, rehypeKatexModule]) => {
+        setRemarkMath(() => remarkMathModule.default);
+        setRehypeKatex(() => rehypeKatexModule.default);
+        setKatexLoaded(true);
+      })
+      .catch((error) => {
+        console.error('Failed to load KaTeX modules:', error);
+      });
   }, []);
 
   const preprocessedText = smartPreprocessMarkdown(content || '');

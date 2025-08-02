@@ -67,10 +67,12 @@ export type ChatAction =
   | { type: typeof UPDATE_AGENT_MESSAGE; payload: string }
   | { type: typeof RESET_CHAT_SESSION_STATE }
   | { type: typeof ADD_ERROR_MESSAGE; payload: string }
-  | { type: typeof SET_SESSION_NAME; payload: { sessionId: string; name: string } }
+  | {
+      type: typeof SET_SESSION_NAME;
+      payload: { sessionId: string; name: string };
+    }
   | { type: typeof SET_WORKSPACE_ID; payload: string | undefined }
   | { type: typeof SET_WORKSPACE_NAME; payload: string | undefined };
-
 
 // Reducer Function
 export const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
@@ -99,7 +101,12 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
       const newMessage = action.payload;
       const lastMessage = state.messages[state.messages.length - 1];
 
-      if (newMessage.type === 'thought' && lastMessage && lastMessage.type === 'model' && lastMessage.parts[0]?.text === '') {
+      if (
+        newMessage.type === 'thought' &&
+        lastMessage &&
+        lastMessage.type === 'model' &&
+        lastMessage.parts[0]?.text === ''
+      ) {
         // Insert the thought message before the empty model message
         const newMessages = [...state.messages];
         newMessages.splice(newMessages.length - 1, 0, newMessage);
@@ -123,7 +130,12 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
         return { ...state, messages: newMessages };
       } else {
         // Otherwise, just add the message to the end
-        const newMessage = { id: crypto.randomUUID(), role: 'model', parts: [{ text: newMessageText }], type: 'model' } as ChatMessage;
+        const newMessage = {
+          id: crypto.randomUUID(),
+          role: 'model',
+          parts: [{ text: newMessageText }],
+          type: 'model',
+        } as ChatMessage;
         return { ...state, messages: [...state.messages, newMessage] };
       }
     }
@@ -159,10 +171,8 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
     case SET_SESSION_NAME:
       return {
         ...state,
-        sessions: state.sessions.map(session =>
-          session.id === action.payload.sessionId
-            ? { ...session, name: action.payload.name }
-            : session
+        sessions: state.sessions.map((session) =>
+          session.id === action.payload.sessionId ? { ...session, name: action.payload.name } : session,
         ),
       };
     case SET_WORKSPACE_ID:

@@ -58,7 +58,9 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({ file, onR
       {isImage && previewUrl ? (
         <img src={previewUrl} alt={fileName} />
       ) : (
-        <span className="file-icon"><FaFile /></span> // Generic file icon
+        <span className="file-icon">
+          <FaFile />
+        </span> // Generic file icon
       )}
       <span className="file-name">{fileName}</span>
       <button onClick={handleDownload}>

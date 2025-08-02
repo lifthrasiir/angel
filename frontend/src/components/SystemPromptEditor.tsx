@@ -101,20 +101,47 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
       <div className={`chat-bubble system-prompt-bubble ${isExpanded || promptType === 'custom' ? 'expanded' : ''}`}>
         {isSystemPromptEditing ? (
           // Editable mode
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              width: '100%',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
               <select
                 value={promptType}
                 onChange={handlePromptTypeChange}
                 disabled={isReadOnly}
-                style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc' }}
+                style={{
+                  padding: '5px',
+                  borderRadius: '5px',
+                  border: '1px solid #ccc',
+                }}
               >
                 <option value="default">Default Prompt</option>
                 <option value="empty">Empty Prompt</option>
                 <option value="custom">Custom</option>
               </select>
-              <button onClick={() => setIsExpanded(!isExpanded)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2em', color: 'var(--color-system-verydark)' }}>
-                {isExpanded ? <FaChevronUp /> : <FaChevronDown />}</button>
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '1.2em',
+                  color: 'var(--color-system-verydark)',
+                }}
+              >
+                {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
+              </button>
             </div>
 
             {promptType === 'custom' && (
@@ -128,8 +155,15 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
                   target.style.height = target.scrollHeight + 'px';
                 }}
                 readOnly={isReadOnly}
-                className={isSystemPromptEditing ? "system-prompt-textarea-editable" : ""}
-                style={{ width: '100%', marginTop: '10px', resize: 'none', border: 'none', background: 'transparent', outline: 'none' }}
+                className={isSystemPromptEditing ? 'system-prompt-textarea-editable' : ''}
+                style={{
+                  width: '100%',
+                  marginTop: '10px',
+                  resize: 'none',
+                  border: 'none',
+                  background: 'transparent',
+                  outline: 'none',
+                }}
               />
             )}
 
@@ -138,7 +172,14 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
                 {evaluationError ? (
                   <p style={{ color: 'red' }}>Error: {evaluationError}</p>
                 ) : (
-                  <pre style={{ whiteSpace: 'pre-wrap', background: '#f9f9f9', padding: '10px', borderRadius: '5px' }}>
+                  <pre
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      background: '#f9f9f9',
+                      padding: '10px',
+                      borderRadius: '5px',
+                    }}
+                  >
                     {evaluatedPrompt}
                   </pre>
                 )}
@@ -148,16 +189,56 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
         ) : (
           // Read-only mode
           <div
-            style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', cursor: 'pointer' }}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              width: '100%',
+              cursor: 'pointer',
+            }}
             onClick={() => setIsExpanded(!isExpanded)}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontWeight: 'bold', color: 'var(--color-system-verydark)' }}>View Prompt</span>
-              {isExpanded ? <FaChevronUp style={{ fontSize: '1.2em', color: 'var(--color-system-verydark)' }} /> : <FaChevronDown style={{ fontSize: '1.2em', color: 'var(--color-system-verydark)' }} />}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span
+                style={{
+                  fontWeight: 'bold',
+                  color: 'var(--color-system-verydark)',
+                }}
+              >
+                View Prompt
+              </span>
+              {isExpanded ? (
+                <FaChevronUp
+                  style={{
+                    fontSize: '1.2em',
+                    color: 'var(--color-system-verydark)',
+                  }}
+                />
+              ) : (
+                <FaChevronDown
+                  style={{
+                    fontSize: '1.2em',
+                    color: 'var(--color-system-verydark)',
+                  }}
+                />
+              )}
             </div>
             {isExpanded && (
               <div style={{ width: '100%' }}>
-                <pre style={{ whiteSpace: 'pre-wrap', background: '#f9f9f9', padding: '10px', borderRadius: '5px' }}>
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    background: '#f9f9f9',
+                    padding: '10px',
+                    borderRadius: '5px',
+                  }}
+                >
                   {systemPrompt}
                 </pre>
               </div>

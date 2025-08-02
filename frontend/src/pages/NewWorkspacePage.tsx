@@ -33,9 +33,25 @@ const NewWorkspacePage: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+      }}
+    >
       <h1>Create New Workspace</h1>
-      <form onSubmit={handleCreateWorkspace} style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '300px' }}>
+      <form
+        onSubmit={handleCreateWorkspace}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+          width: '300px',
+        }}
+      >
         <label>
           Workspace Name:
           <input
@@ -46,10 +62,31 @@ const NewWorkspacePage: React.FC = () => {
             style={{ width: '100%', padding: '8px' }}
           />
         </label>
-        <button type="submit" style={{ padding: '10px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+        <button
+          type="submit"
+          style={{
+            padding: '10px',
+            backgroundColor: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+          }}
+        >
           Create Workspace
         </button>
-        <button type="button" onClick={() => navigate('/workspaces')} style={{ padding: '10px', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+        <button
+          type="button"
+          onClick={() => navigate('/workspaces')}
+          style={{
+            padding: '10px',
+            backgroundColor: '#6c757d',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+          }}
+        >
           Cancel
         </button>
       </form>

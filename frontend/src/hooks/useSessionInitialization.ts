@@ -47,7 +47,10 @@ export const useSessionInitialization = ({
   handleLoginRedirect,
 }: UseSessionInitializationProps) => {
   const navigate = useNavigate();
-  const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{ sessionId?: string; workspaceId?: string }>(); // Renamed to urlWorkspaceId
+  const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
+    sessionId?: string;
+    workspaceId?: string;
+  }>(); // Renamed to urlWorkspaceId
   const location = useLocation();
 
   const resetChatSessionState = () => {
@@ -86,7 +89,7 @@ export const useSessionInitialization = ({
           dispatch({ type: SET_WORKSPACE_ID, payload: urlWorkspaceId });
         } else {
           // /new 경로일 경우, 기본 워크스페이스를 나타내기 위해 빈 문자열로 설정
-          dispatch({ type: SET_WORKSPACE_ID, payload: "" });
+          dispatch({ type: SET_WORKSPACE_ID, payload: '' });
         }
         const defaultPrompt = `{{.Builtin.SystemPrompt}}`;
         dispatch({ type: SET_SYSTEM_PROMPT, payload: defaultPrompt });
@@ -108,42 +111,95 @@ export const useSessionInitialization = ({
 
               if (eventType === EventInitialState || eventType === EventInitialStateNoCall) {
                 const data = JSON.parse(eventData);
-                dispatch({ type: SET_CHAT_SESSION_ID, payload: data.sessionId });
-                dispatch({ type: SET_SYSTEM_PROMPT, payload: data.systemPrompt });
-                dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
-                dispatch({ type: SET_MESSAGES, payload: (data.history || []).map((msg: any) => {
-                  const chatMessage: ChatMessage = { ...msg, id: msg.id || crypto.randomUUID(), attachments: msg.attachments };
-                  if (msg.type === 'thought') {
-                    chatMessage.type = 'thought';
-                  } else if (msg.type === 'model_error') {
-                    chatMessage.type = 'model_error';
-                  } else if (msg.parts?.[0]?.functionCall) {
-                    chatMessage.type = 'function_call';
-                    chatMessage.parts[0] = { functionCall: msg.parts[0].functionCall };
-                  } else if (msg.parts?.[0]?.functionResponse) {
-                    chatMessage.type = 'function_response';
-                    chatMessage.parts[0] = { functionResponse: msg.parts[0].functionResponse };
-                  } else {
-                    chatMessage.type = msg.role;
-                  }
-                  return chatMessage;
-                }) });
+                dispatch({
+                  type: SET_CHAT_SESSION_ID,
+                  payload: data.sessionId,
+                });
+                dispatch({
+                  type: SET_SYSTEM_PROMPT,
+                  payload: data.systemPrompt,
+                });
+                dispatch({
+                  type: SET_IS_SYSTEM_PROMPT_EDITING,
+                  payload: false,
+                });
+                dispatch({
+                  type: SET_MESSAGES,
+                  payload: (data.history || []).map((msg: any) => {
+                    const chatMessage: ChatMessage = {
+                      ...msg,
+                      id: msg.id || crypto.randomUUID(),
+                      attachments: msg.attachments,
+                    };
+                    if (msg.type === 'thought') {
+                      chatMessage.type = 'thought';
+                    } else if (msg.type === 'model_error') {
+                      chatMessage.type = 'model_error';
+                    } else if (msg.parts?.[0]?.functionCall) {
+                      chatMessage.type = 'function_call';
+                      chatMessage.parts[0] = {
+                        functionCall: msg.parts[0].functionCall,
+                      };
+                    } else if (msg.parts?.[0]?.functionResponse) {
+                      chatMessage.type = 'function_response';
+                      chatMessage.parts[0] = {
+                        functionResponse: msg.parts[0].functionResponse,
+                      };
+                    } else {
+                      chatMessage.type = msg.role;
+                    }
+                    return chatMessage;
+                  }),
+                });
                 dispatch({ type: SET_WORKSPACE_ID, payload: data.workspaceId });
 
-                dispatch({ type: SET_IS_STREAMING, payload: eventType === EventInitialState });
+                dispatch({
+                  type: SET_IS_STREAMING,
+                  payload: eventType === EventInitialState,
+                });
                 if (eventType === EventInitialStateNoCall) {
                   eventSource?.close();
                 }
-
               } else if (eventType === EventModelMessage) {
                 dispatch({ type: UPDATE_AGENT_MESSAGE, payload: eventData });
               } else if (eventType === EventFunctionCall) {
                 const [functionName, argsJson] = splitOnceByNewline(eventData);
-                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'model', parts: [{ functionCall: { name: functionName, args: JSON.parse(argsJson) } }], type: 'function_call' } });
+                dispatch({
+                  type: ADD_MESSAGE,
+                  payload: {
+                    id: crypto.randomUUID(),
+                    role: 'model',
+                    parts: [
+                      {
+                        functionCall: {
+                          name: functionName,
+                          args: JSON.parse(argsJson),
+                        },
+                      },
+                    ],
+                    type: 'function_call',
+                  },
+                });
               } else if (eventType === EventFunctionReply) {
-                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'user', parts: [{ functionResponse: JSON.parse(eventData) }], type: 'function_response' } });
+                dispatch({
+                  type: ADD_MESSAGE,
+                  payload: {
+                    id: crypto.randomUUID(),
+                    role: 'user',
+                    parts: [{ functionResponse: JSON.parse(eventData) }],
+                    type: 'function_response',
+                  },
+                });
               } else if (eventType === EventThought) {
-                dispatch({ type: ADD_MESSAGE, payload: { id: crypto.randomUUID(), role: 'thought', parts: [{ text: eventData }], type: 'thought' } });
+                dispatch({
+                  type: ADD_MESSAGE,
+                  payload: {
+                    id: crypto.randomUUID(),
+                    role: 'thought',
+                    parts: [{ text: eventData }],
+                    type: 'thought',
+                  },
+                });
               } else if (eventType === EventError) {
                 console.error('SSE Error:', eventData);
                 dispatch({ type: SET_IS_STREAMING, payload: false });
@@ -160,16 +216,18 @@ export const useSessionInitialization = ({
               if (errorEvent.target && (errorEvent.target as EventSource).readyState === EventSource.CLOSED) {
                 // Connection closed, might be due to server error or network issue
                 // Check if it's an auth issue by trying to fetch user info again
-                fetchUserInfo().then(userInfo => {
-                  if (!userInfo || !userInfo.success || !userInfo.email) {
+                fetchUserInfo()
+                  .then((userInfo) => {
+                    if (!userInfo || !userInfo.success || !userInfo.email) {
+                      handleLoginRedirect();
+                    }
+                  })
+                  .catch(() => {
                     handleLoginRedirect();
-                  }
-                }).catch(() => {
-                  handleLoginRedirect();
-                });
+                  });
               }
               dispatch({ type: SET_IS_STREAMING, payload: false });
-            }
+            },
           );
         } catch (error) {
           console.error('Failed to load session via SSE:', error);
@@ -203,7 +261,7 @@ export const useSessionInitialization = ({
           handleLoginRedirect();
         }
       } catch (error) {
-        console.error("Failed to fetch user info:", error);
+        console.error('Failed to fetch user info:', error);
         handleLoginRedirect();
       }
     };

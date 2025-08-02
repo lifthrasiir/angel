@@ -7,7 +7,7 @@ export const useDocumentTitle = (sessions: Session[]) => {
   const location = useLocation();
 
   useEffect(() => {
-    const currentSession = sessions.find(s => s.id === urlSessionId);
+    const currentSession = sessions.find((s) => s.id === urlSessionId);
     if (location.pathname === '/new') {
       document.title = 'Angel';
     } else if (currentSession && currentSession.name) {

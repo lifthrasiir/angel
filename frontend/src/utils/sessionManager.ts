@@ -16,7 +16,11 @@ export const fetchSessions = async (workspaceId?: string): Promise<WorkspaceWith
   return data;
 };
 
-export const loadSession = (sessionId: string, onMessage: (event: MessageEvent) => void, onError: (event: Event) => void): EventSource => {
+export const loadSession = (
+  sessionId: string,
+  onMessage: (event: MessageEvent) => void,
+  onError: (event: Event) => void,
+): EventSource => {
   const eventSource = new EventSource(`/api/chat/${sessionId}`, {
     withCredentials: true,
   });

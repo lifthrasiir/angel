@@ -44,7 +44,14 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [fetchAllWorkspaces]);
 
   return (
-    <WorkspaceContext.Provider value={{ workspaces, loadingWorkspaces, errorWorkspaces, refreshWorkspaces }}>
+    <WorkspaceContext.Provider
+      value={{
+        workspaces,
+        loadingWorkspaces,
+        errorWorkspaces,
+        refreshWorkspaces,
+      }}
+    >
       {children}
     </WorkspaceContext.Provider>
   );

@@ -3,15 +3,15 @@ import { splitOnceByNewline } from './stringUtils';
 
 // SSE Event Types
 
-export const EventInitialState = "0";
-export const EventInitialStateNoCall = "1";
-export const EventFunctionCall = "F";
-export const EventThought = "T";
-export const EventModelMessage = "M";
-export const EventFunctionReply = "R";
-export const EventComplete = "Q";
-export const EventSessionName = "N";
-export const EventError = "E";
+export const EventInitialState = '0';
+export const EventInitialStateNoCall = '1';
+export const EventFunctionCall = 'F';
+export const EventThought = 'T';
+export const EventModelMessage = 'M';
+export const EventFunctionReply = 'R';
+export const EventComplete = 'Q';
+export const EventSessionName = 'N';
+export const EventError = 'E';
 
 // EventSource cannot be used directly here because it only supports GET requests,
 // and we need to send POST parameters (e.g., systemPrompt which can be very long).
@@ -20,7 +20,7 @@ export const sendMessage = async (
   attachments: FileAttachment[],
   chatSessionId: string | null,
   systemPrompt: string,
-  workspaceId?: string
+  workspaceId?: string,
 ) => {
   let apiUrl = '';
   let requestBody: any = {};
@@ -30,7 +30,12 @@ export const sendMessage = async (
     requestBody = { message: inputMessage, attachments };
   } else {
     apiUrl = '/api/chat';
-    requestBody = { message: inputMessage, systemPrompt: systemPrompt, name: '', attachments };
+    requestBody = {
+      message: inputMessage,
+      systemPrompt: systemPrompt,
+      name: '',
+      attachments,
+    };
     if (workspaceId) {
       requestBody.workspaceId = workspaceId;
     }
@@ -58,7 +63,7 @@ export interface StreamEventHandlers {
 
 export const processStreamResponse = async (
   response: Response,
-  handlers: StreamEventHandlers
+  handlers: StreamEventHandlers,
 ): Promise<{ qReceived: boolean; nReceived: boolean }> => {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -80,7 +85,10 @@ export const processStreamResponse = async (
 
     let newlineIndex;
     while ((newlineIndex = buffer.indexOf('\n\n')) !== -1) {
-      let eventString = buffer.substring(0, newlineIndex).slice(6).replace(/\ndata: /g, '\n');
+      let eventString = buffer
+        .substring(0, newlineIndex)
+        .slice(6)
+        .replace(/\ndata: /g, '\n');
       buffer = buffer.substring(newlineIndex + 2);
 
       const [type, data] = splitOnceByNewline(eventString);
@@ -97,7 +105,8 @@ export const processStreamResponse = async (
       } else if (type === EventFunctionReply) {
         const functionResponseRaw = JSON.parse(data);
         handlers.onFunctionResponse(functionResponseRaw);
-      } else if (type === EventInitialState) { // New: Handle EventInitialState
+      } else if (type === EventInitialState) {
+        // New: Handle EventInitialState
         const { sessionId, systemPrompt } = JSON.parse(data);
         handlers.onSessionStart(sessionId, systemPrompt);
       } else if (type === EventSessionName) {

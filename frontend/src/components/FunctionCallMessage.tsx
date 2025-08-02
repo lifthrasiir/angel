@@ -10,12 +10,8 @@ const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall 
   return (
     <div className="chat-message-container agent-message">
       <div className="chat-bubble agent-function-call function-message-bubble">
-        <div className="function-title-bar function-call-title-bar">
-          Function Call: {functionCall.name}
-        </div>
-        <pre className="function-code-block">
-          {codeContent}
-        </pre>
+        <div className="function-title-bar function-call-title-bar">Function Call: {functionCall.name}</div>
+        <pre className="function-code-block">{codeContent}</pre>
       </div>
     </div>
   );

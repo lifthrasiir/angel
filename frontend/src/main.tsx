@@ -1,7 +1,7 @@
-import React, { useState, useEffect, lazy } from 'react'
-import ReactDOM from 'react-dom/client'
+import React, { useState, useEffect, lazy } from 'react';
+import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
-import './index.css'
+import './index.css';
 import ToastMessage from './components/ToastMessage.tsx';
 import { ChatProvider } from './hooks/ChatContext';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
@@ -14,43 +14,47 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 const router = createBrowserRouter([
   {
-    path: "/",
+    path: '/',
     element: <Navigate to="/new" replace />,
   },
   {
-    path: "/new",
+    path: '/new',
     element: <ChatLayout />,
   },
   {
-    path: "/:sessionId",
+    path: '/:sessionId',
     element: <ChatLayout />,
   },
   {
-    path: "/settings",
+    path: '/settings',
     element: <SettingsPage />,
   },
   {
-    path: "/w",
+    path: '/w',
     element: <NotFoundPage />,
   },
   {
-    path: "/w/new",
-    element: <ChatLayout><NewWorkspacePage /></ChatLayout>,
+    path: '/w/new',
+    element: (
+      <ChatLayout>
+        <NewWorkspacePage />
+      </ChatLayout>
+    ),
   },
   {
-    path: "/w/:workspaceId",
+    path: '/w/:workspaceId',
     element: <Navigate to="new" replace />,
   },
   {
-    path: "/w/:workspaceId/new",
+    path: '/w/:workspaceId/new',
     element: <ChatLayout />,
   },
   {
-    path: "/w/:workspaceId/:sessionId",
+    path: '/w/:workspaceId/:sessionId',
     element: <SessionRedirector />,
   },
   {
-    path: "*",
+    path: '*',
     element: <NotFoundPage />,
   },
 ]);
@@ -63,7 +67,13 @@ const Root = () => {
 
     window.onerror = (message, source, lineno, colno, error) => {
       const errorMessage = `An unexpected error occurred: ${message}`;
-      console.error('Uncaught Error:', { message, source, lineno, colno, error });
+      console.error('Uncaught Error:', {
+        message,
+        source,
+        lineno,
+        colno,
+        error,
+      });
       setToastMessage(errorMessage);
 
       if (originalOnError) {

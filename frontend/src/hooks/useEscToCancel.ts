@@ -13,12 +13,13 @@ const useEscToCancel = ({ isStreaming, onCancel }: UseEscToCancelProps) => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && isStreaming) {
         const currentTime = new Date().getTime();
-        if (currentTime - lastEscPressTime < 1000) { // 1 second interval
+        if (currentTime - lastEscPressTime < 1000) {
+          // 1 second interval
           onCancel();
           setLastEscPressTime(0); // Reset
           setToastMessage(null); // Clear toast
         } else {
-          setToastMessage("Press ESC twice quickly to cancel");
+          setToastMessage('Press ESC twice quickly to cancel');
           setLastEscPressTime(currentTime);
         }
       }

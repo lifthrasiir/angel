@@ -7,12 +7,7 @@ import { useDocumentTitle } from './useDocumentTitle';
 import { useSessionInitialization } from './useSessionInitialization';
 import { useMessageSending } from './useMessageSending';
 import { useChat } from './ChatContext';
-import {
-  SET_SESSIONS,
-  SET_SELECTED_FILES,
-  SET_WORKSPACE_NAME,
-  SET_WORKSPACE_ID,
-} from './chatReducer';
+import { SET_SESSIONS, SET_SELECTED_FILES, SET_WORKSPACE_NAME, SET_WORKSPACE_ID } from './chatReducer';
 
 export const useChatSession = () => {
   const { state, dispatch } = useChat();
@@ -45,7 +40,7 @@ export const useChatSession = () => {
       dispatch({ type: SET_SESSIONS, payload: fetchedSessions });
     }
     if (error) {
-      console.error("Failed to load sessions:", error);
+      console.error('Failed to load sessions:', error);
       // Optionally, dispatch an error state to your chatReducer
     }
   }, [currentWorkspace, fetchedSessions, error, dispatch]);
@@ -56,11 +51,17 @@ export const useChatSession = () => {
   };
 
   const handleFilesSelectedWrapper = (files: File[]) => {
-    dispatch({ type: SET_SELECTED_FILES, payload: handleFilesSelected(selectedFiles, files) });
+    dispatch({
+      type: SET_SELECTED_FILES,
+      payload: handleFilesSelected(selectedFiles, files),
+    });
   };
 
   const handleRemoveFileWrapper = (index: number) => {
-    dispatch({ type: SET_SELECTED_FILES, payload: handleRemoveFile(selectedFiles, index) });
+    dispatch({
+      type: SET_SELECTED_FILES,
+      payload: handleRemoveFile(selectedFiles, index),
+    });
   };
 
   useDocumentTitle(sessions);

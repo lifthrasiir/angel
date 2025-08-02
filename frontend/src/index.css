@@ -9,7 +9,8 @@
   --color-system-verydark: #cc7a00;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   overflow: hidden; /* Prevent scrollbars */
@@ -43,11 +44,11 @@ html, body {
   overflow: hidden; /* Ensure border-radius clips content */
 }
 
-.chat-bubble>*:first-child {
+.chat-bubble > *:first-child {
   margin-top: 0;
 }
 
-.chat-bubble>*:last-child {
+.chat-bubble > *:last-child {
   margin-bottom: 0;
 }
 
@@ -60,7 +61,7 @@ html, body {
 .chat-bubble h2 {
   font-size: 140%;
   font-weight: 700;
-  margin: 1.0rem 0 0.5rem 0;
+  margin: 1rem 0 0.5rem 0;
 }
 
 .chat-bubble h3 {
@@ -295,33 +296,87 @@ textarea {
 }
 
 @keyframes logoAnimation {
-  0% { transform: scaleX(1); }
-  1% { transform: scaleX(.9); }
-  2% { transform: scaleX(.5); }
-  3% { transform: scaleX(-.2); }
-  3.5% { transform: scaleX(-1); }
-  4.8% { transform: scaleX(1); }
-  5.5% { transform: scaleX(-1); }
-  6% { transform: scaleX(1); }
-  6.33% { transform: scaleX(-1); }
-  6.67% { transform: scaleX(1); }
-  7% { transform: scaleX(-1); }
-  7.25% { transform: scaleX(1); }
-  7.5% { transform: scaleX(-1); }
-  7.75% { transform: scaleX(1); }
-  8% { transform: scaleX(-1); }
-  8.25% { transform: scaleX(1); }
-  8.5% { transform: scaleX(-1); }
-  8.75% { transform: scaleX(1); }
-  9% { transform: scaleX(-1); }
-  9.33% { transform: scaleX(1); }
-  9.67% { transform: scaleX(-1); }
-  10.2% { transform: scaleX(1); }
-  11.5% { transform: scaleX(-1); }
-  12% { transform: scaleX(-.2); }
-  13% { transform: scaleX(.5); }
-  14% { transform: scaleX(.9); }
-  15% { transform: scaleX(1); }
+  0% {
+    transform: scaleX(1);
+  }
+  1% {
+    transform: scaleX(0.9);
+  }
+  2% {
+    transform: scaleX(0.5);
+  }
+  3% {
+    transform: scaleX(-0.2);
+  }
+  3.5% {
+    transform: scaleX(-1);
+  }
+  4.8% {
+    transform: scaleX(1);
+  }
+  5.5% {
+    transform: scaleX(-1);
+  }
+  6% {
+    transform: scaleX(1);
+  }
+  6.33% {
+    transform: scaleX(-1);
+  }
+  6.67% {
+    transform: scaleX(1);
+  }
+  7% {
+    transform: scaleX(-1);
+  }
+  7.25% {
+    transform: scaleX(1);
+  }
+  7.5% {
+    transform: scaleX(-1);
+  }
+  7.75% {
+    transform: scaleX(1);
+  }
+  8% {
+    transform: scaleX(-1);
+  }
+  8.25% {
+    transform: scaleX(1);
+  }
+  8.5% {
+    transform: scaleX(-1);
+  }
+  8.75% {
+    transform: scaleX(1);
+  }
+  9% {
+    transform: scaleX(-1);
+  }
+  9.33% {
+    transform: scaleX(1);
+  }
+  9.67% {
+    transform: scaleX(-1);
+  }
+  10.2% {
+    transform: scaleX(1);
+  }
+  11.5% {
+    transform: scaleX(-1);
+  }
+  12% {
+    transform: scaleX(-0.2);
+  }
+  13% {
+    transform: scaleX(0.5);
+  }
+  14% {
+    transform: scaleX(0.9);
+  }
+  15% {
+    transform: scaleX(1);
+  }
 }
 
 .toast-message {
@@ -474,8 +529,16 @@ textarea {
 }
 
 @keyframes fadeInOut {
-  0% { opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { opacity: 0; }
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }

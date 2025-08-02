@@ -19,7 +19,14 @@ const SessionList: React.FC<SessionListProps> = ({
   const navigate = useNavigate();
 
   return (
-    <ul style={{ listStyle: 'none', margin: '0', padding: '10px 0', width: '100%' }}>
+    <ul
+      style={{
+        listStyle: 'none',
+        margin: '0',
+        padding: '10px 0',
+        width: '100%',
+      }}
+    >
       {sessions.map((session) => (
         <li key={session.id} className="sidebar-session-item">
           {session.isEditing ? (
@@ -28,7 +35,10 @@ const SessionList: React.FC<SessionListProps> = ({
                 type="text"
                 value={session.name || ''}
                 onChange={(e) => {
-                  updateSessionState(session.id, s => ({ ...s, name: e.target.value }));
+                  updateSessionState(session.id, (s) => ({
+                    ...s,
+                    name: e.target.value,
+                  }));
                 }}
                 onBlur={async () => {
                   if (session.id) {
@@ -43,13 +53,19 @@ const SessionList: React.FC<SessionListProps> = ({
                       console.error('Error updating session name:', error);
                     }
                   }
-                  updateSessionState(session.id, s => ({ ...s, isEditing: false }));
+                  updateSessionState(session.id, (s) => ({
+                    ...s,
+                    isEditing: false,
+                  }));
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.currentTarget.blur();
                   } else if (e.key === 'Escape') {
-                    updateSessionState(session.id, s => ({ ...s, isEditing: false }));
+                    updateSessionState(session.id, (s) => ({
+                      ...s,
+                      isEditing: false,
+                    }));
                   }
                 }}
                 className="sidebar-session-name-input"
@@ -76,7 +92,10 @@ const SessionList: React.FC<SessionListProps> = ({
           {!session.isEditing && (
             <button
               onClick={() => {
-                updateSessionState(session.id, s => ({ ...s, isEditing: true }));
+                updateSessionState(session.id, (s) => ({
+                  ...s,
+                  isEditing: true,
+                }));
               }}
               className="sidebar-edit-button"
             >

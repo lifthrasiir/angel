@@ -14,7 +14,7 @@ interface ChatAreaProps {
   setSystemPrompt: (prompt: string) => void;
   isSystemPromptEditing: boolean;
   chatSessionId: string | null;
-  
+
   inputMessage: string;
   setInputMessage: (message: string) => void;
   handleSendMessage: () => void;
@@ -35,7 +35,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   setSystemPrompt,
   isSystemPromptEditing,
   chatSessionId,
-  
+
   inputMessage,
   setInputMessage,
   handleSendMessage,
@@ -66,15 +66,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           thoughtGroup.push(messages[j]);
           j++;
         }
-        renderedElements.push(<ThoughtGroup key={`thought-group-${i}`} groupId={`thought-group-${i}`} thoughts={thoughtGroup} isAutoDisplayMode={true} lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId} />);
+        renderedElements.push(
+          <ThoughtGroup
+            key={`thought-group-${i}`}
+            groupId={`thought-group-${i}`}
+            thoughts={thoughtGroup}
+            isAutoDisplayMode={true}
+            lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId}
+          />,
+        );
         i = j; // Move index past the grouped thoughts
       } else {
-        renderedElements.push(
-          <ChatMessage
-            key={currentMessage.id}
-            message={currentMessage}
-          />
-        );
+        renderedElements.push(<ChatMessage key={currentMessage.id} message={currentMessage} />);
         i++;
       }
     }
@@ -82,13 +85,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [messages, lastAutoDisplayedThoughtId]);
 
   return (
-    <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <div
+      style={{
+        flexGrow: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+      }}
+    >
       {!isLoggedIn && (
         <div style={{ padding: '20px', textAlign: 'center' }}>
           <p>Login required to start chatting.</p>
         </div>
       )}
-      
+
       {isLoggedIn && (
         <>
           <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
@@ -105,7 +115,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           </div>
           {selectedFiles.length > 0 && (
-            <div style={{ padding: '5px 20px', borderTop: '1px solid #eee', background: '#f9f9f9', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+            <div
+              style={{
+                padding: '5px 20px',
+                borderTop: '1px solid #eee',
+                background: '#f9f9f9',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '5px',
+              }}
+            >
               {selectedFiles.map((file, index) => (
                 <FileAttachmentPreview key={index} file={file} onRemove={() => handleRemoveFile(index)} />
               ))}
