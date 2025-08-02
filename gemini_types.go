@@ -221,9 +221,11 @@ type SafetyRating struct {
 }
 
 type UsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount,omitempty"`
-	CandidatesTokenCount int `json:"candidatesTokenCount,omitempty"`
-	TotalTokenCount      int `json:"totalTokenCount,omitempty"`
+	PromptTokenCount        int `json:"promptTokenCount,omitempty"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount,omitempty"`
+	TotalTokenCount         int `json:"totalTokenCount,omitempty"`
+	ToolUsePromptTokenCount int `json:"toolUsePromptTokenCount,omitempty"`
+	ThoughtsTokenCount      int `json:"thoughtsTokenCount,omitempty"`
 }
 
 type Candidate struct {
@@ -234,7 +236,9 @@ type Candidate struct {
 }
 
 type VertexGenerateContentResponse struct {
-	Candidates []Candidate `json:"candidates"`
+	Candidates     []Candidate     `json:"candidates"`
+	PromptFeedback *PromptFeedback `json:"promptFeedback,omitempty"`
+	UsageMetadata  *UsageMetadata  `json:"usageMetadata,omitempty"`
 }
 
 type CaGenerateContentResponse struct {

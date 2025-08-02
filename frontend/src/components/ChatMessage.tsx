@@ -7,29 +7,36 @@ import ModelTextMessage from './ModelTextMessage';
 import SystemMessage from './SystemMessage';
 // Import new message components
 import UserTextMessage from './UserTextMessage';
+import MessageInfo from './MessageInfo'; // Import MessageInfo
 
 const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
-  const { role, type, attachments } = message;
+  const { role, type, attachments, cumulTokenCount } = message;
   const { text, functionCall, functionResponse } = message.parts?.[0] || {};
 
+  const messageInfoComponent = <MessageInfo cumulTokenCount={cumulTokenCount} />;
+
   if (type === 'function_response') {
-    return <FunctionResponseMessage functionResponse={functionResponse} isUserRole={role === 'user'} />;
+    return (
+      <FunctionResponseMessage
+        functionResponse={functionResponse}
+        isUserRole={role === 'user'}
+        messageInfo={messageInfoComponent}
+      />
+    );
   } else if (type === 'user') {
-    return <UserTextMessage text={text} attachments={attachments} />;
+    return <UserTextMessage text={text} attachments={attachments} messageInfo={messageInfoComponent} />;
   } else if (type === 'thought') {
-    // Thought messages are handled by ThoughtGroup, which passes them to ChatMessage.
-    // We need to render them as a ModelTextMessage with special styling.
     const [subject, description] = splitOnceByNewline(text || '');
     const thoughtText = `**Thought: ${subject}**\n${description || ''}`;
-    return <ModelTextMessage text={thoughtText} className="agent-thought" />;
+    return <ModelTextMessage text={thoughtText} className="agent-thought" messageInfo={messageInfoComponent} />;
   } else if (type === 'function_call') {
-    return <FunctionCallMessage functionCall={functionCall} />;
+    return <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} />;
   } else if (type === 'system') {
-    return <SystemMessage text={text} />;
+    return <SystemMessage text={text} messageInfo={messageInfoComponent} />;
   } else if (type === 'model_error') {
-    return <ModelTextMessage text={text} className="agent-error-message" />;
+    return <ModelTextMessage text={text} className="agent-error-message" messageInfo={messageInfoComponent} />;
   } else if (type === 'model') {
-    return <ModelTextMessage text={text} className="agent-message" />;
+    return <ModelTextMessage text={text} className="agent-message" messageInfo={messageInfoComponent} />;
   }
 
   // Fallback for unknown types or if type is not explicitly set
@@ -38,6 +45,7 @@ const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message })
       <div className="chat-bubble">
         {text} {/* Render raw text as a fallback */}
       </div>
+      {messageInfoComponent} {/* Render MessageInfo outside chat-bubble for fallback */}
     </div>
   );
 });

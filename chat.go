@@ -51,12 +51,14 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	userMessage := requestBody.Message
 
-	// Add user message to current chat history in DB
-	if err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments); err != nil {
+	userMessageID, err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments, nil)
+	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
 	}
+	// Store userMessageID for later token count update
+	// (This variable will be used in streamGeminiResponse)
 
 	// Update last_updated_at for the new session
 	if err := UpdateSessionLastUpdated(sessionId); err != nil {
@@ -116,7 +118,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(initialState, sseW); err != nil {
+	if err := streamGeminiResponse(initialState, sseW, userMessageID); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -167,12 +169,14 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	userMessage := requestBody.Message
 
-	// Add user message to current chat history in DB
-	if err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments); err != nil {
+	userMessageID, err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments, nil)
+	if err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
 	}
+	// Store userMessageID for later token count update
+	// (This variable will be used in streamGeminiResponse)
 
 	// Retrieve session history from DB for Gemini API
 	frontendHistory, err := GetSessionHistory(sessionId, true)
@@ -191,7 +195,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:  session.WorkspaceID,
 	}
 
-	if err := streamGeminiResponse(initialState, sseW); err != nil {
+	if err := streamGeminiResponse(initialState, sseW, userMessageID); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return

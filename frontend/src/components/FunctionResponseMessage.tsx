@@ -7,9 +7,14 @@ import PrettyJSON from './PrettyJSON';
 interface FunctionResponseMessageProps {
   functionResponse: any;
   isUserRole?: boolean; // Optional prop to differentiate user's function response
+  messageInfo?: React.ReactNode; // New prop for MessageInfo
 }
 
-const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({ functionResponse, isUserRole }) => {
+const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
+  functionResponse,
+  isUserRole,
+  messageInfo,
+}) => {
   const [showPrettyJson, setShowPrettyJson] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showToggle, setShowToggle] = useState(false);
@@ -87,6 +92,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({ funct
           </div>
         )}
       </div>
+      {messageInfo} {/* Render MessageInfo outside chat-bubble */}
     </div>
   );
 };

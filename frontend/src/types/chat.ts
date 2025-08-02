@@ -10,6 +10,7 @@ export interface ChatMessage {
   parts: { text?: string; functionCall?: any; functionResponse?: any }[];
   type?: 'model' | 'thought' | 'system' | 'user' | 'function_call' | 'function_response' | 'model_error';
   attachments?: FileAttachment[];
+  cumulTokenCount?: number | null;
 }
 
 export interface Session {

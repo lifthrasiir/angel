@@ -14,8 +14,9 @@ import (
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
+func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMessageID int) error {
 	var agentResponseText string
+	var lastUsageMetadata *UsageMetadata
 	currentHistory := convertFrontendMessagesToContent(initialState.History)
 
 	// Create a cancellable context for the Gemini API call
@@ -67,7 +68,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 			if errors.Is(err, context.Canceled) {
 				errorMessage = "Request canceled by user"
 			}
-			if err := AddMessageToSession(initialState.SessionId, "model", errorMessage, "model_error", nil); err != nil {
+			if _, err := AddMessageToSession(initialState.SessionId, "model", errorMessage, "model_error", nil, nil); err != nil {
 				log.Printf("Failed to save model_error message for API call failure: %v", err)
 			}
 			return fmt.Errorf("CodeAssist API call failed: %w", err)
@@ -78,6 +79,23 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 		var modelResponseParts []Part
 
 		for caResp := range seq {
+			// Log UsageMetadata if available
+			if caResp.Response.UsageMetadata != nil {
+				lastUsageMetadata = caResp.Response.UsageMetadata
+				log.Printf("UsageMetadata: PromptTokenCount=%d, CandidatesTokenCount=%d, TotalTokenCount=%d, ToolUsePromptTokenCount=%d, ThoughtsTokenCount=%d",
+					lastUsageMetadata.PromptTokenCount,
+					lastUsageMetadata.CandidatesTokenCount,
+					lastUsageMetadata.TotalTokenCount,
+					lastUsageMetadata.ToolUsePromptTokenCount,
+					lastUsageMetadata.ThoughtsTokenCount)
+
+				// Update last user message's cumul_token_count with PromptTokenCount
+				if lastUsageMetadata.PromptTokenCount > 0 && lastUserMessageID != 0 {
+					if err := UpdateMessageTokens(lastUserMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
+						log.Printf("Failed to update cumul_token_count for user message %d: %v", lastUserMessageID, err)
+					}
+				}
+			}
 			select {
 			case <-ctx.Done():
 				// Context was canceled, send a message to the frontend
@@ -110,7 +128,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 					}
 
 					broadcastToSession(initialState.SessionId, EventThought, thoughtText)
-					if err := AddMessageToSession(initialState.SessionId, "thought", thoughtText, "thought", nil); err != nil {
+					if _, err := AddMessageToSession(initialState.SessionId, "thought", thoughtText, "thought", nil, nil); err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
 					continue
@@ -143,14 +161,24 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 				broadcastToSession(initialState.SessionId, EventFunctionReply, string(responseJson))
 
 				fcJson, _ := json.Marshal(fc)
-				if err := AddMessageToSession(initialState.SessionId, "model", string(fcJson), "function_call", nil); err != nil {
+				var totalTokens *int
+				if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
+					t := lastUsageMetadata.TotalTokenCount
+					totalTokens = &t
+				}
+				if _, err := AddMessageToSession(initialState.SessionId, "model", string(fcJson), "function_call", nil, totalTokens); err != nil {
 					log.Printf("Failed to save function call: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
 
 				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
 				frJson, _ := json.Marshal(fr)
-				if err := AddMessageToSession(initialState.SessionId, "user", string(frJson), "function_response", nil); err != nil {
+				var promptTokens *int
+				if lastUsageMetadata != nil && lastUsageMetadata.PromptTokenCount > 0 {
+					t := lastUsageMetadata.PromptTokenCount
+					promptTokens = &t
+				}
+				if _, err := AddMessageToSession(initialState.SessionId, "user", string(frJson), "function_response", nil, promptTokens); err != nil {
 					log.Printf("Failed to save function response: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
@@ -170,7 +198,13 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter) error {
 	// Infer session name after streaming is complete
 	go inferAndSetSessionName(initialState.SessionId, initialState.History[0].Parts[0].Text, sseW)
 
-	if err := AddMessageToSession(initialState.SessionId, "model", agentResponseText, "text", nil); err != nil {
+	var finalTotalTokenCount *int
+	if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
+		t := lastUsageMetadata.TotalTokenCount
+		finalTotalTokenCount = &t
+	}
+
+	if _, err := AddMessageToSession(initialState.SessionId, "model", agentResponseText, "text", nil, finalTotalTokenCount); err != nil {
 		failCall(initialState.SessionId, err) // Mark the call as failed
 		return fmt.Errorf("failed to save agent response: %w", err)
 	}

@@ -7,6 +7,7 @@
     "build-frontend": "npm run build --prefix frontend",
     "build-backend": "go fmt . && go build .",
     "build": "npm run build-frontend && npm run build-backend",
+    "pack": "upx --lzma -9 -o angel.dist.exe angel.exe",
     "start": "node -e \"require('child_process').execSync(process.platform === 'win32' ? 'angel.exe' : '.\\angel', { stdio: 'inherit' })"
   },
   "keywords": [],

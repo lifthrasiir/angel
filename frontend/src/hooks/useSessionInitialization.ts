@@ -128,6 +128,7 @@ export const useSessionInitialization = ({
                       ...msg,
                       id: msg.id || crypto.randomUUID(),
                       attachments: msg.attachments,
+                      cumulTokenCount: msg.cumul_token_count,
                     };
                     if (msg.type === 'thought') {
                       chatMessage.type = 'thought';

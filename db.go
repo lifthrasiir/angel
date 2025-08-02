@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -28,13 +29,14 @@ func InitDB() {
 		workspace_id TEXT DEFAULT ''
 	);
 
-	CREATE TABLE IF NOT EXISTS messages (
+		CREATE TABLE IF NOT EXISTS messages (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id TEXT NOT NULL,
 		role TEXT NOT NULL,
 		text TEXT NOT NULL,
 		type TEXT NOT NULL DEFAULT 'text',
 		attachments TEXT,
+		cumul_token_count INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -62,6 +64,19 @@ func InitDB() {
 		log.Fatalf("Failed to create tables: %v", err)
 	}
 
+	// Add cumul_token_count column to messages table if it doesn't exist
+	_, err = db.Exec("ALTER TABLE messages ADD COLUMN cumul_token_count INTEGER;")
+	if err != nil {
+		// Check if the error is due to the column already existing
+		if strings.Contains(err.Error(), "duplicate column name: cumul_token_count") {
+			log.Println("Column 'cumul_token_count' already exists in 'messages' table. Skipping ALTER TABLE.")
+		} else {
+			log.Fatalf("Failed to add cumul_token_count column to messages table: %v", err)
+		}
+	} else {
+		log.Println("Added cumul_token_count column to messages table.")
+	}
+
 	log.Println("Database initialized and tables created.")
 }
 
@@ -83,22 +98,24 @@ type FileAttachment struct {
 
 // Message struct to hold message data for database interaction
 type Message struct {
-	ID          int              `json:"id"`
-	SessionID   string           `json:"session_id"`
-	Role        string           `json:"role"`
-	Text        string           `json:"text"`
-	Type        string           `json:"type"`
-	Attachments []FileAttachment `json:"attachments,omitempty"` // New field
-	CreatedAt   string           `json:"created_at"`
+	ID              int              `json:"id"`
+	SessionID       string           `json:"session_id"`
+	Role            string           `json:"role"`
+	Text            string           `json:"text"`
+	Type            string           `json:"type"`
+	Attachments     []FileAttachment `json:"attachments,omitempty"` // New field
+	CumulTokenCount *int             `json:"cumul_token_count,omitempty"`
+	CreatedAt       string           `json:"created_at"`
 }
 
 // FrontendMessage struct to match the frontend's ChatMessage interface
 type FrontendMessage struct {
-	ID          string           `json:"id"`
-	Role        string           `json:"role"`
-	Parts       []Part           `json:"parts"`
-	Type        string           `json:"type"`
-	Attachments []FileAttachment `json:"attachments,omitempty"`
+	ID              string           `json:"id"`
+	Role            string           `json:"role"`
+	Parts           []Part           `json:"parts"`
+	Type            string           `json:"type"`
+	Attachments     []FileAttachment `json:"attachments,omitempty"`
+	CumulTokenCount *int             `json:"cumul_token_count,omitempty"`
 }
 
 type Workspace struct {
@@ -272,18 +289,24 @@ func GetWorkspaceAndSessions(workspaceID string) (*WorkspaceWithSessions, error)
 	return &wsWithSessions, nil
 }
 
-// AddMessageToSession now accepts a message type and attachments
-func AddMessageToSession(sessionID string, role string, text string, msgType string, attachments []FileAttachment) error {
+// AddMessageToSession now accepts a message type, attachments, and numTokens
+func AddMessageToSession(sessionID string, role string, text string, msgType string, attachments []FileAttachment, cumulTokenCount *int) (int, error) {
 	attachmentsJSON, err := json.Marshal(attachments)
 	if err != nil {
-		return fmt.Errorf("failed to marshal attachments: %w", err)
+		return 0, fmt.Errorf("failed to marshal attachments: %w", err)
 	}
 
-	_, err = db.Exec("INSERT INTO messages (session_id, role, text, type, attachments) VALUES (?, ?, ?, ?, ?)", sessionID, role, text, msgType, string(attachmentsJSON))
+	result, err := db.Exec("INSERT INTO messages (session_id, role, text, type, attachments, cumul_token_count) VALUES (?, ?, ?, ?, ?, ?)", sessionID, role, text, msgType, string(attachmentsJSON), cumulTokenCount)
 	if err != nil {
-		return fmt.Errorf("failed to add message to session: %w", err)
+		return 0, fmt.Errorf("failed to add message to session: %w", err)
 	}
-	return nil
+
+	lastInsertID, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get last insert ID: %w", err)
+	}
+
+	return int(lastInsertID), nil
 }
 
 func SaveOAuthToken(tokenJSON string, userEmail string, projectID string) error {
@@ -341,7 +364,7 @@ func GetSession(sessionID string) (Session, error) {
 }
 
 func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessage, error) {
-	rows, err := db.Query("SELECT id, role, text, type, attachments FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+	rows, err := db.Query("SELECT id, role, text, type, attachments, cumul_token_count FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query chat history: %w", err)
 	}
@@ -352,7 +375,8 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessag
 		var id int
 		var role, message, msgType string
 		var attachmentsJSON sql.NullString
-		if err := rows.Scan(&id, &role, &message, &msgType, &attachmentsJSON); err != nil {
+		var cumulTokenCount sql.NullInt64
+		if err := rows.Scan(&id, &role, &message, &msgType, &attachmentsJSON, &cumulTokenCount); err != nil {
 			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
 		}
 		// Filter out "thought" messages when retrieving history for the model
@@ -362,6 +386,12 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessag
 
 		var parts []Part
 		var attachments []FileAttachment
+		var tokens *int
+
+		if cumulTokenCount.Valid {
+			t := int(cumulTokenCount.Int64)
+			tokens = &t
+		}
 
 		// Add text part
 		if message != "" {
@@ -395,11 +425,12 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessag
 		}
 
 		history = append(history, FrontendMessage{
-			ID:          fmt.Sprintf("%d", id),
-			Role:        role,
-			Parts:       parts,
-			Type:        msgType,
-			Attachments: attachments,
+			ID:              fmt.Sprintf("%d", id),
+			Role:            role,
+			Parts:           parts,
+			Type:            msgType,
+			Attachments:     attachments,
+			CumulTokenCount: tokens,
 		})
 	}
 
@@ -506,6 +537,15 @@ func DeleteMCPServerConfig(name string) error {
 	_, err := db.Exec("DELETE FROM mcp_configs WHERE name = ?", name)
 	if err != nil {
 		return fmt.Errorf("failed to delete MCP server config: %w", err)
+	}
+	return nil
+}
+
+// UpdateMessageTokens updates the cumul_token_count for a specific message.
+func UpdateMessageTokens(messageID int, cumulTokenCount int) error {
+	_, err := db.Exec("UPDATE messages SET cumul_token_count = ? WHERE id = ?", cumulTokenCount, messageID)
+	if err != nil {
+		return fmt.Errorf("failed to update message tokens: %w", err)
 	}
 	return nil
 }

@@ -6,9 +6,10 @@ import PrettyJSON from './PrettyJSON';
 
 interface FunctionCallMessageProps {
   functionCall: any;
+  messageInfo?: React.ReactNode;
 }
 
-const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall }) => {
+const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall, messageInfo }) => {
   const [showPrettyJson, setShowPrettyJson] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showToggle, setShowToggle] = useState(false);
@@ -60,6 +61,7 @@ const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall 
           </div>
         )}
       </div>
+      {messageInfo} {/* Render MessageInfo outside chat-bubble */}
     </div>
   );
 };

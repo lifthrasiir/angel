@@ -8,9 +8,10 @@ import FileAttachmentPreview from './FileAttachmentPreview';
 interface UserTextMessageProps {
   text?: string;
   attachments?: FileAttachment[];
+  messageInfo?: React.ReactNode;
 }
 
-const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) => {
+const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, messageInfo }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
@@ -55,6 +56,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments }) 
           </div>
         )}
       </div>
+      {messageInfo} {/* Render MessageInfo outside chat-bubble */}
     </div>
   );
 };
