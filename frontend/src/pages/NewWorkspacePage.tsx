@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useWorkspaces } from '../hooks/WorkspaceContext';
 
 const NewWorkspacePage: React.FC = () => {
   const [workspaceName, setWorkspaceName] = useState('');
   const navigate = useNavigate();
+  const { refreshWorkspaces } = useWorkspaces();
 
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,6 +20,7 @@ const NewWorkspacePage: React.FC = () => {
 
       if (response.ok) {
         const data = await response.json();
+        refreshWorkspaces();
         navigate(`/w/${data.id}/new`); // Redirect to new session in the created workspace
       } else {
         console.error('Failed to create workspace:', response.status, response.statusText);

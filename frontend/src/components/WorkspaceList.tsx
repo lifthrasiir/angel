@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { FaTrash } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
@@ -12,25 +12,12 @@ interface Workspace {
 interface WorkspaceListProps {
   currentWorkspaceId?: string;
   onSelectWorkspace: (workspaceId: string) => void;
+  workspaces: Workspace[];
+  refreshWorkspaces: () => Promise<void>;
 }
 
-const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSelectWorkspace }) => {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSelectWorkspace, workspaces, refreshWorkspaces }) => {
   const navigate = useNavigate();
-
-  const fetchWorkspaces = async () => {
-    try {
-      const response = await fetch('/api/workspaces');
-      if (response.ok) {
-        const data: Workspace[] = await response.json();
-        setWorkspaces(data);
-      } else {
-        console.error('Failed to fetch workspaces:', response.status, response.statusText);
-      }
-    } catch (error) {
-      console.error('Error fetching workspaces:', error);
-    }
-  };
 
   const handleDeleteWorkspace = async (workspaceId: string) => {
     if (window.confirm('Are you sure you want to delete this workspace and all its sessions?')) {
@@ -39,7 +26,7 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSel
           method: 'DELETE',
         });
         if (response.ok) {
-          fetchWorkspaces();
+          refreshWorkspaces();
           if (currentWorkspaceId === workspaceId) {
             navigate('/new'); // Redirect to no-workspace new session if current workspace is deleted
           }
@@ -52,9 +39,7 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSel
     }
   };
 
-  useEffect(() => {
-    fetchWorkspaces();
-  }, []);
+  
 
   return (
     <ul style={{ listStyle: 'none', margin: '0', padding: '10px 0', width: '100%' }}>
@@ -91,11 +76,7 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({ currentWorkspaceId, onSel
             {workspace.name}
           </button>
           <button
-            onClick={() => {
-              if (window.confirm('Are you sure you want to delete this workspace?\nThis would remove all contained sessions as well!')) {
-                handleDeleteWorkspace(workspace.id);
-              }
-            }}
+            onClick={() => handleDeleteWorkspace(workspace.id)}
             className="sidebar-delete-button"
           >
             <FaTrash size={16} />

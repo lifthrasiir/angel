@@ -1,11 +1,13 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react'
+import React, { useState, useEffect, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import './index.css'
 import ToastMessage from './components/ToastMessage.tsx';
 import { ChatProvider } from './hooks/ChatContext';
+import { WorkspaceProvider } from './hooks/WorkspaceContext';
 
 import ChatLayout from './components/ChatLayout';
+import SessionRedirector from './components/SessionRedirector';
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
@@ -33,7 +35,7 @@ const router = createBrowserRouter([
   },
   {
     path: "/w/new",
-    element: <NewWorkspacePage />,
+    element: <ChatLayout><NewWorkspacePage /></ChatLayout>,
   },
   {
     path: "/w/:workspaceId",
@@ -45,7 +47,7 @@ const router = createBrowserRouter([
   },
   {
     path: "/w/:workspaceId/:sessionId",
-    element: <Navigate to="/:sessionId" replace />,
+    element: <SessionRedirector />,
   },
   {
     path: "*",
@@ -78,9 +80,9 @@ const Root = () => {
   return (
     <React.StrictMode>
       <ChatProvider>
-        <Suspense fallback={<div>Loading...</div>}>
+        <WorkspaceProvider>
           <RouterProvider router={router} />
-        </Suspense>
+        </WorkspaceProvider>
       </ChatProvider>
       <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
     </React.StrictMode>

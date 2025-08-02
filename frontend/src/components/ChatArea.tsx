@@ -13,16 +13,16 @@ interface ChatAreaProps {
   systemPrompt: string;
   setSystemPrompt: (prompt: string) => void;
   isSystemPromptEditing: boolean;
-  chatSessionId: string | null; // New prop
+  chatSessionId: string | null;
   
   inputMessage: string;
   setInputMessage: (message: string) => void;
   handleSendMessage: () => void;
   isStreaming: boolean;
   onFilesSelected: (files: File[]) => void;
-  selectedFiles: File[]; // New prop
-  handleRemoveFile: (index: number) => void; // New prop
-  handleCancelStreaming: () => void; // New prop
+  selectedFiles: File[];
+  handleRemoveFile: (index: number) => void;
+  handleCancelStreaming: () => void;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -32,16 +32,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   systemPrompt,
   setSystemPrompt,
   isSystemPromptEditing,
-  chatSessionId, // Destructure new prop
+  chatSessionId,
   
   inputMessage,
   setInputMessage,
   handleSendMessage,
   isStreaming,
   onFilesSelected,
-  selectedFiles, // Destructure new prop
-  handleRemoveFile, // Destructure new prop
-  handleCancelStreaming, // Destructure new prop
+  selectedFiles,
+  handleRemoveFile,
+  handleCancelStreaming,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 

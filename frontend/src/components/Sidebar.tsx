@@ -5,13 +5,15 @@ import LogoAnimation from './LogoAnimation';
 import { useChat } from '../hooks/ChatContext';
 import SessionList from './SessionList';
 import WorkspaceList from './WorkspaceList';
-import { Session } from '../types/chat';
+import { Session, Workspace } from '../types/chat';
 
 interface SidebarProps {
   sessions: Session[];
   chatSessionId: string | null;
   workspaceName?: string;
   workspaceId?: string;
+  workspaces: Workspace[];
+  refreshWorkspaces: () => Promise<void>;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -19,6 +21,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   chatSessionId,
   workspaceName,
   workspaceId,
+  workspaces,
+  refreshWorkspaces,
 }) => {
   const navigate = useNavigate();
   const { dispatch } = useChat();
@@ -111,6 +115,8 @@ const Sidebar: React.FC<SidebarProps> = ({
               navigate(id ? `/w/${id}/new` : '/new');
               setShowWorkspaces(false);
             }}
+            workspaces={workspaces}
+            refreshWorkspaces={refreshWorkspaces}
           />
         ) : (
           sessions && sessions.length === 0 ? (
