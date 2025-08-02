@@ -92,7 +92,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           Cancel
         </button>
       ) : (
-        <button onClick={handleSendMessage} disabled={isStreaming} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: isStreaming ? 'not-allowed' : 'pointer', opacity: isStreaming ? 0.5 : 1 }}>
+        <button onClick={handleSendMessage} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
           Send
         </button>
       )}

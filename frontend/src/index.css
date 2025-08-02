@@ -117,7 +117,7 @@ textarea {
 /* New styles for function call/response title bar */
 .function-title-bar {
   padding: 5px 15px; /* Padding inside the title bar */
-  margin: -10px -15px 10px -15px; /* Negative top margin to pull it up, negative side margins to extend to bubble edges, and margin-bottom for spacing */
+  margin: -10px -15px 10px -15px !important; /* Negative top margin to pull it up, negative side margins to extend to bubble edges, and margin-bottom for spacing */
   border-top-left-radius: 18px;
   border-top-right-radius: 18px;
   font-weight: bold; /* Keep bold for title */

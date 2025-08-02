@@ -1,6 +1,6 @@
 module angel
 
-go 1.23
+go 1.23.0
 
 toolchain go1.24.4
 
@@ -13,6 +13,8 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
-	github.com/google/go-cmp v0.6.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/modelcontextprotocol/go-sdk v0.2.0 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 )

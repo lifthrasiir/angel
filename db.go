@@ -50,6 +50,12 @@ func InitDB() {
 		name TEXT NOT NULL,
 		default_system_prompt TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS mcp_configs (
+		name TEXT PRIMARY KEY,
+		config_json TEXT NOT NULL,
+		enabled BOOLEAN NOT NULL
 	);`
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
@@ -449,5 +455,57 @@ func DeleteLastEmptyModelMessage(sessionID string) error {
 		log.Printf("Deleted %d empty model message(s) for session %s", rowsAffected, sessionID)
 	}
 
+	return nil
+}
+
+// MCPServerConfig struct to hold MCP server configuration data
+type MCPServerConfig struct {
+	Name       string          `json:"name"`
+	ConfigJSON json.RawMessage `json:"config_json"`
+	Enabled    bool            `json:"enabled"`
+}
+
+// SaveMCPServerConfig saves an MCP server configuration to the database.
+func SaveMCPServerConfig(config MCPServerConfig) error {
+	_, err := db.Exec(`
+		INSERT OR REPLACE INTO mcp_configs (name, config_json, enabled)
+		VALUES (?, ?, ?)
+	`, config.Name, string(config.ConfigJSON), config.Enabled)
+	if err != nil {
+		return fmt.Errorf("failed to save MCP server config: %w", err)
+	}
+	return nil
+}
+
+// GetMCPServerConfigs retrieves all MCP server configurations from the database.
+func GetMCPServerConfigs() ([]MCPServerConfig, error) {
+	rows, err := db.Query("SELECT name, config_json, enabled FROM mcp_configs")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query MCP server configs: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []MCPServerConfig
+	for rows.Next() {
+		var config MCPServerConfig
+		var connConfigJSON string
+		if err := rows.Scan(&config.Name, &connConfigJSON, &config.Enabled); err != nil {
+			return nil, fmt.Errorf("failed to scan MCP server config: %w", err)
+		}
+		config.ConfigJSON = json.RawMessage(connConfigJSON)
+		configs = append(configs, config)
+	}
+	if configs == nil {
+		return []MCPServerConfig{}, nil
+	}
+	return configs, nil
+}
+
+// DeleteMCPServerConfig deletes an MCP server configuration from the database.
+func DeleteMCPServerConfig(name string) error {
+	_, err := db.Exec("DELETE FROM mcp_configs WHERE name = ?", name)
+	if err != nil {
+		return fmt.Errorf("failed to delete MCP server config: %w", err)
+	}
 	return nil
 }

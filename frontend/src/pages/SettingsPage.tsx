@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import MCPSettings from '../components/MCPSettings'; // Import the new component
 
 const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('auth');
@@ -72,7 +73,22 @@ const SettingsPage: React.FC = () => {
               Authentication
             </button>
           </li>
-          {/* 다른 탭들을 여기에 추가할 수 있습니다 */}
+          <li style={{ marginBottom: '10px' }}>
+            <button 
+              onClick={() => setActiveTab('mcp')}
+              style={{
+                width: '100%',
+                padding: '10px',
+                textAlign: 'left',
+                background: activeTab === 'mcp' ? '#e0e0e0' : 'none',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: 'pointer',
+              }}
+            >
+              MCP
+            </button>
+          </li>
         </ul>
         <div style={{ marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #ccc' }}>
           <button 
@@ -111,6 +127,7 @@ const SettingsPage: React.FC = () => {
             )}
           </div>
         )}
+        {activeTab === 'mcp' && <MCPSettings />}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 )
@@ -61,6 +62,14 @@ var availableTools = map[string]ToolDefinition{
 	},
 }
 
+func GetBuiltinToolNames() map[string]bool {
+	builtinToolNames := make(map[string]bool)
+	for toolName := range availableTools {
+		builtinToolNames[toolName] = true
+	}
+	return builtinToolNames
+}
+
 // ToolDefinition represents a tool with its schema and handler function.
 type ToolDefinition struct {
 	Name        string
@@ -74,22 +83,85 @@ func GetToolsForGemini() []Tool {
 	var tools []Tool
 	var functionDeclarations []FunctionDeclaration
 
+	// Add local tools
+	builtinToolNames := make(map[string]bool)
 	for _, toolDef := range availableTools {
 		functionDeclarations = append(functionDeclarations, FunctionDeclaration{
 			Name:        toolDef.Name,
 			Description: toolDef.Description,
 			Parameters:  toolDef.Parameters,
 		})
+		builtinToolNames[toolDef.Name] = true
 	}
+
+	// Update MCP tool name mapping
+	mcpManager.UpdateToolNameMapping(builtinToolNames)
+
+	// Add tools from active MCP connections with name conflict resolution
+	mcpManager.mu.RLock()
+	defer mcpManager.mu.RUnlock()
+	for mcpName, conn := range mcpManager.connections {
+		if conn.IsEnabled && conn.Session != nil {
+			toolsIterator := conn.Session.Tools(context.Background(), nil)
+			for tool, err := range toolsIterator {
+				if err != nil {
+					log.Printf("Failed to list tools from MCP server %s: %v", mcpName, err)
+					break
+				}
+				mappedName := tool.Name
+				if _, exists := builtinToolNames[tool.Name]; exists {
+					mappedName = mcpName + "__" + tool.Name
+				}
+				functionDeclarations = append(functionDeclarations, FunctionDeclaration{
+					Name:        mappedName,
+					Description: tool.Description,
+					Parameters: &Schema{
+						Type: TypeObject,
+						Properties: map[string]*Schema{
+							"args": {
+								Type:        TypeObject,
+								Description: "Arguments for the tool.",
+							},
+						},
+					},
+				})
+			}
+		}
+	}
+
 	tools = append(tools, Tool{FunctionDeclarations: functionDeclarations})
 	return tools
 }
 
 // CallToolFunction executes the handler for the given function call.
 func CallToolFunction(fc FunctionCall) (map[string]interface{}, error) {
-	toolDef, ok := availableTools[fc.Name]
-	if !ok {
-		return nil, fmt.Errorf("unknown tool: %s", fc.Name)
+	// Check if it's a local tool first
+	if toolDef, ok := availableTools[fc.Name]; ok {
+		return toolDef.Handler(fc.Args)
 	}
-	return toolDef.Handler(fc.Args)
+
+	// Check if it's an MCP tool (potentially with a mapped name)
+	mcpManager.mu.RLock()
+	defer mcpManager.mu.RUnlock()
+
+	originalToolName, isMCPTool := mcpManager.mcpToolNameMapping[fc.Name]
+	if isMCPTool {
+		// Find the MCP server that provides this original tool name
+		for mcpName, conn := range mcpManager.connections {
+			if conn.IsEnabled && conn.Session != nil {
+				toolsIterator := conn.Session.Tools(context.Background(), nil)
+				for tool, err := range toolsIterator {
+					if err != nil {
+						break // Cannot check this server
+					}
+					if tool.Name == originalToolName {
+						log.Printf("Dispatching tool call '%s' (originally '%s') to MCP server '%s'", fc.Name, originalToolName, mcpName)
+						return mcpManager.DispatchToolCall(context.Background(), mcpName, originalToolName, fc.Args)
+					}
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("unknown tool: %s", fc.Name)
 }

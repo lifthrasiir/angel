@@ -130,6 +130,7 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 
 func init() {
 	InitDB()
+	InitMCPManager()
 	GlobalGeminiState.OAuthState = "random"
 	GlobalGeminiState.LoadToken()
 	InitAuth(&GlobalGeminiState)
@@ -145,7 +146,7 @@ func main() {
 	}
 
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
-	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET") // New handler for /:sessionId
+	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
 
 	router.HandleFunc("/w", handleNotFound).Methods("GET")
 	router.HandleFunc("/w/new", serveSPAIndex).Methods("GET")
@@ -173,8 +174,12 @@ func main() {
 	router.HandleFunc("/api/logout", handleLogout).Methods("POST")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
 	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
+	router.HandleFunc("/api/mcp/configs", getMCPConfigsHandler).Methods("GET")
+	router.HandleFunc("/api/mcp/configs", saveMCPConfigHandler).Methods("POST")
+	router.HandleFunc("/api/mcp/configs/{name}", deleteMCPConfigHandler).Methods("DELETE")
+	router.HandleFunc("/api", handleNotFound)
 
-	// Serve frontend static files
+	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
 	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
 
 	fmt.Println("Server started at http://localhost:8080")
@@ -446,4 +451,108 @@ func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
 
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
+}
+
+// FrontendMCPConfig is a struct that combines DB config with live status for the frontend.
+type FrontendMCPConfig struct {
+	Name           string          `json:"name"`
+	ConfigJSON     json.RawMessage `json:"config_json"`
+	Enabled        bool            `json:"enabled"`
+	IsConnected    bool            `json:"is_connected"`
+	AvailableTools []string        `json:"available_tools,omitempty"`
+}
+
+func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
+	dbConfigs, err := GetMCPServerConfigs()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve MCP configs from DB: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	activeConnections := mcpManager.GetMCPConnections()
+	frontendConfigs := make([]FrontendMCPConfig, len(dbConfigs))
+
+	for i, dbConfig := range dbConfigs {
+		conn, isConnected := activeConnections[dbConfig.Name]
+
+		frontendConfig := FrontendMCPConfig{
+			Name:        dbConfig.Name,
+			ConfigJSON:  dbConfig.ConfigJSON,
+			Enabled:     dbConfig.Enabled,
+			IsConnected: isConnected && conn.IsEnabled,
+		}
+
+		if frontendConfig.IsConnected {
+			toolsIterator := conn.Session.Tools(context.Background(), nil)
+			var tools []string
+			builtinToolNames := GetBuiltinToolNames()
+			for tool, err := range toolsIterator {
+				if err != nil {
+					log.Printf("Error iterating tools for %s: %v", dbConfig.Name, err)
+					break
+				}
+				mappedName := tool.Name
+				if _, exists := builtinToolNames[tool.Name]; exists {
+					mappedName = dbConfig.Name + "__" + tool.Name
+				}
+				tools = append(tools, mappedName)
+			}
+			frontendConfig.AvailableTools = tools
+		}
+
+		frontendConfigs[i] = frontendConfig
+	}
+
+	sendJSONResponse(w, frontendConfigs)
+}
+
+func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		Name       string `json:"name"`
+		ConfigJSON string `json:"config_json"`
+		Enabled    bool   `json:"enabled"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "saveMCPConfigHandler") {
+		return
+	}
+
+	config := MCPServerConfig{
+		Name:       requestBody.Name,
+		ConfigJSON: json.RawMessage(requestBody.ConfigJSON),
+		Enabled:    requestBody.Enabled,
+	}
+
+	if err := SaveMCPServerConfig(config); err != nil {
+		log.Printf("Failed to save MCP config %s: %v", config.Name, err)
+		http.Error(w, fmt.Sprintf("Failed to save MCP config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Start or stop the connection based on the new enabled state
+	if config.Enabled {
+		mcpManager.startConnection(config)
+	} else {
+		mcpManager.stopConnection(config.Name)
+	}
+
+	sendJSONResponse(w, config)
+}
+
+func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["name"]
+	if name == "" {
+		http.Error(w, "MCP config name is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := DeleteMCPServerConfig(name); err != nil {
+		log.Printf("Failed to delete MCP config %s: %v", name, err)
+		http.Error(w, fmt.Sprintf("Failed to delete MCP config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	mcpManager.stopConnection(name)
+
+	sendJSONResponse(w, map[string]string{"status": "success", "message": "MCP config deleted successfully"})
 }
