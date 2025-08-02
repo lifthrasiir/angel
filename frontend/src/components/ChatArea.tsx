@@ -23,6 +23,8 @@ interface ChatAreaProps {
   selectedFiles: File[];
   handleRemoveFile: (index: number) => void;
   handleCancelStreaming: () => void;
+  chatInputRef: React.RefObject<HTMLTextAreaElement>;
+  chatAreaRef: React.RefObject<HTMLDivElement>;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -42,6 +44,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   selectedFiles,
   handleRemoveFile,
   handleCancelStreaming,
+  chatInputRef,
+  chatAreaRef,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -87,7 +91,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       
       {isLoggedIn && (
         <>
-          <div style={{ flexGrow: 1, overflowY: 'auto' }}>
+          <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
             <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
               <SystemPromptEditor
                 key={chatSessionId}
@@ -114,6 +118,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             isStreaming={isStreaming}
             onFilesSelected={onFilesSelected}
             handleCancelStreaming={handleCancelStreaming}
+            inputRef={chatInputRef}
           />
         </>
       )}

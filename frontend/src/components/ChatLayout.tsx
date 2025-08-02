@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import LogoAnimation from './LogoAnimation';
@@ -19,6 +19,8 @@ interface ChatLayoutProps {
 const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
   const { dispatch } = useChat();
   const { workspaces, refreshWorkspaces } = useWorkspaces();
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
   const {
     userEmail,
     chatSessionId,
@@ -43,6 +45,17 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     isStreaming,
     onCancel: cancelStreamingCall,
   });
+
+    useEffect(() => {
+    // ChatArea가 직접 렌더링될 때만 포커스 로직을 적용
+    if (!children) {
+      if (chatSessionId === null || chatSessionId === undefined) { // /new 또는 /w/:workspaceId/new 경로
+        chatInputRef.current?.focus();
+      } else { // 그 외의 경로 (기존 세션)
+        chatAreaRef.current?.focus();
+      }
+    }
+  }, [chatSessionId, children, chatInputRef, chatAreaRef]);
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -79,6 +92,8 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
               selectedFiles={selectedFiles}
               handleRemoveFile={handleRemoveFile}
               handleCancelStreaming={cancelStreamingCall}
+              chatInputRef={chatInputRef}
+              chatAreaRef={chatAreaRef}
             />
           )}
           <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />

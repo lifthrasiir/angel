@@ -8,6 +8,7 @@ interface ChatInputProps {
   isStreaming: boolean;
   onFilesSelected: (files: File[]) => void; // New prop for file selection
   handleCancelStreaming: () => void; // New prop for canceling streaming
+  inputRef: React.RefObject<HTMLTextAreaElement>;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -17,8 +18,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   isStreaming,
   onFilesSelected,
   handleCancelStreaming,
+  inputRef,
 }) => {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Debounce utility function
@@ -40,9 +41,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   // Adjust textarea height when inputMessage changes (e.g., after sending message)
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
     }
   }, [inputMessage]);
 
@@ -70,7 +71,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
         <FaPaperclip />
       </button>
       <textarea
-        ref={textareaRef}
+        ref={inputRef}
         value={inputMessage}
         onChange={(e) => setInputMessage(e.target.value)}
         onInput={(e) => {
