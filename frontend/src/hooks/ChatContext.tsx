@@ -1,5 +1,6 @@
-import React, { createContext, useReducer, useContext, ReactNode } from 'react';
-import { chatReducer, initialState, ChatState, ChatAction } from './chatReducer';
+import type React from 'react';
+import { createContext, type ReactNode, useContext, useReducer } from 'react';
+import { type ChatAction, type ChatState, chatReducer, initialState } from './chatReducer';
 
 interface ChatContextType {
   state: ChatState;

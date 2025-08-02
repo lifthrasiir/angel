@@ -1,13 +1,14 @@
-import React, { useRef, useEffect } from 'react';
-import Sidebar from './Sidebar';
+import type React from 'react';
+import { useEffect, useRef } from 'react';
+import { useChat } from '../hooks/ChatContext';
+import { SET_INPUT_MESSAGE, SET_SYSTEM_PROMPT } from '../hooks/chatReducer';
+import { useChatSession } from '../hooks/useChatSession'; // Re-import useChatSession
+import useEscToCancel from '../hooks/useEscToCancel'; // Import the new hook
+import { useWorkspaces } from '../hooks/WorkspaceContext';
 import ChatArea from './ChatArea';
 import LogoAnimation from './LogoAnimation';
+import Sidebar from './Sidebar';
 import ToastMessage from './ToastMessage'; // Import ToastMessage
-import { useChatSession } from '../hooks/useChatSession'; // Re-import useChatSession
-import { useChat } from '../hooks/ChatContext';
-import { useWorkspaces } from '../hooks/WorkspaceContext';
-import useEscToCancel from '../hooks/useEscToCancel'; // Import the new hook
-import { SET_INPUT_MESSAGE, SET_SYSTEM_PROMPT } from '../hooks/chatReducer';
 
 interface ChatLayoutProps {
   children?: React.ReactNode;

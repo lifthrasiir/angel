@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Workspace, Session } from '../types/chat';
+import type { Session, Workspace } from '../types/chat';
 import { fetchSessions } from '../utils/sessionManager';
 
 interface UseWorkspaceAndSessionsResult {

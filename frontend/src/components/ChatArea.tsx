@@ -1,10 +1,11 @@
-import React, { useRef, useEffect, useMemo } from 'react';
-import ChatMessage from './ChatMessage';
-import { ThoughtGroup } from './ThoughtGroup';
-import SystemPromptEditor from './SystemPromptEditor';
+import type React from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import type { ChatMessage as ChatMessageType } from '../types/chat';
 import ChatInput from './ChatInput';
+import ChatMessage from './ChatMessage';
 import FileAttachmentPreview from './FileAttachmentPreview';
-import { ChatMessage as ChatMessageType } from '../types/chat';
+import SystemPromptEditor from './SystemPromptEditor';
+import { ThoughtGroup } from './ThoughtGroup';
 
 interface ChatAreaProps {
   isLoggedIn: boolean;

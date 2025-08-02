@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import type React from 'react';
+import { useState } from 'react';
+import { FaArrowLeft, FaCog, FaFolder, FaPlus } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
-import { FaFolder, FaPlus, FaArrowLeft, FaCog } from 'react-icons/fa';
-import LogoAnimation from './LogoAnimation';
 import { useChat } from '../hooks/ChatContext';
+import type { Session, Workspace } from '../types/chat';
+import LogoAnimation from './LogoAnimation';
 import SessionList from './SessionList';
 import WorkspaceList from './WorkspaceList';
-import { Session, Workspace } from '../types/chat';
 
 interface SidebarProps {
   sessions: Session[];

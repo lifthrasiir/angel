@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import type React from 'react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import breaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
 import remarkHtml from 'remark-html';
 import 'katex/dist/katex.min.css';
 import { smartPreprocessMarkdown } from '../lib/markdown-preprocessor';

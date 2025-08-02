@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { Workspace } from '../types/chat';
+import type React from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import type { Workspace } from '../types/chat';
 
 interface WorkspaceContextType {
   workspaces: Workspace[];

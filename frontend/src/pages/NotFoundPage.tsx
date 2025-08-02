@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import LogoAnimation from '../components/LogoAnimation';
 
 const NotFoundPage: React.FC = () => {

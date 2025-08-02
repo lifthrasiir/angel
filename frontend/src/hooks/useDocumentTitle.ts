@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { Session } from '../types/chat';
+import type { Session } from '../types/chat';
 
 export const useDocumentTitle = (sessions: Session[]) => {
   const { sessionId: urlSessionId } = useParams();

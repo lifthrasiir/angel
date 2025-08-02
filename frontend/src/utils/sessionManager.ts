@@ -1,4 +1,4 @@
-import { WorkspaceWithSessions, Session } from '../types/chat';
+import type { Session, WorkspaceWithSessions } from '../types/chat';
 
 export const fetchSessions = async (workspaceId?: string): Promise<WorkspaceWithSessions> => {
   let url = '/api/chat';

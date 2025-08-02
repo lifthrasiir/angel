@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import type React from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MCPSettings from '../components/MCPSettings'; // Import the new component
 
@@ -47,7 +48,7 @@ const SettingsPage: React.FC = () => {
 
   const handleLogin = () => {
     const currentPath = window.location.pathname + window.location.search;
-    let redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
+    const redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
     window.location.href = redirectToUrl;
   };
 

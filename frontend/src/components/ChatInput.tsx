@@ -1,4 +1,5 @@
-import React, { useRef, useEffect } from 'react';
+import type React from 'react';
+import { useEffect, useRef } from 'react';
 import { FaPaperclip } from 'react-icons/fa';
 
 interface ChatInputProps {

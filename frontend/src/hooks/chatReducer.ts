@@ -1,4 +1,4 @@
-import { ChatMessage, Session } from '../types/chat';
+import type { ChatMessage, Session } from '../types/chat';
 
 // Action Types
 export const SET_USER_EMAIL = 'SET_USER_EMAIL';
@@ -122,7 +122,7 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
 
       if (lastMessage && lastMessage.type === 'model') {
         // Append content to the last model message
-        let newMessages = [...state.messages];
+        const newMessages = [...state.messages];
         newMessages[newMessages.length - 1] = {
           ...lastMessage,
           parts: [{ text: (lastMessage.parts[0]?.text || '') + newMessageText }],
@@ -141,7 +141,7 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
     }
     case ADD_ERROR_MESSAGE: {
       const errorMessageText = action.payload;
-      let newMessages = [...state.messages];
+      const newMessages = [...state.messages];
       const lastMessage = newMessages[newMessages.length - 1];
 
       // Check if the last message is an empty model message and remove it

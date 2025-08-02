@@ -1,13 +1,12 @@
 import React from 'react';
-
-// Import new message components
-import UserTextMessage from './UserTextMessage';
-import ModelTextMessage from './ModelTextMessage';
-import FunctionCallMessage from './FunctionCallMessage';
-import FunctionResponseMessage from './FunctionResponseMessage';
-import SystemMessage from './SystemMessage';
 import type { ChatMessage } from '../types/chat';
 import { splitOnceByNewline } from '../utils/stringUtils';
+import FunctionCallMessage from './FunctionCallMessage';
+import FunctionResponseMessage from './FunctionResponseMessage';
+import ModelTextMessage from './ModelTextMessage';
+import SystemMessage from './SystemMessage';
+// Import new message components
+import UserTextMessage from './UserTextMessage';
 
 const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
   const { role, type, attachments } = message;

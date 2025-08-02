@@ -1,4 +1,4 @@
-import { FileAttachment } from '../types/chat';
+import type { FileAttachment } from '../types/chat';
 import { splitOnceByNewline } from './stringUtils';
 
 // SSE Event Types
@@ -85,7 +85,7 @@ export const processStreamResponse = async (
 
     let newlineIndex;
     while ((newlineIndex = buffer.indexOf('\n\n')) !== -1) {
-      let eventString = buffer
+      const eventString = buffer
         .substring(0, newlineIndex)
         .slice(6)
         .replace(/\ndata: /g, '\n');

@@ -1,7 +1,7 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import type React from 'react';
 import { FaEdit, FaTrash } from 'react-icons/fa';
-import { Session } from '../types/chat';
+import { useNavigate } from 'react-router-dom';
+import type { Session } from '../types/chat';
 
 interface SessionListProps {
   sessions: Session[];

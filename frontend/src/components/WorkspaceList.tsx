@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import { FaTrash } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 

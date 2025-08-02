@@ -1,6 +1,6 @@
+import React from 'react';
 import { renderToString } from 'react-dom/server';
 import PrettyJSON from '../components/PrettyJSON';
-import React from 'react';
 
 export const measureContentHeight = (
   messageRef: React.RefObject<HTMLDivElement>,

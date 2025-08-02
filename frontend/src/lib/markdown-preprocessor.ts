@@ -3,7 +3,7 @@ export function smartPreprocessMarkdown(markdownText: string): string {
   // The `g` flag finds all matches, and the `s` flag allows `.` to include newline characters.
   const fencedBlockRegex = /(```[\s\S]*?```)/g;
 
-  let parts: string[] = [];
+  const parts: string[] = [];
   let lastIndex = 0;
 
   // Split Markdown text into fenced blocks and other parts

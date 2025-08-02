@@ -8,6 +8,7 @@
     "build": "biome format --write && tsc && vite build --logLevel warn",
     "build-frontend": "npm run build",
     "postbuild": "node ../scripts/clean-katex-fonts.js",
+    "lint": "biome check --write",
     "preview": "vite preview"
   },
   "dependencies": {

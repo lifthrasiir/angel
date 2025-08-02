@@ -1,4 +1,4 @@
-import { FileAttachment } from '../types/chat';
+import type { FileAttachment } from '../types/chat';
 
 export const convertFilesToAttachments = async (files: File[]): Promise<FileAttachment[]> => {
   return Promise.all(

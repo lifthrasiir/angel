@@ -1,13 +1,13 @@
-import { useLocation, useParams } from 'react-router-dom';
 import { useEffect } from 'react';
-import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
+import { useLocation, useParams } from 'react-router-dom';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
 import { handleLogin } from '../utils/userManager';
-import { useDocumentTitle } from './useDocumentTitle';
-import { useSessionInitialization } from './useSessionInitialization';
-import { useMessageSending } from './useMessageSending';
 import { useChat } from './ChatContext';
-import { SET_SESSIONS, SET_SELECTED_FILES, SET_WORKSPACE_NAME, SET_WORKSPACE_ID } from './chatReducer';
+import { SET_SELECTED_FILES, SET_SESSIONS, SET_WORKSPACE_ID, SET_WORKSPACE_NAME } from './chatReducer';
+import { useDocumentTitle } from './useDocumentTitle';
+import { useMessageSending } from './useMessageSending';
+import { useSessionInitialization } from './useSessionInitialization';
+import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
 
 export const useChatSession = () => {
   const { state, dispatch } = useChat();

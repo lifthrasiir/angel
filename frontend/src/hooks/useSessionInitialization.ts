@@ -1,37 +1,35 @@
 import { useEffect } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ChatMessage } from '../types/chat';
-import { loadSession } from '../utils/sessionManager';
-
-import { fetchUserInfo } from '../utils/userManager';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import type { ChatMessage } from '../types/chat';
 import {
+  EventComplete,
+  EventError,
+  EventFunctionCall,
+  EventFunctionReply,
   EventInitialState,
   EventInitialStateNoCall,
   EventModelMessage,
-  EventFunctionCall,
-  EventFunctionReply,
   EventThought,
-  EventError,
-  EventComplete,
 } from '../utils/messageHandler';
+import { loadSession } from '../utils/sessionManager';
 import { splitOnceByNewline } from '../utils/stringUtils';
-
+import { fetchUserInfo } from '../utils/userManager';
 import {
-  SET_INPUT_MESSAGE,
-  SET_CHAT_SESSION_ID,
-  SET_MESSAGES,
-  SET_SYSTEM_PROMPT,
-  SET_IS_SYSTEM_PROMPT_EDITING,
-  SET_SELECTED_FILES,
-  SET_IS_STREAMING,
-  SET_USER_EMAIL,
-  RESET_CHAT_SESSION_STATE,
-  ADD_MESSAGE,
   ADD_ERROR_MESSAGE,
-  UPDATE_AGENT_MESSAGE,
+  ADD_MESSAGE,
+  type ChatAction,
+  RESET_CHAT_SESSION_STATE,
+  SET_CHAT_SESSION_ID,
+  SET_INPUT_MESSAGE,
+  SET_IS_STREAMING,
+  SET_IS_SYSTEM_PROMPT_EDITING,
+  SET_MESSAGES,
+  SET_SELECTED_FILES,
+  SET_SYSTEM_PROMPT,
+  SET_USER_EMAIL,
   SET_WORKSPACE_ID, // Import SET_WORKSPACE_ID
+  UPDATE_AGENT_MESSAGE,
 } from './chatReducer';
-import { ChatAction } from './chatReducer';
 
 interface UseSessionInitializationProps {
   chatSessionId: string | null;
@@ -80,7 +78,7 @@ export const useSessionInitialization = ({
     }
 
     const initializeChatSession = async () => {
-      let currentSessionId = urlSessionId;
+      const currentSessionId = urlSessionId;
       // If the path ends with /new and no sessionId is provided in the URL, treat it as a new session
       if (location.pathname.endsWith('/new') && !currentSessionId) {
         resetChatSessionState();

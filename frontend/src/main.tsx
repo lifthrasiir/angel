@@ -1,13 +1,14 @@
-import React, { useState, useEffect, lazy } from 'react';
+import React, { lazy, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import './index.css';
+
+import ChatLayout from './components/ChatLayout';
+import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
 import { ChatProvider } from './hooks/ChatContext';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
 
-import ChatLayout from './components/ChatLayout';
-import SessionRedirector from './components/SessionRedirector';
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));

@@ -1,7 +1,8 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
-import PrettyJSON from './PrettyJSON';
+import type React from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import { measureContentHeight } from '../utils/measurementUtils';
+import PrettyJSON from './PrettyJSON';
 
 interface FunctionCallMessageProps {
   functionCall: any;

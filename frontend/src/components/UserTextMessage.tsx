@@ -1,8 +1,9 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
+import type React from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
-import FileAttachmentPreview from './FileAttachmentPreview';
-import { FileAttachment } from '../types/chat';
+import type { FileAttachment } from '../types/chat';
 import { measureContentHeight } from '../utils/measurementUtils';
+import FileAttachmentPreview from './FileAttachmentPreview';
 
 interface UserTextMessageProps {
   text?: string;

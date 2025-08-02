@@ -1,21 +1,21 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChatMessage, FileAttachment } from '../types/chat';
-import { sendMessage, processStreamResponse, StreamEventHandlers } from '../utils/messageHandler';
+import type { ChatMessage, FileAttachment } from '../types/chat';
 import { convertFilesToAttachments } from '../utils/fileHandler';
+import { processStreamResponse, type StreamEventHandlers, sendMessage } from '../utils/messageHandler';
 import {
-  SET_INPUT_MESSAGE,
-  SET_SELECTED_FILES,
-  SET_IS_STREAMING,
-  SET_LAST_AUTO_DISPLAYED_THOUGHT_ID,
-  SET_CHAT_SESSION_ID,
-  SET_SYSTEM_PROMPT,
-  SET_IS_SYSTEM_PROMPT_EDITING,
-  ADD_MESSAGE,
-  UPDATE_AGENT_MESSAGE,
   ADD_ERROR_MESSAGE,
+  ADD_MESSAGE,
+  type ChatAction,
+  SET_CHAT_SESSION_ID,
+  SET_INPUT_MESSAGE,
+  SET_IS_STREAMING,
+  SET_IS_SYSTEM_PROMPT_EDITING,
+  SET_LAST_AUTO_DISPLAYED_THOUGHT_ID,
+  SET_SELECTED_FILES,
   SET_SESSION_NAME,
+  SET_SYSTEM_PROMPT,
+  UPDATE_AGENT_MESSAGE,
 } from './chatReducer';
-import { ChatAction } from './chatReducer';
 
 interface UseMessageSendingProps {
   inputMessage: string;
