@@ -29,12 +29,38 @@ body {
   margin-bottom: 10px;
 }
 
-.user-message {
-  justify-content: flex-end;
+.chat-message-container.user-message .message-info,
+.chat-message-container.agent-function-response .message-info {
+  color: var(--color-user-verydark);
 }
 
-.agent-message {
-  justify-content: flex-start;
+.chat-message-container.agent-message .message-info,
+.chat-message-container.agent-error-message .message-info,
+.chat-message-container.agent-thought .message-info,
+.chat-message-container.agent-function-call .message-info {
+  color: var(--color-agent-verydark);
+}
+
+.chat-message-container.system-message .message-info {
+  color: var(--color-system-verydark);
+}
+
+.message-info {
+  font-size: 80%;
+  padding: 0 1em;
+}
+
+.user-message,
+.system-prompt-message,
+.agent-function-response {
+  align-items: flex-end;
+}
+
+.agent-message,
+.agent-error-message,
+.agent-thought,
+.system-message {
+  align-items: flex-start;
 }
 
 .chat-bubble {
@@ -222,10 +248,6 @@ textarea {
 
 .thought-circle.selected {
   background-color: var(--color-agent-dark);
-}
-
-.system-prompt-message {
-  justify-content: flex-end;
 }
 
 .system-prompt-message .chat-bubble {
