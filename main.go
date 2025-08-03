@@ -17,13 +17,12 @@ import (
 	"path/filepath"
 )
 
+var (
+	GlobalGeminiAuth GeminiAuth
+)
+
 //go:embed frontend/dist
 var embeddedFiles embed.FS
-
-var (
-	oauthStates       = make(map[string]string) // Stores randomState -> originalQueryString
-	GlobalGeminiState GeminiState
-)
 
 // serveStaticFiles serves static files from the filesystem first, then from embedded files
 func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
@@ -82,27 +81,6 @@ func serveSPAIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateAuthAndProject performs common auth and project validation for handlers
-func validateAuthAndProject(handlerName string, w http.ResponseWriter) bool {
-	// Check if GeminiClient is initialized and attempt to re-initialize if needed
-	if GlobalGeminiState.GeminiClient == nil {
-		log.Printf("%s: GeminiClient not initialized, attempting to re-initialize...", handlerName)
-		if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.Token != nil && GlobalGeminiState.Token.Valid() {
-			GlobalGeminiState.InitGeminiClient()
-		}
-		if GlobalGeminiState.GeminiClient == nil {
-			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
-			http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
-			return false
-		}
-	}
-
-	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.ProjectID == "" {
-		log.Printf("%s: Project ID is not set. Please log in again.", handlerName)
-		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
-		return false
-	}
-	return true
-}
 
 // setupSSEHeaders sets up Server-Sent Events headers
 func setupSSEHeaders(w http.ResponseWriter) {
@@ -131,18 +109,17 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 func init() {
 	InitDB()
 	InitMCPManager()
-	GlobalGeminiState.OAuthState = "random"
-	GlobalGeminiState.LoadToken()
-	InitAuth(&GlobalGeminiState)
+
+	InitAuth(&GlobalGeminiAuth)
 }
 
 func main() {
 	router := mux.NewRouter()
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
-	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle {
-		router.HandleFunc("/login", makeAuthHandler(&GlobalGeminiState, HandleGoogleLogin)).Methods("GET")
-		router.HandleFunc("/oauth2callback", makeAuthHandler(&GlobalGeminiState, HandleGoogleCallback)).Methods("GET")
+	if GlobalGeminiAuth.SelectedAuthType == AuthTypeLoginWithGoogle {
+		router.HandleFunc("/login", makeAuthHandler(&GlobalGeminiAuth, HandleGoogleLogin)).Methods("GET")
+		router.HandleFunc("/oauth2callback", makeAuthHandler(&GlobalGeminiAuth, HandleGoogleCallback)).Methods("GET")
 	}
 
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
@@ -171,7 +148,7 @@ func main() {
 	router.HandleFunc("/api/chat/{sessionId}/call", handleCall).Methods("GET", "DELETE")
 	router.HandleFunc("/api/chat/{sessionId}", deleteSession).Methods("DELETE")
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
-	router.HandleFunc("/api/logout", handleLogout).Methods("POST")
+	router.HandleFunc("/api/logout", GlobalGeminiAuth.HandleLogout).Methods("POST")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
 	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
 	router.HandleFunc("/api/mcp/configs", getMCPConfigsHandler).Methods("GET")
@@ -186,9 +163,9 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
-func makeAuthHandler(gs *GeminiState, handler func(gs *GeminiState, w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
+func makeAuthHandler(ga *GeminiAuth, handler func(ga *GeminiAuth, w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		handler(gs, w, r)
+		handler(ga, w, r)
 	}
 }
 
@@ -241,40 +218,6 @@ func generateID() string {
 	}
 }
 
-func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
-	// Check if logged in
-	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && (GlobalGeminiState.Token == nil || !GlobalGeminiState.Token.Valid()) {
-		http.Error(w, "Not logged in", http.StatusUnauthorized)
-		return
-	}
-
-	// If UserEmail is empty but token is valid, try to re-fetch user info
-	if GlobalGeminiState.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiState.UserEmail == "" && GlobalGeminiState.Token != nil {
-		log.Println("getUserInfoHandler: UserEmail is empty, attempting to fetch from Google API...")
-		ctx := context.Background()
-		userInfoClient := GlobalGeminiState.GoogleOauthConfig.Client(ctx, GlobalGeminiState.Token)
-		userInfoResp, err := userInfoClient.Get("https://www.googleapis.com/oauth2/v2/userinfo")
-		if err != nil {
-			log.Printf("getUserInfoHandler: Failed to fetch user info: %v", err)
-		} else {
-			defer userInfoResp.Body.Close()
-			var userInfo struct {
-				Email string `json:"email"`
-			}
-			if err := json.NewDecoder(userInfoResp.Body).Decode(&userInfo); err != nil {
-				log.Printf("getUserInfoHandler: Failed to decode user info JSON: %v", err)
-			} else {
-
-				GlobalGeminiState.UserEmail = userInfo.Email
-				// Update the token in DB with user email
-				GlobalGeminiState.SaveToken(GlobalGeminiState.Token)
-			}
-		}
-	}
-
-	sendJSONResponse(w, map[string]string{"email": GlobalGeminiState.UserEmail})
-}
-
 func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -301,21 +244,22 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Session name updated successfully")
 }
 
-// Handle logout
-func handleLogout(w http.ResponseWriter, r *http.Request) {
-	GlobalGeminiState.Token = nil
-	GlobalGeminiState.UserEmail = ""
-	GlobalGeminiState.GeminiClient = nil
-
-	// Delete token from DB
-	if err := DeleteOAuthToken(); err != nil {
-		log.Printf("Failed to delete OAuth token from DB: %v", err)
-		http.Error(w, "Failed to logout", http.StatusInternalServerError)
+func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if logged in
+	if GlobalGeminiAuth.SelectedAuthType == AuthTypeLoginWithGoogle && (GlobalGeminiAuth.Token == nil || !GlobalGeminiAuth.Token.Valid()) {
+		http.Error(w, "Not logged in", http.StatusUnauthorized)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "Logged out successfully")
+	// If UserEmail is empty but token is valid, try to re-fetch user info
+	if GlobalGeminiAuth.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiAuth.UserEmail == "" && GlobalGeminiAuth.Token != nil {
+		log.Println("getUserInfoHandler: UserEmail is empty, attempting to fetch from Google API...")
+		if err := GlobalGeminiAuth.GetUserInfoAndSave(); err != nil {
+			log.Printf("getUserInfoHandler: Failed to fetch user info: %v", err)
+		}
+	}
+
+	sendJSONResponse(w, map[string]string{"email": GlobalGeminiAuth.UserEmail})
 }
 
 func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +309,7 @@ func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
-	if !validateAuthAndProject("countTokensHandler", w) {
+	if !GlobalGeminiAuth.ValidateAuthAndProject("countTokensHandler", w) {
 		return
 	}
 
@@ -386,7 +330,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp, err := GlobalGeminiState.GeminiClient.CountTokens(context.Background(), contents, modelName)
+	resp, err := CurrentProvider.(*CodeAssistClient).CountTokens(context.Background(), contents, modelName)
 	if err != nil {
 		log.Printf("CountTokens API call failed: %v", err)
 		http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", err), http.StatusInternalServerError)
@@ -402,7 +346,7 @@ func callFunction(fc FunctionCall) (map[string]interface{}, error) {
 
 // handleCall handles GET and DELETE requests for /api/calls/{sessionId}
 func handleCall(w http.ResponseWriter, r *http.Request) {
-	if !validateAuthAndProject("handleCall", w) {
+	if !GlobalGeminiAuth.ValidateAuthAndProject("handleCall", w) {
 		return
 	}
 

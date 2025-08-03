@@ -32,7 +32,7 @@ func (d *defaultHTTPClientProvider) Client(ctx context.Context) *http.Client {
 // whenever a new token is obtained (e.g., after a refresh).
 type tokenSaverSource struct {
 	oauth2.TokenSource
-	gs *GeminiState
+	ga *GeminiAuth
 }
 
 func (ts *tokenSaverSource) Token() (*oauth2.Token, error) {
@@ -41,24 +41,12 @@ func (ts *tokenSaverSource) Token() (*oauth2.Token, error) {
 		return nil, err
 	}
 	// Save the token to the database after it's obtained/refreshed
-	ts.gs.SaveToken(token)
+	ts.ga.SaveToken(token)
 	return token, nil
 }
 
 func (ts *tokenSaverSource) Client(ctx context.Context) *http.Client {
 	return oauth2.NewClient(ctx, ts.TokenSource)
-}
-
-// GeminiState encapsulates the global state related to Gemini client and authentication.
-type GeminiState struct {
-	GoogleOauthConfig *oauth2.Config
-	OAuthState        string
-	Token             *oauth2.Token
-	TokenSource       HTTPClientProvider // Changed to HTTPClientProvider
-	GeminiClient      *CodeAssistClient
-	ProjectID         string
-	SelectedAuthType  AuthType
-	UserEmail         string
 }
 
 // Define CodeAssistClient struct
@@ -107,25 +95,25 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 }
 
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
-func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents []Content, modelName string, systemPrompt string, thinkingConfig *ThinkingConfig) (io.ReadCloser, error) {
+func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params SessionParams) (io.ReadCloser, error) {
 	reqBody := CAGenerateContentRequest{
-		Model:   modelName,
+		Model:   params.ModelName,
 		Project: c.projectID,
 		Request: VertexGenerateContentRequest{
-			Contents: contents,
+			Contents: params.Contents,
 			SystemInstruction: func() *Content {
-				if systemPrompt == "" {
+				if params.SystemPrompt == "" {
 					return nil
 				}
 				return &Content{
 					Parts: []Part{
-						{Text: systemPrompt},
+						{Text: params.SystemPrompt},
 					},
 				}
 			}(),
 			Tools: GetToolsForGemini(),
 			GenerationConfig: &GenerationConfig{
-				ThinkingConfig: thinkingConfig,
+				ThinkingConfig: params.ThinkingConfig,
 			},
 		},
 	}
@@ -142,8 +130,8 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, contents [
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
-func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Content, modelName string, systemPrompt string, thinkingConfig *ThinkingConfig) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
-	respBody, err := c.streamGenerateContent(ctx, contents, modelName, systemPrompt, thinkingConfig)
+func (c *CodeAssistClient) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	respBody, err := c.streamGenerateContent(ctx, params)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -176,8 +164,8 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, contents []Con
 }
 
 // GenerateContentOneShot calls the streamGenerateContent of Code Assist API and returns a single response.
-func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, contents []Content, modelName string, systemPrompt string, thinkingConfig *ThinkingConfig) (string, error) {
-	seq, closer, err := c.SendMessageStream(ctx, contents, modelName, systemPrompt, thinkingConfig)
+func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error) {
+	seq, closer, err := c.SendMessageStream(ctx, params)
 	if err != nil {
 		return "", err
 	}
@@ -288,155 +276,4 @@ func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserReque
 	}
 
 	return &lroRes, nil
-}
-
-// InitGeminiClient initializes the CodeAssistClient.
-func (gs *GeminiState) InitGeminiClient() {
-	ctx := context.Background()
-	var clientProvider HTTPClientProvider
-
-	switch gs.SelectedAuthType {
-	case AuthTypeLoginWithGoogle:
-		if gs.Token == nil {
-			log.Println("InitGeminiClient: OAuth token is nil. Cannot initialize client.")
-			return
-		}
-		// Always create a new token source to ensure it's up-to-date with the current token
-		gs.TokenSource = &tokenSaverSource{
-			TokenSource: gs.GoogleOauthConfig.TokenSource(ctx, gs.Token),
-			gs:          gs,
-		}
-		clientProvider = gs.TokenSource
-
-		// Proactively refresh token on startup if expired
-		// This will also save the new token via tokenSaverSource.Token()
-		_, err := gs.TokenSource.(*tokenSaverSource).Token() // This call will trigger refresh if needed
-		if err != nil {
-			log.Printf("InitGeminiClient: Failed to proactively refresh token on startup: %v. Client not initialized.", err)
-			gs.GeminiClient = nil
-			return
-		}
-
-		caClient := NewCodeAssistClient(clientProvider, gs.ProjectID) // Initialize with current ProjectID
-
-		// Only call LoadCodeAssist and OnboardUser if ProjectID is not set or needs re-validation
-		if gs.ProjectID == "" {
-			loadReq := LoadCodeAssistRequest{
-				CloudaicompanionProject: gs.ProjectID, // Will be empty
-				Metadata: &ClientMetadata{
-					IdeType:     "IDE_UNSPECIFIED",
-					Platform:    "PLATFORM_UNSPECIFIED",
-					PluginType:  "GEMINI",
-					DuetProject: gs.ProjectID,
-				},
-			}
-			loadRes, loadErr := caClient.LoadCodeAssist(ctx, loadReq)
-			if loadErr != nil {
-				log.Printf("InitGeminiClient: LoadCodeAssist failed: %v. Client not initialized.", loadErr)
-				gs.GeminiClient = nil
-				return
-			}
-
-			if loadRes.CloudaicompanionProject != "" {
-				gs.ProjectID = loadRes.CloudaicompanionProject
-
-				var userTierID UserTierID
-				if loadRes.CurrentTier != nil {
-					userTierID = loadRes.CurrentTier.ID
-				} else {
-					for _, tier := range loadRes.AllowedTiers {
-						if tier.IsDefault != nil && *tier.IsDefault {
-							userTierID = tier.ID
-							break
-						}
-					}
-				}
-
-				onboardReq := OnboardUserRequest{
-					CloudaicompanionProject: gs.ProjectID,
-					Metadata: &ClientMetadata{
-						IdeType:     "IDE_UNSPECIFIED",
-						Platform:    "PLATFORM_UNSPECIFIED",
-						PluginType:  "GEMINI",
-						DuetProject: gs.ProjectID,
-					},
-				}
-				if userTierID != "" {
-					onboardReq.TierID = &userTierID
-				}
-				lroRes, onboardErr := caClient.OnboardUser(ctx, onboardReq)
-				if onboardErr != nil {
-					log.Printf("InitGeminiClient: OnboardUser failed: %v. Client not initialized.", onboardErr)
-					gs.GeminiClient = nil
-					return
-				}
-
-				if lroRes.Response != nil && lroRes.Response.CloudaicompanionProject != nil {
-					gs.ProjectID = lroRes.Response.CloudaicompanionProject.ID
-				} else {
-					log.Println("InitGeminiClient: No project ID from OnboardUser. Client not initialized.")
-					gs.GeminiClient = nil
-					return
-				}
-			} else {
-				log.Println("InitGeminiClient: LoadCodeAssist did not return a Project ID. Client not initialized.")
-				gs.GeminiClient = nil
-				return
-			}
-		} else {
-			// If ProjectID is already set, skip LoadCodeAssist and OnboardUser
-		}
-
-		// Ensure the final ProjectID is saved to the database
-		gs.SaveToken(gs.Token)
-
-	case AuthTypeUseGemini:
-		clientProvider = &defaultHTTPClientProvider{}
-	case AuthTypeUseVertexAI:
-		clientProvider = &defaultHTTPClientProvider{}
-	case AuthTypeCloudShell:
-		clientProvider = &defaultHTTPClientProvider{}
-	default:
-		log.Fatalf("InitGeminiClient: Unsupported authentication type: %s", gs.SelectedAuthType)
-	}
-
-	gs.GeminiClient = NewCodeAssistClient(clientProvider, gs.ProjectID)
-}
-
-// saveToken saves the OAuth token to the database.
-func (gs *GeminiState) SaveToken(t *oauth2.Token) {
-	tokenJSON, err := json.MarshalIndent(t, "", "  ")
-	if err != nil {
-		log.Printf("Failed to marshal token: %v", err)
-		return
-	}
-
-	if err := SaveOAuthToken(string(tokenJSON), gs.UserEmail, gs.ProjectID); err != nil {
-		log.Printf("Failed to save OAuth token to DB: %v", err)
-		return
-	}
-	log.Println("OAuth token saved to DB.")
-	gs.Token = t // Update global token variable
-}
-
-// loadToken loads the OAuth token from the database.
-func (gs *GeminiState) LoadToken() {
-	tokenJSON, userEmail, projectID, err := LoadOAuthToken()
-	if err != nil {
-		log.Printf("LoadToken: Failed to load OAuth token from DB: %v", err)
-		return
-	}
-
-	if tokenJSON == "" {
-		log.Println("LoadToken: No existing token in DB.")
-		return
-	}
-
-	if err := json.Unmarshal([]byte(tokenJSON), &gs.Token); err != nil {
-		log.Printf("LoadToken: Failed to decode token from DB: %v", err)
-		return
-	}
-	gs.UserEmail = userEmail
-	gs.ProjectID = projectID
-
 }

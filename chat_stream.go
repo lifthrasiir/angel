@@ -60,7 +60,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 			// Continue with the Gemini API call
 		}
 
-		seq, closer, err := GlobalGeminiState.GeminiClient.SendMessageStream(ctx, currentHistory, DefaultGeminiModel, initialState.SystemPrompt, &ThinkingConfig{IncludeThoughts: true})
+		seq, closer, err := CurrentProvider.SendMessageStream(ctx, SessionParams{Contents: currentHistory, ModelName: DefaultGeminiModel, SystemPrompt: initialState.SystemPrompt, ThinkingConfig: &ThinkingConfig{IncludeThoughts: true}})
 		if err != nil {
 			failCall(initialState.SessionId, err) // Mark the call as failed
 			// Save a model_error message to the database
@@ -238,12 +238,13 @@ func inferAndSetSessionName(sessionId string, userMessage string, sseW *sseWrite
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	llmInferredName, err := GlobalGeminiState.GeminiClient.GenerateContentOneShot(ctx, []Content{
-		{
-			Role:  "user",
-			Parts: []Part{{Text: nameInputPrompt}},
-		},
-	}, DefaultGeminiModel, nameSystemPrompt, &ThinkingConfig{IncludeThoughts: false})
+	llmInferredName, err := CurrentProvider.GenerateContentOneShot(ctx, SessionParams{
+		Contents: []Content{
+			{
+				Role:  "user",
+				Parts: []Part{{Text: nameInputPrompt}},
+			},
+		}, ModelName: DefaultGeminiModel, SystemPrompt: nameSystemPrompt, ThinkingConfig: &ThinkingConfig{IncludeThoughts: false}})
 	if err != nil {
 		log.Printf("Failed to infer session name for %s: %v", sessionId, err)
 		return // inferredName remains empty
