@@ -21,12 +21,14 @@ type SessionParams struct {
 type LLMProvider interface {
 	SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
 	GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error)
+	CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 }
 
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.
 type MockLLMProvider struct {
 	SendMessageStreamFunc      func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
 	GenerateContentOneShotFunc func(ctx context.Context, params SessionParams) (string, error)
+	CountTokensFunc            func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 }
 
 // SendMessageStream implements the LLMProvider interface for MockLLMProvider.
@@ -43,4 +45,12 @@ func (m *MockLLMProvider) GenerateContentOneShot(ctx context.Context, params Ses
 		return m.GenerateContentOneShotFunc(ctx, params)
 	}
 	return "", fmt.Errorf("GenerateContentOneShot not implemented in mock")
+}
+
+// CountTokens implements the LLMProvider interface for MockLLMProvider.
+func (m *MockLLMProvider) CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+	if m.CountTokensFunc != nil {
+		return m.CountTokensFunc(ctx, contents, modelName)
+	}
+	return nil, fmt.Errorf("CountTokens not implemented in mock")
 }

@@ -2,19 +2,21 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMessageID int) error {
+func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, wg *sync.WaitGroup) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	currentHistory := convertFrontendMessagesToContent(initialState.History)
@@ -68,7 +70,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 			if errors.Is(err, context.Canceled) {
 				errorMessage = "Request canceled by user"
 			}
-			if _, err := AddMessageToSession(initialState.SessionId, "model", errorMessage, "model_error", nil, nil); err != nil {
+			if _, err := AddMessageToSession(db, initialState.SessionId, "model", errorMessage, "model_error", nil, nil); err != nil {
 				log.Printf("Failed to save model_error message for API call failure: %v", err)
 			}
 			return fmt.Errorf("CodeAssist API call failed: %w", err)
@@ -91,7 +93,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 
 				// Update last user message's cumul_token_count with PromptTokenCount
 				if lastUsageMetadata.PromptTokenCount > 0 && lastUserMessageID != 0 {
-					if err := UpdateMessageTokens(lastUserMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
+					if err := UpdateMessageTokens(db, lastUserMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
 						log.Printf("Failed to update cumul_token_count for user message %d: %v", lastUserMessageID, err)
 					}
 				}
@@ -128,7 +130,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 					}
 
 					broadcastToSession(initialState.SessionId, EventThought, thoughtText)
-					if _, err := AddMessageToSession(initialState.SessionId, "thought", thoughtText, "thought", nil, nil); err != nil {
+					if _, err := AddMessageToSession(db, initialState.SessionId, "thought", thoughtText, "thought", nil, nil); err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
 					continue
@@ -166,7 +168,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 					t := lastUsageMetadata.TotalTokenCount
 					totalTokens = &t
 				}
-				if _, err := AddMessageToSession(initialState.SessionId, "model", string(fcJson), "function_call", nil, totalTokens); err != nil {
+				if _, err := AddMessageToSession(db, initialState.SessionId, "model", string(fcJson), "function_call", nil, totalTokens); err != nil {
 					log.Printf("Failed to save function call: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
@@ -178,7 +180,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 					t := lastUsageMetadata.PromptTokenCount
 					promptTokens = &t
 				}
-				if _, err := AddMessageToSession(initialState.SessionId, "user", string(frJson), "function_response", nil, promptTokens); err != nil {
+				if _, err := AddMessageToSession(db, initialState.SessionId, "user", string(frJson), "function_response", nil, promptTokens); err != nil {
 					log.Printf("Failed to save function response: %v", err)
 				}
 				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
@@ -191,12 +193,22 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 	broadcastToSession(initialState.SessionId, EventComplete, "")
 
 	// Before saving the final agent response, delete any empty model messages
-	if err := DeleteLastEmptyModelMessage(initialState.SessionId); err != nil {
+	if err := DeleteLastEmptyModelMessage(db, initialState.SessionId); err != nil {
 		log.Printf("Failed to save last empty model message: %v", err)
 	}
 
 	// Infer session name after streaming is complete
-	go inferAndSetSessionName(initialState.SessionId, initialState.History[0].Parts[0].Text, sseW)
+	if wg != nil {
+		wg.Add(1)
+	}
+	go func() {
+		defer func() {
+			if wg != nil {
+				wg.Done()
+			}
+		}()
+		inferAndSetSessionName(db, initialState.SessionId, initialState.History[0].Parts[0].Text, sseW, wg)
+	}()
 
 	var finalTotalTokenCount *int
 	if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
@@ -204,7 +216,7 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 		finalTotalTokenCount = &t
 	}
 
-	if _, err := AddMessageToSession(initialState.SessionId, "model", agentResponseText, "text", nil, finalTotalTokenCount); err != nil {
+	if _, err := AddMessageToSession(db, initialState.SessionId, "model", agentResponseText, "text", nil, finalTotalTokenCount); err != nil {
 		failCall(initialState.SessionId, err) // Mark the call as failed
 		return fmt.Errorf("failed to save agent response: %w", err)
 	}
@@ -214,7 +226,12 @@ func streamGeminiResponse(initialState InitialState, sseW *sseWriter, lastUserMe
 }
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
-func inferAndSetSessionName(sessionId string, userMessage string, sseW *sseWriter) {
+func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, sseW *sseWriter, wg *sync.WaitGroup) {
+	if wg != nil {
+		wg.Add(1)
+		defer wg.Done()
+	}
+
 	var inferredName string // Initialize to empty string
 
 	defer func() {
@@ -223,7 +240,12 @@ func inferAndSetSessionName(sessionId string, userMessage string, sseW *sseWrite
 		sseW.sendServerEvent(EventSessionName, fmt.Sprintf("%s\n%s", sessionId, inferredName))
 	}()
 
-	session, err := GetSession(sessionId)
+	if db == nil {
+		log.Printf("inferAndSetSessionName: Database connection is nil for session %s", sessionId)
+		return
+	}
+
+	session, err := GetSession(db, sessionId)
 	if err != nil {
 		log.Printf("Failed to get session %s for name inference: %v", sessionId, err)
 		return // inferredName remains empty
@@ -258,7 +280,7 @@ func inferAndSetSessionName(sessionId string, userMessage string, sseW *sseWrite
 
 	inferredName = llmInferredName // Set inferredName only if successful
 
-	if err := UpdateSessionName(sessionId, inferredName); err != nil {
+	if err := UpdateSessionName(db, sessionId, inferredName); err != nil {
 		log.Printf("Failed to update session name for %s: %v", sessionId, err)
 		// If DB update fails, inferredName is still the valid one, but DB might not reflect it.
 		// We still send the inferredName to frontend, as it's the best we have.

@@ -10,15 +10,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var db *sql.DB
-
-func InitDB() {
-	var err error
-	db, err = sql.Open("sqlite3", "angel.db")
-	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
-	}
-
+// createTables creates the necessary tables in the database.
+func createTables(db *sql.DB) error {
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS sessions (
 		id TEXT PRIMARY KEY,
@@ -59,26 +52,61 @@ func InitDB() {
 		config_json TEXT NOT NULL,
 		enabled BOOLEAN NOT NULL
 	);`
-	_, err = db.Exec(createTableSQL)
+	_, err := db.Exec(createTableSQL)
 	if err != nil {
-		log.Fatalf("Failed to create tables: %v", err)
+		return fmt.Errorf("Failed to create tables: %w", err)
+	}
+	return nil
+}
+
+// addCumulTokenCountColumn adds the cumul_token_count column to the messages table if it doesn't exist.
+func addCumulTokenCountColumn(db *sql.DB) error {
+	_, err := db.Exec("ALTER TABLE messages ADD COLUMN cumul_token_count INTEGER;")
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name: cumul_token_count") {
+			log.Println("Column 'cumul_token_count' already exists in 'messages' table. Skipping ALTER TABLE.")
+			return nil // Not an error if column already exists
+		}
+		return fmt.Errorf("Failed to add cumul_token_count column to messages table: %w", err)
+	}
+	log.Println("Added cumul_token_count column to messages table.")
+	return nil
+}
+
+// InitDB initializes the SQLite database connection and creates tables if they don't exist.
+func InitDB(dataSourceName string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", dataSourceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Configure connection pool for SQLite (especially important for :memory: databases)
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0) // No connection lifetime limit
+
+	// Ping the database to ensure the connection is established
+	if err = db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Create tables
+	if err = createTables(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
 	// Add cumul_token_count column to messages table if it doesn't exist
-	_, err = db.Exec("ALTER TABLE messages ADD COLUMN cumul_token_count INTEGER;")
-	if err != nil {
-		// Check if the error is due to the column already existing
-		if strings.Contains(err.Error(), "duplicate column name: cumul_token_count") {
-			log.Println("Column 'cumul_token_count' already exists in 'messages' table. Skipping ALTER TABLE.")
-		} else {
-			log.Fatalf("Failed to add cumul_token_count column to messages table: %v", err)
-		}
-	} else {
-		log.Println("Added cumul_token_count column to messages table.")
+	if err = addCumulTokenCountColumn(db); err != nil {
+		log.Printf("Failed to add cumul_token_count column: %v", err)
 	}
 
 	log.Println("Database initialized and tables created.")
+	return db, nil
 }
+
+// Keep global db for non-test usage, but tests will use their own instance
 
 // Session struct to hold session data
 type Session struct {
@@ -131,7 +159,7 @@ type WorkspaceWithSessions struct {
 }
 
 // CreateWorkspace creates a new workspace in the database.
-func CreateWorkspace(workspaceID string, name string, defaultSystemPrompt string) error {
+func CreateWorkspace(db *sql.DB, workspaceID string, name string, defaultSystemPrompt string) error {
 	_, err := db.Exec("INSERT INTO workspaces (id, name, default_system_prompt) VALUES (?, ?, ?)", workspaceID, name, defaultSystemPrompt)
 	if err != nil {
 		return fmt.Errorf("failed to create workspace: %w", err)
@@ -140,7 +168,7 @@ func CreateWorkspace(workspaceID string, name string, defaultSystemPrompt string
 }
 
 // GetWorkspace retrieves a single workspace by its ID.
-func GetWorkspace(workspaceID string) (Workspace, error) {
+func GetWorkspace(db *sql.DB, workspaceID string) (Workspace, error) {
 	var w Workspace
 	err := db.QueryRow("SELECT id, name, default_system_prompt, created_at FROM workspaces WHERE id = ?", workspaceID).Scan(&w.ID, &w.Name, &w.DefaultSystemPrompt, &w.CreatedAt)
 	if err != nil {
@@ -150,7 +178,7 @@ func GetWorkspace(workspaceID string) (Workspace, error) {
 }
 
 // GetAllWorkspaces retrieves all workspaces from the database.
-func GetAllWorkspaces() ([]Workspace, error) {
+func GetAllWorkspaces(db *sql.DB) ([]Workspace, error) {
 	rows, err := db.Query("SELECT id, name, default_system_prompt, created_at FROM workspaces ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query all workspaces: %w", err)
@@ -173,7 +201,7 @@ func GetAllWorkspaces() ([]Workspace, error) {
 }
 
 // DeleteWorkspace deletes a workspace and all its associated sessions and messages.
-func DeleteWorkspace(workspaceID string) error {
+func DeleteWorkspace(db *sql.DB, workspaceID string) error {
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
 	if err != nil {
@@ -204,7 +232,7 @@ func DeleteWorkspace(workspaceID string) error {
 	return tx.Commit()
 }
 
-func CreateSession(sessionID string, systemPrompt string, workspaceID string) error {
+func CreateSession(db *sql.DB, sessionID string, systemPrompt string, workspaceID string) error {
 	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name, workspace_id) VALUES (?, ?, ?, ?)", sessionID, systemPrompt, "", workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
@@ -212,7 +240,7 @@ func CreateSession(sessionID string, systemPrompt string, workspaceID string) er
 	return nil
 }
 
-func UpdateSessionSystemPrompt(sessionID string, systemPrompt string) error {
+func UpdateSessionSystemPrompt(db *sql.DB, sessionID string, systemPrompt string) error {
 	_, err := db.Exec("UPDATE sessions SET system_prompt = ? WHERE id = ?", systemPrompt, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session system prompt: %w", err)
@@ -220,7 +248,7 @@ func UpdateSessionSystemPrompt(sessionID string, systemPrompt string) error {
 	return nil
 }
 
-func UpdateSessionLastUpdated(sessionID string) error {
+func UpdateSessionLastUpdated(db *sql.DB, sessionID string) error {
 	_, err := db.Exec("UPDATE sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session last_updated_at: %w", err)
@@ -228,7 +256,7 @@ func UpdateSessionLastUpdated(sessionID string) error {
 	return nil
 }
 
-func UpdateSessionName(sessionID string, name string) error {
+func UpdateSessionName(db *sql.DB, sessionID string, name string) error {
 	_, err := db.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session name: %w", err)
@@ -236,7 +264,7 @@ func UpdateSessionName(sessionID string, name string) error {
 	return nil
 }
 
-func GetWorkspaceAndSessions(workspaceID string) (*WorkspaceWithSessions, error) {
+func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSessions, error) {
 	var wsWithSessions WorkspaceWithSessions
 
 	// Get workspace information
@@ -290,7 +318,7 @@ func GetWorkspaceAndSessions(workspaceID string) (*WorkspaceWithSessions, error)
 }
 
 // AddMessageToSession now accepts a message type, attachments, and numTokens
-func AddMessageToSession(sessionID string, role string, text string, msgType string, attachments []FileAttachment, cumulTokenCount *int) (int, error) {
+func AddMessageToSession(db *sql.DB, sessionID string, role string, text string, msgType string, attachments []FileAttachment, cumulTokenCount *int) (int, error) {
 	attachmentsJSON, err := json.Marshal(attachments)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal attachments: %w", err)
@@ -309,7 +337,7 @@ func AddMessageToSession(sessionID string, role string, text string, msgType str
 	return int(lastInsertID), nil
 }
 
-func SaveOAuthToken(tokenJSON string, userEmail string, projectID string) error {
+func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string) error {
 	_, err := db.Exec("INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id) VALUES (1, ?, ?, ?)", tokenJSON, userEmail, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token: %w", err)
@@ -317,7 +345,7 @@ func SaveOAuthToken(tokenJSON string, userEmail string, projectID string) error 
 	return nil
 }
 
-func LoadOAuthToken() (string, string, string, error) {
+func LoadOAuthToken(db *sql.DB) (string, string, string, error) {
 	var tokenJSON string
 	var nullUserEmail sql.NullString
 	var nullProjectID sql.NullString
@@ -336,7 +364,7 @@ func LoadOAuthToken() (string, string, string, error) {
 }
 
 // DeleteOAuthToken deletes the OAuth token from the database.
-func DeleteOAuthToken() error {
+func DeleteOAuthToken(db *sql.DB) error {
 	_, err := db.Exec("DELETE FROM oauth_tokens WHERE id = 1")
 	if err != nil {
 		return fmt.Errorf("failed to delete OAuth token: %w", err)
@@ -345,7 +373,7 @@ func DeleteOAuthToken() error {
 }
 
 // SessionExists checks if a session with the given ID exists.
-func SessionExists(sessionID string) (bool, error) {
+func SessionExists(db *sql.DB, sessionID string) (bool, error) {
 	var exists bool
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)", sessionID).Scan(&exists)
 	if err != nil && err != sql.ErrNoRows {
@@ -354,16 +382,13 @@ func SessionExists(sessionID string) (bool, error) {
 	return exists, nil
 }
 
-func GetSession(sessionID string) (Session, error) {
+func GetSession(db *sql.DB, sessionID string) (Session, error) {
 	var s Session
 	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID)
-	if err != nil {
-		return s, fmt.Errorf("failed to get session: %w", err)
-	}
-	return s, nil
+	return s, err
 }
 
-func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessage, error) {
+func GetSessionHistory(db *sql.DB, sessionId string, discardThoughts bool) ([]FrontendMessage, error) {
 	rows, err := db.Query("SELECT id, role, text, type, attachments, cumul_token_count FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query chat history: %w", err)
@@ -438,7 +463,7 @@ func GetSessionHistory(sessionId string, discardThoughts bool) ([]FrontendMessag
 }
 
 // DeleteSession deletes a session and all its associated messages.
-func DeleteSession(sessionID string) error {
+func DeleteSession(db *sql.DB, sessionID string) error {
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
 	if err != nil {
@@ -463,7 +488,7 @@ func DeleteSession(sessionID string) error {
 }
 
 // DeleteLastEmptyModelMessage deletes the last message in a session if it's an empty "model" type.
-func DeleteLastEmptyModelMessage(sessionID string) error {
+func DeleteLastEmptyModelMessage(db *sql.DB, sessionID string) error {
 	result, err := db.Exec(`
 		DELETE FROM messages
 		WHERE id = (
@@ -497,7 +522,7 @@ type MCPServerConfig struct {
 }
 
 // SaveMCPServerConfig saves an MCP server configuration to the database.
-func SaveMCPServerConfig(config MCPServerConfig) error {
+func SaveMCPServerConfig(db *sql.DB, config MCPServerConfig) error {
 	_, err := db.Exec(`
 		INSERT OR REPLACE INTO mcp_configs (name, config_json, enabled)
 		VALUES (?, ?, ?)
@@ -509,7 +534,7 @@ func SaveMCPServerConfig(config MCPServerConfig) error {
 }
 
 // GetMCPServerConfigs retrieves all MCP server configurations from the database.
-func GetMCPServerConfigs() ([]MCPServerConfig, error) {
+func GetMCPServerConfigs(db *sql.DB) ([]MCPServerConfig, error) {
 	rows, err := db.Query("SELECT name, config_json, enabled FROM mcp_configs")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query MCP server configs: %w", err)
@@ -533,16 +558,25 @@ func GetMCPServerConfigs() ([]MCPServerConfig, error) {
 }
 
 // DeleteMCPServerConfig deletes an MCP server configuration from the database.
-func DeleteMCPServerConfig(name string) error {
-	_, err := db.Exec("DELETE FROM mcp_configs WHERE name = ?", name)
+func DeleteMCPServerConfig(db *sql.DB, name string) error {
+	result, err := db.Exec("DELETE FROM mcp_configs WHERE name = ?", name)
 	if err != nil {
 		return fmt.Errorf("failed to delete MCP server config: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("MCP config with name %s not found", name)
 	}
 	return nil
 }
 
 // UpdateMessageTokens updates the cumul_token_count for a specific message.
-func UpdateMessageTokens(messageID int, cumulTokenCount int) error {
+func UpdateMessageTokens(db *sql.DB, messageID int, cumulTokenCount int) error {
 	_, err := db.Exec("UPDATE messages SET cumul_token_count = ? WHERE id = ?", cumulTokenCount, messageID)
 	if err != nil {
 		return fmt.Errorf("failed to update message tokens: %w", err)

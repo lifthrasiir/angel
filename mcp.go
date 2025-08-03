@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -49,12 +50,12 @@ type MCPConnection struct {
 
 var mcpManager *MCPManager
 
-func InitMCPManager() {
+func InitMCPManager(db *sql.DB) {
 	mcpManager = &MCPManager{
 		connections: make(map[string]*MCPConnection),
 	}
 
-	configs, err := GetMCPServerConfigs()
+	configs, err := GetMCPServerConfigs(db)
 	if err != nil {
 		log.Printf("Error loading MCP server configs: %v", err)
 		return

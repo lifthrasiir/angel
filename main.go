@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -15,10 +16,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-)
-
-var (
-	GlobalGeminiAuth GeminiAuth
+	"runtime"
+	"sync"
 )
 
 //go:embed frontend/dist
@@ -93,8 +92,14 @@ func setupSSEHeaders(w http.ResponseWriter) {
 // decodeJSONRequest decodes JSON request body with error handling
 func decodeJSONRequest(r *http.Request, w http.ResponseWriter, target interface{}, handlerName string) bool {
 	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
-		log.Printf("%s: Invalid request body: %v", handlerName, err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		// Check if it's an EOF error, which happens with empty body
+		if err == io.EOF || err.Error() == "unexpected EOF" {
+			log.Printf("%s: Empty request body", handlerName)
+			http.Error(w, "Empty request body", http.StatusBadRequest)
+		} else {
+			log.Printf("%s: Invalid request body: %v", handlerName, err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+		}
 		return false
 	}
 	return true
@@ -106,20 +111,26 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func init() {
-	InitDB()
-	InitMCPManager()
-
-	InitAuth(&GlobalGeminiAuth)
-}
-
 func main() {
+	var wg sync.WaitGroup
+
+	db, err := InitDB("angel.db")
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
+	InitMCPManager(db)
+
+	var ga GeminiAuth
+	ga.Init(db)
+
 	router := mux.NewRouter()
+	router.Use(makeContextMiddleware(db, &ga, &wg))
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
-	if GlobalGeminiAuth.SelectedAuthType == AuthTypeLoginWithGoogle {
-		router.HandleFunc("/login", makeAuthHandler(&GlobalGeminiAuth, HandleGoogleLogin)).Methods("GET")
-		router.HandleFunc("/oauth2callback", makeAuthHandler(&GlobalGeminiAuth, HandleGoogleCallback)).Methods("GET")
+	if ga.SelectedAuthType == AuthTypeLoginWithGoogle {
+		router.HandleFunc("/login", HandleGoogleLogin).Methods("GET")
+		router.HandleFunc("/oauth2callback", HandleGoogleCallback).Methods("GET")
 	}
 
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
@@ -148,7 +159,7 @@ func main() {
 	router.HandleFunc("/api/chat/{sessionId}/call", handleCall).Methods("GET", "DELETE")
 	router.HandleFunc("/api/chat/{sessionId}", deleteSession).Methods("DELETE")
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
-	router.HandleFunc("/api/logout", GlobalGeminiAuth.HandleLogout).Methods("POST")
+	router.HandleFunc("/api/logout", ga.HandleLogout).Methods("POST")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
 	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
 	router.HandleFunc("/api/mcp/configs", getMCPConfigsHandler).Methods("GET")
@@ -163,13 +174,58 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
-func makeAuthHandler(ga *GeminiAuth, handler func(ga *GeminiAuth, w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		handler(ga, w, r)
+// Context keys for storing values in context.Context
+type contextKey uint8
+
+const (
+	dbKey contextKey = iota
+	gaKey
+	wgKey
+)
+
+func makeContextMiddleware(db *sql.DB, ga *GeminiAuth, wg *sync.WaitGroup) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := context.WithValue(r.Context(), dbKey, db)
+			ctx = context.WithValue(ctx, gaKey, ga)
+			ctx = context.WithValue(ctx, wgKey, wg)
+			r = r.WithContext(ctx)
+
+			// Increment the WaitGroup counter before executing the handler
+			wg.Add(1)
+			defer wg.Done() // Decrement the counter when the handler finishes
+
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 
+func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
+	db, ok := r.Context().Value(dbKey).(*sql.DB)
+	if !ok {
+		http.Error(w, "Internal Server Error: Database connection missing.", http.StatusInternalServerError)
+		runtime.Goexit()
+	}
+	return db
+}
+
+func getGeminiAuth(w http.ResponseWriter, r *http.Request) *GeminiAuth {
+	ga, ok := r.Context().Value(gaKey).(*GeminiAuth)
+	if !ok {
+		http.Error(w, "Internal Server Error: GeminiAuth missing.", http.StatusInternalServerError)
+		runtime.Goexit()
+	}
+	return ga
+}
+
+func getWaitGroup(r *http.Request) *sync.WaitGroup {
+	ga, _ := r.Context().Value(wgKey).(*sync.WaitGroup)
+	return ga
+}
+
 func handleSessionPage(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 
@@ -178,7 +234,7 @@ func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exists, err := SessionExists(sessionId)
+	exists, err := SessionExists(db, sessionId)
 	if err != nil {
 		log.Printf("handleSessionPage: Failed to check session existence for %s: %v", sessionId, err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -219,6 +275,8 @@ func generateID() string {
 }
 
 func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
@@ -234,7 +292,7 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := UpdateSessionName(sessionId, requestBody.Name); err != nil {
+	if err := UpdateSessionName(db, sessionId, requestBody.Name); err != nil {
 		log.Printf("Failed to update session name for %s: %v", sessionId, err)
 		http.Error(w, fmt.Sprintf("Failed to update session name: %v", err), http.StatusInternalServerError)
 		return
@@ -245,24 +303,29 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
 	// Check if logged in
-	if GlobalGeminiAuth.SelectedAuthType == AuthTypeLoginWithGoogle && (GlobalGeminiAuth.Token == nil || !GlobalGeminiAuth.Token.Valid()) {
+	if ga.SelectedAuthType == AuthTypeLoginWithGoogle && (ga.Token == nil || !ga.Token.Valid()) {
 		http.Error(w, "Not logged in", http.StatusUnauthorized)
 		return
 	}
 
 	// If UserEmail is empty but token is valid, try to re-fetch user info
-	if GlobalGeminiAuth.SelectedAuthType == AuthTypeLoginWithGoogle && GlobalGeminiAuth.UserEmail == "" && GlobalGeminiAuth.Token != nil {
+	if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.UserEmail == "" && ga.Token != nil {
 		log.Println("getUserInfoHandler: UserEmail is empty, attempting to fetch from Google API...")
-		if err := GlobalGeminiAuth.GetUserInfoAndSave(); err != nil {
+		if err := ga.GetUserInfoAndSave(db); err != nil {
 			log.Printf("getUserInfoHandler: Failed to fetch user info: %v", err)
 		}
 	}
 
-	sendJSONResponse(w, map[string]string{"email": GlobalGeminiAuth.UserEmail})
+	sendJSONResponse(w, map[string]string{"email": ga.UserEmail})
 }
 
 func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	var requestBody struct {
 		Name string `json:"name"`
 	}
@@ -273,7 +336,7 @@ func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := generateID() // Reusing session ID generation for workspace ID
 
-	if err := CreateWorkspace(workspaceID, requestBody.Name, ""); err != nil {
+	if err := CreateWorkspace(db, workspaceID, requestBody.Name, ""); err != nil {
 		log.Printf("Failed to create workspace %s: %v", requestBody.Name, err)
 		http.Error(w, fmt.Sprintf("Failed to create workspace: %v", err), http.StatusInternalServerError)
 		return
@@ -283,7 +346,9 @@ func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func listWorkspacesHandler(w http.ResponseWriter, r *http.Request) {
-	workspaces, err := GetAllWorkspaces()
+	db := getDb(w, r)
+
+	workspaces, err := GetAllWorkspaces(db)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve workspaces: %v", err), http.StatusInternalServerError)
 		return
@@ -293,13 +358,15 @@ func listWorkspacesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	workspaceID := mux.Vars(r)["id"]
 	if workspaceID == "" {
 		http.Error(w, "Workspace ID is required", http.StatusBadRequest)
 		return
 	}
 
-	if err := DeleteWorkspace(workspaceID); err != nil {
+	if err := DeleteWorkspace(db, workspaceID); err != nil {
 		log.Printf("Failed to delete workspace %s: %v", workspaceID, err)
 		http.Error(w, fmt.Sprintf("Failed to delete workspace: %v", err), http.StatusInternalServerError)
 		return
@@ -309,7 +376,9 @@ func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
-	if !GlobalGeminiAuth.ValidateAuthAndProject("countTokensHandler", w) {
+	ga := getGeminiAuth(w, r)
+
+	if !ga.ValidateAuthAndProject("countTokensHandler", w, r) {
 		return
 	}
 
@@ -330,7 +399,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp, err := CurrentProvider.(*CodeAssistClient).CountTokens(context.Background(), contents, modelName)
+	resp, err := CurrentProvider.CountTokens(context.Background(), contents, modelName)
 	if err != nil {
 		log.Printf("CountTokens API call failed: %v", err)
 		http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", err), http.StatusInternalServerError)
@@ -346,7 +415,9 @@ func callFunction(fc FunctionCall) (map[string]interface{}, error) {
 
 // handleCall handles GET and DELETE requests for /api/calls/{sessionId}
 func handleCall(w http.ResponseWriter, r *http.Request) {
-	if !GlobalGeminiAuth.ValidateAuthAndProject("handleCall", w) {
+	ga := getGeminiAuth(w, r)
+
+	if !ga.ValidateAuthAndProject("handleCall", w, r) {
 		return
 	}
 
@@ -407,7 +478,9 @@ type FrontendMCPConfig struct {
 }
 
 func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
-	dbConfigs, err := GetMCPServerConfigs()
+	db := getDb(w, r)
+
+	dbConfigs, err := GetMCPServerConfigs(db)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve MCP configs from DB: %v", err), http.StatusInternalServerError)
 		return
@@ -451,6 +524,8 @@ func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	var requestBody struct {
 		Name       string `json:"name"`
 		ConfigJSON string `json:"config_json"`
@@ -467,7 +542,7 @@ func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 		Enabled:    requestBody.Enabled,
 	}
 
-	if err := SaveMCPServerConfig(config); err != nil {
+	if err := SaveMCPServerConfig(db, config); err != nil {
 		log.Printf("Failed to save MCP config %s: %v", config.Name, err)
 		http.Error(w, fmt.Sprintf("Failed to save MCP config: %v", err), http.StatusInternalServerError)
 		return
@@ -484,13 +559,15 @@ func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	name := mux.Vars(r)["name"]
 	if name == "" {
 		http.Error(w, "MCP config name is required", http.StatusBadRequest)
 		return
 	}
 
-	if err := DeleteMCPServerConfig(name); err != nil {
+	if err := DeleteMCPServerConfig(db, name); err != nil {
 		log.Printf("Failed to delete MCP config %s: %v", name, err)
 		http.Error(w, fmt.Sprintf("Failed to delete MCP config: %v", err), http.StatusInternalServerError)
 		return

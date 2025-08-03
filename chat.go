@@ -1,10 +1,13 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -18,7 +21,10 @@ type InitialState struct {
 
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
-	if !GlobalGeminiAuth.ValidateAuthAndProject("newSessionAndMessage", w) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
+	if !ga.ValidateAuthAndProject("newSessionAndMessage", w, r) {
 		return
 	}
 
@@ -43,7 +49,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := CreateSession(sessionId, systemPrompt, requestBody.WorkspaceID); err != nil {
+	if err := CreateSession(db, sessionId, systemPrompt, requestBody.WorkspaceID); err != nil {
 		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to create new session: %v", err), http.StatusInternalServerError)
 		return
@@ -51,7 +57,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	userMessage := requestBody.Message
 
-	userMessageID, err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments, nil)
+	userMessageID, err := AddMessageToSession(db, sessionId, "user", userMessage, "text", requestBody.Attachments, nil)
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
@@ -61,7 +67,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// (This variable will be used in streamGeminiResponse)
 
 	// Update last_updated_at for the new session
-	if err := UpdateSessionLastUpdated(sessionId); err != nil {
+	if err := UpdateSessionLastUpdated(db, sessionId); err != nil {
 		log.Printf("Failed to update last_updated_at for new session %s: %v", sessionId, err)
 		// Non-fatal error, continue with response
 	}
@@ -100,7 +106,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	defer removeSseWriter(sessionId, sseW)
 
 	// Retrieve session history from DB for Gemini API
-	frontendHistory, err := GetSessionHistory(sessionId, true)
+	frontendHistory, err := GetSessionHistory(db, sessionId, true)
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
@@ -118,15 +124,19 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(initialState, sseW, userMessageID); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, getWaitGroup(r)); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
+
 }
 
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
-	if !GlobalGeminiAuth.ValidateAuthAndProject("chatMessage", w) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
+	if !ga.ValidateAuthAndProject("chatMessage", w, r) {
 		return
 	}
 
@@ -146,10 +156,16 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := GetSession(sessionId)
+	session, err := GetSession(db, sessionId)
 	if err != nil {
 		log.Printf("chatMessage: Failed to load session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
+		if errors.Is(err, sql.ErrNoRows) || 
+		   err.Error() == "sql: no rows in result set" ||
+		   strings.Contains(err.Error(), "no such table") {
+			http.Error(w, "Session not found", http.StatusNotFound)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 	systemPrompt := session.SystemPrompt
@@ -169,7 +185,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	userMessage := requestBody.Message
 
-	userMessageID, err := AddMessageToSession(sessionId, "user", userMessage, "text", requestBody.Attachments, nil)
+	userMessageID, err := AddMessageToSession(db, sessionId, "user", userMessage, "text", requestBody.Attachments, nil)
 	if err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
@@ -179,7 +195,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	// (This variable will be used in streamGeminiResponse)
 
 	// Retrieve session history from DB for Gemini API
-	frontendHistory, err := GetSessionHistory(sessionId, true)
+	frontendHistory, err := GetSessionHistory(db, sessionId, true)
 	if err != nil {
 		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
@@ -195,7 +211,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:  session.WorkspaceID,
 	}
 
-	if err := streamGeminiResponse(initialState, sseW, userMessageID); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, getWaitGroup(r)); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
@@ -204,7 +220,10 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 // New endpoint to load chat session history
 func loadChatSession(w http.ResponseWriter, r *http.Request) {
-	if !GlobalGeminiAuth.ValidateAuthAndProject("loadChatSession", w) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
+	if !ga.ValidateAuthAndProject("loadChatSession", w, r) {
 		return
 	}
 
@@ -216,7 +235,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if session exists
-	exists, err := SessionExists(sessionId)
+	exists, err := SessionExists(db, sessionId)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to check session existence: %v", err), http.StatusInternalServerError)
 		return
@@ -226,13 +245,13 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := GetSession(sessionId)
+	session, err := GetSession(db, sessionId)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	history, err := GetSessionHistory(sessionId, false)
+	history, err := GetSessionHistory(db, sessionId, false)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
 		return
@@ -292,13 +311,16 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
-	if !GlobalGeminiAuth.ValidateAuthAndProject("listSessionsByWorkspaceHandler", w) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
+	if !ga.ValidateAuthAndProject("listSessionsByWorkspaceHandler", w, r) {
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("workspaceId")
 
-	wsWithSessions, err := GetWorkspaceAndSessions(workspaceID)
+	wsWithSessions, err := GetWorkspaceAndSessions(db, workspaceID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve sessions: %v", err), http.StatusInternalServerError)
 		return
@@ -309,7 +331,10 @@ func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 
 // New endpoint to delete a chat session
 func deleteSession(w http.ResponseWriter, r *http.Request) {
-	if !GlobalGeminiAuth.ValidateAuthAndProject("deleteSession", w) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
+	if !ga.ValidateAuthAndProject("deleteSession", w, r) {
 		return
 	}
 
@@ -320,7 +345,7 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := DeleteSession(sessionId); err != nil {
+	if err := DeleteSession(db, sessionId); err != nil {
 		log.Printf("deleteSession: Failed to delete session %s: %v", sessionId, err)
 		http.Error(w, fmt.Sprintf("Failed to delete session: %v", err), http.StatusInternalServerError)
 		return

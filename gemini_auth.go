@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -32,14 +33,14 @@ type GeminiAuth struct {
 }
 
 // saveToken saves the OAuth token to the database.
-func (ga *GeminiAuth) SaveToken(t *oauth2.Token) {
+func (ga *GeminiAuth) SaveToken(db *sql.DB, t *oauth2.Token) {
 	tokenJSON, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		log.Printf("Failed to marshal token: %v", err)
 		return
 	}
 
-	if err := SaveOAuthToken(string(tokenJSON), ga.UserEmail, ga.ProjectID); err != nil {
+	if err := SaveOAuthToken(db, string(tokenJSON), ga.UserEmail, ga.ProjectID); err != nil {
 		log.Printf("Failed to save OAuth token to DB: %v", err)
 		return
 	}
@@ -48,8 +49,8 @@ func (ga *GeminiAuth) SaveToken(t *oauth2.Token) {
 }
 
 // loadToken loads the OAuth token from the database.
-func (ga *GeminiAuth) LoadToken() {
-	tokenJSON, userEmail, projectID, err := LoadOAuthToken()
+func (ga *GeminiAuth) LoadToken(db *sql.DB) {
+	tokenJSON, userEmail, projectID, err := LoadOAuthToken(db)
 	if err != nil {
 		log.Printf("LoadToken: Failed to load OAuth token from DB: %v", err)
 		return
@@ -69,10 +70,10 @@ func (ga *GeminiAuth) LoadToken() {
 
 }
 
-// InitAuth initializes the authentication state.
-func InitAuth(ga *GeminiAuth) {
+// Init initializes the authentication state.
+func (ga *GeminiAuth) Init(db *sql.DB) {
 	ga.OAuthState = "random"
-	ga.LoadToken()
+	ga.LoadToken(db)
 	// Select authentication method from environment variables
 	if os.Getenv("GEMINI_API_KEY") != "" {
 		ga.SelectedAuthType = AuthTypeUseGemini
@@ -102,21 +103,21 @@ func InitAuth(ga *GeminiAuth) {
 		}
 
 		// Attempt to load existing token on startup
-		ga.LoadToken()
+		ga.LoadToken(db)
 
 		// Initialize GenAI service
-		InitCurrentProvider(ga)
+		InitCurrentProvider(ga, db)
 	case AuthTypeUseGemini:
-		InitCurrentProvider(ga)
+		InitCurrentProvider(ga, db)
 	case AuthTypeUseVertexAI:
-		InitCurrentProvider(ga)
+		InitCurrentProvider(ga, db)
 	case AuthTypeCloudShell:
-		InitCurrentProvider(ga)
+		InitCurrentProvider(ga, db)
 	}
 }
 
 // InitCurrentProvider initializes the CurrentProvider based on GeminiAuth state.
-func InitCurrentProvider(ga *GeminiAuth) {
+func InitCurrentProvider(ga *GeminiAuth, db *sql.DB) {
 	ctx := context.Background()
 	var clientProvider HTTPClientProvider
 
@@ -135,7 +136,7 @@ func InitCurrentProvider(ga *GeminiAuth) {
 
 		// Proactively refresh token on startup if expired
 		// This will also save the new token via tokenSaverSource.Token()
-		_, err := ga.TokenSource.(*tokenSaverSource).Token() // This call will trigger refresh if needed
+		_, err := ga.TokenSource.(*tokenSaverSource).Token(db) // This call will trigger refresh if needed
 		if err != nil {
 			log.Printf("InitCurrentProvider: Failed to proactively refresh token on startup: %v. Client not initialized.", err)
 			CurrentProvider = nil
@@ -213,7 +214,7 @@ func InitCurrentProvider(ga *GeminiAuth) {
 		}
 
 		// Ensure the final ProjectID is saved to the database
-		ga.SaveToken(ga.Token)
+		ga.SaveToken(db, ga.Token)
 
 	case AuthTypeUseGemini:
 		clientProvider = &defaultHTTPClientProvider{}
@@ -229,12 +230,14 @@ func InitCurrentProvider(ga *GeminiAuth) {
 }
 
 // ValidateAuthAndProject performs common auth and project validation for handlers
-func (ga *GeminiAuth) ValidateAuthAndProject(handlerName string, w http.ResponseWriter) bool {
+func (ga *GeminiAuth) ValidateAuthAndProject(handlerName string, w http.ResponseWriter, r *http.Request) bool {
+	db := getDb(w, r)
+
 	// Check if GeminiClient is initialized and attempt to re-initialize if needed
 	if CurrentProvider == nil {
 		log.Printf("%s: GeminiClient not initialized, attempting to re-initialize...", handlerName)
 		if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil && ga.Token.Valid() {
-			InitCurrentProvider(ga)
+			InitCurrentProvider(ga, db)
 		}
 		if CurrentProvider == nil {
 			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
@@ -243,15 +246,17 @@ func (ga *GeminiAuth) ValidateAuthAndProject(handlerName string, w http.Response
 		}
 	}
 
-	if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.ProjectID == "" {
-		log.Printf("%s: Project ID is not set. Please log in again.", handlerName)
-		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
+	if (ga.SelectedAuthType == AuthTypeLoginWithGoogle || ga.SelectedAuthType == AuthTypeUseGemini || ga.SelectedAuthType == AuthTypeUseVertexAI) && ga.ProjectID == "" {
+		log.Printf("%s: Project ID is not set. Please log in again or set GOOGLE_CLOUD_PROJECT.", handlerName)
+		http.Error(w, "Project ID is not set. Please log in again or set GOOGLE_CLOUD_PROJECT.", http.StatusUnauthorized)
 		return false
 	}
 	return true
 }
 
-func HandleGoogleLogin(ga *GeminiAuth, w http.ResponseWriter, r *http.Request) {
+func HandleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	ga := getGeminiAuth(w, r)
+
 	// Capture the entire raw query string from the /login request.
 	// This will contain both 'redirect_to' and 'draft_message'.
 	redirectToQueryString := r.URL.RawQuery
@@ -276,7 +281,10 @@ func HandleGoogleLogin(ga *GeminiAuth, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
-func HandleGoogleCallback(ga *GeminiAuth, w http.ResponseWriter, r *http.Request) {
+func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
 	stateParam := r.FormValue("state")
 
 	// Validate the random part of the state against the stored value
@@ -323,7 +331,7 @@ func HandleGoogleCallback(ga *GeminiAuth, w http.ResponseWriter, r *http.Request
 	}
 
 	// Save token to file
-	ga.SaveToken(Token)
+	ga.SaveToken(db, Token)
 
 	// Fetch user info (email)
 
@@ -349,14 +357,14 @@ func HandleGoogleCallback(ga *GeminiAuth, w http.ResponseWriter, r *http.Request
 	}
 
 	// Re-initialize CurrentProvider after successful authentication and user info fetch
-	InitCurrentProvider(ga)
+	InitCurrentProvider(ga, db)
 
 	// Redirect to the original path after successful authentication
 	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)
 }
 
 // GetUserInfoAndSave fetches user info from Google API and saves it.
-func (ga *GeminiAuth) GetUserInfoAndSave() error {
+func (ga *GeminiAuth) GetUserInfoAndSave(db *sql.DB) error {
 	if ga.Token == nil || !ga.Token.Valid() {
 		return fmt.Errorf("token is invalid or nil")
 	}
@@ -380,19 +388,21 @@ func (ga *GeminiAuth) GetUserInfoAndSave() error {
 
 	ga.UserEmail = userInfo.Email
 	// Update the token in DB with user email
-	ga.SaveToken(ga.Token)
+	ga.SaveToken(db, ga.Token)
 
 	return nil
 }
 
 // Handle logout
 func (ga *GeminiAuth) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	ga.Token = nil
 	ga.UserEmail = ""
 	CurrentProvider = nil
 
 	// Delete token from DB
-	if err := DeleteOAuthToken(); err != nil {
+	if err := DeleteOAuthToken(db); err != nil {
 		log.Printf("Failed to delete OAuth token from DB: %v", err)
 		http.Error(w, "Failed to logout", http.StatusInternalServerError)
 		return
