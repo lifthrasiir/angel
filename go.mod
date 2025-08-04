@@ -8,13 +8,12 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/mattn/go-sqlite3 v1.14.29
+	github.com/modelcontextprotocol/go-sdk v0.2.0
 	golang.org/x/oauth2 v0.23.0
 )
 
 require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/modelcontextprotocol/go-sdk v0.2.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 )

@@ -19,12 +19,25 @@ func createTables(db *sql.DB) error {
 		last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		system_prompt TEXT,
 		name TEXT DEFAULT '',
-		workspace_id TEXT DEFAULT ''
+		workspace_id TEXT DEFAULT '',
+		primary_branch_id TEXT -- New column for primary branch
+	);
+
+	CREATE TABLE IF NOT EXISTS branches (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		parent_branch_id TEXT,
+		branch_from_message_id INTEGER,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 	);
 
 	CREATE TABLE IF NOT EXISTS messages (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		session_id TEXT NOT NULL,
+		session_id TEXT NOT NULL, -- Keep session_id to link to session
+		branch_id TEXT NOT NULL, -- New column for branch
+		parent_message_id INTEGER, -- New column for branching
+		chosen_next_id INTEGER, -- New column for chosen next message
 		role TEXT NOT NULL,
 		text TEXT NOT NULL,
 		type TEXT NOT NULL DEFAULT 'text',
@@ -101,6 +114,21 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	if err = addCumulTokenCountColumn(db); err != nil {
 		log.Printf("Failed to add cumul_token_count column: %v", err)
 	}
+	if err = addPrimaryBranchIDColumn(db); err != nil {
+		log.Printf("Failed to add primary_branch_id column: %v", err)
+	}
+	if err = addBranchIDColumn(db); err != nil {
+		log.Printf("Failed to add branch_id column: %v", err)
+	}
+	if err = addParentMessageIDColumn(db); err != nil {
+		log.Printf("Failed to add parent_message_id column: %v", err)
+	}
+	if err = addChosenNextIDColumn(db); err != nil {
+		log.Printf("Failed to add chosen_next_id column: %v", err)
+	}
+	if err = addBranchesTable(db); err != nil {
+		log.Printf("Failed to add branches table: %v", err)
+	}
 
 	log.Println("Database initialized and tables created.")
 	return db, nil
@@ -110,11 +138,21 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 
 // Session struct to hold session data
 type Session struct {
-	ID           string `json:"id"`
-	LastUpdated  string `json:"last_updated_at"`
-	SystemPrompt string `json:"system_prompt"`
-	Name         string `json:"name"`
-	WorkspaceID  string `json:"workspace_id"`
+	ID              string `json:"id"`
+	LastUpdated     string `json:"last_updated_at"`
+	SystemPrompt    string `json:"system_prompt"`
+	Name            string `json:"name"`
+	WorkspaceID     string `json:"workspace_id"`
+	PrimaryBranchID string `json:"primary_branch_id"` // Changed to string
+}
+
+// Branch struct to hold branch data
+type Branch struct {
+	ID                  string  `json:"id"`
+	SessionID           string  `json:"session_id"`
+	ParentBranchID      *string `json:"parent_branch_id"`       // Pointer for nullable
+	BranchFromMessageID *int    `json:"branch_from_message_id"` // Pointer for nullable
+	CreatedAt           string  `json:"created_at"`
 }
 
 // FileAttachment struct to hold file attachment data
@@ -127,23 +165,36 @@ type FileAttachment struct {
 // Message struct to hold message data for database interaction
 type Message struct {
 	ID              int              `json:"id"`
-	SessionID       string           `json:"session_id"`
+	SessionID       string           `json:"session_id"`        // Existing
+	BranchID        string           `json:"branch_id"`         // New field
+	ParentMessageID *int             `json:"parent_message_id"` // New field, pointer for nullable
+	ChosenNextID    *int             `json:"chosen_next_id"`    // New field, pointer for nullable
 	Role            string           `json:"role"`
 	Text            string           `json:"text"`
 	Type            string           `json:"type"`
-	Attachments     []FileAttachment `json:"attachments,omitempty"` // New field
+	Attachments     []FileAttachment `json:"attachments,omitempty"`
 	CumulTokenCount *int             `json:"cumul_token_count,omitempty"`
 	CreatedAt       string           `json:"created_at"`
 }
 
+// PossibleNextMessage struct to hold possible next message data for the frontend
+type PossibleNextMessage struct {
+	MessageID string `json:"messageId"`
+	BranchID  string `json:"branchId"`
+}
+
 // FrontendMessage struct to match the frontend's ChatMessage interface
 type FrontendMessage struct {
-	ID              string           `json:"id"`
-	Role            string           `json:"role"`
-	Parts           []Part           `json:"parts"`
-	Type            string           `json:"type"`
-	Attachments     []FileAttachment `json:"attachments,omitempty"`
-	CumulTokenCount *int             `json:"cumul_token_count,omitempty"`
+	ID              string                `json:"id"`
+	Role            string                `json:"role"`
+	Parts           []Part                `json:"parts"`
+	Type            string                `json:"type"`
+	Attachments     []FileAttachment      `json:"attachments,omitempty"`
+	CumulTokenCount *int                  `json:"cumul_token_count,omitempty"`
+	BranchID        string                `json:"branchId,omitempty"`
+	ParentMessageID *string               `json:"parentMessageId,omitempty"`
+	ChosenNextID    *string               `json:"chosenNextId,omitempty"`
+	PossibleNextIDs []PossibleNextMessage `json:"possibleNextIds,omitempty"`
 }
 
 type Workspace struct {
@@ -232,12 +283,27 @@ func DeleteWorkspace(db *sql.DB, workspaceID string) error {
 	return tx.Commit()
 }
 
-func CreateSession(db *sql.DB, sessionID string, systemPrompt string, workspaceID string) error {
-	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name, workspace_id) VALUES (?, ?, ?, ?)", sessionID, systemPrompt, "", workspaceID)
+func CreateSession(db *sql.DB, sessionID string, systemPrompt string, workspaceID string) (string, error) {
+	primaryBranchID := generateID() // Generate a new ID for the primary branch
+	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name, workspace_id, primary_branch_id) VALUES (?, ?, ?, ?, ?)", sessionID, systemPrompt, "", workspaceID, primaryBranchID)
 	if err != nil {
-		return fmt.Errorf("failed to create session: %w", err)
+		return "", fmt.Errorf("failed to create session: %w", err)
 	}
-	return nil
+	// Also create the initial branch entry in the branches table
+	_, err = db.Exec("INSERT INTO branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, NULL, NULL)", primaryBranchID, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create initial branch for session: %w", err)
+	}
+	return primaryBranchID, nil
+}
+
+// CreateBranch creates a new branch in the database.
+func CreateBranch(db *sql.DB, branchID string, sessionID string, parentBranchID *string, branchFromMessageID *int) (string, error) {
+	_, err := db.Exec("INSERT INTO branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, ?, ?)", branchID, sessionID, parentBranchID, branchFromMessageID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create branch: %w", err)
+	}
+	return branchID, nil
 }
 
 func UpdateSessionSystemPrompt(db *sql.DB, sessionID string, systemPrompt string) error {
@@ -317,24 +383,89 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	return &wsWithSessions, nil
 }
 
-// AddMessageToSession now accepts a message type, attachments, and numTokens
-func AddMessageToSession(db *sql.DB, sessionID string, role string, text string, msgType string, attachments []FileAttachment, cumulTokenCount *int) (int, error) {
+// AddMessageToSession now accepts a message type, attachments, and numTokens, and branch_id, parent_message_id, chosen_next_id
+func AddMessageToSession(db *sql.DB, sessionID string, branchID string, parentMessageID *int, chosenNextID *int, role string, text string, msgType string, attachments []FileAttachment, cumulTokenCount *int) (int, error) {
 	attachmentsJSON, err := json.Marshal(attachments)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal attachments: %w", err)
 	}
 
-	result, err := db.Exec("INSERT INTO messages (session_id, role, text, type, attachments, cumul_token_count) VALUES (?, ?, ?, ?, ?, ?)", sessionID, role, text, msgType, string(attachmentsJSON), cumulTokenCount)
+	result, err := db.Exec("INSERT INTO messages (session_id, branch_id, parent_message_id, chosen_next_id, role, text, type, attachments, cumul_token_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sessionID, branchID, parentMessageID, chosenNextID, role, text, msgType, string(attachmentsJSON), cumulTokenCount)
 	if err != nil {
+		log.Printf("AddMessageToSession: Failed to add message to session: %v", err)
 		return 0, fmt.Errorf("failed to add message to session: %w", err)
 	}
 
 	lastInsertID, err := result.LastInsertId()
 	if err != nil {
+		log.Printf("AddMessageToSession: Failed to get last insert ID: %v", err)
 		return 0, fmt.Errorf("failed to get last insert ID: %w", err)
 	}
 
 	return int(lastInsertID), nil
+}
+
+// UpdateMessageChosenNextID updates the chosen_next_id for a specific message.
+func UpdateMessageChosenNextID(db *sql.DB, messageID int, chosenNextID *int) error {
+	_, err := db.Exec("UPDATE messages SET chosen_next_id = ? WHERE id = ?", chosenNextID, messageID)
+	if err != nil {
+		return fmt.Errorf("failed to update message chosen_next_id: %w", err)
+	}
+	return nil
+}
+
+// UpdateSessionPrimaryBranchID updates the primary_branch_id for a session.
+func UpdateSessionPrimaryBranchID(db *sql.DB, sessionID string, branchID string) error {
+	_, err := db.Exec("UPDATE sessions SET primary_branch_id = ? WHERE id = ?", branchID, sessionID)
+	if err != nil {
+		log.Printf("UpdateSessionPrimaryBranchID: Failed to update session primary_branch_id: %v", err)
+		return fmt.Errorf("failed to update session primary_branch_id: %w", err)
+	}
+	return nil
+}
+
+// GetBranchMessages retrieves all messages for a given branch, ordered by creation time.
+func GetBranchMessages(db *sql.DB, branchID string) ([]Message, error) {
+	rows, err := db.Query("SELECT id, session_id, branch_id, parent_message_id, chosen_next_id, role, text, type, attachments, cumul_token_count, created_at FROM messages WHERE branch_id = ? ORDER BY created_at ASC", branchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query branch messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var m Message
+		var attachmentsJSON sql.NullString
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID, &m.Role, &m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan message: %w", err)
+		}
+		if attachmentsJSON.Valid {
+			if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
+				log.Printf("Failed to unmarshal attachments for message %d: %v", m.ID, err)
+			}
+		}
+		messages = append(messages, m)
+	}
+	return messages, nil
+}
+
+// GetMessagePossibleNextIDs retrieves all possible next message IDs and their branch IDs for a given message ID.
+func GetMessagePossibleNextIDs(db *sql.DB, messageID int) ([]PossibleNextMessage, error) {
+	rows, err := db.Query("SELECT id, branch_id FROM messages WHERE parent_message_id = ?", messageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query possible next message IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var nextIDs []PossibleNextMessage
+	for rows.Next() {
+		var next PossibleNextMessage
+		if err := rows.Scan(&next.MessageID, &next.BranchID); err != nil {
+			return nil, fmt.Errorf("failed to scan next message ID and branch ID: %w", err)
+		}
+		nextIDs = append(nextIDs, next)
+	}
+	return nextIDs, nil
 }
 
 func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string) error {
@@ -384,81 +515,165 @@ func SessionExists(db *sql.DB, sessionID string) (bool, error) {
 
 func GetSession(db *sql.DB, sessionID string) (Session, error) {
 	var s Session
-	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID)
-	return s, err
+	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, '') FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID)
+	if err != nil {
+		return s, err
+	}
+	return s, nil
 }
 
-func GetSessionHistory(db *sql.DB, sessionId string, discardThoughts bool) ([]FrontendMessage, error) {
-	rows, err := db.Query("SELECT id, role, text, type, attachments, cumul_token_count FROM messages WHERE session_id = ? ORDER BY created_at ASC", sessionId)
+func GetBranch(db *sql.DB, branchID string) (Branch, error) {
+	var b Branch
+	err := db.QueryRow("SELECT id, session_id, parent_branch_id, branch_from_message_id, created_at FROM branches WHERE id = ?", branchID).Scan(&b.ID, &b.SessionID, &b.ParentBranchID, &b.BranchFromMessageID, &b.CreatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query chat history: %w", err)
+		return b, fmt.Errorf("failed to get branch: %w", err)
 	}
-	defer rows.Close()
+	return b, nil
+}
 
+// GetSessionHistory retrieves the chat history for a given session and its primary branch,
+// recursively fetching messages from parent branches.
+func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, discardThoughts bool) ([]FrontendMessage, error) {
+	log.Printf("GetSessionHistory: sessionID=%s, primaryBranchID=%s, discardThoughts=%t", sessionID, primaryBranchID, discardThoughts)
 	var history []FrontendMessage
-	for rows.Next() {
-		var id int
-		var role, message, msgType string
-		var attachmentsJSON sql.NullString
-		var cumulTokenCount sql.NullInt64
-		if err := rows.Scan(&id, &role, &message, &msgType, &attachmentsJSON, &cumulTokenCount); err != nil {
-			return nil, fmt.Errorf("failed to scan chat history row: %w", err)
-		}
-		// Filter out "thought" messages when retrieving history for the model
-		if discardThoughts && role == "thought" {
-			continue
-		}
 
-		var parts []Part
-		var attachments []FileAttachment
-		var tokens *int
-
-		if cumulTokenCount.Valid {
-			t := int(cumulTokenCount.Int64)
-			tokens = &t
-		}
-
-		// Add text part
-		if message != "" {
-			parts = append(parts, Part{Text: message})
-		}
-
-		// Unmarshal attachments if present
-		if attachmentsJSON.Valid && attachmentsJSON.String != "" {
-			if err := json.Unmarshal([]byte(attachmentsJSON.String), &attachments); err != nil {
-				log.Printf("Failed to unmarshal attachments: %v", err)
-			} else {
-				// For FrontendMessage, attachments are directly assigned
-			}
-		}
-
-		switch msgType {
-		case "function_call":
-			var fc FunctionCall
-			if err := json.Unmarshal([]byte(message), &fc); err != nil {
-				log.Printf("Failed to unmarshal FunctionCall: %v", err)
-				continue
-			}
-			parts = []Part{{FunctionCall: &fc}}
-		case "function_response":
-			var fr FunctionResponse
-			if err := json.Unmarshal([]byte(message), &fr); err != nil {
-				log.Printf("Failed to unmarshal FunctionResponse: %v", err)
-				continue
-			}
-			parts = []Part{{FunctionResponse: &fr}}
-		}
-
-		history = append(history, FrontendMessage{
-			ID:              fmt.Sprintf("%d", id),
-			Role:            role,
-			Parts:           parts,
-			Type:            msgType,
-			Attachments:     attachments,
-			CumulTokenCount: tokens,
-		})
+	// Get all messages belonging to the primary branch
+	primaryBranchMessages, err := GetBranchMessages(db, primaryBranchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get messages for primary branch %s: %w", primaryBranchID, err)
+	}
+	log.Printf("GetSessionHistory: primaryBranchMessages count=%d", len(primaryBranchMessages))
+	for _, msg := range primaryBranchMessages {
+		log.Printf("  Message: ID=%d, Role=%s, Parent=%v, ChosenNext=%v, Text=%s", msg.ID, msg.Role, msg.ParentMessageID, msg.ChosenNextID, msg.Text)
 	}
 
+	// Map to store messages by their ID for quick lookup within the primary branch
+	primaryBranchMessageMap := make(map[int]Message)
+	for _, msg := range primaryBranchMessages {
+		primaryBranchMessageMap[msg.ID] = msg
+	}
+	log.Printf("GetSessionHistory: primaryBranchMessageMap size=%d", len(primaryBranchMessageMap))
+
+	// Find the first message in the primary branch (the one with no parent_message_id or whose parent_message_id is not in the same branch)
+	var firstMessageID int
+	err = db.QueryRow(`
+		SELECT id FROM messages
+		WHERE session_id = ? AND branch_id = ? AND parent_message_id IS NULL
+		ORDER BY created_at ASC LIMIT 1
+	`, sessionID, primaryBranchID).Scan(&firstMessageID)
+
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get first message of primary branch: %w", err)
+	}
+
+	if err == sql.ErrNoRows {
+		// If no message with NULL parent_message_id, find the one whose parent is not in this branch
+		err = db.QueryRow(`
+			SELECT m1.id FROM messages m1
+			LEFT JOIN messages m2 ON m1.parent_message_id = m2.id
+			WHERE m1.session_id = ? AND m1.branch_id = ? AND (m2.branch_id IS NULL OR m2.branch_id != ?)
+			ORDER BY m1.created_at ASC LIMIT 1
+		`, sessionID, primaryBranchID, primaryBranchID).Scan(&firstMessageID)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("failed to get first message of primary branch (complex): %w", err)
+		}
+	}
+	log.Printf("GetSessionHistory: firstMessageID=%d", firstMessageID)
+
+	// If no messages found in the primary branch, return empty history
+	if firstMessageID == 0 {
+		log.Printf("GetSessionHistory: No first message found, returning empty history.")
+		return []FrontendMessage{}, nil
+	}
+
+	currentMessageID := firstMessageID
+	for {
+		log.Printf("GetSessionHistory: Processing currentMessageID=%d", currentMessageID)
+		msg, ok := primaryBranchMessageMap[currentMessageID]
+		if !ok {
+			log.Printf("GetSessionHistory: currentMessageID %d not found in primaryBranchMessageMap, breaking loop.", currentMessageID)
+			break // No more messages in the chosen path within the primary branch
+		}
+		log.Printf("  Current Message: ID=%d, Role=%s, Parent=%v, ChosenNext=%v, Text=%s", msg.ID, msg.Role, msg.ParentMessageID, msg.ChosenNextID, msg.Text)
+
+		if discardThoughts && msg.Role == "thought" {
+			log.Printf("GetSessionHistory: Discarding thought message ID=%d", msg.ID)
+			// Skip thought messages
+		} else {
+			var parts []Part
+			var attachments []FileAttachment
+			var tokens *int
+
+			if msg.CumulTokenCount != nil {
+				tokens = msg.CumulTokenCount
+			}
+
+			if msg.Text != "" {
+				parts = append(parts, Part{Text: msg.Text})
+			}
+
+			if msg.Attachments != nil {
+				attachments = msg.Attachments
+			}
+
+			// Convert int pointers to string pointers for FrontendMessage
+			var fmParentMessageID *string
+			if msg.ParentMessageID != nil {
+				s := fmt.Sprintf("%d", *msg.ParentMessageID)
+				fmParentMessageID = &s
+			}
+
+			var fmChosenNextID *string
+			if msg.ChosenNextID != nil {
+				s := fmt.Sprintf("%d", *msg.ChosenNextID)
+				fmChosenNextID = &s
+			}
+
+			// Get possible next message IDs
+			fmPossibleNextIDs, err := GetMessagePossibleNextIDs(db, msg.ID)
+			if err != nil {
+				log.Printf("Failed to get possible next IDs for message %d: %v", msg.ID, err)
+			}
+
+			switch msg.Type {
+			case "function_call":
+				var fc FunctionCall
+				if err := json.Unmarshal([]byte(msg.Text), &fc); err != nil {
+					log.Printf("Failed to unmarshal FunctionCall for message %d: %v", msg.ID, err)
+				} else {
+					parts = []Part{{FunctionCall: &fc}}
+				}
+			case "function_response":
+				var fr FunctionResponse
+				if err := json.Unmarshal([]byte(msg.Text), &fr); err != nil {
+					log.Printf("Failed to unmarshal FunctionResponse for message %d: %v", msg.ID, err)
+				} else {
+					parts = []Part{{FunctionResponse: &fr}}
+				}
+			}
+
+			history = append(history, FrontendMessage{
+				ID:              fmt.Sprintf("%d", msg.ID),
+				Role:            msg.Role,
+				Parts:           parts,
+				Type:            msg.Type,
+				Attachments:     attachments,
+				CumulTokenCount: tokens,
+				BranchID:        msg.BranchID,
+				ParentMessageID: fmParentMessageID,
+				ChosenNextID:    fmChosenNextID,
+				PossibleNextIDs: fmPossibleNextIDs,
+			})
+		}
+
+		if msg.ChosenNextID == nil {
+			log.Printf("GetSessionHistory: msg.ChosenNextID is nil for message ID=%d, breaking loop.", msg.ID)
+			break // End of the chosen path
+		}
+		currentMessageID = *msg.ChosenNextID
+	}
+
+	log.Printf("GetSessionHistory: Returning history with %d messages.", len(history))
 	return history, nil
 }
 
@@ -485,33 +700,6 @@ func DeleteSession(db *sql.DB, sessionID string) error {
 	}
 
 	return tx.Commit()
-}
-
-// DeleteLastEmptyModelMessage deletes the last message in a session if it's an empty "model" type.
-func DeleteLastEmptyModelMessage(db *sql.DB, sessionID string) error {
-	result, err := db.Exec(`
-		DELETE FROM messages
-		WHERE id = (
-			SELECT id FROM messages
-			WHERE session_id = ? AND role = 'model' AND type = 'text' AND TRIM(text) = ''
-			ORDER BY created_at DESC
-			LIMIT 1
-		);
-	`, sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to delete last empty model message: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		log.Printf("Failed to get rows affected after deleting empty model message: %v", err)
-	}
-
-	if rowsAffected > 0 {
-		log.Printf("Deleted %d empty model message(s) for session %s", rowsAffected, sessionID)
-	}
-
-	return nil
 }
 
 // MCPServerConfig struct to hold MCP server configuration data
@@ -597,4 +785,89 @@ func UpdateMessageContent(db *sql.DB, messageID int, content string) error {
 		return fmt.Errorf("failed to execute update message content statement: %w", err)
 	}
 	return nil
+}
+
+// addPrimaryBranchIDColumn adds the primary_branch_id column to the sessions table if it doesn't exist.
+func addPrimaryBranchIDColumn(db *sql.DB) error {
+	_, err := db.Exec("ALTER TABLE sessions ADD COLUMN primary_branch_id TEXT;")
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name: primary_branch_id") {
+			log.Println("Column 'primary_branch_id' already exists in 'sessions' table. Skipping ALTER TABLE.")
+			return nil
+		}
+		return fmt.Errorf("Failed to add primary_branch_id column to sessions table: %w", err)
+	}
+	log.Println("Added primary_branch_id column to sessions table.")
+	return nil
+}
+
+// addBranchIDColumn adds the branch_id column to the messages table if it doesn't exist.
+func addBranchIDColumn(db *sql.DB) error {
+	_, err := db.Exec("ALTER TABLE messages ADD COLUMN branch_id TEXT;")
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name: branch_id") {
+			log.Println("Column 'branch_id' already exists in 'messages' table. Skipping ALTER TABLE.")
+			return nil
+		}
+		return fmt.Errorf("Failed to add branch_id column to messages table: %w", err)
+	}
+	log.Println("Added branch_id column to messages table.")
+	return nil
+}
+
+// addParentMessageIDColumn adds the parent_message_id column to the messages table if it doesn't exist.
+func addParentMessageIDColumn(db *sql.DB) error {
+	_, err := db.Exec("ALTER TABLE messages ADD COLUMN parent_message_id INTEGER;")
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name: parent_message_id") {
+			log.Println("Column 'parent_message_id' already exists in 'messages' table. Skipping ALTER TABLE.")
+			return nil
+		}
+		return fmt.Errorf("Failed to add parent_message_id column to messages table: %w", err)
+	}
+	log.Println("Added parent_message_id column to messages table.")
+	return nil
+}
+
+// addChosenNextIDColumn adds the chosen_next_id column to the messages table if it doesn't exist.
+func addChosenNextIDColumn(db *sql.DB) error {
+	_, err := db.Exec("ALTER TABLE messages ADD COLUMN chosen_next_id INTEGER;")
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name: chosen_next_id") {
+			log.Println("Column 'chosen_next_id' already exists in 'messages' table. Skipping ALTER TABLE.")
+			return nil
+		}
+		return fmt.Errorf("Failed to add chosen_next_id column to messages table: %w", err)
+	}
+	log.Println("Added chosen_next_id column to messages table.")
+	return nil
+}
+
+// addBranchesTable adds the branches table if it doesn't exist.
+func addBranchesTable(db *sql.DB) error {
+	createTableSQL := `
+	CREATE TABLE IF NOT EXISTS branches (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		parent_branch_id TEXT,
+		branch_from_message_id INTEGER,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	);`
+	_, err := db.Exec(createTableSQL)
+	if err != nil {
+		return fmt.Errorf("Failed to create branches table: %w", err)
+	}
+	log.Println("Branches table ensured.")
+	return nil
+}
+
+// GetMessageBranchID retrieves the branch_id for a given message ID.
+func GetMessageBranchID(db *sql.DB, messageID int) (string, error) {
+	var branchID string
+	err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ?", messageID).Scan(&branchID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get branch_id for message %d: %w", messageID, err)
+	}
+	return branchID, nil
 }

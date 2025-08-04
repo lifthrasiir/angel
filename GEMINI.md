@@ -66,11 +66,11 @@
 - **State Management**: Utilizes React Context API and `useReducer` for global state management across the chat application.
 - **Custom Hooks**:
   - **`useChatSession.ts`**: A central hub hook that encapsulates all chat session-related state and logic. It integrates `useChat`, `useMessageSending`, `useSessionInitialization`, and `useWorkspaceAndSessions` to manage the overall chat session state and logic. Its connection to the backend is indirect, facilitated by the integrated hooks.
-  - **`useMessageSending.ts`**: Encapsulates the logic for sending messages and handling streaming responses.
+  - **`useMessageSending.ts`**: Encapsulates the logic for sending messages and streaming subsequent responses.
     - **Backend Connection**: Sends user messages (with attachments) via POST requests to the `/api/chat` endpoint (for new sessions) or `/api/chat/{sessionId}` (for existing sessions).
     - **Streaming Processing**: Processes streaming responses from the backend (using SSE event types defined in `sse.go`) to update the UI in real-time.
     - **Cancellation**: Sends a DELETE request to `/api/chat/{sessionId}/call` to cancel ongoing streaming, which is handled by the `cancelCall` function in `call_manager.go` on the backend.
-  - **`useSessionInitialization.ts`**: Encapsulates the logic for initializing chat sessions.
+  - **`useSessionInitialization.ts`**: Encapsulates the logic for loading existing chat sessions and possibly streaming the ongoing call.
     - **Backend Connection**: Establishes an SSE connection to the `/api/chat/{sessionId}` endpoint via the `loadSession` function to receive session history and real-time updates.
     - **Authentication**: Fetches user information from the `/api/userinfo` endpoint via `fetchUserInfo` to verify login status.
   - **`useWorkspaceAndSessions.ts`**: Encapsulates the logic for fetching workspace and session data.
@@ -101,4 +101,5 @@
 - When using `replace` or `write_file`, pay close attention to newlines and whitespace. These tools demand exact literal matches.
   - **`replace`:** `old_string`/`new_string` must exactly match, including all whitespace, indentation, and newlines (`\n` or `\r\n`). Read sufficient context (via `read_file` with `limit`, or `type`/`cat`) to form accurate `old_string` and respect file's newline convention.
   - **Complex Changes:** For complex modifications prone to `replace` errors, prefer `write_file` (read file, modify in memory, then overwrite).
-
+- **Go Error Handling:** When an error occurs, prefer re-declaring the variable using `:=` instead of `var` followed by `=` to avoid "declared and not used" errors and ensure proper variable scoping.
+- **Addressing User Doubts:** If a user expresses doubt or questions a proposed solution, immediately pause the current task. Prioritize understanding the user's perspective and the reasoning behind their concerns. Engage in a dialogue to clarify their thoughts, address their specific points, and collaboratively arrive at a solution that aligns with their understanding and expectations. The goal is to ensure the user feels heard and confident in the approach.

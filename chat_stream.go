@@ -16,10 +16,15 @@ import (
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, wg *sync.WaitGroup) error {
+func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
+	var finalTotalTokenCount *int
 	currentHistory := convertFrontendMessagesToContent(initialState.History)
+
+	// Track the ID of the last message added to the database
+	lastAddedMessageID := lastUserMessageID
+	var parentMessageID *int // Declare parentMessageID here
 
 	// Create a cancellable context for the Gemini API call
 	ctx, cancel := context.WithCancel(context.Background())
@@ -42,16 +47,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 	log.Printf("streamGeminiResponse: Sent initial state for session %s.", initialState.SessionId)
 
-	// Goroutine to monitor client disconnection
-	go func() {
-		select {
-		case <-ctx.Done():
-			// Gemini API call context was cancelled (e.g., by explicit cancel request)
-			// No need to do anything here, the main goroutine will handle it.
-		}
-	}()
-
-	// Initialize modelMessageID to negative. It will be set when the first text part arrives.
+	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
 
 	for {
@@ -87,7 +83,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
-				if _, err := AddMessageToSession(db, initialState.SessionId, "model", errorMessage, "model_error", nil, nil); err != nil {
+				if _, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, nil, nil, "model", errorMessage, "model_error", nil, nil); err != nil {
 					log.Printf("Failed to add model error message to DB: %v", err)
 				}
 			}
@@ -95,7 +91,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			broadcastToSession(initialState.SessionId, EventError, errorMessage)
 			return fmt.Errorf("CodeAssist API call failed: %w", err)
 		}
-		defer closer.Close()
+		defer closer.Close() // This closes the server-initiated API request.
 
 		hasFunctionCall := false
 
@@ -151,11 +147,23 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					// Immediately broadcast function call
 					fc := *part.FunctionCall
 					fcJson, _ := json.Marshal(fc)
-					messageID, err := AddMessageToSession(db, initialState.SessionId, "model", string(fcJson), "function_call", nil, nil)
+					if lastAddedMessageID != 0 {
+						parentMessageID = &lastAddedMessageID
+					} else {
+						parentMessageID = nil
+					}
+					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", string(fcJson), "function_call", nil, nil)
 					if err != nil {
 						log.Printf("Failed to save function call message: %v", err)
 						return fmt.Errorf("failed to save function call message: %w", err)
 					}
+					// Update chosen_next_id of the parent message
+					if parentMessageID != nil {
+						if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
+							log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+						}
+					}
+					lastAddedMessageID = messageID
 					argsJson, _ := json.Marshal(fc.Args)
 					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsJson))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
@@ -183,11 +191,23 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 						t := lastUsageMetadata.PromptTokenCount
 						promptTokens = &t
 					}
-					messageID, err = AddMessageToSession(db, initialState.SessionId, "user", string(frJson), "function_response", nil, promptTokens)
+					if lastAddedMessageID != 0 {
+						parentMessageID = &lastAddedMessageID
+					} else {
+						parentMessageID = nil
+					}
+					messageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "user", string(frJson), "function_response", nil, promptTokens)
 					if err != nil {
 						log.Printf("Failed to save function response message: %v", err)
 						return fmt.Errorf("failed to save function response message: %w", err)
 					}
+					// Update chosen_next_id of the parent message
+					if parentMessageID != nil {
+						if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
+							log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+						}
+					}
+					lastAddedMessageID = messageID
 					formattedData = fmt.Sprintf("%d\n%s", messageID, string(responseJson))
 					broadcastToSession(initialState.SessionId, EventFunctionReply, formattedData)
 					currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
@@ -195,6 +215,11 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					continue // Continue processing other parts in the same caResp
 				}
 
+				if part.Text == "" {
+					continue
+				}
+
+				// part.Thought determines whether part.Text is a thought or a model text
 				if part.Thought {
 					var thoughtText string
 					matches := thoughtPattern.FindStringSubmatch(part.Text)
@@ -205,28 +230,55 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					}
 
 					// Save thought message to DB
-					messageID, err := AddMessageToSession(db, initialState.SessionId, "thought", thoughtText, "thought", nil, nil)
+					if lastAddedMessageID != 0 {
+						parentMessageID = &lastAddedMessageID
+					} else {
+						parentMessageID = nil
+					}
+					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "thought", thoughtText, "thought", nil, nil)
 					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
+					// Update chosen_next_id of the parent message
+					if parentMessageID != nil {
+						if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
+							log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+						}
+					}
+					lastAddedMessageID = messageID
 					// Broadcast thought immediately
 					broadcastToSession(initialState.SessionId, EventThought, fmt.Sprintf("%d\n%s", messageID, thoughtText))
-					continue
-				}
-
-				// Process text parts
-				if part.Text != "" {
-					// If we are not currently streaming text, or if modelMessageID was reset by a non-text part
+				} else {
 					if modelMessageID < 0 {
-						var err error
-						modelMessageID, err = AddMessageToSession(db, initialState.SessionId, "model", "", "text", nil, nil)
+						// Initialize agentResponseText for the new model message
+						agentResponseText = "" // Initialize to empty string
+						// Set parentMessageID for the new model message
+						if lastAddedMessageID != 0 {
+							parentMessageID = &lastAddedMessageID
+						} else {
+							parentMessageID = nil
+						}
+						// Add the initial model message to DB with empty text
+						modelMessageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", "", "text", nil, nil) // Changed part.Text to ""
 						if err != nil {
 							log.Printf("Failed to add new model message to DB: %v", err)
 							return fmt.Errorf("failed to add new model message to DB: %w", err)
 						}
+						// Update chosen_next_id of the parent message (if any)
+						if parentMessageID != nil {
+							if err := UpdateMessageChosenNextID(db, *parentMessageID, &modelMessageID); err != nil {
+								log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+							}
+						}
 					}
 
 					agentResponseText += part.Text // Accumulate text for DB update
+
+					// Update the message content in DB immediately for all parts
+					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+						log.Printf("Failed to update model message content: %v", err)
+					}
+					lastAddedMessageID = modelMessageID // Update lastAddedMessageID for every part
 
 					// Send only the current text chunk to the frontend
 					broadcastToSession(initialState.SessionId, EventModelMessage, fmt.Sprintf("%d\n%s", modelMessageID, part.Text))
@@ -250,26 +302,25 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		}
 	}
 
-	// Delete any empty model messages that might have been created by previous logic
-	// This should now be safe as the main message is updated
-	if err := DeleteLastEmptyModelMessage(db, initialState.SessionId); err != nil {
-		log.Printf("Failed to delete last empty model message: %v", err)
-	}
+	// Need to wait for inferAndSetSessionName so that the connection remains intact.
+	var inferWg sync.WaitGroup
+	inferWg.Add(1)
 
 	// Infer session name after streaming is complete
-	if wg != nil {
-		wg.Add(1)
-	}
 	go func() {
+		addSseWriter(initialState.SessionId, sseW) // Increases the reference count and prevents it from being closed early
 		defer func() {
-			if wg != nil {
-				wg.Done()
-			}
+			inferWg.Done()
+			removeSseWriter(initialState.SessionId, sseW)
 		}()
-		inferAndSetSessionName(db, initialState.SessionId, initialState.History[0].Parts[0].Text, sseW, wg)
+
+		userMsg := ""
+		if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
+			userMsg = initialState.History[0].Parts[0].Text
+		}
+		inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW)
 	}()
 
-	var finalTotalTokenCount *int
 	if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
 		t := lastUsageMetadata.TotalTokenCount
 		finalTotalTokenCount = &t
@@ -284,15 +335,13 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 	}
 
 	completeCall(initialState.SessionId) // Mark the call as completed
+	inferWg.Wait()
 	return nil
 }
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
-func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, sseW *sseWriter, wg *sync.WaitGroup) {
-	if wg != nil {
-		wg.Add(1)
-		defer wg.Done()
-	}
+func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, sseW *sseWriter) {
+	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)
 
 	var inferredName string // Initialize to empty string
 
@@ -352,4 +401,5 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		// We still send the inferredName to frontend, as it's the best we have.
 		return
 	}
+	log.Printf("inferAndSetSessionName: Finished for session %s. Inferred name: %s", sessionId, inferredName)
 }

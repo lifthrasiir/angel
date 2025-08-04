@@ -44,6 +44,23 @@ type sseWriter struct {
 	disconnected bool
 	ctx          context.Context
 	sessionId    string // Add sessionId to sseWriter
+	refCount     int
+}
+
+func newSseWriter(sessionId string, w http.ResponseWriter, r *http.Request) *sseWriter {
+	header := w.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+	header.Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Println("newSseWriter: Streaming unsupported!")
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return nil
+	}
+	return &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
 }
 
 // Close marks the sseWriter as disconnected and removes it from the active writers.
@@ -72,13 +89,23 @@ var (
 func addSseWriter(sessionId string, sseW *sseWriter) {
 	sseWritersMutex.Lock()
 	defer sseWritersMutex.Unlock()
-	activeSseWriters[sessionId] = append(activeSseWriters[sessionId], sseW)
+
+	if sseW.refCount == 0 {
+		activeSseWriters[sessionId] = append(activeSseWriters[sessionId], sseW)
+	}
+	sseW.refCount++
 }
 
 // removeSseWriter removes an sseWriter from the activeSseWriters map.
 func removeSseWriter(sessionId string, sseW *sseWriter) {
 	sseWritersMutex.Lock()
 	defer sseWritersMutex.Unlock()
+
+	sseW.refCount--
+	if sseW.refCount > 0 {
+		return
+	}
+
 	writers := activeSseWriters[sessionId]
 	for i, w := range writers {
 		if w == sseW {

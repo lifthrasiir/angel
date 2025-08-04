@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 )
 
 //go:embed frontend/dist
@@ -79,16 +78,6 @@ func serveSPAIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write(content)
 }
 
-// validateAuthAndProject performs common auth and project validation for handlers
-
-// setupSSEHeaders sets up Server-Sent Events headers
-func setupSSEHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-}
-
 // decodeJSONRequest decodes JSON request body with error handling
 func decodeJSONRequest(r *http.Request, w http.ResponseWriter, target interface{}, handlerName string) bool {
 	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
@@ -112,7 +101,6 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 }
 
 func main() {
-	var wg sync.WaitGroup
 
 	db, err := InitDB("angel.db")
 	if err != nil {
@@ -125,14 +113,22 @@ func main() {
 	ga.Init(db)
 
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(db, &ga, &wg))
+	router.Use(makeContextMiddleware(db, &ga))
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
 	if ga.SelectedAuthType == AuthTypeLoginWithGoogle {
 		router.HandleFunc("/login", HandleGoogleLogin).Methods("GET")
 		router.HandleFunc("/oauth2callback", HandleGoogleCallback).Methods("GET")
 	}
+	router.HandleFunc("/api/logout", ga.HandleLogout).Methods("POST")
 
+	InitRouter(router)
+
+	fmt.Println("Server started at http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
+func InitRouter(router *mux.Router) {
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
 
@@ -158,8 +154,10 @@ func main() {
 	router.HandleFunc("/api/chat/{sessionId}/name", updateSessionNameHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/call", handleCall).Methods("GET", "DELETE")
 	router.HandleFunc("/api/chat/{sessionId}", deleteSession).Methods("DELETE")
+	router.HandleFunc("/api/chat/{sessionId}/branch", createBranchHandler).Methods("POST")
+	router.HandleFunc("/api/chat/{sessionId}/branch", switchBranchHandler).Methods("PUT")
+
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
-	router.HandleFunc("/api/logout", ga.HandleLogout).Methods("POST")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
 	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
 	router.HandleFunc("/api/mcp/configs", getMCPConfigsHandler).Methods("GET")
@@ -169,9 +167,6 @@ func main() {
 
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
 	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
-
-	fmt.Println("Server started at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
 // Context keys for storing values in context.Context
@@ -180,20 +175,18 @@ type contextKey uint8
 const (
 	dbKey contextKey = iota
 	gaKey
-	wgKey
 )
 
-func makeContextMiddleware(db *sql.DB, ga *GeminiAuth, wg *sync.WaitGroup) func(next http.Handler) http.Handler {
+func contextWithGlobals(ctx context.Context, db *sql.DB, ga *GeminiAuth) context.Context {
+	ctx = context.WithValue(ctx, dbKey, db)
+	ctx = context.WithValue(ctx, gaKey, ga)
+	return ctx
+}
+
+func makeContextMiddleware(db *sql.DB, ga *GeminiAuth) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), dbKey, db)
-			ctx = context.WithValue(ctx, gaKey, ga)
-			ctx = context.WithValue(ctx, wgKey, wg)
-			r = r.WithContext(ctx)
-
-			// Increment the WaitGroup counter before executing the handler
-			wg.Add(1)
-			defer wg.Done() // Decrement the counter when the handler finishes
+			r = r.WithContext(contextWithGlobals(r.Context(), db, ga))
 
 			next.ServeHTTP(w, r)
 		})
@@ -215,11 +208,6 @@ func getGeminiAuth(w http.ResponseWriter, r *http.Request) *GeminiAuth {
 		http.Error(w, "Internal Server Error: GeminiAuth missing.", http.StatusInternalServerError)
 		runtime.Goexit()
 	}
-	return ga
-}
-
-func getWaitGroup(r *http.Request) *sync.WaitGroup {
-	ga, _ := r.Context().Value(wgKey).(*sync.WaitGroup)
 	return ga
 }
 
@@ -464,10 +452,6 @@ func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]string{"evaluatedPrompt": evaluatedPrompt})
 }
 
-func handleNotFound(w http.ResponseWriter, r *http.Request) {
-	http.NotFound(w, r)
-}
-
 // FrontendMCPConfig is a struct that combines DB config with live status for the frontend.
 type FrontendMCPConfig struct {
 	Name           string          `json:"name"`
@@ -576,4 +560,9 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	mcpManager.stopConnection(name)
 
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "MCP config deleted successfully"})
+}
+
+// handleNotFound handles requests for paths that don't match any other routes.
+func handleNotFound(w http.ResponseWriter, r *http.Request) {
+	http.NotFound(w, r)
 }
