@@ -58,16 +58,6 @@ export const useMessageSending = ({
       dispatch({ type: SET_INPUT_MESSAGE, payload: '' });
       dispatch({ type: SET_SELECTED_FILES, payload: [] });
 
-      dispatch({
-        type: ADD_MESSAGE,
-        payload: {
-          id: crypto.randomUUID(),
-          role: 'model',
-          parts: [{ text: '' }],
-          type: 'model',
-        } as ChatMessage,
-      });
-
       if (chatSessionId === null) {
         dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
       }
@@ -87,16 +77,15 @@ export const useMessageSending = ({
       }
 
       const handlers: StreamEventHandlers = {
-        onMessage: (text: string) => {
-          dispatch({ type: UPDATE_AGENT_MESSAGE, payload: text });
+        onMessage: (messageId: string, text: string) => {
+          dispatch({ type: UPDATE_AGENT_MESSAGE, payload: { messageId, text } });
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
-        onThought: (thoughtText: string) => {
-          const thoughtId = crypto.randomUUID();
+        onThought: (messageId: string, thoughtText: string) => {
           dispatch({
             type: ADD_MESSAGE,
             payload: {
-              id: thoughtId,
+              id: messageId,
               role: 'model',
               parts: [{ text: thoughtText }],
               type: 'thought',
@@ -104,12 +93,12 @@ export const useMessageSending = ({
           });
           dispatch({
             type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID,
-            payload: thoughtId,
+            payload: messageId,
           });
         },
-        onFunctionCall: (functionName: string, functionArgs: any) => {
+        onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => {
           const message: ChatMessage = {
-            id: crypto.randomUUID(),
+            id: messageId,
             role: 'model',
             parts: [{ functionCall: { name: functionName, args: functionArgs } }],
             type: 'function_call',
@@ -117,9 +106,9 @@ export const useMessageSending = ({
           dispatch({ type: ADD_MESSAGE, payload: message });
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
-        onFunctionResponse: (functionResponse: any) => {
+        onFunctionResponse: (messageId: string, functionResponse: any) => {
           const message: ChatMessage = {
-            id: crypto.randomUUID(),
+            id: messageId,
             role: 'user',
             parts: [{ functionResponse: { response: functionResponse } }],
             type: 'function_response',

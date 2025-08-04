@@ -583,3 +583,18 @@ func UpdateMessageTokens(db *sql.DB, messageID int, cumulTokenCount int) error {
 	}
 	return nil
 }
+
+// UpdateMessageContent updates the content of a message in the database.
+func UpdateMessageContent(db *sql.DB, messageID int, content string) error {
+	stmt, err := db.Prepare("UPDATE messages SET text = ? WHERE id = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare update message content statement: %w", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(content, messageID)
+	if err != nil {
+		return fmt.Errorf("failed to execute update message content statement: %w", err)
+	}
+	return nil
+}

@@ -126,7 +126,7 @@ export const useSessionInitialization = ({
                   payload: (data.history || []).map((msg: any) => {
                     const chatMessage: ChatMessage = {
                       ...msg,
-                      id: msg.id || crypto.randomUUID(),
+                      id: msg.id,
                       attachments: msg.attachments,
                       cumulTokenCount: msg.cumul_token_count,
                     };
@@ -160,13 +160,15 @@ export const useSessionInitialization = ({
                   eventSource?.close();
                 }
               } else if (eventType === EventModelMessage) {
-                dispatch({ type: UPDATE_AGENT_MESSAGE, payload: eventData });
+                const [messageId, text] = splitOnceByNewline(eventData);
+                dispatch({ type: UPDATE_AGENT_MESSAGE, payload: { messageId, text } });
               } else if (eventType === EventFunctionCall) {
-                const [functionName, argsJson] = splitOnceByNewline(eventData);
+                const [messageId, rest] = splitOnceByNewline(eventData);
+                const [functionName, argsJson] = splitOnceByNewline(rest);
                 dispatch({
                   type: ADD_MESSAGE,
                   payload: {
-                    id: crypto.randomUUID(),
+                    id: messageId,
                     role: 'model',
                     parts: [
                       {
@@ -180,22 +182,24 @@ export const useSessionInitialization = ({
                   },
                 });
               } else if (eventType === EventFunctionReply) {
+                const [messageId, functionResponseJson] = splitOnceByNewline(eventData);
                 dispatch({
                   type: ADD_MESSAGE,
                   payload: {
-                    id: crypto.randomUUID(),
+                    id: messageId,
                     role: 'user',
-                    parts: [{ functionResponse: JSON.parse(eventData) }],
+                    parts: [{ functionResponse: JSON.parse(functionResponseJson) }],
                     type: 'function_response',
                   },
                 });
               } else if (eventType === EventThought) {
+                const [messageId, thoughtText] = splitOnceByNewline(eventData);
                 dispatch({
                   type: ADD_MESSAGE,
                   payload: {
-                    id: crypto.randomUUID(),
+                    id: messageId,
                     role: 'thought',
-                    parts: [{ text: eventData }],
+                    parts: [{ text: thoughtText }],
                     type: 'thought',
                   },
                 });

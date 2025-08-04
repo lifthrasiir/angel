@@ -56,14 +56,14 @@ export const sendMessage = async (
 };
 
 export interface StreamEventHandlers {
-  onMessage: (text: string) => void;
-  onThought: (thoughtText: string) => void;
-  onFunctionCall: (functionName: string, functionArgs: any) => void;
-  onFunctionResponse: (functionResponse: any) => void;
+  onMessage: (messageId: string, text: string) => void;
+  onThought: (messageId: string, thoughtText: string) => void;
+  onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => void;
+  onFunctionResponse: (messageId: string, functionResponse: any) => void;
   onSessionStart: (sessionId: string, systemPrompt: string) => void;
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
-  onError: (errorData: string) => void; // Add this line
+  onError: (errorData: string) => void;
   onAcknowledge: (messageId: string) => void;
 }
 
@@ -100,17 +100,20 @@ export const processStreamResponse = async (
       const [type, data] = splitOnceByNewline(eventString);
 
       if (type === EventModelMessage) {
-        handlers.onMessage(data);
+        const [messageId, text] = splitOnceByNewline(data);
+        handlers.onMessage(messageId, text);
       } else if (type === EventThought) {
-        const thoughtText = data;
-        handlers.onThought(thoughtText);
+        const [messageId, thoughtText] = splitOnceByNewline(data);
+        handlers.onThought(messageId, thoughtText);
       } else if (type === EventFunctionCall) {
-        const [functionName, functionArgsJson] = splitOnceByNewline(data);
+        const [messageId, rest] = splitOnceByNewline(data);
+        const [functionName, functionArgsJson] = splitOnceByNewline(rest);
         const functionArgs = JSON.parse(functionArgsJson);
-        handlers.onFunctionCall(functionName, functionArgs);
+        handlers.onFunctionCall(messageId, functionName, functionArgs);
       } else if (type === EventFunctionReply) {
-        const functionResponseRaw = JSON.parse(data);
-        handlers.onFunctionResponse(functionResponseRaw);
+        const [messageId, functionResponseJson] = splitOnceByNewline(data);
+        const functionResponseRaw = JSON.parse(functionResponseJson);
+        handlers.onFunctionResponse(messageId, functionResponseRaw);
       } else if (type === EventInitialState) {
         // New: Handle EventInitialState
         const { sessionId, systemPrompt } = JSON.parse(data);

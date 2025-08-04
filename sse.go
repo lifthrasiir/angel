@@ -9,22 +9,24 @@ import (
 	"sync"
 )
 
+type EventType rune
+
 const (
 	// SSE Event Types
 	//
 	// Sending initial messages: A -> 0 -> any number of T/M/F/R -> (Q -> N) or E
 	// Sending subsequent messages: A -> any number of T/M/F/R -> Q or E
 	// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R -> Q/E)
-	EventInitialState       = "0" // Initial state with history (for active call)
-	EventInitialStateNoCall = "1" // Initial state with history (for load session when no active call)
-	EventAcknowledge        = "A" // Acknowledge message ID
-	EventThought            = "T" // Thought process
-	EventModelMessage       = "M" // Model message (text)
-	EventFunctionCall       = "F" // Function call
-	EventFunctionReply      = "R" // Function response
-	EventComplete           = "Q" // Query complete
-	EventSessionName        = "N" // Session name inferred/updated
-	EventError              = "E" // Error message
+	EventInitialState       EventType = '0' // Initial state with history (for active call)
+	EventInitialStateNoCall           = '1' // Initial state with history (for load session when no active call)
+	EventAcknowledge                  = 'A' // Acknowledge message ID
+	EventThought                      = 'T' // Thought process
+	EventModelMessage                 = 'M' // Model message (text)
+	EventFunctionCall                 = 'F' // Function call
+	EventFunctionReply                = 'R' // Function response
+	EventComplete                     = 'Q' // Query complete
+	EventSessionName                  = 'N' // Session name inferred/updated
+	EventError                        = 'E' // Error message
 )
 
 // sseWriter wraps http.ResponseWriter and http.Flusher to handle client disconnections gracefully.
@@ -56,9 +58,9 @@ func (s *sseWriter) Close() {
 
 // prepareSSEEventData prepares the SSE event data string.
 // Note: `eventType` is for the logical message kind, not the browser event type!
-func prepareSSEEventData(eventType, data string) []byte {
+func prepareSSEEventData(eventType EventType, data string) []byte {
 	escapedData := strings.ReplaceAll(data, "\n", "\ndata: ")
-	return []byte(fmt.Sprintf("data: %s\ndata: %s\n\n", eventType, escapedData))
+	return []byte(fmt.Sprintf("data: %c\ndata: %s\n\n", eventType, escapedData))
 }
 
 var (
@@ -87,7 +89,7 @@ func removeSseWriter(sessionId string, sseW *sseWriter) {
 }
 
 // broadcastToSession sends an event to all active sseWriters for a given session.
-func broadcastToSession(sessionId string, eventType string, data string) {
+func broadcastToSession(sessionId string, eventType EventType, data string) {
 	sseWritersMutex.Lock()
 	defer sseWritersMutex.Unlock()
 
@@ -162,7 +164,7 @@ func (s *sseWriter) flushUnsafe() {
 	s.Flusher.Flush()
 }
 
-func (sseW *sseWriter) sendServerEvent(eventType, data string) {
+func (sseW *sseWriter) sendServerEvent(eventType EventType, data string) {
 	sseW.mu.Lock()
 	defer sseW.mu.Unlock()
 

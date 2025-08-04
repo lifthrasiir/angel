@@ -65,7 +65,7 @@ export type ChatAction =
   | { type: typeof SET_IS_SYSTEM_PROMPT_EDITING; payload: boolean }
   | { type: typeof SET_SELECTED_FILES; payload: File[] }
   | { type: typeof ADD_MESSAGE; payload: ChatMessage }
-  | { type: typeof UPDATE_AGENT_MESSAGE; payload: string }
+  | { type: typeof UPDATE_AGENT_MESSAGE; payload: { messageId: string; text: string } }
   | { type: typeof RESET_CHAT_SESSION_STATE }
   | { type: typeof ADD_ERROR_MESSAGE; payload: string }
   | {
@@ -119,25 +119,26 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
       }
     }
     case UPDATE_AGENT_MESSAGE: {
-      const newMessageText = action.payload;
-      const lastMessage = state.messages[state.messages.length - 1];
+      const { messageId, text: newMessageText } = action.payload;
+      const existingMessageIndex = state.messages.findIndex((msg) => msg.id === messageId);
 
-      if (lastMessage && lastMessage.type === 'model') {
-        // Append content to the last model message
+      if (existingMessageIndex !== -1) {
+        // Update existing message
         const newMessages = [...state.messages];
-        newMessages[newMessages.length - 1] = {
-          ...lastMessage,
-          parts: [{ text: (lastMessage.parts[0]?.text || '') + newMessageText }],
+        const existingMessage = newMessages[existingMessageIndex];
+        newMessages[existingMessageIndex] = {
+          ...existingMessage,
+          parts: [{ text: (existingMessage.parts[0]?.text || '') + newMessageText }],
         };
         return { ...state, messages: newMessages };
       } else {
-        // Otherwise, just add the message to the end
-        const newMessage = {
-          id: crypto.randomUUID(),
+        // Add new message
+        const newMessage: ChatMessage = {
+          id: messageId,
           role: 'model',
           parts: [{ text: newMessageText }],
           type: 'model',
-        } as ChatMessage;
+        };
         return { ...state, messages: [...state.messages, newMessage] };
       }
     }

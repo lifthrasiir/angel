@@ -51,12 +51,23 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		}
 	}()
 
+	// Initialize modelMessageID to negative. It will be set when the first text part arrives.
+	modelMessageID := -1
+
 	for {
 		select {
 		case <-ctx.Done():
 			// API call was cancelled (either by client disconnect or explicit cancel)
 			// Mark the call as cancelled in the manager
 			failCall(initialState.SessionId, ctx.Err())
+			// Update the message in DB with current accumulated text and mark as cancelled
+			if modelMessageID >= 0 { // Only update if a model message was created
+				if err := UpdateMessageContent(db, modelMessageID, agentResponseText+"\n(Cancelled)"); err != nil {
+					log.Printf("Failed to update model message with cancelled status: %v", err)
+				}
+			}
+			// Send error to frontend
+			broadcastToSession(initialState.SessionId, EventError, "Request canceled by user")
 			return ctx.Err() // Return the context error
 		default:
 			// Continue with the Gemini API call
@@ -70,15 +81,23 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			if errors.Is(err, context.Canceled) {
 				errorMessage = "Request canceled by user"
 			}
-			if _, err := AddMessageToSession(db, initialState.SessionId, "model", errorMessage, "model_error", nil, nil); err != nil {
-				log.Printf("Failed to save model_error message for API call failure: %v", err)
+			// If a model message was already created, update it with the error
+			if modelMessageID >= 0 {
+				if err := UpdateMessageContent(db, modelMessageID, errorMessage); err != nil {
+					log.Printf("Failed to update initial model message with error: %v", err)
+				}
+			} else { // If no model message was created yet, add a new error message
+				if _, err := AddMessageToSession(db, initialState.SessionId, "model", errorMessage, "model_error", nil, nil); err != nil {
+					log.Printf("Failed to add model error message to DB: %v", err)
+				}
 			}
+			// Send error to frontend
+			broadcastToSession(initialState.SessionId, EventError, errorMessage)
 			return fmt.Errorf("CodeAssist API call failed: %w", err)
 		}
 		defer closer.Close()
 
-		var functionCalls []FunctionCall
-		var modelResponseParts []Part
+		hasFunctionCall := false
 
 		for caResp := range seq {
 			// Log UsageMetadata if available
@@ -102,6 +121,11 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			case <-ctx.Done():
 				// Context was canceled, send a message to the frontend
 				broadcastToSession(initialState.SessionId, EventError, "Request canceled by user")
+				if modelMessageID >= 0 { // Only update if a model message was created
+					if err := UpdateMessageContent(db, modelMessageID, agentResponseText+"\n(Cancelled)"); err != nil {
+						log.Printf("Failed to update model message with cancelled status: %v", err)
+					}
+				}
 				return ctx.Err() // Return the context error
 			default:
 				// Continue processing the response
@@ -113,11 +137,62 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 				continue
 			}
 			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+				// Check if a non-text part interrupts the current text stream
+				if (part.FunctionCall != nil || part.Thought) && modelMessageID >= 0 {
+					// Finalize the current model message before processing the non-text part
+					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+						log.Printf("Failed to finalize model message before interruption: %v", err)
+					}
+					agentResponseText = "" // Reset for the next text block
+					modelMessageID = -1    // Reset ID, a new one will be created for next text block
+				}
+
 				if part.FunctionCall != nil {
-					functionCalls = append(functionCalls, *part.FunctionCall)
-					argsJson, _ := json.Marshal(part.FunctionCall.Args)
-					broadcastToSession(initialState.SessionId, EventFunctionCall, fmt.Sprintf("%s\n%s", part.FunctionCall.Name, string(argsJson)))
-					continue
+					// Immediately broadcast function call
+					fc := *part.FunctionCall
+					fcJson, _ := json.Marshal(fc)
+					messageID, err := AddMessageToSession(db, initialState.SessionId, "model", string(fcJson), "function_call", nil, nil)
+					if err != nil {
+						log.Printf("Failed to save function call message: %v", err)
+						return fmt.Errorf("failed to save function call message: %w", err)
+					}
+					argsJson, _ := json.Marshal(fc.Args)
+					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsJson))
+					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
+
+					// Add to current history and functionCalls for later execution
+					currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
+					hasFunctionCall = true
+
+					functionResponseValue, err := callFunction(fc)
+					if err != nil {
+						log.Printf("Error executing function %s: %v", fc.Name, err)
+						functionResponseValue = map[string]interface{}{"error": err.Error()}
+					}
+
+					responseJson, err := json.Marshal(functionResponseValue)
+					if err != nil {
+						log.Printf("Failed to marshal function response for frontend: %v", err)
+						responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+					}
+
+					fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
+					frJson, _ := json.Marshal(fr)
+					var promptTokens *int
+					if lastUsageMetadata != nil && lastUsageMetadata.PromptTokenCount > 0 {
+						t := lastUsageMetadata.PromptTokenCount
+						promptTokens = &t
+					}
+					messageID, err = AddMessageToSession(db, initialState.SessionId, "user", string(frJson), "function_response", nil, promptTokens)
+					if err != nil {
+						log.Printf("Failed to save function response message: %v", err)
+						return fmt.Errorf("failed to save function response message: %w", err)
+					}
+					formattedData = fmt.Sprintf("%d\n%s", messageID, string(responseJson))
+					broadcastToSession(initialState.SessionId, EventFunctionReply, formattedData)
+					currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
+
+					continue // Continue processing other parts in the same caResp
 				}
 
 				if part.Thought {
@@ -129,72 +204,56 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
 					}
 
-					broadcastToSession(initialState.SessionId, EventThought, thoughtText)
-					if _, err := AddMessageToSession(db, initialState.SessionId, "thought", thoughtText, "thought", nil, nil); err != nil {
+					// Save thought message to DB
+					messageID, err := AddMessageToSession(db, initialState.SessionId, "thought", thoughtText, "thought", nil, nil)
+					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
+					// Broadcast thought immediately
+					broadcastToSession(initialState.SessionId, EventThought, fmt.Sprintf("%d\n%s", messageID, thoughtText))
 					continue
 				}
 
+				// Process text parts
 				if part.Text != "" {
-					broadcastToSession(initialState.SessionId, EventModelMessage, part.Text)
-					agentResponseText += part.Text
-					modelResponseParts = append(modelResponseParts, part)
+					// If we are not currently streaming text, or if modelMessageID was reset by a non-text part
+					if modelMessageID < 0 {
+						var err error
+						modelMessageID, err = AddMessageToSession(db, initialState.SessionId, "model", "", "text", nil, nil)
+						if err != nil {
+							log.Printf("Failed to add new model message to DB: %v", err)
+							return fmt.Errorf("failed to add new model message to DB: %w", err)
+						}
+					}
+
+					agentResponseText += part.Text // Accumulate text for DB update
+
+					// Send only the current text chunk to the frontend
+					broadcastToSession(initialState.SessionId, EventModelMessage, fmt.Sprintf("%d\n%s", modelMessageID, part.Text))
 				}
-			}
-			if len(functionCalls) > 0 {
-				break
 			}
 		}
 
-		if len(functionCalls) > 0 {
-			for _, fc := range functionCalls {
-				functionResponseValue, err := callFunction(fc)
-				if err != nil {
-					log.Printf("Error executing function %s: %v", fc.Name, err)
-					functionResponseValue = map[string]interface{}{"error": err.Error()}
-				}
-
-				responseJson, err := json.Marshal(functionResponseValue)
-				if err != nil {
-					log.Printf("Failed to marshal function response for frontend: %v", err)
-					responseJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
-				}
-				broadcastToSession(initialState.SessionId, EventFunctionReply, string(responseJson))
-
-				fcJson, _ := json.Marshal(fc)
-				var totalTokens *int
-				if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
-					t := lastUsageMetadata.TotalTokenCount
-					totalTokens = &t
-				}
-				if _, err := AddMessageToSession(db, initialState.SessionId, "model", string(fcJson), "function_call", nil, totalTokens); err != nil {
-					log.Printf("Failed to save function call: %v", err)
-				}
-				currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
-
-				fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
-				frJson, _ := json.Marshal(fr)
-				var promptTokens *int
-				if lastUsageMetadata != nil && lastUsageMetadata.PromptTokenCount > 0 {
-					t := lastUsageMetadata.PromptTokenCount
-					promptTokens = &t
-				}
-				if _, err := AddMessageToSession(db, initialState.SessionId, "user", string(frJson), "function_response", nil, promptTokens); err != nil {
-					log.Printf("Failed to save function response: %v", err)
-				}
-				currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
-			}
-		} else {
+		// Model has generated all messages and nothing to ask
+		if !hasFunctionCall {
 			break
 		}
 	}
 
 	broadcastToSession(initialState.SessionId, EventComplete, "")
 
-	// Before saving the final agent response, delete any empty model messages
+	// Finalize the last model message if any text was streamed
+	if modelMessageID >= 0 {
+		if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+			log.Printf("Failed to update final agent response: %v", err)
+			return fmt.Errorf("failed to update final agent response: %w", err)
+		}
+	}
+
+	// Delete any empty model messages that might have been created by previous logic
+	// This should now be safe as the main message is updated
 	if err := DeleteLastEmptyModelMessage(db, initialState.SessionId); err != nil {
-		log.Printf("Failed to save last empty model message: %v", err)
+		log.Printf("Failed to delete last empty model message: %v", err)
 	}
 
 	// Infer session name after streaming is complete
@@ -216,9 +275,12 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		finalTotalTokenCount = &t
 	}
 
-	if _, err := AddMessageToSession(db, initialState.SessionId, "model", agentResponseText, "text", nil, finalTotalTokenCount); err != nil {
-		failCall(initialState.SessionId, err) // Mark the call as failed
-		return fmt.Errorf("failed to save agent response: %w", err)
+	// Update the final message with token count if available
+	// This applies to the last model message that was streamed
+	if modelMessageID >= 0 && finalTotalTokenCount != nil {
+		if err := UpdateMessageTokens(db, modelMessageID, *finalTotalTokenCount); err != nil {
+			log.Printf("Failed to update final message tokens: %v", err)
+		}
 	}
 
 	completeCall(initialState.SessionId) // Mark the call as completed
@@ -266,7 +328,11 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 				Role:  "user",
 				Parts: []Part{{Text: nameInputPrompt}},
 			},
-		}, ModelName: DefaultGeminiModel, SystemPrompt: nameSystemPrompt, ThinkingConfig: &ThinkingConfig{IncludeThoughts: false}})
+		},
+		ModelName:      DefaultGeminiModel,
+		SystemPrompt:   nameSystemPrompt,
+		ThinkingConfig: &ThinkingConfig{IncludeThoughts: false},
+	})
 	if err != nil {
 		log.Printf("Failed to infer session name for %s: %v", sessionId, err)
 		return // inferredName remains empty
