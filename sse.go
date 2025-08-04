@@ -11,12 +11,16 @@ import (
 
 const (
 	// SSE Event Types
-	EventSessionID          = "S" // Initial session ID
+	//
+	// Sending initial messages: A -> 0 -> any number of T/M/F/R -> (Q -> N) or E
+	// Sending subsequent messages: A -> any number of T/M/F/R -> Q or E
+	// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R -> Q/E)
 	EventInitialState       = "0" // Initial state with history (for active call)
 	EventInitialStateNoCall = "1" // Initial state with history (for load session when no active call)
-	EventFunctionCall       = "F" // Function call
+	EventAcknowledge        = "A" // Acknowledge message ID
 	EventThought            = "T" // Thought process
 	EventModelMessage       = "M" // Model message (text)
+	EventFunctionCall       = "F" // Function call
 	EventFunctionReply      = "R" // Function response
 	EventComplete           = "Q" // Query complete
 	EventSessionName        = "N" // Session name inferred/updated

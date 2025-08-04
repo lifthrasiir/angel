@@ -18,6 +18,7 @@ export const ADD_ERROR_MESSAGE = 'ADD_ERROR_MESSAGE'; // New Action Type
 export const SET_SESSION_NAME = 'SET_SESSION_NAME';
 export const SET_WORKSPACE_ID = 'SET_WORKSPACE_ID'; // New Action Type
 export const SET_WORKSPACE_NAME = 'SET_WORKSPACE_NAME'; // New Action Type
+export const UPDATE_USER_MESSAGE_ID = 'UPDATE_USER_MESSAGE_ID';
 
 // State Interface
 export interface ChatState {
@@ -72,7 +73,8 @@ export type ChatAction =
       payload: { sessionId: string; name: string };
     }
   | { type: typeof SET_WORKSPACE_ID; payload: string | undefined }
-  | { type: typeof SET_WORKSPACE_NAME; payload: string | undefined };
+  | { type: typeof SET_WORKSPACE_NAME; payload: string | undefined }
+  | { type: typeof UPDATE_USER_MESSAGE_ID; payload: { temporaryId: string; newId: string } };
 
 // Reducer Function
 export const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
@@ -179,6 +181,13 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
       return { ...state, workspaceId: action.payload };
     case SET_WORKSPACE_NAME:
       return { ...state, workspaceName: action.payload };
+    case UPDATE_USER_MESSAGE_ID: {
+      const { temporaryId, newId } = action.payload;
+      return {
+        ...state,
+        messages: state.messages.map((message) => (message.id === temporaryId ? { ...message, id: newId } : message)),
+      };
+    }
     default:
       return state;
   }

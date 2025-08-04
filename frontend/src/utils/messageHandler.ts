@@ -2,12 +2,17 @@ import type { FileAttachment } from '../types/chat';
 import { splitOnceByNewline } from './stringUtils';
 
 // SSE Event Types
+//
+// Sending initial messages: A -> 0 -> any number of T/M/F/R -> (Q -> N) or E
+// Sending subsequent messages: A -> any number of T/M/F/R -> Q or E
+// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R -> Q/E)
 
 export const EventInitialState = '0';
 export const EventInitialStateNoCall = '1';
-export const EventFunctionCall = 'F';
+export const EventAcknowledge = 'A';
 export const EventThought = 'T';
 export const EventModelMessage = 'M';
+export const EventFunctionCall = 'F';
 export const EventFunctionReply = 'R';
 export const EventComplete = 'Q';
 export const EventSessionName = 'N';
@@ -59,6 +64,7 @@ export interface StreamEventHandlers {
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
   onError: (errorData: string) => void; // Add this line
+  onAcknowledge: (messageId: string) => void;
 }
 
 export const processStreamResponse = async (
@@ -120,6 +126,8 @@ export const processStreamResponse = async (
       } else if (type === EventComplete) {
         handlers.onEnd();
         qReceived = true;
+      } else if (type === EventAcknowledge) {
+        handlers.onAcknowledge(data);
       } else {
         console.warn('Unknown protocol:', data);
       }

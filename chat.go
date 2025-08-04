@@ -83,6 +83,9 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Create a sseWriter for this client connection
 	sseW := &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
 
+	// Send acknowledgement for user message ID to frontend
+	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
+
 	// Prepare initial state for streaming with only SessionId and SystemPrompt
 	initialStateForClient := InitialState{
 		SessionId:    sessionId,
@@ -159,9 +162,9 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	session, err := GetSession(db, sessionId)
 	if err != nil {
 		log.Printf("chatMessage: Failed to load session %s: %v", sessionId, err)
-		if errors.Is(err, sql.ErrNoRows) || 
-		   err.Error() == "sql: no rows in result set" ||
-		   strings.Contains(err.Error(), "no such table") {
+		if errors.Is(err, sql.ErrNoRows) ||
+			err.Error() == "sql: no rows in result set" ||
+			strings.Contains(err.Error(), "no such table") {
 			http.Error(w, "Session not found", http.StatusNotFound)
 		} else {
 			http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
@@ -193,6 +196,9 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Store userMessageID for later token count update
 	// (This variable will be used in streamGeminiResponse)
+
+	// Send acknowledgement for user message ID to frontend
+	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
 
 	// Retrieve session history from DB for Gemini API
 	frontendHistory, err := GetSessionHistory(db, sessionId, true)

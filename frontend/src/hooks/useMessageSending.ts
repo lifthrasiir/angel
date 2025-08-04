@@ -15,6 +15,7 @@ import {
   SET_SESSION_NAME,
   SET_SYSTEM_PROMPT,
   UPDATE_AGENT_MESSAGE,
+  UPDATE_USER_MESSAGE_ID,
 } from './chatReducer';
 
 interface UseMessageSendingProps {
@@ -45,8 +46,9 @@ export const useMessageSending = ({
     try {
       const attachments: FileAttachment[] = await convertFilesToAttachments(selectedFiles);
 
+      const temporaryUserMessageId = crypto.randomUUID();
       const userMessage: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: temporaryUserMessageId,
         role: 'user',
         parts: [{ text: inputMessage }],
         type: 'user',
@@ -142,6 +144,9 @@ export const useMessageSending = ({
         },
         onError: (errorData: string) => {
           dispatch({ type: ADD_ERROR_MESSAGE, payload: errorData });
+        },
+        onAcknowledge: (messageId: string) => {
+          dispatch({ type: UPDATE_USER_MESSAGE_ID, payload: { temporaryId: userMessage.id, newId: messageId } });
         },
       };
 
