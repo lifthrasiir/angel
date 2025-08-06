@@ -559,7 +559,11 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 		`, parentMsgID, requestBody.NewPrimaryBranchID).Scan(&firstMessageOfNewBranchID)
 
 		if err != nil {
-			log.Printf("switchBranchHandler: Failed to find first message of new branch %s: %v", requestBody.NewPrimaryBranchID, err)
+			if err == sql.ErrNoRows {
+				log.Printf("switchBranchHandler: No first message found for new branch %s. Skipping chosen_next_id update.", requestBody.NewPrimaryBranchID)
+			} else {
+				log.Printf("switchBranchHandler: Failed to find first message of new branch %s: %v", requestBody.NewPrimaryBranchID, err)
+			}
 			// Non-fatal, continue
 		} else {
 			if err := UpdateMessageChosenNextID(db, parentMsgID, &firstMessageOfNewBranchID); err != nil {
@@ -622,9 +626,9 @@ func convertFrontendMessagesToContent(frontendMessages []FrontendMessage) []Cont
 
 		// Handle function calls and responses (these should override text/attachments for their specific message types)
 		if fm.Type == "function_call" && fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
-			parts = []Part{{FunctionCall: fm.Parts[0].FunctionCall}}
+			parts = append(parts, Part{FunctionCall: fm.Parts[0].FunctionCall})
 		} else if fm.Type == "function_response" && fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
-			parts = []Part{{FunctionResponse: fm.Parts[0].FunctionResponse}}
+			parts = append(parts, Part{FunctionResponse: fm.Parts[0].FunctionResponse})
 		}
 
 		// If parts is still empty, add an empty text part to satisfy Gemini API requirements

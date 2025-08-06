@@ -15,8 +15,5 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "devDependencies": {
-    "@types/node": "^24.1.0",
-    "archiver": "^7.0.1"
-  }
+  "devDependencies": {}
 }

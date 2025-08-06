@@ -109,9 +109,9 @@ type Sse struct {
 
 // parseSseStream parses an HTTP response body as an SSE stream.
 // Assumes that the SSE stream itself is correct. Do not fix this!
-func parseSseStream(t *testing.T, rr *httptest.ResponseRecorder) iter.Seq[Sse] {
+func parseSseStream(t *testing.T, resp *http.Response) iter.Seq[Sse] {
 	return func(yield func(Sse) bool) {
-		scanner := bufio.NewScanner(rr.Body)
+		scanner := bufio.NewScanner(resp.Body)
 		var buffer string
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -124,7 +124,7 @@ func parseSseStream(t *testing.T, rr *httptest.ResponseRecorder) iter.Seq[Sse] {
 
 				// The first character of the header is the EventType
 				eventType := EventType(rune(header[0]))
-				log.Printf("parseSseStream: type=%c payload=%q", eventType, payload)
+				log.Printf("parseSseStream(%p): type=%c payload=[%s]", resp, eventType, strings.ReplaceAll(payload, "\n", "|"))
 
 				if !yield(Sse{Type: eventType, Payload: payload}) {
 					return
@@ -159,9 +159,43 @@ func testRequest(t *testing.T, router *mux.Router, method, url string, payload [
 	router.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != expectedStatus {
-		t.Errorf("handler returned wrong status code: got %v want %v", status, expectedStatus)
+		t.Fatalf("handler returned wrong status code: got %v want %v", status, expectedStatus)
 	}
 	return rr
+}
+
+// testStreamingRequest sends an HTTP request to a test server and returns the response.
+// This is specifically for streaming responses (SSE).
+func testStreamingRequest(t *testing.T, router *mux.Router, method, url string, payload []byte, expectedStatus int) *http.Response {
+	// Create a test server
+	ts := httptest.NewServer(router)
+	t.Cleanup(func() {
+		ts.Close()
+	})
+
+	var req *http.Request
+	var err error
+	if payload != nil {
+		req, err = http.NewRequest(method, ts.URL+url, bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req, err = http.NewRequest(method, ts.URL+url, nil)
+		req.Header.Set("Accept", "text/event-stream") // SSE requested
+	}
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to send request to test server: %v", err)
+	}
+
+	if status := resp.StatusCode; status != expectedStatus {
+		t.Fatalf("handler returned wrong status code: got %v want %v", status, expectedStatus)
+	}
+	return resp
 }
 
 // querySingleRow executes a query that is expected to return a single row and handles errors.

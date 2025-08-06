@@ -164,7 +164,8 @@ func TestNewSessionAndMessage(t *testing.T) {
 			t.Fatalf("Workspace not created in testDB")
 		}
 
-		testRequest(t, router, "POST", "/api/chat", payload, http.StatusOK)
+		rr := testStreamingRequest(t, router, "POST", "/api/chat", payload, http.StatusOK)
+		defer rr.Body.Close()
 
 		// Verify in DB - both workspace and session/message should be created
 		var sessionIDFromDB string
@@ -260,7 +261,8 @@ func TestLoadChatSession(t *testing.T) {
 
 	// Test case 1: Successful session load
 	t.Run("Success", func(t *testing.T) {
-		rr := testRequest(t, router, "GET", "/api/chat/"+sessionId, nil, http.StatusOK)
+		rr := testStreamingRequest(t, router, "GET", "/api/chat/"+sessionId, nil, http.StatusOK)
+		defer rr.Body.Close()
 
 		// Parse SSE events mirroring client-side logic
 		// Use a channel to signal when the initial state is found

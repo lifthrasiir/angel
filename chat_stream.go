@@ -56,14 +56,14 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			// API call was cancelled (either by client disconnect or explicit cancel)
 			// Mark the call as cancelled in the manager
 			failCall(initialState.SessionId, ctx.Err())
-			// Update the message in DB with current accumulated text and mark as cancelled
-			if modelMessageID >= 0 { // Only update if a model message was created
-				if err := UpdateMessageContent(db, modelMessageID, agentResponseText+"\n(Cancelled)"); err != nil {
-					log.Printf("Failed to update model message with cancelled status: %v", err)
+			// Update the message in DB with current accumulated text as-is
+			if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created and has content
+				if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+					log.Printf("Failed to update model message: %v", err)
 				}
 			}
 			// Send error to frontend
-			broadcastToSession(initialState.SessionId, EventError, "Request canceled by user")
+			broadcastToSession(initialState.SessionId, EventError, "user canceled request")
 			return ctx.Err() // Return the context error
 		default:
 			// Continue with the Gemini API call
@@ -75,7 +75,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			// Save a model_error message to the database
 			errorMessage := fmt.Sprintf("Gemini API call failed: %v", err)
 			if errors.Is(err, context.Canceled) {
-				errorMessage = "Request canceled by user"
+				errorMessage = "user canceled request"
 			}
 			// If a model message was already created, update it with the error
 			if modelMessageID >= 0 {
@@ -117,8 +117,8 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			case <-ctx.Done():
 				// Context was canceled, send a message to the frontend
 				broadcastToSession(initialState.SessionId, EventError, "Request canceled by user")
-				if modelMessageID >= 0 { // Only update if a model message was created
-					if err := UpdateMessageContent(db, modelMessageID, agentResponseText+"\n(Cancelled)"); err != nil {
+				if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created
+					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
 						log.Printf("Failed to update model message with cancelled status: %v", err)
 					}
 				}
@@ -286,6 +286,37 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			}
 		}
 
+		// Check if context was cancelled after stream ended
+		select {
+		case <-ctx.Done():
+			// Stream was cancelled, send error and return
+			failCall(initialState.SessionId, ctx.Err())
+			// Finalize the current model message as-is without adding cancellation text
+			if modelMessageID >= 0 && agentResponseText != "" {
+				if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+					log.Printf("Failed to update final model message: %v", err)
+				}
+			}
+
+			// Add a separate error message to the database
+			errorMessageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, &lastAddedMessageID, nil, "model", "user canceled request", "error", nil, nil)
+			if err != nil {
+				log.Printf("Failed to add error message to DB: %v", err)
+			} else {
+				// Update chosen_next_id of the parent message to point to the error message
+				if lastAddedMessageID != 0 {
+					if err := UpdateMessageChosenNextID(db, lastAddedMessageID, &errorMessageID); err != nil {
+						log.Printf("Failed to update chosen_next_id for cancelled message %d: %v", lastAddedMessageID, err)
+					}
+				}
+			}
+
+			broadcastToSession(initialState.SessionId, EventError, "user canceled request")
+			return ctx.Err()
+		default:
+			// Continue with normal processing
+		}
+
 		// Model has generated all messages and nothing to ask
 		if !hasFunctionCall {
 			break
@@ -293,6 +324,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 	}
 
 	broadcastToSession(initialState.SessionId, EventComplete, "")
+
+	// Small delay to allow all clients to receive EventComplete before removeCall is executed
+	time.Sleep(50 * time.Millisecond)
 
 	// Finalize the last model message if any text was streamed
 	if modelMessageID >= 0 {

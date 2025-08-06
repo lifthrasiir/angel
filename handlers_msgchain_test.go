@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -17,8 +18,11 @@ import (
 
 // MockGeminiProvider for testing streamGeminiResponse
 type MockGeminiProvider struct {
-	Responses []CaGenerateContentResponse
-	Err       error
+	Responses        []CaGenerateContentResponse
+	Err              error
+	Delay            time.Duration
+	ExtraDelayIndex  int           // Index at which to apply extra delay
+	ExtraDelayAmount time.Duration // Amount of extra delay to apply
 }
 
 func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
@@ -31,16 +35,32 @@ func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, params Sessi
 
 	seq := func(yield func(CaGenerateContentResponse) bool) {
 		defer closer()
-		for _, resp := range m.Responses {
+		for i, resp := range m.Responses {
+			// Simulate streaming delay before sending each response (except the first)
+			if i > 0 {
+				if m.Delay > 0 {
+					time.Sleep(m.Delay)
+				} else {
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+
+			// Apply extra delay at specified index
+			if i == m.ExtraDelayIndex && m.ExtraDelayAmount > 0 {
+				log.Printf("MockGeminiProvider: Applying extra delay of %v at index %d", m.ExtraDelayAmount, i)
+				time.Sleep(m.ExtraDelayAmount)
+			}
+
 			select {
 			case <-ctx.Done():
+				log.Printf("MockGeminiProvider: Context cancelled at index %d", i)
 				return
 			default:
+				log.Printf("MockGeminiProvider: Sending response at index %d: %+v", i, resp)
 				if !yield(resp) {
+					log.Printf("MockGeminiProvider: yield returned false at index %d", i)
 					return
 				}
-				// Simulate streaming delay
-				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}
@@ -107,18 +127,13 @@ func responseFromPart(part Part) CaGenerateContentResponse {
 }
 
 func TestMessageChainWithThoughtAndModel(t *testing.T) {
-	// Setup DB
-	db, err := InitDB(":memory:")
-	if err != nil {
-		t.Fatalf("Failed to initialize database: %v", err)
-	}
-
 	// Setup router and context middleware
 	router, db, _ := setupTest(t)
 
 	// Setup Mock Gemini Provider
 	provider := replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
+			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "**Thinking**\nThis is a thought.", Thought: true}),
 			responseFromPart(Part{Text: "This is the model's response."}),
 		},
@@ -133,7 +148,8 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		"workspaceId":  "test-workspace",
 	}
 	body, _ := json.Marshal(reqBody)
-	rr := testRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
+	rr := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
+	defer rr.Body.Close()
 
 	printMessages(t, db, "After first message chain") // ADDED
 
@@ -210,7 +226,8 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		"message": secondUserMessage,
 	}
 	body, _ = json.Marshal(reqBody)
-	rr = testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), body, http.StatusOK)
+	rr = testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), body, http.StatusOK)
+	defer rr.Body.Close()
 
 	// Parse SSE events for the second user message ID and second thought message ID
 	var secondUserMessageID int
@@ -262,12 +279,6 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 }
 
 func TestBranchingMessageChain(t *testing.T) {
-	// Setup DB
-	db, err := InitDB(":memory:")
-	if err != nil {
-		t.Fatalf("Failed to initialize database: %v", err)
-	}
-
 	// Setup router and context middleware
 	router, db, _ := setupTest(t)
 
@@ -288,7 +299,8 @@ func TestBranchingMessageChain(t *testing.T) {
 		"workspaceId":  "test-workspace",
 	}
 	bodyA1, _ := json.Marshal(reqBodyA1)
-	rrA1 := testRequest(t, router, "POST", "/api/chat", bodyA1, http.StatusOK)
+	rrA1 := testStreamingRequest(t, router, "POST", "/api/chat", bodyA1, http.StatusOK)
+	defer rrA1.Body.Close()
 
 	var sessionId string
 	var msgA1ID int // A1: User message
@@ -335,7 +347,8 @@ func TestBranchingMessageChain(t *testing.T) {
 		"message": userMessageB1,
 	}
 	bodyB1, _ := json.Marshal(reqBodyB1)
-	rrB1 := testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), bodyB1, http.StatusOK)
+	rrB1 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), bodyB1, http.StatusOK)
+	defer rrB1.Body.Close()
 
 	var msgB1ID int // B1: User message
 	var msgB2ID int // B2: Thought message
@@ -360,29 +373,32 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// Verify A1-A3-B1-B3 chain in DB
 	var msg Message
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA1ID}, &msg.ChosenNextID)
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA1ID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	if msg.ParentMessageID != nil {
+		t.Errorf("Expected first user message parent_message_id to be nil, got %d", *msg.ParentMessageID)
+	}
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA2ID {
-		t.Errorf("A1's chosen_next_id is not A2 (thought). Got %v, want %d", msg.ChosenNextID, msgA2ID)
+		t.Errorf("Expected first user message chosen_next_id to be %d, got %v", msg.ChosenNextID, msgA2ID)
 	}
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA2ID}, &msg.ChosenNextID)
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA3ID {
-		t.Errorf("A2's chosen_next_id is not A3 (model). Got %v, want %d", msg.ChosenNextID, msgA3ID)
+		t.Errorf("Expected A2's chosen_next_id to be A3 (model). Got %v, want %d", msg.ChosenNextID, msgA3ID)
 	}
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ChosenNextID)
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB1ID {
-		t.Errorf("A3's chosen_next_id is not B1 (user). Got %v, want %d", msg.ChosenNextID, msgB1ID)
+		t.Errorf("Expected A3's chosen_next_id to be B1 (user). Got %v, want %d", msg.ChosenNextID, msgB1ID)
 	}
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB1ID}, &msg.ChosenNextID)
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB1ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB2ID {
-		t.Errorf("B1's chosen_next_id is not B2 (thought). Got %v, want %d", msg.ChosenNextID, msgB2ID)
+		t.Errorf("Expected B1's chosen_next_id to be B2 (thought). Got %v, want %d", msg.ChosenNextID, msgB2ID)
 	}
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB2ID}, &msg.ChosenNextID)
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB3ID {
-		t.Errorf("B2's chosen_next_id is not B3 (model). Got %v, want %d", msg.ChosenNextID, msgB3ID)
+		t.Errorf("Expected B2's chosen_next_id to be B3 (model). Got %v, want %d", msg.ChosenNextID, msgB3ID)
 	}
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB3ID}, &msg.ChosenNextID)
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID != nil {
-		t.Errorf("B3's chosen_next_id is not nil. Got %v", msg.ChosenNextID)
+		t.Errorf("Expected B3's chosen_next_id to be nil. Got %v", msg.ChosenNextID)
 	}
 
 	// ii) Create a new branch C1-C2-C3 after A3 (Model A)
@@ -403,7 +419,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	rrC1 := testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch", sessionId), bodyC1, http.StatusOK)
 
 	var branchResponseC map[string]string
-	err = json.Unmarshal(rrC1.Body.Bytes(), &branchResponseC)
+	err := json.Unmarshal(rrC1.Body.Bytes(), &branchResponseC)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal branch response: %v", err)
 	}
@@ -424,6 +440,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	// Simulate streaming response for Message C (thought and model)
 	replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
+			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
 			responseFromPart(Part{Text: "C's response"}),
 		},
@@ -456,7 +473,8 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// iii) Verify that the history correctly includes C1-C2-C3 and that A3 has both B1 and C1 as next messages.
 	// Load history for C1-C2-C3 branch
-	rrLoadC := testRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+	rrLoadC := testStreamingRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+	defer rrLoadC.Body.Close()
 
 	var initialStateC InitialState
 	for event := range parseSseStream(t, rrLoadC) {
@@ -516,7 +534,8 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// v) Verify that the history has changed to A1-A3-B1-B3
 	// Load history for A1-A3-B1-B3 branch
-	rrLoadA1B3 := testRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+	rrLoadA1B3 := testStreamingRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+	defer rrLoadA1B3.Body.Close()
 
 	var initialStateA1B3 InitialState
 	for event := range parseSseStream(t, rrLoadA1B3) {
@@ -540,5 +559,616 @@ func TestBranchingMessageChain(t *testing.T) {
 		initialStateA1B3.History[4].ID != fmt.Sprintf("%d", msgB2ID) ||
 		initialStateA1B3.History[5].ID != fmt.Sprintf("%d", msgB3ID) {
 		t.Errorf("A1-A3-B1-B3 history mismatch. Got %v", initialStateA1B3.History)
+	}
+}
+
+func TestStreamingMessageConsolidation(t *testing.T) {
+	// Setup router and context middleware
+	router, db, _ := setupTest(t)
+
+	// Setup Mock Gemini Provider to stream "A", "B", "C" and then complete
+	provider := replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{Text: "A"}),
+			responseFromPart(Part{Text: "B"}),
+			responseFromPart(Part{Text: "C"}),
+		},
+	})
+	defer replaceProvider(provider)
+
+	// 1. Start new session with initial user message
+	initialUserMessage := "Test streaming consolidation."
+	reqBody := map[string]interface{}{
+		"message":      initialUserMessage,
+		"systemPrompt": "You are a helpful assistant.",
+		"workspaceId":  "test-workspace",
+	}
+	body, _ := json.Marshal(reqBody)
+	rr := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
+	defer rr.Body.Close()
+
+	var sessionId string
+	var userMessageID int
+	var modelMessageID int
+	var receivedModelMessage string
+
+	// Parse SSE events
+	for event := range parseSseStream(t, rr) {
+		switch event.Type {
+		case EventAcknowledge:
+			userMessageID, _ = strconv.Atoi(event.Payload)
+		case EventInitialState:
+			var initialState InitialState
+			err := json.Unmarshal([]byte(event.Payload), &initialState)
+			if err != nil {
+				t.Fatalf("Failed to unmarshal initialState: %v", err)
+			}
+			sessionId = initialState.SessionId
+		case EventModelMessage:
+			messageIdPart, messageText, _ := strings.Cut(event.Payload, "\n")
+			currentModelMessageID, _ := strconv.Atoi(messageIdPart)
+			if modelMessageID == 0 { // First model message
+				modelMessageID = currentModelMessageID
+			} else if modelMessageID != currentModelMessageID { // Subsequent model messages must have the same ID
+				t.Errorf("Expected model message ID to be %d, got %d", modelMessageID, currentModelMessageID)
+			}
+			receivedModelMessage += messageText
+		case EventComplete:
+			// Stream complete, check final message content and ID
+			if receivedModelMessage != "ABC" {
+				t.Errorf("Expected consolidated message 'ABC', got '%s'", receivedModelMessage)
+			}
+
+			// Verify the message in the database
+			var msg Message
+			querySingleRow(t, db, "SELECT text FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.Text)
+			if msg.Text != "ABC" {
+				t.Errorf("Expected message in DB to be 'ABC', got '%s'", msg.Text)
+			}
+		}
+	}
+
+	if sessionId == "" {
+		t.Fatal("Session ID not found in SSE events")
+	}
+	if userMessageID == 0 {
+		t.Fatal("User message ID not found in SSE events")
+	}
+	if modelMessageID == 0 {
+		t.Fatal("Model message ID not found in SSE events")
+	}
+}
+
+func TestSyncDuringThought(t *testing.T) {
+	router, _, _ := setupTest(t)
+
+	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
+	provider := replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{Text: "A"}),
+			responseFromPart(Part{Text: "B", Thought: true}),
+			responseFromPart(Part{Text: "C", Thought: true}),
+			responseFromPart(Part{Text: "D"}),
+			responseFromPart(Part{Text: "E"}),
+			responseFromPart(Part{Text: "F"}),
+		},
+		Delay: 50 * time.Millisecond, // Faster for robust testing
+	})
+	defer replaceProvider(provider)
+
+	// 1. Start new session with initial user message
+	initialUserMessage := "Hello, Gemini!"
+	reqBody := map[string]interface{}{
+		"message":      initialUserMessage,
+		"systemPrompt": "You are a helpful assistant.",
+		"workspaceId":  "test-workspace",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	// Use a channel to signal when the first stream has received 'B'
+	stream1Ready := make(chan bool)
+
+	var sessionId string
+
+	// First client connection (simulated)
+	go func() {
+		rr1 := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
+		defer rr1.Body.Close()
+
+		receivedB := false
+		receivedComplete := false
+		for event := range parseSseStream(t, rr1) {
+			switch event.Type {
+			case EventAcknowledge:
+				// Expected but do nothing
+			case EventInitialState:
+				var initialState InitialState
+				err := json.Unmarshal([]byte(event.Payload), &initialState)
+				if err != nil {
+					t.Errorf("Failed to unmarshal initialState: %v", err)
+					stream1Ready <- false
+					return
+				}
+				sessionId = initialState.SessionId
+			case EventThought:
+				_, messageText, _ := strings.Cut(event.Payload, "\n")
+				if messageText == "Thinking...\nB" {
+					receivedB = true
+				}
+			case EventModelMessage:
+				// Expected but do nothing
+			case EventComplete:
+				receivedComplete = true
+				break
+			case EventSessionName:
+				// Expected but do nothing
+			default:
+				t.Errorf("Unexpected event type: %c", event.Type)
+				stream1Ready <- false
+				return
+			}
+		}
+		if !receivedB {
+			t.Errorf("First client did not receive B")
+		}
+		if !receivedComplete {
+			t.Errorf("First client did not receive EventComplete")
+		}
+		stream1Ready <- receivedB && receivedComplete
+	}()
+
+	// Wait for the first stream to receive 'B'
+	select {
+	case ok := <-stream1Ready:
+		if !ok {
+			return
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Timeout waiting for first stream to receive 'B'")
+	}
+
+	// 2. Second client connects while streaming is ongoing (after B)
+	rr2 := testStreamingRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+
+	var initialState2 InitialState
+	var receivedModelMessage2 string
+	var receivedThoughtMessage2 string
+
+	// Verify initial state for second client
+	for event := range parseSseStream(t, rr2) {
+		defer rr2.Body.Close()
+		switch event.Type {
+		case EventInitialState:
+			err := json.Unmarshal([]byte(event.Payload), &initialState2)
+			if err != nil {
+				t.Errorf("Failed to unmarshal initialState: %v", err)
+				return
+			}
+			// Check if A and B are in the initial state
+			if len(initialState2.History) < 4 ||
+				initialState2.History[0].Parts[0].Text != initialUserMessage ||
+				initialState2.History[1].Parts[0].Text != "A" ||
+				initialState2.History[2].Parts[0].Text != "Thinking...\nB" {
+				t.Errorf("Second client initial state missing A, B, or C. History: %+v", initialState2.History)
+			}
+			for _, message := range initialState2.History[1:] {
+				if message.Parts[0].Thought {
+					receivedThoughtMessage2 += message.Parts[0].Text
+				} else {
+					receivedModelMessage2 += message.Parts[0].Text
+				}
+			}
+		case EventInitialStateNoCall:
+			err := json.Unmarshal([]byte(event.Payload), &initialState2)
+			if err != nil {
+				t.Errorf("Failed to unmarshal initialState: %v", err)
+				return
+			}
+			// Check if all messages are in the initial state
+			if len(initialState2.History) < 5 ||
+				initialState2.History[0].Parts[0].Text != initialUserMessage ||
+				initialState2.History[1].Parts[0].Text != "A" ||
+				initialState2.History[2].Parts[0].Text != "Thinking...\nB" ||
+				initialState2.History[3].Parts[0].Text != "Thinking...\nC" ||
+				initialState2.History[4].Parts[0].Text != "DEF" {
+				t.Errorf("Second client initial state missing A, B, or C. History: %+v", initialState2.History)
+			}
+			return
+		case EventThought:
+			_, messageText, _ := strings.Cut(event.Payload, "\n")
+			receivedThoughtMessage2 += messageText
+		case EventModelMessage:
+			_, messageText, _ := strings.Cut(event.Payload, "\n")
+			receivedModelMessage2 += messageText
+		case EventComplete:
+			// Check if D, E, F are streamed to the second client
+			if receivedThoughtMessage2 != "Thinking...\nBThinking\nC" {
+				t.Errorf("Second client received unexpected thought. Got: %s", receivedThoughtMessage2)
+			}
+			if receivedModelMessage2 != "DEF" {
+				t.Errorf("Second client did not receive model DEF. Got: %s", receivedModelMessage2)
+			}
+			return
+		default:
+			t.Errorf("Unexpected event type: %c", event.Type)
+			return
+		}
+		t.Errorf("Second client did not receive EventComplete")
+	}
+}
+
+func TestSyncDuringResponse(t *testing.T) {
+	router, _, _ := setupTest(t)
+
+	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
+	provider := replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{Text: "A"}),
+			responseFromPart(Part{Text: "B", Thought: true}),
+			responseFromPart(Part{Text: "C", Thought: true}),
+			responseFromPart(Part{Text: "D"}),
+			responseFromPart(Part{Text: "E"}),
+			responseFromPart(Part{Text: "F"}),
+		},
+		Delay: 50 * time.Millisecond, // Faster for robust testing
+	})
+	defer replaceProvider(provider)
+
+	// 1. Start new session with initial user message
+	initialUserMessage := "Hello, Gemini!"
+	reqBody := map[string]interface{}{
+		"message":      initialUserMessage,
+		"systemPrompt": "You are a helpful assistant.",
+		"workspaceId":  "test-workspace",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	// Use a channel to signal when the first stream has received 'E'
+	stream1Ready := make(chan struct{})
+	stream1Finished := make(chan struct{})
+
+	var sessionId string
+
+	receivedModelMessage1 := ""
+
+	// First client connection (simulated)
+	go func() {
+		rr1 := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
+		defer rr1.Body.Close()
+
+		receivedE := false
+		receivedComplete := false
+		for event := range parseSseStream(t, rr1) {
+			switch event.Type {
+			case EventAcknowledge:
+				// Expected but do nothing
+			case EventInitialState:
+				var initialState InitialState
+				err := json.Unmarshal([]byte(event.Payload), &initialState)
+				if err != nil {
+					t.Errorf("Failed to unmarshal initialState: %v", err)
+					close(stream1Finished)
+					return
+				}
+				sessionId = initialState.SessionId
+			case EventThought:
+				// Expected but do nothing
+			case EventModelMessage:
+				_, messageText, _ := strings.Cut(event.Payload, "\n")
+				receivedModelMessage1 += messageText
+				if strings.Contains(messageText, "E") {
+					receivedE = true
+					close(stream1Ready)
+				}
+			case EventComplete:
+				receivedComplete = true
+				break
+			case EventSessionName:
+				// Expected but do nothing
+			default:
+				t.Errorf("Unexpected event type: %c", event.Type)
+				close(stream1Finished)
+				return
+			}
+		}
+		if !receivedE {
+			t.Errorf("First client did not receive 'E'")
+		}
+		if !receivedComplete {
+			t.Errorf("First client did not receive EventComplete")
+		}
+		close(stream1Finished)
+	}()
+
+	// Wait for the first stream to receive 'E'
+	select {
+	case <-stream1Ready:
+		// Continue
+	case <-stream1Finished:
+		return
+	case <-time.After(time.Second):
+		t.Fatal("Timeout waiting for first stream to receive 'E'")
+	}
+
+	// 2. Second client connects while streaming is ongoing (after E)
+	rr2 := testStreamingRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+	defer rr2.Body.Close()
+
+	var initialState2 InitialState
+	receivedModelMessage2 := ""
+
+	// Verify initial state for second client
+	for event := range parseSseStream(t, rr2) {
+		switch event.Type {
+		case EventInitialState, EventInitialStateNoCall:
+			err := json.Unmarshal([]byte(event.Payload), &initialState2)
+			if err != nil {
+				t.Errorf("Failed to unmarshal initialState for second client: %v", err)
+				return
+			}
+			expectedModelMessage := "DE"
+			if event.Type == EventInitialStateNoCall {
+				// If we've got EventInitialStateNoCall (possible due to the timing),
+				// Every model message should have been merged into one.
+				expectedModelMessage += "F"
+			}
+			// Check if A, B, C, D+E+(F) are in the initial state (including thought messages)
+			if len(initialState2.History) < 5 ||
+				initialState2.History[0].Parts[0].Text != initialUserMessage ||
+				initialState2.History[1].Parts[0].Text != "A" ||
+				initialState2.History[2].Parts[0].Text != "Thinking...\nB" ||
+				initialState2.History[3].Parts[0].Text != "Thinking...\nC" ||
+				initialState2.History[4].Parts[0].Text != expectedModelMessage {
+				t.Errorf("Second client initial state missing A, B, C, D, E or (possibly) F. History: %+v", initialState2.History)
+			}
+		case EventModelMessage:
+			_, messageText, _ := strings.Cut(event.Payload, "\n")
+			receivedModelMessage2 += messageText
+		case EventComplete:
+			// Check if F is streamed to the second client
+			if receivedModelMessage2 == "F" {
+				select {
+				case <-stream1Finished:
+					// Continue
+				case <-time.After(time.Second):
+					t.Fatal("Timeout waiting for first stream to receive EventComplete")
+				}
+			} else {
+				t.Errorf("Second client did not receive model F. Got: %s", receivedModelMessage2)
+			}
+			return
+		case EventSessionName:
+			// Expected but do nothing
+		default:
+			t.Errorf("Unexpected event type: %c", event.Type)
+			return
+		}
+	}
+	t.Errorf("Second client did not receive EventComplete")
+}
+
+func TestCancelDuringSync(t *testing.T) {
+	router, _, _ := setupTest(t)
+
+	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
+	provider := replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{Text: "A"}),
+			responseFromPart(Part{Text: "B", Thought: true}),
+			responseFromPart(Part{Text: "C", Thought: true}),
+			responseFromPart(Part{Text: "D"}),
+			responseFromPart(Part{Text: "E"}),
+			responseFromPart(Part{Text: "F"}),
+		},
+		Delay:            200 * time.Millisecond, // Simulate streaming delay
+		ExtraDelayIndex:  5,                      // Add extra delay before F
+		ExtraDelayAmount: 500 * time.Millisecond, // Long enough for cancellation
+	})
+	defer replaceProvider(provider)
+
+	// 1. Start new session with initial user message
+	initialUserMessage := "Hello, Gemini!"
+	reqBody := map[string]interface{}{
+		"message":      initialUserMessage,
+		"systemPrompt": "You are a helpful assistant.",
+		"workspaceId":  "test-workspace",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	// Use a channel to signal when the first stream has received 'B'
+	stream1Ready := make(chan struct{})
+	stream1Finished := make(chan struct{})
+
+	var sessionId string
+
+	// First client connection (simulated)
+	go func() {
+		rr1 := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
+		defer rr1.Body.Close()
+
+		receivedB := false
+		receivedCompleteOrError := false
+		for event := range parseSseStream(t, rr1) {
+			switch event.Type {
+			case EventAcknowledge:
+				// Expected but do nothing
+			case EventInitialState:
+				var initialState InitialState
+				err := json.Unmarshal([]byte(event.Payload), &initialState)
+				if err != nil {
+					t.Errorf("Failed to unmarshal initialState: %v", err)
+					close(stream1Finished)
+					return
+				}
+				sessionId = initialState.SessionId
+			case EventThought:
+				_, messageText, _ := strings.Cut(event.Payload, "\n")
+				if messageText == "Thinking...\nB" {
+					receivedB = true
+					close(stream1Ready)
+				}
+			case EventModelMessage:
+				// Expected but do nothing
+			case EventComplete, EventError:
+				receivedCompleteOrError = true
+				break
+			case EventSessionName:
+				// Expected but do nothing
+			default:
+				t.Errorf("Unexpected event type: %c", event.Type)
+				close(stream1Finished)
+				return
+			}
+		}
+		if !receivedB {
+			t.Errorf("First client did not receive B")
+		}
+		if !receivedCompleteOrError {
+			// Both are possible depending on timing
+			t.Errorf("First client did not receive EventComplete or EventError")
+		}
+		close(stream1Finished)
+	}()
+
+	// Wait for the first stream to receive 'B'
+	select {
+	case <-stream1Ready:
+		// Continue
+	case <-stream1Finished:
+		return
+	case <-time.After(time.Second):
+		t.Fatal("Timeout waiting for first stream to receive 'B'")
+	}
+
+	// 2. Second client connects while streaming is ongoing (after B)
+	stream2Ready := make(chan struct{})
+	stream2Finished := make(chan struct{})
+	rr2 := testStreamingRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+
+	var initialState2 InitialState
+	receivedModelMessage2 := ""
+	receivedThoughtMessage2 := ""
+	secondClientErrorReceived := false
+
+	go func() {
+		defer rr2.Body.Close()
+		for event := range parseSseStream(t, rr2) {
+			switch event.Type {
+			case EventInitialState:
+				err := json.Unmarshal([]byte(event.Payload), &initialState2)
+				if err != nil {
+					t.Errorf("Failed to unmarshal initialState: %v", err)
+					close(stream2Finished)
+					return
+				}
+				// Check if A and B are in the initial state (including thought message)
+				if len(initialState2.History) < 3 ||
+					initialState2.History[0].Parts[0].Text != initialUserMessage ||
+					initialState2.History[1].Parts[0].Text != "A" ||
+					initialState2.History[2].Parts[0].Text != "Thinking...\nB" {
+					t.Errorf("Second client initial state missing A or B. History: %+v", initialState2.History)
+				}
+			case EventThought:
+				_, messageText, _ := strings.Cut(event.Payload, "\n")
+				receivedThoughtMessage2 += messageText
+			case EventModelMessage:
+				_, messageText, _ := strings.Cut(event.Payload, "\n")
+				receivedModelMessage2 += messageText
+				if strings.Contains(messageText, "E") {
+					close(stream2Ready)
+				}
+			case EventError:
+				if strings.Contains(event.Payload, "user canceled request") {
+					secondClientErrorReceived = true
+				}
+				close(stream2Finished)
+				return // Exit the goroutine after processing the error
+			case EventComplete:
+				close(stream2Finished)
+				return // Exit the goroutine
+			case EventSessionName:
+				// Expected but do nothing
+			default:
+				t.Errorf("Unexpected event type: %c", event.Type)
+				close(stream2Finished)
+				return
+			}
+		}
+		t.Errorf("Second client did not receive EventError or EventComplete")
+		close(stream2Finished)
+	}()
+
+	// Wait for the second stream to receive 'E'
+	select {
+	case <-stream2Ready:
+		// Continue
+	case <-stream2Finished:
+		return
+	case <-time.After(time.Second):
+		t.Fatal("Timeout waiting for second stream to receive 'E'")
+	}
+
+	// 3. Cancel the ongoing call
+	cancelRR := testRequest(t, router, "DELETE", fmt.Sprintf("/api/chat/%s/call", sessionId), nil, http.StatusOK)
+	if cancelRR.Code != http.StatusOK {
+		t.Fatalf("Failed to cancel call: %v", cancelRR.Body.String())
+	}
+
+	// Give some time for the error event to propagate
+	select {
+	case <-stream2Finished:
+		// Continue
+	case <-time.After(time.Second):
+		t.Fatal("Timeout waiting for second stream to receive EventError or EventComplete")
+	}
+
+	// Verify that both clients received the error message
+	if !secondClientErrorReceived {
+		t.Errorf("Second client did not receive 'user canceled request' error")
+	}
+
+	// 4. After cancellation, request initial state again
+	rr3 := testStreamingRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
+	defer rr3.Body.Close()
+
+	var initialState3 InitialState
+	initialStateNoCallReceived := false
+	errorInInitialState := false
+
+	for event := range parseSseStream(t, rr3) {
+		switch event.Type {
+		case EventInitialStateNoCall:
+			initialStateNoCallReceived = true
+			err := json.Unmarshal([]byte(event.Payload), &initialState3)
+			if err != nil {
+				t.Errorf("Failed to unmarshal initialStateNoCall: %v", err)
+				return
+			}
+			// Check if A, B, C, DE and the error message are in the initial state
+			// (D and E should merge into one message)
+			if len(initialState3.History) < 6 ||
+				initialState3.History[0].Parts[0].Text != initialUserMessage ||
+				initialState3.History[1].Parts[0].Text != "A" ||
+				initialState3.History[2].Parts[0].Text != "Thinking...\nB" ||
+				initialState3.History[3].Parts[0].Text != "Thinking...\nC" ||
+				initialState3.History[4].Parts[0].Text != "DE" ||
+				!strings.Contains(initialState3.History[5].Parts[0].Text, "user canceled request") {
+				t.Errorf("Initial state after cancellation missing expected messages or error. History: %+v", initialState3.History)
+			}
+			// Ensure the last message is an error message
+			if len(initialState3.History) >= 6 && initialState3.History[5].Type != "error" {
+				errorInInitialState = true
+			}
+		default:
+			t.Errorf("Unexpected event type: %c", event.Type)
+			return
+		}
+	}
+
+	if !initialStateNoCallReceived {
+		t.Errorf("Did not receive EventInitialStateNoCall after cancellation")
+	}
+	if errorInInitialState {
+		t.Errorf("Last message in initial state after cancellation is not an error message")
 	}
 }

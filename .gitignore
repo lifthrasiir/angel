@@ -3,6 +3,7 @@
 *.db
 node_modules
 /angel
+.claude/settings.local.json
 frontend/vite.config.ts.timestamp-*.mjs
 frontend/dist
 frontend.zip
