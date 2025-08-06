@@ -1,9 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"database/sql" // ADDED
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/gorilla/mux"
 )
 
 // MockGeminiProvider for testing streamGeminiResponse
@@ -50,13 +47,6 @@ func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, params Sessi
 	return seq, &mockCloser{}, nil // Return a mock io.Closer
 }
 
-// mockCloser implements io.Closer for testing purposes
-type mockCloser struct{}
-
-func (mc *mockCloser) Close() error {
-	return nil
-}
-
 func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error) {
 	return "inferred name", nil
 }
@@ -65,11 +55,10 @@ func (m *MockGeminiProvider) CountTokens(ctx context.Context, contents []Content
 	return &CaCountTokenResponse{TotalTokens: 10}, nil
 }
 
-func (m *MockGeminiProvider) LoadCodeAssist(ctx context.Context) error {
-	return nil
-}
+// mockCloser implements io.Closer for testing purposes
+type mockCloser struct{}
 
-func (m *MockGeminiProvider) OnboardUser(ctx context.Context) error {
+func (mc *mockCloser) Close() error {
 	return nil
 }
 
@@ -103,6 +92,20 @@ func printMessages(t *testing.T, db *sql.DB, testName string) {
 	t.Log("------------------------------------")
 }
 
+func responseFromPart(part Part) CaGenerateContentResponse {
+	return CaGenerateContentResponse{
+		Response: VertexGenerateContentResponse{
+			Candidates: []Candidate{
+				{
+					Content: Content{
+						Parts: []Part{part},
+					},
+				},
+			},
+		},
+	}
+}
+
 func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	// Setup DB
 	db, err := InitDB(":memory:")
@@ -110,48 +113,17 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Setup Mock Gemini Provider
-	mockProvider := &MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "**Thinking**\nThis is a thought.", Thought: true},
-								},
-							},
-						},
-					},
-				},
-			},
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "This is the model's response."},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	CurrentProvider = mockProvider
-
 	// Setup router and context middleware
-	router := mux.NewRouter()
+	router, db, _ := setupTest(t)
 
-	ga := &GeminiAuth{}
-	ga.Init(db)
-	ga.ProjectID = "test-project" // Set a dummy project ID for testing
-
-	router.Use(makeContextMiddleware(db, ga))
-	InitRouter(router)
+	// Setup Mock Gemini Provider
+	provider := replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{Text: "**Thinking**\nThis is a thought.", Thought: true}),
+			responseFromPart(Part{Text: "This is the model's response."}),
+		},
+	})
+	defer replaceProvider(provider)
 
 	// 1. Start new session with initial user message
 	initialUserMessage := "Hello, Gemini!"
@@ -161,49 +133,32 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		"workspaceId":  "test-workspace",
 	}
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/chat", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-
-	// Manually add db, ga, wg to request context
-	req = req.WithContext(contextWithGlobals(req.Context(), db, ga))
-
-	rr := httptest.NewRecorder()
-
-	newSessionAndMessage(rr, req)
+	rr := testRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
 
 	printMessages(t, db, "After first message chain") // ADDED
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("newSessionAndMessage failed with status %d: %s", rr.Code, rr.Body.String())
-	}
-
 	// Parse SSE events to get session ID and message IDs
-	events := strings.Split(strings.TrimSpace(rr.Body.String()), "\n\n")
 	var sessionId string
 	var firstUserMessageID int
 	var thoughtMessageID int
 	var modelMessageID int
 
-	for _, event := range events {
-		event = strings.ReplaceAll(event[6:], "\ndata: ", "\n")
-		eventType, payload, _ := strings.Cut(event, "\n")
-
-		switch EventType([]rune(eventType)[0]) {
+	for event := range parseSseStream(t, rr) {
+		switch event.Type {
 		case EventAcknowledge:
-			firstUserMessageID, _ = strconv.Atoi(payload)
+			firstUserMessageID, _ = strconv.Atoi(event.Payload)
 		case EventInitialState:
 			var initialState InitialState
-			err := json.Unmarshal([]byte(payload), &initialState)
+			err := json.Unmarshal([]byte(event.Payload), &initialState)
 			if err != nil {
 				t.Fatalf("Failed to unmarshal initialState: %v", err)
 			}
 			sessionId = initialState.SessionId
 		case EventThought:
-			messageIdPart, _, _ := strings.Cut(payload, "\n")
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 			thoughtMessageID, _ = strconv.Atoi(messageIdPart)
 		case EventModelMessage:
-			messageIdPart, _, _ := strings.Cut(payload, "\n")
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 			modelMessageID, _ = strconv.Atoi(messageIdPart)
 		}
 	}
@@ -224,10 +179,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	// Verify initial message chain
 	// User (firstUserMessageID) -> Thought (thoughtMessageID) -> Model (modelMessageID)
 	var msg Message
-	err = db.QueryRow("SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", firstUserMessageID).Scan(&msg.ParentMessageID, &msg.ChosenNextID)
-	if err != nil {
-		t.Fatalf("Failed to get message %d: %v", firstUserMessageID, err)
-	}
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{firstUserMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID != nil {
 		t.Errorf("Expected first user message parent_message_id to be nil, got %d", *msg.ParentMessageID)
 	}
@@ -235,10 +187,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		t.Errorf("Expected first user message chosen_next_id to be %d, got %v", thoughtMessageID, msg.ChosenNextID)
 	}
 
-	err = db.QueryRow("SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", thoughtMessageID).Scan(&msg.ParentMessageID, &msg.ChosenNextID)
-	if err != nil {
-		t.Fatalf("Failed to get message %d: %v", thoughtMessageID, err)
-	}
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{thoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != firstUserMessageID {
 		t.Errorf("Expected thought message parent_message_id to be %d, got %v", firstUserMessageID, msg.ParentMessageID)
 	}
@@ -246,10 +195,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		t.Errorf("Expected thought message chosen_next_id to be %d, got %v", modelMessageID, msg.ChosenNextID)
 	}
 
-	err = db.QueryRow("SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", modelMessageID).Scan(&msg.ParentMessageID, &msg.ChosenNextID)
-	if err != nil {
-		t.Fatalf("Failed to get message %d: %v", modelMessageID, err)
-	}
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != thoughtMessageID {
 		t.Errorf("Expected model message parent_message_id to be %d, got %v", thoughtMessageID, msg.ParentMessageID)
 	}
@@ -264,38 +210,22 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		"message": secondUserMessage,
 	}
 	body, _ = json.Marshal(reqBody)
-	req = httptest.NewRequest("POST", fmt.Sprintf("/api/chat/%s", sessionId), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-
-	// Manually add db, ga, wg to request context for the second request
-	req = req.WithContext(contextWithGlobals(req.Context(), db, ga))
-
-	rr = httptest.NewRecorder()
-
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("chatMessage failed with status %d: %s", rr.Code, rr.Body.String())
-	}
+	rr = testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), body, http.StatusOK)
 
 	// Parse SSE events for the second user message ID and second thought message ID
-	events = strings.Split(strings.TrimSpace(rr.Body.String()), "\n\n")
 	var secondUserMessageID int
 	var secondThoughtMessageID int
-	var secondModelMessageID int // ADDED
-	for _, event := range events {
-		event = strings.ReplaceAll(event[6:], "\ndata: ", "\n")
-		eventType, payload, _ := strings.Cut(event, "\n")
-		switch EventType([]rune(eventType)[0]) {
+	var secondModelMessageID int
+	for event := range parseSseStream(t, rr) {
+		switch event.Type {
 		case EventAcknowledge:
-			secondUserMessageID, _ = strconv.Atoi(payload)
+			secondUserMessageID, _ = strconv.Atoi(event.Payload)
 		case EventThought:
-			messageIdPart, _, _ := strings.Cut(payload, "\n")
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 			secondThoughtMessageID, _ = strconv.Atoi(messageIdPart)
-		case EventModelMessage: // ADDED
-			messageIdPart, _, _ := strings.Cut(payload, "\n")     // ADDED
-			secondModelMessageID, _ = strconv.Atoi(messageIdPart) // ADDED
+		case EventModelMessage:
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
+			secondModelMessageID, _ = strconv.Atoi(messageIdPart)
 		}
 	}
 
@@ -308,18 +238,12 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 
 	// Verify chain after second user message
 	// Model (modelMessageID) -> User (secondUserMessageID) -> Thought (secondThoughtMessageID)
-	err = db.QueryRow("SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", modelMessageID).Scan(&msg.ParentMessageID, &msg.ChosenNextID)
-	if err != nil {
-		t.Fatalf("Failed to get message %d: %v", modelMessageID, err)
-	}
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != secondUserMessageID {
 		t.Errorf("Expected model message chosen_next_id to be %d, got %v", secondUserMessageID, msg.ChosenNextID)
 	}
 
-	err = db.QueryRow("SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", secondUserMessageID).Scan(&msg.ParentMessageID, &msg.ChosenNextID)
-	if err != nil {
-		t.Fatalf("Failed to get message %d: %v", secondUserMessageID, err)
-	}
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{secondUserMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != modelMessageID {
 		t.Errorf("Expected second user message parent_message_id to be %d, got %v", modelMessageID, msg.ParentMessageID)
 	}
@@ -328,10 +252,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	}
 
 	// Verify the second thought message
-	err = db.QueryRow("SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", secondThoughtMessageID).Scan(&msg.ParentMessageID, &msg.ChosenNextID)
-	if err != nil {
-		t.Fatalf("Failed to get message %d: %v", secondThoughtMessageID, err)
-	}
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{secondThoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != secondUserMessageID {
 		t.Errorf("Expected second thought message parent_message_id to be %d, got %v", secondUserMessageID, msg.ParentMessageID)
 	}
@@ -347,53 +268,19 @@ func TestBranchingMessageChain(t *testing.T) {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Setup Mock Gemini Provider (will be re-assigned for each request)
-	var mockProvider *MockGeminiProvider
-
 	// Setup router and context middleware
-	router := mux.NewRouter()
+	router, db, _ := setupTest(t)
 
-	ga := &GeminiAuth{}
-	ga.Init(db)
-	ga.ProjectID = "test-project" // Set a dummy project ID for testing
-
-	router.Use(makeContextMiddleware(db, ga))
-	InitRouter(router)
-
-	// i) A-B-C 세 메시지를 작성
+	// i) Create three messages: A-B-C
 	// 1. Send initial user message (A)
-	mockProvider = &MockGeminiProvider{
+	provider := replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
 			// Responses for B (thought, model)
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "B's thought", Thought: true},
-								},
-							},
-						},
-					},
-				},
-			},
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "B's response"},
-								},
-							},
-						},
-					},
-				},
-			},
+			responseFromPart(Part{Text: "B's thought", Thought: true}),
+			responseFromPart(Part{Text: "B's response"}),
 		},
-	}
-	CurrentProvider = mockProvider
+	})
+	defer replaceProvider(provider)
 	msgA1Text := "Message A"
 	reqBodyA1 := map[string]interface{}{
 		"message":      msgA1Text,
@@ -401,42 +288,31 @@ func TestBranchingMessageChain(t *testing.T) {
 		"workspaceId":  "test-workspace",
 	}
 	bodyA1, _ := json.Marshal(reqBodyA1)
-	reqA1 := httptest.NewRequest("POST", "/api/chat", bytes.NewReader(bodyA1))
-	reqA1.Header.Set("Content-Type", "application/json")
-	reqA1.Header.Set("Accept", "text/event-stream")
-	reqA1 = reqA1.WithContext(contextWithGlobals(reqA1.Context(), db, ga))
-	rrA1 := httptest.NewRecorder()
-	newSessionAndMessage(rrA1, reqA1)
-	if rrA1.Code != http.StatusOK {
-		t.Fatalf("newSessionAndMessage for A failed with status %d: %s", rrA1.Code, rrA1.Body.String())
-	}
+	rrA1 := testRequest(t, router, "POST", "/api/chat", bodyA1, http.StatusOK)
 
-	eventsA := strings.Split(strings.TrimSpace(rrA1.Body.String()), "\n\n")
 	var sessionId string
 	var msgA1ID int // A1: User message
 	var msgA2ID int // A2: Thought message
 	var msgA3ID int // A3: Model message
 	var originalPrimaryBranchID string
 
-	for _, event := range eventsA {
-		event = strings.ReplaceAll(event[6:], "\ndata: ", "\n")
-		eventType, payload, _ := strings.Cut(event, "\n")
-		switch EventType([]rune(eventType)[0]) {
+	for event := range parseSseStream(t, rrA1) {
+		switch event.Type {
 		case EventAcknowledge:
-			msgA1ID, _ = strconv.Atoi(payload)
+			msgA1ID, _ = strconv.Atoi(event.Payload)
 		case EventInitialState:
 			var initialState InitialState
-			err := json.Unmarshal([]byte(payload), &initialState)
+			err := json.Unmarshal([]byte(event.Payload), &initialState)
 			if err != nil {
 				t.Fatalf("Failed to unmarshal initialState: %v", err)
 			}
 			sessionId = initialState.SessionId
 			originalPrimaryBranchID = initialState.PrimaryBranchID
 		case EventThought:
-			messageIdPart, _, _ := strings.Cut(payload, "\n")
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 			msgA2ID, _ = strconv.Atoi(messageIdPart)
 		case EventModelMessage:
-			messageIdPart, _, _ := strings.Cut(payload, "\n")
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 			msgA3ID, _ = strconv.Atoi(messageIdPart)
 		}
 	}
@@ -447,68 +323,33 @@ func TestBranchingMessageChain(t *testing.T) {
 	printMessages(t, db, "After A1-A3 chain")
 
 	// 2. Send second user message (C)
-	mockProvider = &MockGeminiProvider{
+	replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
 			// Responses for B (thought, model)
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "B's thought", Thought: true},
-								},
-							},
-						},
-					},
-				},
-			},
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "B's response"},
-								},
-							},
-						},
-					},
-				},
-			},
+			responseFromPart(Part{Text: "B's thought", Thought: true}),
+			responseFromPart(Part{Text: "B's response"}),
 		},
-	}
-	CurrentProvider = mockProvider
+	})
 	userMessageB1 := "Message B"
 	reqBodyB1 := map[string]interface{}{
 		"message": userMessageB1,
 	}
 	bodyB1, _ := json.Marshal(reqBodyB1)
-	reqB1 := httptest.NewRequest("POST", fmt.Sprintf("/api/chat/%s", sessionId), bytes.NewReader(bodyB1))
-	reqB1.Header.Set("Content-Type", "application/json")
-	reqB1 = reqB1.WithContext(contextWithGlobals(reqB1.Context(), db, ga))
-	rrB1 := httptest.NewRecorder()
-	router.ServeHTTP(rrB1, reqB1)
-	if rrB1.Code != http.StatusOK {
-		t.Fatalf("chatMessage for B failed with status %d: %s", rrB1.Code, rrB1.Body.String())
-	}
+	rrB1 := testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), bodyB1, http.StatusOK)
 
-	eventsB := strings.Split(strings.TrimSpace(rrB1.Body.String()), "\n\n")
 	var msgB1ID int // B1: User message
 	var msgB2ID int // B2: Thought message
 	var msgB3ID int // B3: Model message
 
-	for _, event := range eventsB {
-		event = strings.ReplaceAll(event[6:], "\ndata: ", "\n")
-		eventType, payload, _ := strings.Cut(event, "\n")
-		switch EventType([]rune(eventType)[0]) {
+	for event := range parseSseStream(t, rrB1) {
+		switch event.Type {
 		case EventAcknowledge:
-			msgB1ID, _ = strconv.Atoi(payload)
+			msgB1ID, _ = strconv.Atoi(event.Payload)
 		case EventThought:
-			messageIdPart, _, _ := strings.Cut(payload, "\n")
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 			msgB2ID, _ = strconv.Atoi(messageIdPart)
 		case EventModelMessage:
-			messageIdPart, _, _ := strings.Cut(payload, "\n")
+			messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 			msgB3ID, _ = strconv.Atoi(messageIdPart)
 		}
 	}
@@ -519,79 +360,47 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// Verify A1-A3-B1-B3 chain in DB
 	var msg Message
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgA1ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil || *msg.ChosenNextID != msgA2ID {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA1ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA2ID {
 		t.Errorf("A1's chosen_next_id is not A2 (thought). Got %v, want %d", msg.ChosenNextID, msgA2ID)
 	}
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgA2ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil || *msg.ChosenNextID != msgA3ID {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA2ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA3ID {
 		t.Errorf("A2's chosen_next_id is not A3 (model). Got %v, want %d", msg.ChosenNextID, msgA3ID)
 	}
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgA3ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil || *msg.ChosenNextID != msgB1ID {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB1ID {
 		t.Errorf("A3's chosen_next_id is not B1 (user). Got %v, want %d", msg.ChosenNextID, msgB1ID)
 	}
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgB1ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil || *msg.ChosenNextID != msgB2ID {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB1ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB2ID {
 		t.Errorf("B1's chosen_next_id is not B2 (thought). Got %v, want %d", msg.ChosenNextID, msgB2ID)
 	}
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgB2ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil || *msg.ChosenNextID != msgB3ID {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB2ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB3ID {
 		t.Errorf("B2's chosen_next_id is not B3 (model). Got %v, want %d", msg.ChosenNextID, msgB3ID)
 	}
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgB3ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID != nil {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB3ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID != nil {
 		t.Errorf("B3's chosen_next_id is not nil. Got %v", msg.ChosenNextID)
 	}
 
-	// ii) A3 (모델 A) 다음에 브랜치를 새로 만들어 C1-C2-C3를 만들고
+	// ii) Create a new branch C1-C2-C3 after A3 (Model A)
 	// Create a new branch from message A3 (Model A)
-	mockProvider = &MockGeminiProvider{
+	replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
 			// Responses for C (thought, model)
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "C's thought", Thought: true},
-								},
-							},
-						},
-					},
-				},
-			},
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "C's response"},
-								},
-							},
-						},
-					},
-				},
-			},
+			responseFromPart(Part{Text: "C's thought", Thought: true}),
+			responseFromPart(Part{Text: "C's response"}),
 		},
-	}
-	CurrentProvider = mockProvider
+	})
 	msgC1Text := "Message C"
 	reqBodyC1 := map[string]interface{}{
 		"updatedMessageId": msgB1ID, // Branching from A3, updating B1
 		"newMessageText":   msgC1Text,
 	}
 	bodyC1, _ := json.Marshal(reqBodyC1)
-	reqC1 := httptest.NewRequest("POST", fmt.Sprintf("/api/chat/%s/branch", sessionId), bytes.NewReader(bodyC1))
-	reqC1.Header.Set("Content-Type", "application/json")
-	reqC1 = reqC1.WithContext(contextWithGlobals(reqC1.Context(), db, ga))
-	rrC1 := httptest.NewRecorder()
-	router.ServeHTTP(rrC1, reqC1)
-	if rrC1.Code != http.StatusOK {
-		t.Fatalf("createBranchHandler for C failed with status %d: %s", rrC1.Code, rrC1.Body.String())
-	}
+	rrC1 := testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch", sessionId), bodyC1, http.StatusOK)
 
 	var branchResponseC map[string]string
 	err = json.Unmarshal(rrC1.Body.Bytes(), &branchResponseC)
@@ -607,43 +416,18 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// Verify that the new branch is now the primary branch
 	var currentPrimaryBranchID string
-	err = db.QueryRow("SELECT primary_branch_id FROM sessions WHERE id = ?", sessionId).Scan(&currentPrimaryBranchID)
-	if err != nil || currentPrimaryBranchID != newBranchCID {
+	querySingleRow(t, db, "SELECT primary_branch_id FROM sessions WHERE id = ?", []interface{}{sessionId}, &currentPrimaryBranchID)
+	if currentPrimaryBranchID != newBranchCID {
 		t.Errorf("Primary branch not updated to new branch. Got %s, want %s", currentPrimaryBranchID, newBranchCID)
 	}
 
 	// Simulate streaming response for Message C (thought and model)
-	mockProvider = &MockGeminiProvider{
+	replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "C's thought", Thought: true},
-								},
-							},
-						},
-					},
-				},
-			},
-			{
-				Response: VertexGenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "C's response"},
-								},
-							},
-						},
-					},
-				},
-			},
+			responseFromPart(Part{Text: "C's thought", Thought: true}),
+			responseFromPart(Part{Text: "C's response"}),
 		},
-	}
-	CurrentProvider = mockProvider
+	})
 
 	// Prepare initial state for streaming for the new branch
 	initialStateCStream := InitialState{
@@ -655,7 +439,9 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 
 	// Create a dummy SSE writer for streamGeminiResponse
-	dummySseW := newSseWriter(sessionId, httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	rrDummy := httptest.NewRecorder()
+	reqDummy := httptest.NewRequest("GET", "/", nil)
+	dummySseW := newSseWriter(sessionId, rrDummy, reqDummy)
 	if dummySseW == nil {
 		t.Fatalf("Failed to create dummy SSE writer")
 	}
@@ -668,24 +454,14 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	printMessages(t, db, "After A1-A3-C1-C3 branch creation")
 
-	// iii) 그 상태에서 히스토리가 C1-C2-C3를 제대로 포함하며 A3 다음 메시지가 B1/C1 둘 다 있음을 확인
+	// iii) Verify that the history correctly includes C1-C2-C3 and that A3 has both B1 and C1 as next messages.
 	// Load history for C1-C2-C3 branch
-	reqLoadC := httptest.NewRequest("GET", fmt.Sprintf("/api/chat/%s", sessionId), nil)
-	reqLoadC.Header.Set("Accept", "text/event-stream")
-	reqLoadC = reqLoadC.WithContext(contextWithGlobals(reqLoadC.Context(), db, ga))
-	rrLoadC := httptest.NewRecorder()
-	router.ServeHTTP(rrLoadC, reqLoadC)
-	if rrLoadC.Code != http.StatusOK {
-		t.Fatalf("loadChatSession for C1-C2-C3 failed with status %d: %s", rrLoadC.Code, rrLoadC.Body.String())
-	}
+	rrLoadC := testRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
 
-	eventsLoadC := strings.Split(strings.TrimSpace(rrLoadC.Body.String()), "\n\n")
 	var initialStateC InitialState
-	for _, event := range eventsLoadC {
-		event = strings.ReplaceAll(event[6:], "\ndata: ", "\n")
-		eventType, payload, _ := strings.Cut(event, "\n")
-		if EventType([]rune(eventType)[0]) == EventInitialState || EventType([]rune(eventType)[0]) == EventInitialStateNoCall {
-			err = json.Unmarshal([]byte(payload), &initialStateC)
+	for event := range parseSseStream(t, rrLoadC) {
+		if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
+			err = json.Unmarshal([]byte(event.Payload), &initialStateC)
 			if err != nil {
 				t.Fatalf("Failed to unmarshal initialState for C1-C2-C3: %v", err)
 			}
@@ -694,21 +470,21 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 
 	// Get msgC2ID and msgC3ID from DB after streaming
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgC1ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgC1ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil {
 		t.Fatalf("Failed to get chosen_next_id for msgC1ID %d: %v", msgC1ID, err)
 	}
 	msgC2ID := int(*msg.ChosenNextID)
 
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgC2ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgC2ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil {
 		t.Fatalf("Failed to get chosen_next_id for msgC2ID %d: %v", msgC2ID, err)
 	}
 	msgC3ID := int(*msg.ChosenNextID)
 
 	// History should be C (user), C (thought), C (model)
 	if len(initialStateC.History) != 3 {
-		t.Errorf("Expected C1-C2-C3 history length 3, got %d", len(initialStateC.History))
+		t.Fatalf("Expected C1-C2-C3 history length 3, got %d", len(initialStateC.History))
 	}
 	if initialStateC.History[0].ID != fmt.Sprintf("%d", msgC1ID) ||
 		initialStateC.History[1].ID != fmt.Sprintf("%d", msgC2ID) ||
@@ -717,52 +493,35 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 
 	// Verify A3's chosen_next_id is C1 (user C)
-	err = db.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", msgA3ID).Scan(&msg.ChosenNextID)
-	if err != nil || msg.ChosenNextID == nil || *msg.ChosenNextID != msgC1ID {
+	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ChosenNextID)
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgC1ID {
 		t.Errorf("A3's chosen_next_id is not C1 (user C). Got %v, want %d", msg.ChosenNextID, msgC1ID)
 	}
 
 	// Verify A3's parent (A3) has both B1 and C1 as possible next messages (by checking branches table)
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM branches WHERE session_id = ? AND branch_from_message_id = ?", sessionId, msgA3ID).Scan(&count)
-	if err != nil || count != 1 { // Only the new C branch should have A3 as parent
+	querySingleRow(t, db, "SELECT COUNT(*) FROM branches WHERE session_id = ? AND branch_from_message_id = ?", []interface{}{sessionId, msgA3ID}, &count)
+	if count != 1 { // Only the new C branch should have A3 as parent
 		t.Errorf("Expected 1 branch from A3, got %d", count)
 	}
 
-	// iv) A1-A3-B1-B3 브랜치로 돌아가고
+	// iv) Switch back to the A1-A3-B1-B3 branch
 	// Switch back to A1-A3-B1-B3 branch
 	reqBodySwitch := map[string]interface{}{
 		"newPrimaryBranchId": originalPrimaryBranchID,
 	}
 	bodySwitch, _ := json.Marshal(reqBodySwitch)
-	reqSwitch := httptest.NewRequest("PUT", fmt.Sprintf("/api/chat/%s/branch", sessionId), bytes.NewReader(bodySwitch))
-	reqSwitch.Header.Set("Content-Type", "application/json")
-	reqSwitch = reqSwitch.WithContext(contextWithGlobals(reqSwitch.Context(), db, ga))
-	rrSwitch := httptest.NewRecorder()
-	router.ServeHTTP(rrSwitch, reqSwitch)
-	if rrSwitch.Code != http.StatusOK {
-		t.Fatalf("switchBranchHandler failed with status %d: %s", rrSwitch.Code, rrSwitch.Body.String())
-	}
+	testRequest(t, router, "PUT", fmt.Sprintf("/api/chat/%s/branch", sessionId), bodySwitch, http.StatusOK)
 	printMessages(t, db, "After switching back to A1-A3-B1-B3 branch")
 
-	// v) 히스토리가 A1-A3-B1-B3로 바뀌었음을 확인
+	// v) Verify that the history has changed to A1-A3-B1-B3
 	// Load history for A1-A3-B1-B3 branch
-	reqLoadA1B3 := httptest.NewRequest("GET", fmt.Sprintf("/api/chat/%s", sessionId), nil)
-	reqLoadA1B3.Header.Set("Accept", "text/event-stream")
-	reqLoadA1B3 = reqLoadA1B3.WithContext(contextWithGlobals(reqLoadA1B3.Context(), db, ga))
-	rrLoadA1B3 := httptest.NewRecorder()
-	router.ServeHTTP(rrLoadA1B3, reqLoadA1B3)
-	if rrLoadA1B3.Code != http.StatusOK {
-		t.Fatalf("loadChatSession for A1-A3-B1-B3 failed with status %d: %s", rrLoadA1B3.Code, rrLoadA1B3.Body.String())
-	}
+	rrLoadA1B3 := testRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
 
-	eventsLoadA1B3 := strings.Split(strings.TrimSpace(rrLoadA1B3.Body.String()), "\n\n")
 	var initialStateA1B3 InitialState
-	for _, event := range eventsLoadA1B3 {
-		event = strings.ReplaceAll(event[6:], "\ndata: ", "\n")
-		eventType, payload, _ := strings.Cut(event, "\n")
-		if EventType([]rune(eventType)[0]) == EventInitialState || EventType([]rune(eventType)[0]) == EventInitialStateNoCall {
-			err := json.Unmarshal([]byte(payload), &initialStateA1B3)
+	for event := range parseSseStream(t, rrLoadA1B3) {
+		if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
+			err := json.Unmarshal([]byte(event.Payload), &initialStateA1B3)
 			if err != nil {
 				t.Fatalf("Failed to unmarshal initialState for A1-A3-B1-B3: %v", err)
 			}

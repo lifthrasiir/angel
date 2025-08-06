@@ -8,8 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/gorilla/mux"
 	"io"
 	"io/fs"
 	"log"
@@ -17,6 +15,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 )
 
 //go:embed frontend/dist
@@ -390,7 +391,11 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 	resp, err := CurrentProvider.CountTokens(context.Background(), contents, modelName)
 	if err != nil {
 		log.Printf("CountTokens API call failed: %v", err)
-		http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", err), http.StatusInternalServerError)
+		if apiErr, ok := err.(*APIError); ok {
+			http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", apiErr.Message), apiErr.StatusCode)
+		} else {
+			http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 

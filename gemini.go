@@ -50,6 +50,16 @@ func (ts *tokenSaverSource) Client(ctx context.Context) *http.Client {
 	return oauth2.NewClient(ctx, ts.TokenSource)
 }
 
+type APIError struct {
+	StatusCode int
+	Message    string
+	Response   string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API response error: %d %s, response: %s", e.StatusCode, e.Message, e.Response)
+}
+
 // Define CodeAssistClient struct
 type CodeAssistClient struct {
 	clientProvider HTTPClientProvider // Changed from *http.Client
@@ -89,7 +99,7 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("API response error: %s, response: %s", resp.Status, string(bodyBytes))
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: resp.Status, Response: string(bodyBytes)}
 	}
 
 	return resp, nil

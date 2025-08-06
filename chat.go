@@ -85,25 +85,6 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Send acknowledgement for user message ID to frontend
 	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
 
-	// Prepare initial state for streaming with only SessionId and SystemPrompt
-	initialStateForClient := InitialState{
-		SessionId:       sessionId,
-		History:         []FrontendMessage{}, // Empty history for initial client state
-		SystemPrompt:    systemPrompt,
-		WorkspaceID:     requestBody.WorkspaceID,
-		PrimaryBranchID: primaryBranchID, // Include primary branch ID
-	}
-
-	initialStateJSON, err := json.Marshal(initialStateForClient)
-	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to marshal initial state for client: %v", err)
-		http.Error(w, "Failed to prepare initial state for client", http.StatusInternalServerError)
-		return
-	}
-
-	// Send the initial state (SessionId and SystemPrompt) as the first event
-	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
-
 	// Add this sseWriter to the active list for broadcasting subsequent events
 	addSseWriter(sessionId, sseW)
 	defer removeSseWriter(sessionId, sseW)

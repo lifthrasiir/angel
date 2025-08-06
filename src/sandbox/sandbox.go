@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -164,7 +163,7 @@ func checkDeveloperMode(testDir string) (bool, error) {
 
 	// If there's an error, check if it's because of insufficient privilege.
 	// A common error message for insufficient privileges on Windows is "A required privilege is not held by the client."
-	
+
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		// Check for specific error code for insufficient privileges (1314 on Windows)
 		if exitErr.ExitCode() == 1314 {

@@ -5,9 +5,10 @@
   "main": "index.js",
   "scripts": {
     "build-frontend": "npm run build --prefix frontend",
-    "build-backend": "go fmt . && go build .",
+    "build-backend": "goimports -w . && go build .",
     "build": "npm run build-frontend && npm run build-backend",
-    "test": "go test -count=8 ./...",
+    "test-backend": "goimports -w . && go test -count=8 ./...",
+    "test": "npm run test-backend",
     "pack": "upx --lzma -9 -o angel.dist.exe angel.exe",
     "start": "node -e \"require('child_process').execSync(process.platform === 'win32' ? 'angel.exe' : '.\\angel', { stdio: 'inherit' })"
   },
