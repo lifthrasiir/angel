@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage, InitialState } from '../types/chat';
 import {
   EventComplete,
   EventError,
@@ -24,6 +24,7 @@ import {
   SET_IS_STREAMING,
   SET_IS_SYSTEM_PROMPT_EDITING,
   SET_MESSAGES,
+  SET_PRIMARY_BRANCH_ID,
   SET_SELECTED_FILES,
   SET_SYSTEM_PROMPT,
   SET_USER_EMAIL,
@@ -36,6 +37,7 @@ interface UseSessionInitializationProps {
   isStreaming: boolean;
   dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
+  primaryBranchId: string;
 }
 
 export const useSessionInitialization = ({
@@ -43,6 +45,7 @@ export const useSessionInitialization = ({
   isStreaming,
   dispatch,
   handleLoginRedirect,
+  primaryBranchId,
 }: UseSessionInitializationProps) => {
   const navigate = useNavigate();
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
@@ -104,11 +107,12 @@ export const useSessionInitialization = ({
         try {
           eventSource = loadSession(
             currentSessionId,
+            primaryBranchId,
             (event: MessageEvent) => {
               const [eventType, eventData] = splitOnceByNewline(event.data);
 
               if (eventType === EventInitialState || eventType === EventInitialStateNoCall) {
-                const data = JSON.parse(eventData);
+                const data: InitialState = JSON.parse(eventData);
                 dispatch({
                   type: SET_CHAT_SESSION_ID,
                   payload: data.sessionId,
@@ -151,6 +155,7 @@ export const useSessionInitialization = ({
                   }),
                 });
                 dispatch({ type: SET_WORKSPACE_ID, payload: data.workspaceId });
+                dispatch({ type: SET_PRIMARY_BRANCH_ID, payload: data.primaryBranchId });
 
                 dispatch({
                   type: SET_IS_STREAMING,

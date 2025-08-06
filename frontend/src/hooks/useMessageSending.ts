@@ -14,6 +14,7 @@ import {
   SET_SELECTED_FILES,
   SET_SESSION_NAME,
   SET_SYSTEM_PROMPT,
+  SET_PRIMARY_BRANCH_ID,
   UPDATE_AGENT_MESSAGE,
   UPDATE_USER_MESSAGE_ID,
 } from './chatReducer';
@@ -25,6 +26,7 @@ interface UseMessageSendingProps {
   systemPrompt: string;
   dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
+  primaryBranchId: string;
 }
 
 export const useMessageSending = ({
@@ -34,6 +36,7 @@ export const useMessageSending = ({
   systemPrompt,
   dispatch,
   handleLoginRedirect,
+  primaryBranchId,
 }: UseMessageSendingProps) => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -62,7 +65,14 @@ export const useMessageSending = ({
         dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
       }
 
-      const response = await sendMessage(inputMessage, attachments, chatSessionId, systemPrompt, workspaceId);
+      const response = await sendMessage(
+        inputMessage,
+        attachments,
+        chatSessionId,
+        systemPrompt,
+        workspaceId,
+        primaryBranchId,
+      );
 
       if (response.status === 401) {
         handleLoginRedirect();
@@ -116,9 +126,10 @@ export const useMessageSending = ({
           dispatch({ type: ADD_MESSAGE, payload: message });
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
-        onSessionStart: (sessionId: string, systemPrompt: string) => {
+        onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => {
           dispatch({ type: SET_CHAT_SESSION_ID, payload: sessionId });
           dispatch({ type: SET_SYSTEM_PROMPT, payload: systemPrompt });
+          dispatch({ type: SET_PRIMARY_BRANCH_ID, payload: primaryBranchId });
           navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
         },
         onSessionNameUpdate: (sessionId: string, newName: string) => {

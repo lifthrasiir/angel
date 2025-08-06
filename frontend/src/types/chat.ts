@@ -4,6 +4,11 @@ export interface FileAttachment {
   data: string;
 }
 
+export interface PossibleNextMessage {
+  messageId: string;
+  branchId: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: string;
@@ -11,6 +16,18 @@ export interface ChatMessage {
   type?: 'model' | 'thought' | 'system' | 'user' | 'function_call' | 'function_response' | 'model_error';
   attachments?: FileAttachment[];
   cumulTokenCount?: number | null;
+  branchId?: string;
+  parentMessageId?: string;
+  chosenNextId?: string;
+  possibleNextIds?: PossibleNextMessage[];
+}
+
+export interface InitialState {
+  sessionId: string;
+  history: ChatMessage[];
+  systemPrompt: string;
+  workspaceId: string;
+  primaryBranchId: string;
 }
 
 export interface Session {

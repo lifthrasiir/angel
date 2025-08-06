@@ -18,6 +18,7 @@ export const ADD_ERROR_MESSAGE = 'ADD_ERROR_MESSAGE'; // New Action Type
 export const SET_SESSION_NAME = 'SET_SESSION_NAME';
 export const SET_WORKSPACE_ID = 'SET_WORKSPACE_ID'; // New Action Type
 export const SET_WORKSPACE_NAME = 'SET_WORKSPACE_NAME'; // New Action Type
+export const SET_PRIMARY_BRANCH_ID = 'SET_PRIMARY_BRANCH_ID';
 export const UPDATE_USER_MESSAGE_ID = 'UPDATE_USER_MESSAGE_ID';
 
 // State Interface
@@ -34,6 +35,7 @@ export interface ChatState {
   selectedFiles: File[];
   workspaceId?: string; // Added workspaceId to state
   workspaceName?: string; // Added workspaceName to state
+  primaryBranchId: string; // New field for primary branch ID
 }
 
 // Initial State
@@ -50,6 +52,7 @@ export const initialState: ChatState = {
   selectedFiles: [],
   workspaceId: undefined, // Added workspaceId to initial state
   workspaceName: undefined, // Added workspaceName to initial state
+  primaryBranchId: '', // Initialize primaryBranchId
 };
 
 // Action Interface
@@ -74,6 +77,7 @@ export type ChatAction =
     }
   | { type: typeof SET_WORKSPACE_ID; payload: string | undefined }
   | { type: typeof SET_WORKSPACE_NAME; payload: string | undefined }
+  | { type: typeof SET_PRIMARY_BRANCH_ID; payload: string }
   | { type: typeof UPDATE_USER_MESSAGE_ID; payload: { temporaryId: string; newId: string } };
 
 // Reducer Function
@@ -170,6 +174,7 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
         systemPrompt: '',
         isSystemPromptEditing: true,
         selectedFiles: [],
+        primaryBranchId: '',
       };
     case SET_SESSION_NAME:
       return {
@@ -182,6 +187,8 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
       return { ...state, workspaceId: action.payload };
     case SET_WORKSPACE_NAME:
       return { ...state, workspaceName: action.payload };
+    case SET_PRIMARY_BRANCH_ID:
+      return { ...state, primaryBranchId: action.payload };
     case UPDATE_USER_MESSAGE_ID: {
       const { temporaryId, newId } = action.payload;
       return {

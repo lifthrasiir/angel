@@ -24,6 +24,7 @@ export const useChatSession = () => {
     selectedFiles,
     workspaceId: stateWorkspaceId, // Rename to avoid conflict with useParams
     workspaceName,
+    primaryBranchId,
   } = state;
 
   const location = useLocation();
@@ -75,6 +76,7 @@ export const useChatSession = () => {
     isStreaming,
     dispatch,
     handleLoginRedirect,
+    primaryBranchId,
   });
 
   const { handleSendMessage, cancelStreamingCall } = useMessageSending({
@@ -84,6 +86,7 @@ export const useChatSession = () => {
     systemPrompt,
     dispatch,
     handleLoginRedirect,
+    primaryBranchId,
   });
 
   return {
@@ -99,6 +102,7 @@ export const useChatSession = () => {
     selectedFiles,
     workspaceId: stateWorkspaceId, // Return stateWorkspaceId
     workspaceName,
+    primaryBranchId,
     handleLogin: handleLoginRedirect,
     handleFilesSelected: handleFilesSelectedWrapper,
     handleRemoveFile: handleRemoveFileWrapper,

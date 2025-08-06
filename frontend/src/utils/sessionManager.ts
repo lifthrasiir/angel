@@ -18,10 +18,11 @@ export const fetchSessions = async (workspaceId?: string): Promise<WorkspaceWith
 
 export const loadSession = (
   sessionId: string,
+  primaryBranchId: string,
   onMessage: (event: MessageEvent) => void,
   onError: (event: Event) => void,
 ): EventSource => {
-  const eventSource = new EventSource(`/api/chat/${sessionId}`, {
+  const eventSource = new EventSource(`/api/chat/${sessionId}?primaryBranchId=${primaryBranchId}`, {
     withCredentials: true,
   });
 

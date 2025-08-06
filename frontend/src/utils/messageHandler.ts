@@ -26,6 +26,7 @@ export const sendMessage = async (
   chatSessionId: string | null,
   systemPrompt: string,
   workspaceId?: string,
+  primaryBranchId?: string,
 ) => {
   let apiUrl = '';
   let requestBody: any = {};
@@ -33,6 +34,9 @@ export const sendMessage = async (
   if (chatSessionId) {
     apiUrl = `/api/chat/${chatSessionId}`;
     requestBody = { message: inputMessage, attachments };
+    if (primaryBranchId) {
+      requestBody.primaryBranchId = primaryBranchId;
+    }
   } else {
     apiUrl = '/api/chat';
     requestBody = {
@@ -60,7 +64,7 @@ export interface StreamEventHandlers {
   onThought: (messageId: string, thoughtText: string) => void;
   onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => void;
   onFunctionResponse: (messageId: string, functionResponse: any) => void;
-  onSessionStart: (sessionId: string, systemPrompt: string) => void;
+  onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => void;
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
   onError: (errorData: string) => void;
@@ -116,8 +120,8 @@ export const processStreamResponse = async (
         handlers.onFunctionResponse(messageId, functionResponseRaw);
       } else if (type === EventInitialState) {
         // New: Handle EventInitialState
-        const { sessionId, systemPrompt } = JSON.parse(data);
-        handlers.onSessionStart(sessionId, systemPrompt);
+        const { sessionId, systemPrompt, primaryBranchId } = JSON.parse(data);
+        handlers.onSessionStart(sessionId, systemPrompt, primaryBranchId);
       } else if (type === EventSessionName) {
         const [sessionIdToUpdate, newName] = splitOnceByNewline(data);
         handlers.onSessionNameUpdate(sessionIdToUpdate, newName);
