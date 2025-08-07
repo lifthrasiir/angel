@@ -37,8 +37,10 @@ type tokenSaverSource struct {
 }
 
 func (ts *tokenSaverSource) Token(db *sql.DB) (*oauth2.Token, error) {
+	log.Println("tokenSaverSource: Attempting to get/refresh token...")
 	token, err := ts.TokenSource.Token()
 	if err != nil {
+		log.Printf("tokenSaverSource: Failed to get/refresh token: %v", err)
 		return nil, err
 	}
 	// Save the token to the database after it's obtained/refreshed
@@ -47,6 +49,7 @@ func (ts *tokenSaverSource) Token(db *sql.DB) (*oauth2.Token, error) {
 }
 
 func (ts *tokenSaverSource) Client(ctx context.Context) *http.Client {
+	log.Println("tokenSaverSource: Creating new HTTP client with oauth2.TokenSource.")
 	return oauth2.NewClient(ctx, ts.TokenSource)
 }
 
@@ -78,11 +81,13 @@ func NewCodeAssistClient(provider HTTPClientProvider, projectID string) *CodeAss
 func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBody interface{}, headers map[string]string) (*http.Response, error) {
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
+		log.Printf("makeAPIRequest: Failed to marshal request body: %v", err)
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
+		log.Printf("makeAPIRequest: Failed to create HTTP request: %v", err)
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
@@ -93,12 +98,14 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 
 	resp, err := c.clientProvider.Client(ctx).Do(httpReq)
 	if err != nil {
+		log.Printf("makeAPIRequest: API request failed: %v", err)
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		log.Printf("makeAPIRequest: API response error: Status %d %s, Response: %s", resp.StatusCode, resp.Status, string(bodyBytes))
 		return nil, &APIError{StatusCode: resp.StatusCode, Message: resp.Status, Response: string(bodyBytes)}
 	}
 
@@ -134,6 +141,7 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 
 	resp, err := c.makeAPIRequest(ctx, url, reqBody, headers)
 	if err != nil {
+		log.Printf("streamGenerateContent: makeAPIRequest failed: %v", err)
 		return nil, err
 	}
 
@@ -144,6 +152,7 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 func (c *CodeAssistClient) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	respBody, err := c.streamGenerateContent(ctx, params)
 	if err != nil {
+		log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
 		return nil, nil, err
 	}
 
@@ -154,6 +163,7 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, params Session
 	_, err = dec.Token()
 	if err != nil {
 		respBody.Close()
+		log.Printf("SendMessageStream: Expected opening bracket '[', but got %v", err)
 		return nil, nil, fmt.Errorf("expected opening bracket '[', but got %w", err)
 	}
 
@@ -162,7 +172,7 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, params Session
 		for dec.More() {
 			var caResp CaGenerateContentResponse
 			if err := dec.Decode(&caResp); err != nil {
-				log.Printf("Failed to decode JSON object from stream: %v", err)
+				log.Printf("SendMessageStream: Failed to decode JSON object from stream: %v", err)
 				return // Or handle error more robustly
 			}
 			if !yield(caResp) {
@@ -178,6 +188,7 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, params Session
 func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error) {
 	seq, closer, err := c.SendMessageStream(ctx, params)
 	if err != nil {
+		log.Printf("GenerateContentOneShot: SendMessageStream failed: %v", err)
 		return "", err
 	}
 	defer closer.Close()

@@ -295,10 +295,12 @@ func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 	ga := getGeminiAuth(w, r)
 
-	// Check if logged in
-	if ga.SelectedAuthType == AuthTypeLoginWithGoogle && (ga.Token == nil || !ga.Token.Valid()) {
-		http.Error(w, "Not logged in", http.StatusUnauthorized)
-		return
+	// Use ValidateAuthAndProject to ensure token is valid and refreshed if necessary
+	if ga.SelectedAuthType == AuthTypeLoginWithGoogle {
+		if !ga.ValidateAuthAndProject("getUserInfoHandler", w, r) {
+			// ValidateAuthAndProject already sent an error response
+			return
+		}
 	}
 
 	// If UserEmail is empty but token is valid, try to re-fetch user info
@@ -306,6 +308,8 @@ func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println("getUserInfoHandler: UserEmail is empty, attempting to fetch from Google API...")
 		if err := ga.GetUserInfoAndSave(db); err != nil {
 			log.Printf("getUserInfoHandler: Failed to fetch user info: %v", err)
+			// Don't fail the request, just log the error. The user might still be "logged in"
+			// but we just couldn't get their email.
 		}
 	}
 

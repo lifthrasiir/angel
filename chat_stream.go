@@ -45,7 +45,6 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		return err
 	}
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
-	log.Printf("streamGeminiResponse: Sent initial state for session %s.", initialState.SessionId)
 
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
@@ -99,12 +98,6 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			// Log UsageMetadata if available
 			if caResp.Response.UsageMetadata != nil {
 				lastUsageMetadata = caResp.Response.UsageMetadata
-				log.Printf("UsageMetadata: PromptTokenCount=%d, CandidatesTokenCount=%d, TotalTokenCount=%d, ToolUsePromptTokenCount=%d, ThoughtsTokenCount=%d",
-					lastUsageMetadata.PromptTokenCount,
-					lastUsageMetadata.CandidatesTokenCount,
-					lastUsageMetadata.TotalTokenCount,
-					lastUsageMetadata.ToolUsePromptTokenCount,
-					lastUsageMetadata.ThoughtsTokenCount)
 
 				// Update last user message's cumul_token_count with PromptTokenCount
 				if lastUsageMetadata.PromptTokenCount > 0 && lastUserMessageID != 0 {
@@ -402,7 +395,7 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 
 	nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(userMessage, "")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	llmInferredName, err := CurrentProvider.GenerateContentOneShot(ctx, SessionParams{

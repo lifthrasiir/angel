@@ -61,7 +61,6 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	userMessage := requestBody.Message
 
-	log.Printf("newSessionAndMessage: Attempting to add user message to session %s with branch %s", sessionId, primaryBranchID)
 	// Add message with branch_id, no parent_message_id, no chosen_next_id initially
 	userMessageID, err := AddMessageToSession(db, sessionId, primaryBranchID, nil, nil, "user", userMessage, "text", requestBody.Attachments, nil)
 	if err != nil {
@@ -69,7 +68,6 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("newSessionAndMessage: Successfully added user message with ID %d to session %s", userMessageID, sessionId)
 
 	// Update last_updated_at for the new session
 	if err := UpdateSessionLastUpdated(db, sessionId); err != nil {
@@ -296,16 +294,13 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if hasActiveCall(sessionId) {
-			log.Printf("loadChatSession: Active call found for session %s, streaming response.", sessionId)
 			sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
 			// Keep the connection open until client disconnects.
 			// sseW will get any broadcasted messages over the course.
 			<-r.Context().Done()
-			log.Printf("loadChatSession: Client disconnected from SSE for session %s.", sessionId)
 		} else {
 			// If no active call, close the SSE connection after sending initial state
-			log.Printf("loadChatSession: No active call for session %s, closing SSE connection.", sessionId)
 			sseW.sendServerEvent(EventInitialStateNoCall, string(initialStateJSON))
 			time.Sleep(10 * time.Millisecond) // Give some time for the event to be processed
 			sseW.Close()

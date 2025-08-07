@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -72,20 +71,6 @@ func createTables(db *sql.DB) error {
 	return nil
 }
 
-// addCumulTokenCountColumn adds the cumul_token_count column to the messages table if it doesn't exist.
-func addCumulTokenCountColumn(db *sql.DB) error {
-	_, err := db.Exec("ALTER TABLE messages ADD COLUMN cumul_token_count INTEGER;")
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate column name: cumul_token_count") {
-			log.Println("Column 'cumul_token_count' already exists in 'messages' table. Skipping ALTER TABLE.")
-			return nil // Not an error if column already exists
-		}
-		return fmt.Errorf("Failed to add cumul_token_count column to messages table: %w", err)
-	}
-	log.Println("Added cumul_token_count column to messages table.")
-	return nil
-}
-
 // InitDB initializes the SQLite database connection and creates tables if they don't exist.
 func InitDB(dataSourceName string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dataSourceName)
@@ -108,26 +93,6 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	if err = createTables(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create tables: %w", err)
-	}
-
-	// Add cumul_token_count column to messages table if it doesn't exist
-	if err = addCumulTokenCountColumn(db); err != nil {
-		log.Printf("Failed to add cumul_token_count column: %v", err)
-	}
-	if err = addPrimaryBranchIDColumn(db); err != nil {
-		log.Printf("Failed to add primary_branch_id column: %v", err)
-	}
-	if err = addBranchIDColumn(db); err != nil {
-		log.Printf("Failed to add branch_id column: %v", err)
-	}
-	if err = addParentMessageIDColumn(db); err != nil {
-		log.Printf("Failed to add parent_message_id column: %v", err)
-	}
-	if err = addChosenNextIDColumn(db); err != nil {
-		log.Printf("Failed to add chosen_next_id column: %v", err)
-	}
-	if err = addBranchesTable(db); err != nil {
-		log.Printf("Failed to add branches table: %v", err)
 	}
 
 	log.Println("Database initialized and tables created.")
@@ -534,7 +499,6 @@ func GetBranch(db *sql.DB, branchID string) (Branch, error) {
 // GetSessionHistory retrieves the chat history for a given session and its primary branch,
 // recursively fetching messages from parent branches.
 func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, discardThoughts bool) ([]FrontendMessage, error) {
-	log.Printf("GetSessionHistory: sessionID=%s, primaryBranchID=%s, discardThoughts=%t", sessionID, primaryBranchID, discardThoughts)
 	var history []FrontendMessage
 
 	// Get all messages belonging to the primary branch
@@ -542,17 +506,12 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 	if err != nil {
 		return nil, fmt.Errorf("failed to get messages for primary branch %s: %w", primaryBranchID, err)
 	}
-	log.Printf("GetSessionHistory: primaryBranchMessages count=%d", len(primaryBranchMessages))
-	for _, msg := range primaryBranchMessages {
-		log.Printf("  Message: ID=%d, Role=%s, Parent=%v, ChosenNext=%v, Text=%s", msg.ID, msg.Role, msg.ParentMessageID, msg.ChosenNextID, msg.Text)
-	}
 
 	// Map to store messages by their ID for quick lookup within the primary branch
 	primaryBranchMessageMap := make(map[int]Message)
 	for _, msg := range primaryBranchMessages {
 		primaryBranchMessageMap[msg.ID] = msg
 	}
-	log.Printf("GetSessionHistory: primaryBranchMessageMap size=%d", len(primaryBranchMessageMap))
 
 	// Find the first message in the primary branch (the one with no parent_message_id or whose parent_message_id is not in the same branch)
 	var firstMessageID int
@@ -578,26 +537,20 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 			return nil, fmt.Errorf("failed to get first message of primary branch (complex): %w", err)
 		}
 	}
-	log.Printf("GetSessionHistory: firstMessageID=%d", firstMessageID)
 
 	// If no messages found in the primary branch, return empty history
 	if firstMessageID == 0 {
-		log.Printf("GetSessionHistory: No first message found, returning empty history.")
 		return []FrontendMessage{}, nil
 	}
 
 	currentMessageID := firstMessageID
 	for {
-		log.Printf("GetSessionHistory: Processing currentMessageID=%d", currentMessageID)
 		msg, ok := primaryBranchMessageMap[currentMessageID]
 		if !ok {
-			log.Printf("GetSessionHistory: currentMessageID %d not found in primaryBranchMessageMap, breaking loop.", currentMessageID)
 			break // No more messages in the chosen path within the primary branch
 		}
-		log.Printf("  Current Message: ID=%d, Role=%s, Parent=%v, ChosenNext=%v, Text=%s", msg.ID, msg.Role, msg.ParentMessageID, msg.ChosenNextID, msg.Text)
 
 		if discardThoughts && msg.Role == "thought" {
-			log.Printf("GetSessionHistory: Discarding thought message ID=%d", msg.ID)
 			// Skip thought messages
 		} else {
 			var parts []Part
@@ -667,13 +620,11 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 		}
 
 		if msg.ChosenNextID == nil {
-			log.Printf("GetSessionHistory: msg.ChosenNextID is nil for message ID=%d, breaking loop.", msg.ID)
 			break // End of the chosen path
 		}
 		currentMessageID = *msg.ChosenNextID
 	}
 
-	log.Printf("GetSessionHistory: Returning history with %d messages.", len(history))
 	return history, nil
 }
 
@@ -784,81 +735,6 @@ func UpdateMessageContent(db *sql.DB, messageID int, content string) error {
 	if err != nil {
 		return fmt.Errorf("failed to execute update message content statement: %w", err)
 	}
-	return nil
-}
-
-// addPrimaryBranchIDColumn adds the primary_branch_id column to the sessions table if it doesn't exist.
-func addPrimaryBranchIDColumn(db *sql.DB) error {
-	_, err := db.Exec("ALTER TABLE sessions ADD COLUMN primary_branch_id TEXT;")
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate column name: primary_branch_id") {
-			log.Println("Column 'primary_branch_id' already exists in 'sessions' table. Skipping ALTER TABLE.")
-			return nil
-		}
-		return fmt.Errorf("Failed to add primary_branch_id column to sessions table: %w", err)
-	}
-	log.Println("Added primary_branch_id column to sessions table.")
-	return nil
-}
-
-// addBranchIDColumn adds the branch_id column to the messages table if it doesn't exist.
-func addBranchIDColumn(db *sql.DB) error {
-	_, err := db.Exec("ALTER TABLE messages ADD COLUMN branch_id TEXT;")
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate column name: branch_id") {
-			log.Println("Column 'branch_id' already exists in 'messages' table. Skipping ALTER TABLE.")
-			return nil
-		}
-		return fmt.Errorf("Failed to add branch_id column to messages table: %w", err)
-	}
-	log.Println("Added branch_id column to messages table.")
-	return nil
-}
-
-// addParentMessageIDColumn adds the parent_message_id column to the messages table if it doesn't exist.
-func addParentMessageIDColumn(db *sql.DB) error {
-	_, err := db.Exec("ALTER TABLE messages ADD COLUMN parent_message_id INTEGER;")
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate column name: parent_message_id") {
-			log.Println("Column 'parent_message_id' already exists in 'messages' table. Skipping ALTER TABLE.")
-			return nil
-		}
-		return fmt.Errorf("Failed to add parent_message_id column to messages table: %w", err)
-	}
-	log.Println("Added parent_message_id column to messages table.")
-	return nil
-}
-
-// addChosenNextIDColumn adds the chosen_next_id column to the messages table if it doesn't exist.
-func addChosenNextIDColumn(db *sql.DB) error {
-	_, err := db.Exec("ALTER TABLE messages ADD COLUMN chosen_next_id INTEGER;")
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate column name: chosen_next_id") {
-			log.Println("Column 'chosen_next_id' already exists in 'messages' table. Skipping ALTER TABLE.")
-			return nil
-		}
-		return fmt.Errorf("Failed to add chosen_next_id column to messages table: %w", err)
-	}
-	log.Println("Added chosen_next_id column to messages table.")
-	return nil
-}
-
-// addBranchesTable adds the branches table if it doesn't exist.
-func addBranchesTable(db *sql.DB) error {
-	createTableSQL := `
-	CREATE TABLE IF NOT EXISTS branches (
-		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
-		parent_branch_id TEXT,
-		branch_from_message_id INTEGER,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-	);`
-	_, err := db.Exec(createTableSQL)
-	if err != nil {
-		return fmt.Errorf("Failed to create branches table: %w", err)
-	}
-	log.Println("Branches table ensured.")
 	return nil
 }
 

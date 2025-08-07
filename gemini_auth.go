@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -30,6 +31,7 @@ type GeminiAuth struct {
 	ProjectID         string
 	SelectedAuthType  AuthType
 	UserEmail         string
+	initMutex         sync.Mutex
 }
 
 // saveToken saves the OAuth token to the database.
@@ -233,15 +235,44 @@ func InitCurrentProvider(ga *GeminiAuth, db *sql.DB) {
 func (ga *GeminiAuth) ValidateAuthAndProject(handlerName string, w http.ResponseWriter, r *http.Request) bool {
 	db := getDb(w, r)
 
+	ga.initMutex.Lock()
+	defer ga.initMutex.Unlock()
+
+	// Detailed logging at the start of ValidateAuthAndProject
+	if ga.Token != nil {
+		// If token is invalid but CurrentProvider is not nil, force CurrentProvider to nil
+		if !ga.Token.Valid() && CurrentProvider != nil {
+			log.Println("ValidateAuthAndProject: Invalid token detected, forcing CurrentProvider to nil for re-initialization.")
+			CurrentProvider = nil
+		}
+	} else {
+		// If token is nil but CurrentProvider is not nil, force CurrentProvider to nil
+		if CurrentProvider != nil {
+			log.Println("ValidateAuthAndProject: Token is nil, forcing CurrentProvider to nil for re-initialization.")
+			CurrentProvider = nil
+		}
+	}
+
 	// Check if GeminiClient is initialized and attempt to re-initialize if needed
 	if CurrentProvider == nil {
 		log.Printf("%s: GeminiClient not initialized, attempting to re-initialize...", handlerName)
-		if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil && ga.Token.Valid() {
+		if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil {
+			// Attempt to re-initialize, which includes token refresh if needed
 			InitCurrentProvider(ga, db)
+			log.Printf("%s: CurrentProvider state after InitCurrentProvider: %t, ProjectID: %s", handlerName, CurrentProvider == nil, ga.ProjectID)
 		}
+		// After attempting re-initialization, check CurrentProvider again
 		if CurrentProvider == nil {
 			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
-			http.Error(w, "CodeAssist client not initialized. Check authentication method.", http.StatusUnauthorized)
+			// If CurrentProvider is still nil, it means token refresh failed or no token exists.
+			// Provide a more user-friendly message.
+			if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil && ga.Token.RefreshToken == "" {
+				http.Error(w, "Session expired. Please log in again (no refresh token).", http.StatusUnauthorized)
+			} else if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil {
+				http.Error(w, "Session expired. Please log in again (token refresh failed).", http.StatusUnauthorized)
+			} else {
+				http.Error(w, "CodeAssist client not initialized. Check authentication method or log in.", http.StatusUnauthorized)
+			}
 			return false
 		}
 	}
