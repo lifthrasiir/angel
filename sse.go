@@ -26,6 +26,7 @@ const (
 	EventFunctionReply                = 'R' // Function response
 	EventComplete                     = 'Q' // Query complete
 	EventSessionName                  = 'N' // Session name inferred/updated
+	EventCumulTokenCount              = 'C' // Cumulative token count update
 	EventError                        = 'E' // Error message
 )
 

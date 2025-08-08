@@ -104,6 +104,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					if err := UpdateMessageTokens(db, lastUserMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
 						log.Printf("Failed to update cumul_token_count for user message %d: %v", lastUserMessageID, err)
 					}
+					broadcastToSession(initialState.SessionId, EventCumulTokenCount, fmt.Sprintf("%d\n%d", lastUserMessageID, lastUsageMetadata.PromptTokenCount))
 				}
 			}
 			select {
@@ -359,6 +360,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		if err := UpdateMessageTokens(db, modelMessageID, *finalTotalTokenCount); err != nil {
 			log.Printf("Failed to update final message tokens: %v", err)
 		}
+		broadcastToSession(initialState.SessionId, EventCumulTokenCount, fmt.Sprintf("%d\n%d", modelMessageID, *finalTotalTokenCount))
 	}
 
 	completeCall(initialState.SessionId) // Mark the call as completed

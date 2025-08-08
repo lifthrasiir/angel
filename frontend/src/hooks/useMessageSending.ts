@@ -17,6 +17,7 @@ import {
   SET_PRIMARY_BRANCH_ID,
   UPDATE_AGENT_MESSAGE,
   UPDATE_USER_MESSAGE_ID,
+  UPDATE_MESSAGE_TOKEN_COUNT,
 } from './chatReducer';
 
 interface UseMessageSendingProps {
@@ -147,6 +148,9 @@ export const useMessageSending = ({
         },
         onAcknowledge: (messageId: string) => {
           dispatch({ type: UPDATE_USER_MESSAGE_ID, payload: { temporaryId: userMessage.id, newId: messageId } });
+        },
+        onTokenCount: (messageId: string, cumulTokenCount: number) => {
+          dispatch({ type: UPDATE_MESSAGE_TOKEN_COUNT, payload: { messageId, cumulTokenCount } });
         },
       };
 

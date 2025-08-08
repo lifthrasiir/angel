@@ -16,6 +16,7 @@ export const EventFunctionCall = 'F';
 export const EventFunctionReply = 'R';
 export const EventComplete = 'Q';
 export const EventSessionName = 'N';
+export const EventCumulTokenCount = 'C';
 export const EventError = 'E';
 
 // EventSource cannot be used directly here because it only supports GET requests,
@@ -69,6 +70,7 @@ export interface StreamEventHandlers {
   onEnd: () => void;
   onError: (errorData: string) => void;
   onAcknowledge: (messageId: string) => void;
+  onTokenCount: (messageId: string, cumulTokenCount: number) => void;
 }
 
 export const processStreamResponse = async (
@@ -136,6 +138,9 @@ export const processStreamResponse = async (
         qReceived = true;
       } else if (type === EventAcknowledge) {
         handlers.onAcknowledge(data);
+      } else if (type === EventCumulTokenCount) {
+        const [messageId, cumulTokenCountStr] = splitOnceByNewline(data);
+        handlers.onTokenCount(messageId, parseInt(cumulTokenCountStr, 10));
       } else {
         console.warn('Unknown protocol:', data);
       }

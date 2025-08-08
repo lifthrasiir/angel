@@ -20,6 +20,7 @@ export const SET_WORKSPACE_ID = 'SET_WORKSPACE_ID'; // New Action Type
 export const SET_WORKSPACE_NAME = 'SET_WORKSPACE_NAME'; // New Action Type
 export const SET_PRIMARY_BRANCH_ID = 'SET_PRIMARY_BRANCH_ID';
 export const UPDATE_USER_MESSAGE_ID = 'UPDATE_USER_MESSAGE_ID';
+export const UPDATE_MESSAGE_TOKEN_COUNT = 'UPDATE_MESSAGE_TOKEN_COUNT';
 
 // State Interface
 export interface ChatState {
@@ -78,7 +79,8 @@ export type ChatAction =
   | { type: typeof SET_WORKSPACE_ID; payload: string | undefined }
   | { type: typeof SET_WORKSPACE_NAME; payload: string | undefined }
   | { type: typeof SET_PRIMARY_BRANCH_ID; payload: string }
-  | { type: typeof UPDATE_USER_MESSAGE_ID; payload: { temporaryId: string; newId: string } };
+  | { type: typeof UPDATE_USER_MESSAGE_ID; payload: { temporaryId: string; newId: string } }
+  | { type: typeof UPDATE_MESSAGE_TOKEN_COUNT; payload: { messageId: string; cumulTokenCount: number } };
 
 // Reducer Function
 export const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
@@ -194,6 +196,15 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
       return {
         ...state,
         messages: state.messages.map((message) => (message.id === temporaryId ? { ...message, id: newId } : message)),
+      };
+    }
+    case UPDATE_MESSAGE_TOKEN_COUNT: {
+      const { messageId, cumulTokenCount } = action.payload;
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === messageId ? { ...message, cumulTokenCount: cumulTokenCount } : message,
+        ),
       };
     }
     default:
