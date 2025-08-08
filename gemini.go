@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,7 +35,7 @@ type tokenSaverSource struct {
 	ga *GeminiAuth
 }
 
-func (ts *tokenSaverSource) Token(db *sql.DB) (*oauth2.Token, error) {
+func (ts *tokenSaverSource) Token() (*oauth2.Token, error) {
 	log.Println("tokenSaverSource: Attempting to get/refresh token...")
 	token, err := ts.TokenSource.Token()
 	if err != nil {
@@ -44,7 +43,7 @@ func (ts *tokenSaverSource) Token(db *sql.DB) (*oauth2.Token, error) {
 		return nil, err
 	}
 	// Save the token to the database after it's obtained/refreshed
-	ts.ga.SaveToken(db, token)
+	ts.ga.SaveToken(ts.ga.db, token)
 	return token, nil
 }
 

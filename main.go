@@ -110,18 +110,18 @@ func main() {
 	defer db.Close()
 	InitMCPManager(db)
 
-	var ga GeminiAuth
-	ga.Init(db)
+	ga := NewGeminiAuth(db)
+	ga.Init()
 
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(db, &ga))
+	router.Use(makeContextMiddleware(db, ga))
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
-	if ga.SelectedAuthType == AuthTypeLoginWithGoogle {
-		router.HandleFunc("/login", HandleGoogleLogin).Methods("GET")
-		router.HandleFunc("/oauth2callback", HandleGoogleCallback).Methods("GET")
+	if ga.GetCurrentProvider() == string(AuthTypeLoginWithGoogle) {
+		router.HandleFunc("/login", http.HandlerFunc(ga.GetAuthHandler().ServeHTTP)).Methods("GET")
+		router.HandleFunc("/oauth2callback", http.HandlerFunc(ga.GetAuthCallbackHandler().ServeHTTP)).Methods("GET")
 	}
-	router.HandleFunc("/api/logout", ga.HandleLogout).Methods("POST")
+	router.HandleFunc("/api/logout", http.HandlerFunc(ga.GetLogoutHandler().ServeHTTP)).Methods("POST")
 
 	InitRouter(router)
 
@@ -175,19 +175,19 @@ type contextKey uint8
 
 const (
 	dbKey contextKey = iota
-	gaKey
+	// gaKey
 )
 
-func contextWithGlobals(ctx context.Context, db *sql.DB, ga *GeminiAuth) context.Context {
+func contextWithGlobals(ctx context.Context, db *sql.DB, auth Auth) context.Context {
 	ctx = context.WithValue(ctx, dbKey, db)
-	ctx = context.WithValue(ctx, gaKey, ga)
+	ctx = auth.SetAuthContext(ctx, auth) // Use the Auth interface's SetAuthContext method
 	return ctx
 }
 
-func makeContextMiddleware(db *sql.DB, ga *GeminiAuth) func(next http.Handler) http.Handler {
+func makeContextMiddleware(db *sql.DB, auth Auth) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(contextWithGlobals(r.Context(), db, ga))
+			r = r.WithContext(contextWithGlobals(r.Context(), db, auth))
 
 			next.ServeHTTP(w, r)
 		})
@@ -203,13 +203,13 @@ func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
 	return db
 }
 
-func getGeminiAuth(w http.ResponseWriter, r *http.Request) *GeminiAuth {
-	ga, ok := r.Context().Value(gaKey).(*GeminiAuth)
+func getAuth(w http.ResponseWriter, r *http.Request) Auth {
+	auth, ok := r.Context().Value(authContextKey).(Auth)
 	if !ok {
-		http.Error(w, "Internal Server Error: GeminiAuth missing.", http.StatusInternalServerError)
+		http.Error(w, "Internal Server Error: Auth interface missing.", http.StatusInternalServerError)
 		runtime.Goexit()
 	}
-	return ga
+	return auth
 }
 
 func handleSessionPage(w http.ResponseWriter, r *http.Request) {
@@ -292,28 +292,22 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	// Use ValidateAuthAndProject to ensure token is valid and refreshed if necessary
-	if ga.SelectedAuthType == AuthTypeLoginWithGoogle {
-		if !ga.ValidateAuthAndProject("getUserInfoHandler", w, r) {
-			// ValidateAuthAndProject already sent an error response
-			return
-		}
+	// Use Validate to ensure token is valid and refreshed if necessary
+	if !auth.Validate("getUserInfoHandler", w, r) {
+		// Validate already sent an error response
+		return
 	}
 
 	// If UserEmail is empty but token is valid, try to re-fetch user info
-	if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.UserEmail == "" && ga.Token != nil {
-		log.Println("getUserInfoHandler: UserEmail is empty, attempting to fetch from Google API...")
-		if err := ga.GetUserInfoAndSave(db); err != nil {
-			log.Printf("getUserInfoHandler: Failed to fetch user info: %v", err)
-			// Don't fail the request, just log the error. The user might still be "logged in"
-			// but we just couldn't get their email.
-		}
+	userEmail, err := auth.GetUserEmail(r)
+	if err != nil {
+		log.Printf("getUserInfoHandler: Failed to get user email: %v", err)
+		// Non-fatal, continue without email
 	}
 
-	sendJSONResponse(w, map[string]string{"email": ga.UserEmail})
+	sendJSONResponse(w, map[string]string{"email": userEmail})
 }
 
 func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
@@ -369,9 +363,9 @@ func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("countTokensHandler", w, r) {
+	if !auth.Validate("countTokensHandler", w, r) {
 		return
 	}
 
@@ -412,9 +406,9 @@ func callFunction(fc FunctionCall) (map[string]interface{}, error) {
 
 // handleCall handles GET and DELETE requests for /api/calls/{sessionId}
 func handleCall(w http.ResponseWriter, r *http.Request) {
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("handleCall", w, r) {
+	if !auth.Validate("handleCall", w, r) {
 		return
 	}
 

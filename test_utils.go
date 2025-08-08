@@ -20,7 +20,7 @@ import (
 )
 
 // Helper function to set up the test environment
-func setupTest(t *testing.T) (*mux.Router, *sql.DB, *GeminiAuth) {
+func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 	// Initialize an in-memory database for testing with unique name
 	dbName := fmt.Sprintf(":memory:?cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL&test=%s", t.Name())
 	testDB, err := InitDB(dbName)
@@ -40,7 +40,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *GeminiAuth) {
 	InitMCPManager(testDB)
 
 	// Reset GlobalGeminiAuth for each test
-	ga := &GeminiAuth{}
+	ga := NewGeminiAuth(testDB)
 	// Explicitly set auth type and ProjectID for testing
 	ga.SelectedAuthType = AuthTypeLoginWithGoogle
 	ga.ProjectID = "test-project"
@@ -52,7 +52,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *GeminiAuth) {
 		Expiry:      time.Now().Add(time.Hour),
 	}
 
-	InitCurrentProvider(ga, testDB)
+	ga.InitCurrentProvider()
 
 	// Override CurrentProvider with MockLLMProvider for testing
 	mockLLMProvider := &MockLLMProvider{

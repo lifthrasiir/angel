@@ -24,9 +24,9 @@ type InitialState struct {
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("newSessionAndMessage", w, r) {
+	if !auth.Validate("newSessionAndMessage", w, r) {
 		return
 	}
 
@@ -115,9 +115,9 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("chatMessage", w, r) {
+	if !auth.Validate("chatMessage", w, r) {
 		return
 	}
 
@@ -225,9 +225,9 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 // New endpoint to load chat session history
 func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("loadChatSession", w, r) {
+	if !auth.Validate("loadChatSession", w, r) {
 		return
 	}
 
@@ -313,9 +313,9 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("listSessionsByWorkspaceHandler", w, r) {
+	if !auth.Validate("listSessionsByWorkspaceHandler", w, r) {
 		return
 	}
 
@@ -333,9 +333,9 @@ func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 // createBranchHandler creates a new branch from a given parent message.
 func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("createBranchHandler", w, r) {
+	if !auth.Validate("createBranchHandler", w, r) {
 		return
 	}
 
@@ -425,9 +425,9 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 // switchBranchHandler switches the primary branch of a session.
 func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("switchBranchHandler", w, r) {
+	if !auth.Validate("switchBranchHandler", w, r) {
 		return
 	}
 
@@ -577,9 +577,9 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 // New endpoint to delete a chat session
 func deleteSession(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	ga := getGeminiAuth(w, r)
+	auth := getAuth(w, r)
 
-	if !ga.ValidateAuthAndProject("deleteSession", w, r) {
+	if !auth.Validate("deleteSession", w, r) {
 		return
 	}
 
