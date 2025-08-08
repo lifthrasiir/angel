@@ -30,6 +30,7 @@ export interface ChatMessage {
   parentMessageId?: string;
   chosenNextId?: string;
   possibleNextIds?: PossibleNextMessage[];
+  model?: string; // New field for the model that generated the message
 }
 
 export interface InitialState {

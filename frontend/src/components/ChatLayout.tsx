@@ -32,6 +32,9 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     selectedFiles,
     workspaceId,
     workspaceName,
+    availableModels,
+    selectedModel,
+    setSelectedModel,
     handleLogin,
     handleFilesSelected,
     handleRemoveFile,
@@ -100,6 +103,9 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
               handleCancelStreaming={cancelStreamingCall}
               chatInputRef={chatInputRef}
               chatAreaRef={chatAreaRef}
+              availableModels={availableModels}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
             />
           )}
           <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />

@@ -7,7 +7,9 @@ import (
 	"iter"
 )
 
-var CurrentProvider LLMProvider
+const DefaultGeminiModel = "gemini-2.5-flash"
+
+var CurrentProviders = make(map[string]LLMProvider)
 
 // SessionParams holds the parameters for a chat session.
 type SessionParams struct {

@@ -27,6 +27,9 @@ interface ChatAreaProps {
   handleCancelStreaming: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef: React.RefObject<HTMLDivElement>;
+  availableModels: string[]; // New prop
+  selectedModel: string; // New prop
+  setSelectedModel: (model: string) => void; // New prop
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -48,6 +51,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleCancelStreaming,
   chatInputRef,
   chatAreaRef,
+  availableModels,
+  selectedModel,
+  setSelectedModel,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -163,6 +169,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             onFilesSelected={onFilesSelected}
             handleCancelStreaming={handleCancelStreaming}
             inputRef={chatInputRef}
+            availableModels={availableModels}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
           />
         </>
       )}

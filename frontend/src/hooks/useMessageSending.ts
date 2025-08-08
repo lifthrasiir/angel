@@ -28,6 +28,7 @@ interface UseMessageSendingProps {
   dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
   primaryBranchId: string;
+  selectedModel: string; // New field for selected model
 }
 
 export const useMessageSending = ({
@@ -38,6 +39,7 @@ export const useMessageSending = ({
   dispatch,
   handleLoginRedirect,
   primaryBranchId,
+  selectedModel,
 }: UseMessageSendingProps) => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -57,6 +59,7 @@ export const useMessageSending = ({
         parts: [{ text: inputMessage }],
         type: 'user',
         attachments: attachments,
+        model: selectedModel, // Include selected model in user message
       };
       dispatch({ type: ADD_MESSAGE, payload: userMessage });
       dispatch({ type: SET_INPUT_MESSAGE, payload: '' });
@@ -73,6 +76,7 @@ export const useMessageSending = ({
         systemPrompt,
         workspaceId,
         primaryBranchId,
+        selectedModel, // Pass selected model to sendMessage
       );
 
       if (response.status === 401) {

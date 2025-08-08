@@ -7,6 +7,7 @@ interface MessageInfoProps {
   parentMessageId?: string;
   chosenNextId?: string;
   possibleNextIds?: PossibleNextMessage[];
+  model?: string; // New prop for the model that generated the message
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = ({
@@ -15,13 +16,15 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
   parentMessageId,
   chosenNextId,
   possibleNextIds,
+  model,
 }) => {
   const hasInfo =
     cumulTokenCount !== undefined ||
     branchId ||
     parentMessageId ||
     chosenNextId ||
-    (possibleNextIds && possibleNextIds.length > 0);
+    (possibleNextIds && possibleNextIds.length > 0) ||
+    model;
 
   if (!hasInfo) {
     return null;
@@ -31,6 +34,7 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
     <details className="message-info-details">
       <summary className="message-info-summary">Message Info</summary>
       <div className="message-info-content">
+        {model && <div className="model-name">Model: {model}</div>}
         {cumulTokenCount !== undefined && cumulTokenCount !== null && (
           <div className="token-count">Tokens: {cumulTokenCount}</div>
         )}

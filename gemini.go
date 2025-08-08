@@ -14,7 +14,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const DefaultGeminiModel = "gemini-2.5-flash"
+// Ensure CodeAssistClient implements LLMProvider
+var _ LLMProvider = (*CodeAssistClient)(nil)
 
 // HTTPClientProvider defines an interface for providing an *http.Client.
 type HTTPClientProvider interface {

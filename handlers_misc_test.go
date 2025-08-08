@@ -12,7 +12,7 @@ func TestCountTokensHandler(t *testing.T) {
 	router, _, _ := setupTest(t)
 
 	// Mock the CountTokens method of CurrentProvider
-	mockLLMProvider := CurrentProvider.(*MockLLMProvider)
+	mockLLMProvider := CurrentProviders["gemini-2.5-flash"].(*MockLLMProvider)
 	mockLLMProvider.CountTokensFunc = func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
 		// Simulate token counting based on input text length
 		totalTokens := len(contents[0].Parts[0].Text) / 2 // Example: 2 chars per token
@@ -46,7 +46,11 @@ func TestCountTokensHandler(t *testing.T) {
 	// Test case 3: Authentication failure
 	t.Run("Authentication Failure", func(t *testing.T) {
 		// Temporarily set CurrentProvider to nil to simulate uninitialized client
-		originalProvider := replaceProvider(nil)
+		originalProvider := replaceProvider(&MockLLMProvider{
+			CountTokensFunc: func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+				return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: "Authentication failed"}
+			},
+		})
 		defer replaceProvider(originalProvider)
 
 		payload := []byte(`{"text": "Some text"}`)

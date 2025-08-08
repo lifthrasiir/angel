@@ -10,6 +10,9 @@ interface ChatInputProps {
   onFilesSelected: (files: File[]) => void; // New prop for file selection
   handleCancelStreaming: () => void; // New prop for canceling streaming
   inputRef: React.RefObject<HTMLTextAreaElement>;
+  availableModels: string[];
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -20,6 +23,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onFilesSelected,
   handleCancelStreaming,
   inputRef,
+  availableModels,
+  selectedModel,
+  setSelectedModel,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -66,8 +72,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
         borderTop: '1px solid #ccc',
         display: 'flex',
         alignItems: 'center',
-        position: 'sticky',
-        bottom: 0,
         background: 'white',
       }}
     >
@@ -91,31 +95,68 @@ const ChatInput: React.FC<ChatInputProps> = ({
       >
         <FaPaperclip />
       </button>
-      <textarea
-        ref={inputRef}
-        value={inputMessage}
-        onChange={(e) => setInputMessage(e.target.value)}
-        onInput={(e) => {
-          debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && e.ctrlKey && !isStreaming) {
-            e.preventDefault();
-            handleSendMessage();
-          }
-        }}
-        placeholder="Enter your message..."
-        rows={1}
+      <div
         style={{
+          display: 'flex',
+          flexDirection: 'column',
           flexGrow: 1,
-          padding: '10px',
           marginRight: '10px',
-          border: '1px solid #eee',
-          borderRadius: '5px',
-          resize: 'none',
-          overflowY: 'hidden',
         }}
-      />
+      >
+        <textarea
+          ref={inputRef}
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          onInput={(e) => {
+            debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.ctrlKey && !isStreaming) {
+              e.preventDefault();
+              handleSendMessage();
+            }
+          }}
+          placeholder="Enter your message..."
+          rows={1}
+          style={{
+            flexGrow: 1,
+            padding: '10px',
+            border: '1px solid #eee',
+            borderRadius: '5px',
+            resize: 'none',
+            overflowY: 'hidden',
+          }}
+        />
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            marginTop: '5px',
+          }}
+        >
+          <label htmlFor="model-select" style={{ marginRight: '10px' }}>
+            Model:
+          </label>
+          <select
+            id="model-select"
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            style={{
+              padding: '8px',
+              borderRadius: '5px',
+              border: '1px solid #ccc',
+              backgroundColor: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            {availableModels.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
       {isStreaming ? (
         <button
           onClick={handleCancelStreaming}

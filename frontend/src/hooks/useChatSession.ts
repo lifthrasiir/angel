@@ -3,11 +3,19 @@ import { useLocation, useParams } from 'react-router-dom';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
 import { handleLogin } from '../utils/userManager';
 import { useChat } from './ChatContext';
-import { SET_SELECTED_FILES, SET_SESSIONS, SET_WORKSPACE_ID, SET_WORKSPACE_NAME } from './chatReducer';
+import {
+  SET_SELECTED_FILES,
+  SET_SESSIONS,
+  SET_WORKSPACE_ID,
+  SET_WORKSPACE_NAME,
+  SET_AVAILABLE_MODELS,
+  SET_SELECTED_MODEL,
+} from './chatReducer';
 import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
 import { useSessionInitialization } from './useSessionInitialization';
 import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
+import { getAvailableModels } from '../api/models'; // Import the new API function
 
 export const useChatSession = () => {
   const { state, dispatch } = useChat();
@@ -25,6 +33,8 @@ export const useChatSession = () => {
     workspaceId: stateWorkspaceId, // Rename to avoid conflict with useParams
     workspaceName,
     primaryBranchId,
+    availableModels,
+    selectedModel,
   } = state;
 
   const location = useLocation();
@@ -32,6 +42,21 @@ export const useChatSession = () => {
 
   // Pass stateWorkspaceId to useWorkspaceAndSessions
   const { currentWorkspace, sessions: fetchedSessions, error } = useWorkspaceAndSessions(stateWorkspaceId);
+
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const models = await getAvailableModels();
+        dispatch({ type: SET_AVAILABLE_MODELS, payload: models });
+        if (models.length > 0) {
+          dispatch({ type: SET_SELECTED_MODEL, payload: models[0] }); // Set first model as default
+        }
+      } catch (err) {
+        console.error('Failed to fetch available models:', err);
+      }
+    };
+    fetchModels();
+  }, [dispatch]);
 
   useEffect(() => {
     if (currentWorkspace) {
@@ -87,7 +112,12 @@ export const useChatSession = () => {
     dispatch,
     handleLoginRedirect,
     primaryBranchId,
+    selectedModel,
   });
+
+  const setSelectedModel = (model: string) => {
+    dispatch({ type: SET_SELECTED_MODEL, payload: model });
+  };
 
   return {
     userEmail,
@@ -103,10 +133,13 @@ export const useChatSession = () => {
     workspaceId: stateWorkspaceId, // Return stateWorkspaceId
     workspaceName,
     primaryBranchId,
+    availableModels,
+    selectedModel,
     handleLogin: handleLoginRedirect,
     handleFilesSelected: handleFilesSelectedWrapper,
     handleRemoveFile: handleRemoveFileWrapper,
     handleSendMessage,
     cancelStreamingCall,
+    setSelectedModel,
   };
 };

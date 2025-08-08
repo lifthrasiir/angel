@@ -35,6 +35,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt string           `json:"systemPrompt"`
 		Attachments  []FileAttachment `json:"attachments"`
 		WorkspaceID  string           `json:"workspaceId"`
+		Model        string           `json:"model"` // New field for model
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
@@ -51,6 +52,12 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine the model to use
+	modelToUse := requestBody.Model
+	if modelToUse == "" {
+		modelToUse = DefaultGeminiModel // Default model for new sessions
+	}
+
 	// Create session with primary_branch_id
 	primaryBranchID, err := CreateSession(db, sessionId, systemPrompt, requestBody.WorkspaceID)
 	if err != nil {
@@ -62,7 +69,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	userMessage := requestBody.Message
 
 	// Add message with branch_id, no parent_message_id, no chosen_next_id initially
-	userMessageID, err := AddMessageToSession(db, sessionId, primaryBranchID, nil, nil, "user", userMessage, "text", requestBody.Attachments, nil)
+	userMessageID, err := AddMessageToSession(db, sessionId, primaryBranchID, nil, nil, "user", userMessage, "text", requestBody.Attachments, nil, modelToUse)
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
@@ -105,7 +112,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -131,6 +138,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		Message     string           `json:"message"`
 		Attachments []FileAttachment `json:"attachments"`
+		Model       string           `json:"model"` // New field for model
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
@@ -154,18 +162,40 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Find the last message in the current primary branch to update its chosen_next_id
 	var lastMessageID int
-	// Modified query to find the last message in the chain (chosen_next_id IS NULL)
-	err = db.QueryRow("SELECT id FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionId, primaryBranchID).Scan(&lastMessageID)
-	if err != nil && err != sql.ErrNoRows {
-		log.Printf("chatMessage: Failed to get last message ID for session %s and branch %s: %v", sessionId, primaryBranchID, err)
-		http.Error(w, fmt.Sprintf("Failed to get last message: %v", err), http.StatusInternalServerError)
-		return
+	var parentMessageID *int // Declare as pointer to int
+	var modelToUse string    // Declare modelToUse here
+
+	lastMessageIDFromDB, lastMessageModelFromDB, err := GetLastMessageInBranch(db, sessionId, primaryBranchID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			parentMessageID = nil
+			lastMessageID = 0
+			modelToUse = requestBody.Model // Use request body model for new branch
+			if modelToUse == "" {
+				modelToUse = DefaultGeminiModel // Fallback to default
+			}
+		} else {
+			log.Printf("chatMessage: Failed to get last message ID for session %s and branch %s: %v", sessionId, primaryBranchID, err)
+			http.Error(w, fmt.Sprintf("Failed to get last message: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		lastMessageID = lastMessageIDFromDB
+		parentMessageID = &lastMessageID
+
+		modelToUse = requestBody.Model
+		if modelToUse == "" {
+			modelToUse = lastMessageModelFromDB // Use the model of the last message in the branch
+			if modelToUse == "" {
+				modelToUse = DefaultGeminiModel // Fallback to default
+			}
+		}
 	}
 
 	userMessage := requestBody.Message
 
 	// Add new message to the primary branch
-	userMessageID, err := AddMessageToSession(db, sessionId, primaryBranchID, &lastMessageID, nil, "user", userMessage, "text", requestBody.Attachments, nil)
+	userMessageID, err := AddMessageToSession(db, sessionId, primaryBranchID, parentMessageID, nil, "user", userMessage, "text", requestBody.Attachments, nil, modelToUse)
 	if err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
@@ -215,7 +245,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		PrimaryBranchID: primaryBranchID, // Include primary branch ID
 	}
 
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
@@ -356,11 +386,9 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the updated message's role, type, parent_message_id, and branch_id to validate branching and create new branch
-	var updatedRole, updatedType, updatedBranchID string
-	var updatedParentMessageID sql.NullInt64
-	err := db.QueryRow("SELECT role, type, parent_message_id, branch_id FROM messages WHERE id = ?", requestBody.UpdatedMessageID).Scan(&updatedRole, &updatedType, &updatedParentMessageID, &updatedBranchID)
+	updatedRole, updatedType, updatedParentMessageID, updatedBranchID, err := GetMessageDetails(db, requestBody.UpdatedMessageID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "Updated message not found", http.StatusNotFound)
 		} else {
 			log.Printf("createBranchHandler: Failed to get updated message details: %v", err)
@@ -395,7 +423,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the new message in the new branch, with updatedMessageID as its parent
-	newMessageID, err := AddMessageToSession(db, sessionId, newBranchID, &requestBody.UpdatedMessageID, nil, "user", requestBody.NewMessageText, "text", nil, nil)
+	newMessageID, err := AddMessageToSession(db, sessionId, newBranchID, &branchFromMessageID, nil, "user", requestBody.NewMessageText, "text", nil, nil, "")
 	if err != nil {
 		log.Printf("createBranchHandler: Failed to add new message to new branch: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to add new message: %v", err), http.StatusInternalServerError)
@@ -475,13 +503,7 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 			parentMsgID := *oldBranch.BranchFromMessageID
 
 			// Find the message that originally followed parentMsgID in its own branch
-			var originalNextMessageID sql.NullInt64
-			err := db.QueryRow(`
-				SELECT id FROM messages
-				WHERE parent_message_id = ? AND branch_id = (SELECT branch_id FROM messages WHERE id = ?)
-				ORDER BY created_at ASC LIMIT 1
-			`, parentMsgID, parentMsgID).Scan(&originalNextMessageID)
-
+			originalNextMessageID, err := GetOriginalNextMessageID(db, parentMsgID, oldPrimaryBranchID)
 			if err != nil && err != sql.ErrNoRows {
 				log.Printf("switchBranchHandler: Failed to find original next message for %d: %v", parentMsgID, err)
 				// Non-fatal, continue
@@ -499,9 +521,7 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			// This was the initial branch. Its last message's chosen_next_id needs to revert to its original next message.
-			// Find the last message of the old primary branch
-			var lastMessageID int
-			err := db.QueryRow("SELECT id FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionId, oldPrimaryBranchID).Scan(&lastMessageID)
+			lastMessageID, _, err := GetLastMessageInBranch(db, sessionId, oldPrimaryBranchID)
 			if err != nil && err != sql.ErrNoRows {
 				log.Printf("switchBranchHandler: Failed to get last message ID for old primary branch %s: %v", oldPrimaryBranchID, err)
 				// Non-fatal, continue
@@ -547,14 +567,9 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Find the first message of the new primary branch that has parentMsgID as its parent
 		var firstMessageOfNewBranchID int
-		err := db.QueryRow(`
-			SELECT id FROM messages
-			WHERE parent_message_id = ? AND branch_id = ?
-			ORDER BY created_at ASC LIMIT 1
-		`, parentMsgID, requestBody.NewPrimaryBranchID).Scan(&firstMessageOfNewBranchID)
-
+		firstMessageOfNewBranchID, err := GetFirstMessageOfBranch(db, parentMsgID, requestBody.NewPrimaryBranchID)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				log.Printf("switchBranchHandler: No first message found for new branch %s. Skipping chosen_next_id update.", requestBody.NewPrimaryBranchID)
 			} else {
 				log.Printf("switchBranchHandler: Failed to find first message of new branch %s: %v", requestBody.NewPrimaryBranchID, err)

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -113,6 +114,17 @@ func main() {
 	ga := NewGeminiAuth(db)
 	ga.Init()
 
+	// Initialize CurrentProviders map
+	CurrentProviders = make(map[string]LLMProvider)
+
+	// Add gemini-2.5-flash provider
+	flashClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+	CurrentProviders["gemini-2.5-flash"] = flashClient
+
+	// Add gemini-2.5-pro provider (sharing the same auth as flash)
+	proClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+	CurrentProviders["gemini-2.5-pro"] = proClient
+
 	router := mux.NewRouter()
 	router.Use(makeContextMiddleware(db, ga))
 
@@ -164,6 +176,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/mcp/configs", getMCPConfigsHandler).Methods("GET")
 	router.HandleFunc("/api/mcp/configs", saveMCPConfigHandler).Methods("POST")
 	router.HandleFunc("/api/mcp/configs/{name}", deleteMCPConfigHandler).Methods("DELETE")
+	router.HandleFunc("/api/models", listModelsHandler).Methods("GET") // New endpoint
 	router.HandleFunc("/api", handleNotFound)
 
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
@@ -370,14 +383,24 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var requestBody struct {
-		Text string `json:"text"`
+		Text  string `json:"text"`
+		Model string `json:"model"` // Add model field to request body
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "countTokensHandler") {
 		return
 	}
 
-	modelName := DefaultGeminiModel
+	modelName := requestBody.Model
+	if modelName == "" {
+		modelName = "gemini-2.5-flash" // Default model if not provided
+	}
+
+	provider, ok := CurrentProviders[modelName]
+	if !ok {
+		http.Error(w, fmt.Sprintf("Unsupported model: %s", modelName), http.StatusBadRequest)
+		return
+	}
 
 	contents := []Content{
 		{
@@ -386,7 +409,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp, err := CurrentProvider.CountTokens(context.Background(), contents, modelName)
+	resp, err := provider.CountTokens(context.Background(), contents, modelName)
 	if err != nil {
 		log.Printf("CountTokens API call failed: %v", err)
 		if apiErr, ok := err.(*APIError); ok {
@@ -568,4 +591,13 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 // handleNotFound handles requests for paths that don't match any other routes.
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
+}
+
+func listModelsHandler(w http.ResponseWriter, r *http.Request) {
+	var models []string
+	for modelName := range CurrentProviders {
+		models = append(models, modelName)
+	}
+	sort.Strings(models)
+	sendJSONResponse(w, models)
 }

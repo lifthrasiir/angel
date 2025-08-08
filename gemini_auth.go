@@ -125,7 +125,7 @@ func (ga *GeminiAuth) Init() {
 	}
 }
 
-// InitCurrentProvider initializes the CurrentProvider based on GeminiAuth state.
+// InitCurrentProvider initializes the TokenSource and ProjectID based on GeminiAuth state.
 func (ga *GeminiAuth) InitCurrentProvider() {
 	ctx := context.Background()
 	var clientProvider HTTPClientProvider
@@ -134,6 +134,8 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 	case AuthTypeLoginWithGoogle:
 		if ga.Token == nil {
 			log.Println("InitCurrentProvider: OAuth token is nil. Cannot initialize client.")
+			ga.TokenSource = nil // Ensure TokenSource is nil if token is not available
+			ga.ProjectID = ""
 			return
 		}
 		// Always create a new token source to ensure it's up-to-date with the current token
@@ -148,14 +150,15 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 		_, err := ga.TokenSource.(*tokenSaverSource).Token() // This call will trigger refresh if needed
 		if err != nil {
 			log.Printf("InitCurrentProvider: Failed to proactively refresh token on startup: %v. Client not initialized.", err)
-			CurrentProvider = nil
+			ga.TokenSource = nil // Ensure TokenSource is nil on error
+			ga.ProjectID = ""
 			return
 		}
 
-		caClient := NewCodeAssistClient(clientProvider, ga.ProjectID) // Initialize with current ProjectID
-
-		// Only call LoadCodeAssist and OnboardUser if ProjectID is not set or needs re-validation
+		// If ProjectID is not set, try to get it.
 		if ga.ProjectID == "" {
+			// Create a temporary client to get ProjectID
+			tempCaClient := NewCodeAssistClient(clientProvider, "") // Pass empty ProjectID for initial load
 			loadReq := LoadCodeAssistRequest{
 				CloudaicompanionProject: ga.ProjectID, // Will be empty
 				Metadata: &ClientMetadata{
@@ -165,10 +168,10 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 					DuetProject: ga.ProjectID,
 				},
 			}
-			loadRes, loadErr := caClient.LoadCodeAssist(ctx, loadReq)
+			loadRes, loadErr := tempCaClient.LoadCodeAssist(ctx, loadReq)
 			if loadErr != nil {
-				log.Printf("InitCurrentProvider: LoadCodeAssist failed: %v. Client not initialized.", loadErr)
-				CurrentProvider = nil
+				log.Printf("InitCurrentProvider: LoadCodeAssist failed: %v. ProjectID not set.", loadErr)
+				ga.ProjectID = ""
 				return
 			}
 
@@ -199,27 +202,25 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 				if userTierID != "" {
 					onboardReq.TierID = &userTierID
 				}
-				lroRes, onboardErr := caClient.OnboardUser(ctx, onboardReq)
+				lroRes, onboardErr := tempCaClient.OnboardUser(ctx, onboardReq)
 				if onboardErr != nil {
-					log.Printf("InitCurrentProvider: OnboardUser failed: %v. Client not initialized.", onboardErr)
-					CurrentProvider = nil
+					log.Printf("InitCurrentProvider: OnboardUser failed: %v. ProjectID not set.", onboardErr)
+					ga.ProjectID = ""
 					return
 				}
 
 				if lroRes.Response != nil && lroRes.Response.CloudaicompanionProject != nil {
 					ga.ProjectID = lroRes.Response.CloudaicompanionProject.ID
 				} else {
-					log.Println("InitCurrentProvider: No project ID from OnboardUser. Client not initialized.")
-					CurrentProvider = nil
+					log.Println("InitCurrentProvider: No project ID from OnboardUser. ProjectID not set.")
+					ga.ProjectID = ""
 					return
 				}
 			} else {
-				log.Println("InitCurrentProvider: LoadCodeAssist did not return a Project ID. Client not initialized.")
-				CurrentProvider = nil
+				log.Println("InitCurrentProvider: LoadCodeAssist did not return a Project ID. ProjectID not set.")
+				ga.ProjectID = ""
 				return
 			}
-		} else {
-			// If ProjectID is already set, skip LoadCodeAssist and OnboardUser
 		}
 
 		// Ensure the final ProjectID is saved to the database
@@ -227,15 +228,22 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 
 	case AuthTypeUseGemini:
 		clientProvider = &defaultHTTPClientProvider{}
+		ga.TokenSource = clientProvider
+		// ProjectID is not needed for Gemini API Key
+		ga.ProjectID = ""
 	case AuthTypeUseVertexAI:
 		clientProvider = &defaultHTTPClientProvider{}
+		ga.TokenSource = clientProvider
+		// ProjectID should be set from env for Vertex AI
+		ga.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
 	case AuthTypeCloudShell:
 		clientProvider = &defaultHTTPClientProvider{}
+		ga.TokenSource = clientProvider
+		// ProjectID should be set from env for Cloud Shell
+		ga.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
 	default:
 		log.Fatalf("InitCurrentProvider: Unsupported authentication type: %s", ga.SelectedAuthType)
 	}
-
-	CurrentProvider = NewCodeAssistClient(clientProvider, ga.ProjectID)
 }
 
 // GetUserEmail returns the email of the currently logged-in user.
@@ -354,7 +362,7 @@ func (ga *GeminiAuth) GetAuthCallbackHandler() http.Handler {
 			}
 		}
 
-		// Re-initialize CurrentProvider after successful authentication and user info fetch
+		// Re-initialize CurrentProviders after successful authentication and user info fetch
 		ga.InitCurrentProvider()
 
 		// Redirect to the original path after successful authentication
@@ -367,7 +375,7 @@ func (ga *GeminiAuth) GetLogoutHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ga.Token = nil
 		ga.UserEmail = ""
-		CurrentProvider = nil
+		CurrentProviders = make(map[string]LLMProvider) // Clear all providers on logout
 
 		// Delete token from DB
 		if err := DeleteOAuthToken(ga.db); err != nil {
@@ -401,32 +409,18 @@ func (ga *GeminiAuth) Validate(handlerName string, w http.ResponseWriter, r *htt
 	defer ga.initMutex.Unlock()
 
 	// Detailed logging at the start of ValidateAuthAndProject
-	if ga.Token != nil {
-		// If token is invalid but CurrentProvider is not nil, force CurrentProvider to nil
-		if !ga.Token.Valid() && CurrentProvider != nil {
-			log.Println("Validate: Invalid token detected, forcing CurrentProvider to nil for re-initialization.")
-			CurrentProvider = nil
-		}
-	} else {
-		// If token is nil but CurrentProvider is not nil, force CurrentProvider to nil
-		if CurrentProvider != nil {
-			log.Println("Validate: Token is nil, forcing CurrentProvider to nil for re-initialization.")
-			CurrentProvider = nil
-		}
-	}
-
-	// Check if GeminiClient is initialized and attempt to re-initialize if needed
-	if CurrentProvider == nil {
-		log.Printf("%s: GeminiClient not initialized, attempting to re-initialize...", handlerName)
+	// Check if any provider is initialized and attempt to re-initialize if needed
+	if len(CurrentProviders) == 0 {
+		log.Printf("%s: No GeminiClient initialized, attempting to re-initialize...", handlerName)
 		if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil {
 			// Attempt to re-initialize, which includes token refresh if needed
 			ga.InitCurrentProvider()
-			log.Printf("%s: CurrentProvider state after InitCurrentProvider: %t, ProjectID: %s", handlerName, CurrentProvider == nil, ga.ProjectID)
+			log.Printf("%s: CurrentProviders state after InitCurrentProvider: %t, ProjectID: %s", handlerName, len(CurrentProviders) == 0, ga.ProjectID)
 		}
-		// After attempting re-initialization, check CurrentProvider again
-		if CurrentProvider == nil {
+		// After attempting re-initialization, check CurrentProviders again
+		if len(CurrentProviders) == 0 {
 			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
-			// If CurrentProvider is still nil, it means token refresh failed or no token exists.
+			// If CurrentProviders is still empty, it means token refresh failed or no token exists.
 			// Provide a more user-friendly message.
 			if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil && ga.Token.RefreshToken == "" {
 				http.Error(w, "Session expired. Please log in again (no refresh token).", http.StatusUnauthorized)

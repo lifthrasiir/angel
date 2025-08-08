@@ -21,6 +21,8 @@ export const SET_WORKSPACE_NAME = 'SET_WORKSPACE_NAME'; // New Action Type
 export const SET_PRIMARY_BRANCH_ID = 'SET_PRIMARY_BRANCH_ID';
 export const UPDATE_USER_MESSAGE_ID = 'UPDATE_USER_MESSAGE_ID';
 export const UPDATE_MESSAGE_TOKEN_COUNT = 'UPDATE_MESSAGE_TOKEN_COUNT';
+export const SET_AVAILABLE_MODELS = 'SET_AVAILABLE_MODELS'; // New Action Type
+export const SET_SELECTED_MODEL = 'SET_SELECTED_MODEL'; // New Action Type
 
 // State Interface
 export interface ChatState {
@@ -37,6 +39,8 @@ export interface ChatState {
   workspaceId?: string; // Added workspaceId to state
   workspaceName?: string; // Added workspaceName to state
   primaryBranchId: string; // New field for primary branch ID
+  availableModels: string[]; // New field for available models
+  selectedModel: string; // New field for selected model
 }
 
 // Initial State
@@ -53,7 +57,9 @@ export const initialState: ChatState = {
   selectedFiles: [],
   workspaceId: undefined, // Added workspaceId to initial state
   workspaceName: undefined, // Added workspaceName to initial state
-  primaryBranchId: '', // Initialize primaryBranchId
+  primaryBranchId: '',
+  availableModels: [], // Initialize availableModels
+  selectedModel: 'gemini-2.5-flash', // Initialize selectedModel
 };
 
 // Action Interface
@@ -80,7 +86,9 @@ export type ChatAction =
   | { type: typeof SET_WORKSPACE_NAME; payload: string | undefined }
   | { type: typeof SET_PRIMARY_BRANCH_ID; payload: string }
   | { type: typeof UPDATE_USER_MESSAGE_ID; payload: { temporaryId: string; newId: string } }
-  | { type: typeof UPDATE_MESSAGE_TOKEN_COUNT; payload: { messageId: string; cumulTokenCount: number } };
+  | { type: typeof UPDATE_MESSAGE_TOKEN_COUNT; payload: { messageId: string; cumulTokenCount: number } }
+  | { type: typeof SET_AVAILABLE_MODELS; payload: string[] }
+  | { type: typeof SET_SELECTED_MODEL; payload: string };
 
 // Reducer Function
 export const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
@@ -207,6 +215,10 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
         ),
       };
     }
+    case SET_AVAILABLE_MODELS:
+      return { ...state, availableModels: action.payload };
+    case SET_SELECTED_MODEL:
+      return { ...state, selectedModel: action.payload };
     default:
       return state;
   }

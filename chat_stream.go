@@ -16,7 +16,7 @@ import (
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int) error {
+func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var finalTotalTokenCount *int
@@ -49,6 +49,11 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
 
+	provider, ok := CurrentProviders[modelToUse]
+	if !ok {
+		return fmt.Errorf("unsupported model: %s", modelToUse)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -68,7 +73,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			// Continue with the Gemini API call
 		}
 
-		seq, closer, err := CurrentProvider.SendMessageStream(ctx, SessionParams{Contents: currentHistory, ModelName: DefaultGeminiModel, SystemPrompt: initialState.SystemPrompt, ThinkingConfig: &ThinkingConfig{IncludeThoughts: true}})
+		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{Contents: currentHistory, ModelName: modelToUse, SystemPrompt: initialState.SystemPrompt, ThinkingConfig: &ThinkingConfig{IncludeThoughts: true}})
 		if err != nil {
 			failCall(initialState.SessionId, err) // Mark the call as failed
 			// Save a model_error message to the database
@@ -82,7 +87,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
-				if _, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, nil, nil, "model", errorMessage, "model_error", nil, nil); err != nil {
+				if _, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, nil, nil, "model", errorMessage, "model_error", nil, nil, modelToUse); err != nil {
 					log.Printf("Failed to add model error message to DB: %v", err)
 				}
 			}
@@ -146,7 +151,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					} else {
 						parentMessageID = nil
 					}
-					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", string(fcJson), "function_call", nil, nil)
+					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", string(fcJson), "function_call", nil, nil, modelToUse)
 					if err != nil {
 						log.Printf("Failed to save function call message: %v", err)
 						return fmt.Errorf("failed to save function call message: %w", err)
@@ -190,7 +195,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					} else {
 						parentMessageID = nil
 					}
-					messageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "user", string(frJson), "function_response", nil, promptTokens)
+					messageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "user", string(frJson), "function_response", nil, promptTokens, modelToUse)
 					if err != nil {
 						log.Printf("Failed to save function response message: %v", err)
 						return fmt.Errorf("failed to save function response message: %w", err)
@@ -229,7 +234,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					} else {
 						parentMessageID = nil
 					}
-					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "thought", thoughtText, "thought", nil, nil)
+					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "thought", thoughtText, "thought", nil, nil, modelToUse)
 					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
@@ -253,7 +258,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 							parentMessageID = nil
 						}
 						// Add the initial model message to DB with empty text
-						modelMessageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", "", "text", nil, nil) // Changed part.Text to ""
+						modelMessageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", "", "text", nil, nil, modelToUse) // Changed part.Text to ""
 						if err != nil {
 							log.Printf("Failed to add new model message to DB: %v", err)
 							return fmt.Errorf("failed to add new model message to DB: %w", err)
@@ -293,7 +298,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			}
 
 			// Add a separate error message to the database
-			errorMessageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, &lastAddedMessageID, nil, "model", "user canceled request", "error", nil, nil)
+			errorMessageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, &lastAddedMessageID, nil, "model", "user canceled request", "error", nil, nil, modelToUse)
 			if err != nil {
 				log.Printf("Failed to add error message to DB: %v", err)
 			} else {
@@ -346,7 +351,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
 			userMsg = initialState.History[0].Parts[0].Text
 		}
-		inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW)
+		inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW, modelToUse)
 	}()
 
 	if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
@@ -369,7 +374,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 }
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
-func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, sseW *sseWriter) {
+func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, sseW *sseWriter, modelToUse string) {
 	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)
 
 	var inferredName string // Initialize to empty string
@@ -400,14 +405,20 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	llmInferredName, err := CurrentProvider.GenerateContentOneShot(ctx, SessionParams{
+	provider, ok := CurrentProviders[modelToUse]
+	if !ok {
+		log.Printf("inferAndSetSessionName: Unsupported model: %s", modelToUse)
+		return
+	}
+
+	llmInferredName, err := provider.GenerateContentOneShot(ctx, SessionParams{
 		Contents: []Content{
 			{
 				Role:  "user",
 				Parts: []Part{{Text: nameInputPrompt}},
 			},
 		},
-		ModelName:      DefaultGeminiModel,
+		ModelName:      modelToUse,
 		SystemPrompt:   nameSystemPrompt,
 		ThinkingConfig: &ThinkingConfig{IncludeThoughts: false},
 	})

@@ -97,7 +97,7 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	_, err = AddMessageToSession(testDB, sessionID, primaryBranchID, nil, nil, "user", "Hello", "text", nil, nil)
+	_, err = AddMessageToSession(testDB, sessionID, primaryBranchID, nil, nil, "user", "Hello", "text", nil, nil, "")
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}
@@ -212,12 +212,22 @@ func TestChatMessage(t *testing.T) {
 
 	// Test case 1: Successful addition of a new message
 	t.Run("Success", func(t *testing.T) {
-		payload := []byte(`{"message": "Another message"}`)
+		sessionData, err := GetSession(testDB, sessionId)
+		if err != nil {
+			t.Fatalf("Failed to get session: %v", err)
+		}
+		// Add an initial message to the session
+		_, err = AddMessageToSession(testDB, sessionId, sessionData.PrimaryBranchID, nil, nil, "user", "Initial message", "text", nil, nil, DefaultGeminiModel)
+		if err != nil {
+			t.Fatalf("Failed to add initial message: %v", err)
+		}
+
+		payload := []byte(fmt.Sprintf(`{"message": "Another message", "model": "%s"}`, DefaultGeminiModel))
 		testRequest(t, router, "POST", "/api/chat/"+sessionId, payload, http.StatusOK)
 
 		// Verify in DB
 		var text string
-		querySingleRow(t, testDB, "SELECT text FROM messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{sessionId}, &text)
+		querySingleRow(t, testDB, "SELECT text FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 1", []interface{}{sessionId}, &text)
 		if text != "Another message" {
 			t.Errorf("message text in DB mismatch: got %v want %v", text, "Another message")
 		}
@@ -247,11 +257,11 @@ func TestLoadChatSession(t *testing.T) {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
-	msg1ID, err := AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "user", "User message 1", "text", nil, nil)
+	msg1ID, err := AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "user", "User message 1", "text", nil, nil, DefaultGeminiModel)
 	if err != nil {
 		t.Fatalf("Failed to add message 1: %v", err)
 	}
-	msg2ID, err := AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "model", "Model response 1", "text", nil, nil)
+	msg2ID, err := AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "model", "Model response 1", "text", nil, nil, DefaultGeminiModel)
 	if err != nil {
 		t.Fatalf("Failed to add message 2: %v", err)
 	}
@@ -360,7 +370,7 @@ func TestDeleteSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	_, err = AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "user", "Message to be deleted", "text", nil, nil)
+	_, err = AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "user", "Message to be deleted", "text", nil, nil, "")
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}

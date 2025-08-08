@@ -10,7 +10,8 @@ import UserTextMessage from './UserTextMessage';
 import MessageInfo from './MessageInfo'; // Import MessageInfo
 
 const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
-  const { type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, possibleNextIds } = message;
+  const { type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, possibleNextIds, model } =
+    message;
   const { text, functionCall, functionResponse } = message.parts?.[0] || {};
 
   const messageInfoComponent = (
@@ -20,6 +21,7 @@ const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message })
       parentMessageId={parentMessageId}
       chosenNextId={chosenNextId}
       possibleNextIds={possibleNextIds}
+      model={model}
     />
   );
 

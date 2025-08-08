@@ -67,7 +67,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 			return &CaCountTokenResponse{TotalTokens: 10}, nil
 		},
 	}
-	CurrentProvider = mockLLMProvider
+	CurrentProviders["gemini-2.5-flash"] = mockLLMProvider
 
 	// Create a new router for testing
 	router := mux.NewRouter()
@@ -85,8 +85,8 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 }
 
 func replaceProvider(provider LLMProvider) LLMProvider {
-	oldProvider := CurrentProvider
-	CurrentProvider = provider
+	oldProvider := CurrentProviders["gemini-2.5-flash"]
+	CurrentProviders["gemini-2.5-flash"] = provider
 	return oldProvider
 }
 

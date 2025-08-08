@@ -465,7 +465,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	defer dummySseW.Close()
 
 	// Call streamGeminiResponse to add thought and model messages for C
-	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID); err != nil {
+	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, "gemini-2.5-flash"); err != nil {
 		t.Fatalf("Error streaming Gemini response for C: %v", err)
 	}
 
@@ -500,13 +500,16 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 	msgC3ID := int(*msg.ChosenNextID)
 
-	// History should be C (user), C (thought), C (model)
-	if len(initialStateC.History) != 3 {
-		t.Fatalf("Expected C1-C2-C3 history length 3, got %d", len(initialStateC.History))
+	// History should be A1 (user), A2 (thought), A3 (model), C1 (user), C2 (thought), C3 (model)
+	if len(initialStateC.History) != 6 { // Expected 6 messages (A1-A3 + C1-C3)
+		t.Fatalf("Expected C1-C2-C3 history length 6, got %d", len(initialStateC.History))
 	}
-	if initialStateC.History[0].ID != fmt.Sprintf("%d", msgC1ID) ||
-		initialStateC.History[1].ID != fmt.Sprintf("%d", msgC2ID) ||
-		initialStateC.History[2].ID != fmt.Sprintf("%d", msgC3ID) {
+	if initialStateC.History[0].ID != fmt.Sprintf("%d", msgA1ID) ||
+		initialStateC.History[1].ID != fmt.Sprintf("%d", msgA2ID) ||
+		initialStateC.History[2].ID != fmt.Sprintf("%d", msgA3ID) ||
+		initialStateC.History[3].ID != fmt.Sprintf("%d", msgC1ID) ||
+		initialStateC.History[4].ID != fmt.Sprintf("%d", msgC2ID) ||
+		initialStateC.History[5].ID != fmt.Sprintf("%d", msgC3ID) {
 		t.Errorf("C1-C2-C3 history mismatch. Got %v", initialStateC.History)
 	}
 
