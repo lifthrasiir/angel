@@ -6,6 +6,7 @@ import ChatMessage from './ChatMessage';
 import FileAttachmentPreview from './FileAttachmentPreview';
 import SystemPromptEditor from './SystemPromptEditor';
 import { ThoughtGroup } from './ThoughtGroup';
+import FunctionPairMessage from './FunctionPairMessage';
 
 interface ChatAreaProps {
   isLoggedIn: boolean;
@@ -60,7 +61,30 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     let i = 0;
     while (i < messages.length) {
       const currentMessage = messages[i];
-      if (currentMessage.type === 'thought') {
+
+      // Check for function_call followed by function_response
+      if (
+        currentMessage.type === 'function_call' &&
+        currentMessage.parts &&
+        currentMessage.parts.length > 0 &&
+        currentMessage.parts[0].functionCall &&
+        i + 1 < messages.length &&
+        messages[i + 1].type === 'function_response' &&
+        messages[i + 1].parts &&
+        messages[i + 1].parts.length > 0 &&
+        messages[i + 1].parts[0].functionResponse
+      ) {
+        const functionCall = currentMessage.parts[0].functionCall!;
+        const functionResponse = messages[i + 1].parts[0].functionResponse!;
+        renderedElements.push(
+          <FunctionPairMessage
+            key={`function-pair-${currentMessage.id}-${messages[i + 1].id}`}
+            functionCall={functionCall}
+            functionResponse={functionResponse}
+          />,
+        );
+        i += 2; // Skip both messages
+      } else if (currentMessage.type === 'thought') {
         const thoughtGroup: ChatMessageType[] = [];
         let j = i;
         while (j < messages.length && messages[j].type === 'thought') {

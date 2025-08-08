@@ -3,67 +3,103 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import { measureContentHeight } from '../utils/measurementUtils';
 import PrettyJSON from './PrettyJSON';
+import { FunctionCall } from '../types/chat';
 
 interface FunctionCallMessageProps {
-  functionCall: any;
+  functionCall: FunctionCall;
   messageInfo?: React.ReactNode;
 }
 
 const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall, messageInfo }) => {
-  const [showPrettyJson, setShowPrettyJson] = useState(true);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
 
   const codeContent = JSON.stringify(functionCall.args, null, 2);
+  const callArgs = JSON.stringify(functionCall.args);
 
   useLayoutEffect(() => {
-    if (messageRef.current) {
-      const contentHeight = measureContentHeight(messageRef, showPrettyJson, codeContent, functionCall.args);
+    if (messageRef.current && mode === 'expanded') {
+      const contentHeight = measureContentHeight(messageRef, false, codeContent, functionCall.args);
       const collapsedHeight = window.innerHeight * 0.3;
-      console.log('FunctionCallMessage: contentHeight', contentHeight, 'collapsedHeight', collapsedHeight);
       setShowToggle(contentHeight > collapsedHeight);
     }
-  }, [functionCall.args, showPrettyJson, codeContent]);
+  }, [functionCall.args, codeContent, mode]);
 
-  const togglePrettyJson = () => {
-    setShowPrettyJson(!showPrettyJson);
+  const toggleMode = () => {
+    setMode((prevMode) => {
+      if (prevMode === 'compact') return 'collapsed';
+      if (prevMode === 'collapsed') return 'expanded';
+      return 'compact';
+    });
   };
 
-  const toggleExpand = () => {
-    setIsExpanded(!isExpanded);
-  };
-
-  return (
-    <div className="chat-message-container agent-message">
-      <div className="chat-bubble agent-function-call function-message-bubble">
-        <div
-          className="function-title-bar function-call-title-bar"
-          style={{ cursor: 'pointer' }}
-          onClick={togglePrettyJson}
-        >
-          Function Call: {functionCall.name}
-        </div>
-        <div
-          ref={messageRef}
-          className={`function-message-content ${isExpanded ? 'expanded' : 'collapsed'}`}
-          style={showToggle && !isExpanded ? { maxHeight: '30vh', overflowY: 'auto' } : {}}
-        >
-          {showPrettyJson ? (
-            <PrettyJSON data={functionCall.args} />
-          ) : (
-            <pre className="function-code-block">{codeContent}</pre>
-          )}
-        </div>
-        {showToggle && (
-          <div className="function-message-toggle-button" onClick={toggleExpand}>
-            {isExpanded ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
+  const renderContent = () => {
+    switch (mode) {
+      case 'compact':
+        return (
+          <div className="chat-message-container agent-message">
+            <div
+              className="chat-bubble agent-function-call function-message-bubble"
+              style={{ cursor: 'pointer' }}
+              onClick={toggleMode}
+            >
+              <div className="function-title-bar function-call-title-bar">
+                {functionCall.name}({callArgs})
+              </div>
+            </div>
+            {messageInfo}
           </div>
-        )}
-      </div>
-      {messageInfo} {/* Render MessageInfo outside chat-bubble */}
-    </div>
-  );
+        );
+      case 'collapsed':
+        return (
+          <div className="chat-message-container agent-message">
+            <div
+              className="chat-bubble agent-function-call function-message-bubble"
+              style={{ cursor: 'pointer' }}
+              onClick={toggleMode}
+            >
+              <div className="function-title-bar function-call-title-bar">Function Call: {functionCall.name}</div>
+              <div ref={messageRef} className="function-message-content">
+                <PrettyJSON data={functionCall.args} />
+              </div>
+            </div>
+            {messageInfo}
+          </div>
+        );
+      case 'expanded':
+        return (
+          <div className="chat-message-container agent-message">
+            <div className="chat-bubble agent-function-call function-message-bubble">
+              <div
+                className="function-title-bar function-call-title-bar"
+                style={{ cursor: 'pointer' }}
+                onClick={toggleMode}
+              >
+                Function Call: {functionCall.name}
+              </div>
+              <div
+                ref={messageRef}
+                className="function-message-content"
+                style={showToggle ? { maxHeight: '30vh', overflowY: 'auto' } : {}}
+              >
+                <pre className="function-code-block">{codeContent}</pre>
+              </div>
+              {showToggle && (
+                <div className="function-message-toggle-button" onClick={toggleMode}>
+                  {mode === 'expanded' ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
+                </div>
+              )}
+            </div>
+            {messageInfo}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return <>{renderContent()}</>;
 };
 
 export default FunctionCallMessage;

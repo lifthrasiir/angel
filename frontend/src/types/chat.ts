@@ -9,10 +9,20 @@ export interface PossibleNextMessage {
   branchId: string;
 }
 
+export interface FunctionCall {
+  name: string;
+  args: Record<string, any>;
+}
+
+export interface FunctionResponse {
+  name: string;
+  response: any;
+}
+
 export interface ChatMessage {
   id: string;
   role: string;
-  parts: { text?: string; functionCall?: any; functionResponse?: any }[];
+  parts: { text?: string; functionCall?: FunctionCall; functionResponse?: FunctionResponse }[];
   type?: 'model' | 'thought' | 'system' | 'user' | 'function_call' | 'function_response' | 'model_error';
   attachments?: FileAttachment[];
   cumulTokenCount?: number | null;

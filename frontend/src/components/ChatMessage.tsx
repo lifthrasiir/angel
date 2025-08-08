@@ -10,8 +10,7 @@ import UserTextMessage from './UserTextMessage';
 import MessageInfo from './MessageInfo'; // Import MessageInfo
 
 const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
-  const { role, type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, possibleNextIds } =
-    message;
+  const { type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, possibleNextIds } = message;
   const { text, functionCall, functionResponse } = message.parts?.[0] || {};
 
   const messageInfoComponent = (
@@ -24,21 +23,15 @@ const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message })
     />
   );
 
-  if (type === 'function_response') {
-    return (
-      <FunctionResponseMessage
-        functionResponse={functionResponse}
-        isUserRole={role === 'user'}
-        messageInfo={messageInfoComponent}
-      />
-    );
+  if (type === 'function_response' && functionResponse) {
+    return <FunctionResponseMessage functionResponse={functionResponse} messageInfo={messageInfoComponent} />;
   } else if (type === 'user') {
     return <UserTextMessage text={text} attachments={attachments} messageInfo={messageInfoComponent} />;
   } else if (type === 'thought') {
     const [subject, description] = splitOnceByNewline(text || '');
     const thoughtText = `**Thought: ${subject}**\n${description || ''}`;
     return <ModelTextMessage text={thoughtText} className="agent-thought" messageInfo={messageInfoComponent} />;
-  } else if (type === 'function_call') {
+  } else if (type === 'function_call' && functionCall) {
     return <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} />;
   } else if (type === 'system') {
     return <SystemMessage text={text} messageInfo={messageInfoComponent} />;

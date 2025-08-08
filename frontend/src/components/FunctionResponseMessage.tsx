@@ -3,20 +3,15 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import { measureContentHeight } from '../utils/measurementUtils';
 import PrettyJSON from './PrettyJSON';
+import { FunctionResponse } from '../types/chat';
 
 interface FunctionResponseMessageProps {
-  functionResponse: any;
-  isUserRole?: boolean; // Optional prop to differentiate user's function response
-  messageInfo?: React.ReactNode; // New prop for MessageInfo
+  functionResponse: FunctionResponse;
+  messageInfo?: React.ReactNode;
 }
 
-const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
-  functionResponse,
-  isUserRole,
-  messageInfo,
-}) => {
-  const [showPrettyJson, setShowPrettyJson] = useState(true);
-  const [isExpanded, setIsExpanded] = useState(false);
+const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({ functionResponse, messageInfo }) => {
+  const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
 
@@ -37,27 +32,9 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
     responseText = JSON.stringify(responseData, null, 2);
   }
   const codeContent = responseText;
-
-  useLayoutEffect(() => {
-    if (messageRef.current) {
-      const contentHeight = measureContentHeight(messageRef, showPrettyJson, codeContent, responseData, soleObjectKey);
-      const collapsedHeight = window.innerHeight * 0.3;
-      console.log('FunctionResponseMessage: contentHeight', contentHeight, 'collapsedHeight', collapsedHeight);
-      setShowToggle(contentHeight > collapsedHeight);
-    }
-  }, [functionResponse.response, showPrettyJson, codeContent]);
-
-  const togglePrettyJson = () => {
-    setIsExpanded(false); // Reset expand state when toggling JSON view
-    setShowPrettyJson(!showPrettyJson);
-  };
-
-  const toggleExpand = () => {
-    setIsExpanded(!isExpanded);
-  };
-
-  const containerClassName = `chat-message-container ${isUserRole ? 'user-message' : 'agent-message'}`;
-  const bubbleClassName = `chat-bubble function-message-bubble`;
+  const responseSummary = functionResponse.response
+    ? JSON.stringify(functionResponse.response).substring(0, 50) + '...'
+    : '(empty)';
 
   let soleObjectKey: string | undefined;
   if (typeof responseData === 'object') {
@@ -65,36 +42,80 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
     if (keys.length === 1 && keys[0]) soleObjectKey = keys[0];
   }
 
-  return (
-    <div className={containerClassName}>
-      <div className={bubbleClassName}>
-        <div
-          className="function-title-bar function-response-title-bar"
-          style={{ cursor: 'pointer' }}
-          onClick={togglePrettyJson}
-        >
-          Function Response: {showPrettyJson && soleObjectKey && <code>{soleObjectKey}</code>}
-        </div>
-        <div
-          ref={messageRef}
-          className={`function-message-content ${isExpanded ? 'expanded' : 'collapsed'}`}
-          style={showToggle && !isExpanded ? { maxHeight: '30vh', overflowY: 'auto' } : {}}
-        >
-          {showPrettyJson ? (
-            <PrettyJSON data={soleObjectKey ? responseData[soleObjectKey] : responseData} />
-          ) : (
-            <pre className="function-code-block">{codeContent}</pre>
-          )}
-        </div>
-        {showToggle && (
-          <div className="function-message-toggle-button" onClick={toggleExpand}>
-            {isExpanded ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
+  useLayoutEffect(() => {
+    if (messageRef.current && mode === 'expanded') {
+      const contentHeight = measureContentHeight(messageRef, false, codeContent, responseData, soleObjectKey);
+      const collapsedHeight = window.innerHeight * 0.3;
+      setShowToggle(contentHeight > collapsedHeight);
+    }
+  }, [functionResponse.response, codeContent, mode, soleObjectKey]);
+
+  const toggleMode = () => {
+    setMode((prevMode) => {
+      if (prevMode === 'compact') return 'collapsed';
+      if (prevMode === 'collapsed') return 'expanded';
+      return 'compact';
+    });
+  };
+
+  const renderContent = () => {
+    switch (mode) {
+      case 'compact':
+        return (
+          <div className="chat-message-container user-message">
+            <div className="chat-bubble function-message-bubble" style={{ cursor: 'pointer' }} onClick={toggleMode}>
+              <div className="function-title-bar function-response-title-bar">{responseSummary}</div>
+            </div>
+            {messageInfo}
           </div>
-        )}
-      </div>
-      {messageInfo} {/* Render MessageInfo outside chat-bubble */}
-    </div>
-  );
+        );
+      case 'collapsed':
+        return (
+          <div className="chat-message-container user-message">
+            <div className="chat-bubble function-message-bubble" style={{ cursor: 'pointer' }} onClick={toggleMode}>
+              <div className="function-title-bar function-response-title-bar">
+                Function Response: {soleObjectKey && <code>{soleObjectKey}</code>}
+              </div>
+              <div ref={messageRef} className="function-message-content">
+                <PrettyJSON data={soleObjectKey ? responseData[soleObjectKey] : responseData} />
+              </div>
+            </div>
+            {messageInfo}
+          </div>
+        );
+      case 'expanded':
+        return (
+          <div className="chat-message-container user-message">
+            <div className="chat-bubble function-message-bubble">
+              <div
+                className="function-title-bar function-response-title-bar"
+                style={{ cursor: 'pointer' }}
+                onClick={toggleMode}
+              >
+                Function Response: {soleObjectKey && <code>{soleObjectKey}</code>}
+              </div>
+              <div
+                ref={messageRef}
+                className="function-message-content"
+                style={showToggle ? { maxHeight: '30vh', overflowY: 'auto' } : {}}
+              >
+                <pre className="function-code-block">{codeContent}</pre>
+              </div>
+              {showToggle && (
+                <div className="function-message-toggle-button" onClick={toggleMode}>
+                  {mode === 'expanded' ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
+                </div>
+              )}
+            </div>
+            {messageInfo}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return <>{renderContent()}</>;
 };
 
 export default FunctionResponseMessage;

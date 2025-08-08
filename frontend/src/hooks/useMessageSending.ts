@@ -116,11 +116,11 @@ export const useMessageSending = ({
           dispatch({ type: ADD_MESSAGE, payload: message });
           dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
         },
-        onFunctionResponse: (messageId: string, functionResponse: any) => {
+        onFunctionResponse: (messageId: string, functionName: string, functionResponse: any) => {
           const message: ChatMessage = {
             id: messageId,
             role: 'user',
-            parts: [{ functionResponse: { response: functionResponse } }],
+            parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
             type: 'function_response',
           };
           dispatch({ type: ADD_MESSAGE, payload: message });

@@ -147,10 +147,15 @@ textarea {
 .function-title-bar {
   padding: 5px 15px; /* Padding inside the title bar */
   margin: -10px -15px 10px -15px !important; /* Negative top margin to pull it up, negative side margins to extend to bubble edges, and margin-bottom for spacing */
-  border-top-left-radius: 18px;
-  border-top-right-radius: 18px;
+  border-top-left-radius: 15px;
+  border-top-right-radius: 15px;
   font-weight: bold; /* Keep bold for title */
   color: #333; /* Default text color for title */
+  white-space: nowrap;
+}
+
+.function-title-bar:last-child {
+  margin-bottom: -10px !important;
 }
 
 .function-call-title-bar {
@@ -577,6 +582,25 @@ textarea {
 
 .user-message .function-message-toggle-button {
   color: var(--color-user-verydark);
+}
+
+.function-pair-container {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+}
+
+.function-pair-container .chat-bubble {
+  width: auto;
+  max-width: 100%;
+}
+
+.function-pair-bar {
+  flex: 1;
+  height: 5px;
+  background-color: lightgray;
+  margin: calc(0.7em + 5px) auto auto auto;
 }
 
 @keyframes fadeInOut {

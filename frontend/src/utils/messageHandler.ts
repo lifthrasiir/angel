@@ -63,7 +63,7 @@ export interface StreamEventHandlers {
   onMessage: (messageId: string, text: string) => void;
   onThought: (messageId: string, thoughtText: string) => void;
   onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => void;
-  onFunctionResponse: (messageId: string, functionResponse: any) => void;
+  onFunctionResponse: (messageId: string, functionName: string, functionResponse: any) => void;
   onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => void;
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
@@ -115,9 +115,10 @@ export const processStreamResponse = async (
         const functionArgs = JSON.parse(functionArgsJson);
         handlers.onFunctionCall(messageId, functionName, functionArgs);
       } else if (type === EventFunctionReply) {
-        const [messageId, functionResponseJson] = splitOnceByNewline(data);
+        const [messageId, rest] = splitOnceByNewline(data);
+        const [functionName, functionResponseJson] = splitOnceByNewline(rest);
         const functionResponseRaw = JSON.parse(functionResponseJson);
-        handlers.onFunctionResponse(messageId, functionResponseRaw);
+        handlers.onFunctionResponse(messageId, functionName, functionResponseRaw);
       } else if (type === EventInitialState) {
         // New: Handle EventInitialState
         const { sessionId, systemPrompt, primaryBranchId } = JSON.parse(data);

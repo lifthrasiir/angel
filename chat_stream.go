@@ -201,7 +201,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 						}
 					}
 					lastAddedMessageID = messageID
-					formattedData = fmt.Sprintf("%d\n%s", messageID, string(responseJson))
+					formattedData = fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(responseJson))
 					broadcastToSession(initialState.SessionId, EventFunctionReply, formattedData)
 					currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
 
