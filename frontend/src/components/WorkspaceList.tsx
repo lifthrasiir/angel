@@ -65,6 +65,7 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({
             borderRadius: '5px',
             cursor: 'pointer',
           }}
+          aria-label="Select no workspace"
         >
           No workspace
         </button>
@@ -89,10 +90,15 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({
               borderRadius: '5px',
               cursor: 'pointer',
             }}
+            aria-label={`Select workspace ${workspace.name}`}
           >
             {workspace.name}
           </button>
-          <button onClick={() => handleDeleteWorkspace(workspace.id)} className="sidebar-delete-button">
+          <button
+            onClick={() => handleDeleteWorkspace(workspace.id)}
+            className="sidebar-delete-button"
+            aria-label={`Delete workspace ${workspace.name}`}
+          >
             <FaTrash size={16} />
           </button>
         </li>

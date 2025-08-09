@@ -85,7 +85,11 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
         >
           <LogoAnimation width="100px" height="100px" color="#007bff" />
           <p style={{ marginTop: '20px' }}>Please log in to use the chat application.</p>
-          <button onClick={handleLogin} style={{ padding: '10px 20px', fontSize: '1em', cursor: 'pointer' }}>
+          <button
+            onClick={handleLogin}
+            style={{ padding: '10px 20px', fontSize: '1em', cursor: 'pointer' }}
+            aria-label="Login to the chat application"
+          >
             Login
           </button>
         </div>

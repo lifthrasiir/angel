@@ -18,6 +18,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
   const messagesLength = messages.length;
 
   const systemPromptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const evaluatedPromptRef = useRef<HTMLPreElement>(null); // 변경: HTMLDivElement -> HTMLPreElement
   const [evaluatedPrompt, setEvaluatedPrompt] = useState<string>('');
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [promptType, setPromptType] = useState<PromptType>('default');
@@ -99,14 +100,31 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
 
   const clickAnywhereToExpand = !isSystemPromptEditing && !isExpanded;
 
+  // 최상위 렌더링 요소를 조건부로 할당
+  const RootElement = clickAnywhereToExpand ? 'button' : 'div';
+
   return (
     <div className="chat-message-container system-prompt-message">
-      <div
+      <RootElement
         className={`chat-bubble system-prompt-bubble ${isExpanded || promptType === 'custom' ? 'expanded' : ''}`}
         style={{
           cursor: clickAnywhereToExpand ? 'pointer' : '',
         }}
-        onClick={() => (clickAnywhereToExpand ? setIsExpanded(true) : null)}
+        onClick={
+          clickAnywhereToExpand
+            ? () => {
+                setIsExpanded(true);
+                setTimeout(() => {
+                  if (!isSystemPromptEditing) {
+                    evaluatedPromptRef.current?.focus();
+                  }
+                }, 0);
+              }
+            : undefined
+        } // onClick 핸들러 조건부 할당
+        aria-label={clickAnywhereToExpand ? 'Expand system prompt' : undefined}
+        tabIndex={clickAnywhereToExpand ? undefined : -1} // tabIndex 조건부 할당
+        role={clickAnywhereToExpand ? undefined : isSystemPromptEditing ? undefined : 'button'} // role 조건부 할당
       >
         {isSystemPromptEditing ? (
           <div
@@ -148,6 +166,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                   marginLeft: '0.8ex',
                   color: 'var(--color-system-verydark)',
                 }}
+                aria-label={isExpanded ? 'Collapse prompt preview' : 'Expand prompt preview'}
               >
                 {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
               </button>
@@ -173,6 +192,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                   background: 'transparent',
                   outline: 'none',
                 }}
+                aria-label="System prompt editor"
               />
             )}
 
@@ -228,6 +248,8 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                     marginLeft: '0.8ex',
                   }}
                   onClick={() => setIsExpanded(false)}
+                  aria-label="Collapse prompt"
+                  tabIndex={isExpanded ? undefined : -1} // 변경
                 />
               ) : (
                 <FaChevronDown
@@ -238,17 +260,27 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                     marginLeft: '0.8ex',
                   }}
                   onClick={() => setIsExpanded(true)}
+                  aria-label="Expand prompt"
+                  tabIndex={isExpanded ? undefined : -1} // 변경
                 />
               )}
             </div>
             {isExpanded && (
-              <div style={{ width: '100%' }}>
+              <div
+                style={{
+                  width: '100%',
+                }}
+              >
                 <pre
+                  ref={evaluatedPromptRef} // ref를 pre 태그로 이동
+                  tabIndex={-1} // tabIndex를 pre 태그로 이동
                   style={{
                     whiteSpace: 'pre-wrap',
                     background: '#f9f9f9',
                     padding: '10px',
                     borderRadius: '5px',
+                    overflowY: 'auto', // 스크롤 가능하게
+                    maxHeight: '200px', // 적절한 높이 설정
                   }}
                 >
                   {systemPrompt}
@@ -257,7 +289,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
             )}
           </div>
         )}
-      </div>
+      </RootElement>
     </div>
   );
 };

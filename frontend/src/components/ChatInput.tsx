@@ -89,6 +89,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           borderRadius: '5px',
           cursor: 'pointer',
         }}
+        aria-label="Attach files"
       >
         <FaPaperclip />
       </button>
@@ -123,6 +124,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             resize: 'none',
             overflowY: 'hidden',
           }}
+          aria-label="Message input"
         />
         <div
           style={{

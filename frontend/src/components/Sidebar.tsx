@@ -72,6 +72,13 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
           padding: '5px',
           backgroundColor: 'transparent',
         }}
+        aria-label={
+          showWorkspaces
+            ? 'Back to Sessions'
+            : workspaceId
+              ? `Current Workspace: ${workspaceName || 'New Workspace'}`
+              : 'Show Workspaces'
+        }
       >
         {showWorkspaces ? (
           <>
@@ -115,6 +122,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
           padding: '5px',
           backgroundColor: 'transparent',
         }}
+        aria-label={showWorkspaces ? 'Create New Workspace' : 'Create New Session'}
       >
         <FaPlus style={{ marginRight: '5px' }} />
         {showWorkspaces ? 'New Workspace' : 'New Session'}
@@ -171,6 +179,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
           padding: '5px',
           backgroundColor: 'transparent',
         }}
+        aria-label="Go to Settings"
       >
         <FaCog style={{ marginRight: '5px' }} />
         Settings

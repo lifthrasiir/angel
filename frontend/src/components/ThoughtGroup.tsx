@@ -36,15 +36,25 @@ export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(({ groupId, 
     }
   };
 
+  const getThoughtTitle = (thought: ChatMessage) => {
+    if (!thought.parts || thought.parts.length === 0 || !thought.parts[0].text) return '';
+    const lines = thought.parts[0].text.split('\n');
+    const title = lines[0].trim();
+    const content = lines.slice(1).join('\n').trim();
+    return `${title}\n\n${content}`;
+  };
+
   return (
     <div className="thought-group-container">
       <div className="thought-circle-container">
         {thoughts.map((thought) => (
-          <div
+          <button
             key={thought.id}
             className={`thought-circle ${activeThoughtId === thought.id ? 'selected' : ''}`}
             onClick={() => handleCircleClick(thought)}
-          ></div>
+            title={getThoughtTitle(thought)}
+            aria-label={`Thought: ${getThoughtTitle(thought).split('\n')[0]}`}
+          ></button>
         ))}
       </div>
       {activeThoughtId !== null && thoughts.find((thought) => thought.id === activeThoughtId) && (

@@ -68,6 +68,7 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
                   }
                 }}
                 className="sidebar-session-name-input"
+                aria-label="Edit session name"
               />
               <button
                 onClick={() => {
@@ -76,6 +77,7 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
                   }
                 }}
                 className="sidebar-delete-button"
+                aria-label="Delete session"
               >
                 <FaTrash size={16} />
               </button>
@@ -84,6 +86,8 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
             <button
               onClick={() => navigate(`/${session.id}`)}
               className={`sidebar-session-button ${session.id === chatSessionId ? 'active' : ''}`}
+              title={session.name || 'New Chat'}
+              aria-label={`Go to ${session.name || 'New Chat'} session`}
             >
               {session.name || 'New Chat'}
             </button>
@@ -97,6 +101,7 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
                 }));
               }}
               className="sidebar-edit-button"
+              aria-label="Change session name or delete session"
             >
               <FaEdit size={16} />
             </button>
