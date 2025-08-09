@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings" // Add strings import for handleDownloadBlob
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -109,6 +111,7 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
 	InitMCPManager(db)
 
 	ga := NewGeminiAuth(db)
@@ -116,14 +119,6 @@ func main() {
 
 	// Initialize CurrentProviders map
 	CurrentProviders = make(map[string]LLMProvider)
-
-	// Add gemini-2.5-flash provider
-	flashClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
-	CurrentProviders["gemini-2.5-flash"] = flashClient
-
-	// Add gemini-2.5-pro provider (sharing the same auth as flash)
-	proClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
-	CurrentProviders["gemini-2.5-pro"] = proClient
 
 	router := mux.NewRouter()
 	router.Use(makeContextMiddleware(db, ga))
@@ -177,6 +172,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/mcp/configs", saveMCPConfigHandler).Methods("POST")
 	router.HandleFunc("/api/mcp/configs/{name}", deleteMCPConfigHandler).Methods("DELETE")
 	router.HandleFunc("/api/models", listModelsHandler).Methods("GET") // New endpoint
+	router.HandleFunc("/api/chat/{sessionId}/blob/{messageId}.{blobIndex}", handleDownloadBlob).Methods("GET")
 	router.HandleFunc("/api", handleNotFound)
 
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
@@ -524,6 +520,7 @@ func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				tools = append(tools, mappedName)
 			}
+			sort.Strings(tools) // Sort tools for consistent output
 			frontendConfig.AvailableTools = tools
 		}
 
@@ -614,4 +611,88 @@ func listModelsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	sendJSONResponse(w, models)
+}
+
+// handleDownloadBlob retrieves a blob by its message ID and attachment index and serves it as a download.
+func handleDownloadBlob(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	messageIdStr := vars["messageId"]
+	blobIndexStr := vars["blobIndex"]
+
+	if sessionId == "" || messageIdStr == "" || blobIndexStr == "" {
+		http.Error(w, "Session ID, Message ID, and Blob Index are required", http.StatusBadRequest)
+		return
+	}
+
+	messageId, err := strconv.Atoi(messageIdStr)
+	if err != nil {
+		http.Error(w, "Invalid Message ID", http.StatusBadRequest)
+		return
+	}
+
+	blobIndex, err := strconv.Atoi(blobIndexStr)
+	if err != nil {
+		http.Error(w, "Invalid Blob Index", http.StatusBadRequest)
+		return
+	}
+
+	// Get the message from the database
+	message, err := GetMessageByID(db, messageId) // GetMessageByID returns Message struct
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, "Message not found", http.StatusNotFound)
+		} else {
+			log.Printf("Failed to retrieve message %d: %v", messageId, err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if message == nil || message.SessionID != sessionId {
+		http.Error(w, "Message not found in this session", http.StatusNotFound)
+		return
+	}
+
+	// message.Attachments is already []FileAttachment type
+	attachments := message.Attachments
+	if attachments == nil { // Handle case where there are no attachments
+		http.Error(w, "No attachments found for this message", http.StatusNotFound)
+		return
+	}
+
+	if blobIndex < 0 || blobIndex >= len(attachments) {
+		http.Error(w, "Blob index out of range", http.StatusBadRequest)
+		return
+	}
+
+	// Use the Hash field for the blob hash
+	blobHash := attachments[blobIndex].Hash
+	fileName := attachments[blobIndex].FileName
+	mimeType := attachments[blobIndex].MimeType
+
+	data, err := GetBlob(db, blobHash) // GetBlob works with hash
+	if err != nil {
+		if strings.Contains(err.Error(), "blob not found") {
+			http.Error(w, "Blob data not found", http.StatusNotFound)
+		} else {
+			log.Printf("Failed to retrieve blob data for hash %s: %v", blobHash, err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Set appropriate headers for file download
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
+
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+
+	_, err = w.Write(data)
+	if err != nil {
+		log.Printf("Failed to write blob data for hash %s: %v", blobHash, err)
+		// Error writing to client, but response headers might already be sent
+	}
 }

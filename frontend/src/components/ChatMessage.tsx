@@ -29,7 +29,15 @@ const ChatMessage: React.FC<{ message: ChatMessage; maxTokens?: number }> = Reac
   if (type === 'function_response' && functionResponse) {
     return <FunctionResponseMessage functionResponse={functionResponse} messageInfo={messageInfoComponent} />;
   } else if (type === 'user') {
-    return <UserTextMessage text={text} attachments={attachments} messageInfo={messageInfoComponent} />;
+    return (
+      <UserTextMessage
+        text={text}
+        attachments={attachments}
+        messageInfo={messageInfoComponent}
+        messageId={message.id}
+        sessionId={message.sessionId}
+      />
+    );
   } else if (type === 'thought') {
     const [subject, description] = splitOnceByNewline(text || '');
     const thoughtText = `**Thought: ${subject}**\n${description || ''}`;

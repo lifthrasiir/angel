@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,7 +70,18 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	userMessage := requestBody.Message
 
 	// Add message with branch_id, no parent_message_id, no chosen_next_id initially
-	userMessageID, err := AddMessageToSession(db, sessionId, primaryBranchID, nil, nil, "user", userMessage, "text", requestBody.Attachments, nil, modelToUse)
+	userMessageID, err := AddMessageToSession(r.Context(), db, Message{
+		SessionID:       sessionId,
+		BranchID:        primaryBranchID,
+		ParentMessageID: nil,
+		ChosenNextID:    nil,
+		Role:            "user",
+		Text:            userMessage,
+		Type:            "text",
+		Attachments:     requestBody.Attachments,
+		CumulTokenCount: nil,
+		Model:           modelToUse,
+	})
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
@@ -195,7 +207,18 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	userMessage := requestBody.Message
 
 	// Add new message to the primary branch
-	userMessageID, err := AddMessageToSession(db, sessionId, primaryBranchID, parentMessageID, nil, "user", userMessage, "text", requestBody.Attachments, nil, modelToUse)
+	userMessageID, err := AddMessageToSession(r.Context(), db, Message{
+		SessionID:       sessionId,
+		BranchID:        primaryBranchID,
+		ParentMessageID: parentMessageID,
+		ChosenNextID:    nil,
+		Role:            "user",
+		Text:            userMessage,
+		Type:            "text",
+		Attachments:     requestBody.Attachments,
+		CumulTokenCount: nil,
+		Model:           modelToUse,
+	})
 	if err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
@@ -423,7 +446,18 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the new message in the new branch, with updatedMessageID as its parent
-	newMessageID, err := AddMessageToSession(db, sessionId, newBranchID, &branchFromMessageID, nil, "user", requestBody.NewMessageText, "text", nil, nil, "")
+	newMessageID, err := AddMessageToSession(r.Context(), db, Message{
+		SessionID:       sessionId,
+		BranchID:        newBranchID,
+		ParentMessageID: &branchFromMessageID,
+		ChosenNextID:    nil,
+		Role:            "user",
+		Text:            requestBody.NewMessageText,
+		Type:            "text",
+		Attachments:     nil,
+		CumulTokenCount: nil,
+		Model:           "", // Model will be inferred or set later
+	})
 	if err != nil {
 		log.Printf("createBranchHandler: Failed to add new message to new branch: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to add new message: %v", err), http.StatusInternalServerError)
@@ -615,7 +649,7 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // Helper function to convert FrontendMessage to Content for Gemini API
-func convertFrontendMessagesToContent(frontendMessages []FrontendMessage) []Content {
+func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMessage) []Content {
 	var contents []Content
 	for _, fm := range frontendMessages {
 		var parts []Part
@@ -626,12 +660,21 @@ func convertFrontendMessagesToContent(frontendMessages []FrontendMessage) []Cont
 
 		// Add attachments as InlineData
 		for _, att := range fm.Attachments {
-			parts = append(parts, Part{
-				InlineData: &InlineData{
-					MimeType: att.MimeType,
-					Data:     att.Data,
-				},
-			})
+			if att.Hash != "" { // Only process if hash exists
+				blobData, err := GetBlob(db, att.Hash)
+				if err != nil {
+					log.Printf("Error retrieving blob data for hash %s: %v", att.Hash, err)
+					// Decide how to handle this error: skip attachment, return error, etc.
+					// For now, we'll skip this attachment to avoid breaking the whole message.
+					continue
+				}
+				parts = append(parts, Part{
+					InlineData: &InlineData{
+						MimeType: att.MimeType,
+						Data:     base64.StdEncoding.EncodeToString(blobData),
+					},
+				})
+			}
 		}
 
 		// Handle function calls and responses (these should override text/attachments for their specific message types)

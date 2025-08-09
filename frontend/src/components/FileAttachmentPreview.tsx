@@ -6,30 +6,67 @@ import type { FileAttachment } from '../types/chat';
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;
   onRemove?: (file: File) => void; // Callback for removing uploaded files
+  messageId?: string; // New: message ID for FileAttachment downloads
+  sessionId?: string; // New: session ID for FileAttachment downloads
+  blobIndex?: number; // New: blob index for FileAttachment downloads
 }
 
-const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({ file, onRemove }) => {
+const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
+  file,
+  onRemove,
+  messageId,
+  sessionId,
+  blobIndex,
+}) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileName = file instanceof File ? file.name : file.fileName;
   const mimeType = file instanceof File ? file.type : file.mimeType;
   const isImage = mimeType.startsWith('image/');
-  const data = file instanceof File ? null : file.data; // Data is directly available for FileAttachment
+  // For FileAttachment, data is now optional and used only for upload.
+  // For display/download, we use the hash and fetch from the backend.
+  const fileAttachment = file instanceof File ? null : file;
 
   useEffect(() => {
-    if (file instanceof File) {
-      // For uploaded File objects, read as Data URL for preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreviewUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    } else if (isImage && data) {
-      // For FileAttachment objects (from messages), use existing base64 data
-      setPreviewUrl(`data:${mimeType};base64,${data}`);
-    } else {
-      setPreviewUrl(null); // No preview for non-image FileAttachment
-    }
-  }, [file, isImage, data, mimeType]);
+    let objectUrl: string | null = null;
+
+    const loadPreview = async () => {
+      if (file instanceof File) {
+        // For uploaded File objects, read as Data URL for preview
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPreviewUrl(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      } else if (isImage && messageId && sessionId && blobIndex !== undefined) {
+        // For FileAttachment objects (from messages), fetch from backend for image preview
+        const blobUrl = `/api/chat/${sessionId}/blob/${messageId}.${blobIndex}`;
+        try {
+          const response = await fetch(blobUrl);
+          if (response.ok) {
+            const blob = await response.blob();
+            objectUrl = URL.createObjectURL(blob);
+            setPreviewUrl(objectUrl);
+          } else {
+            console.error(`Failed to fetch blob for preview: ${response.statusText}`);
+            setPreviewUrl(null);
+          }
+        } catch (error) {
+          console.error('Error fetching blob for preview:', error);
+          setPreviewUrl(null);
+        }
+      } else {
+        setPreviewUrl(null); // No preview for non-image FileAttachment or missing info
+      }
+    };
+
+    loadPreview();
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl); // Clean up object URL on unmount
+      }
+    };
+  }, [file, isImage, messageId, sessionId, blobIndex, mimeType]);
 
   const handleDownload = () => {
     if (file instanceof File) {
@@ -42,12 +79,13 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({ file, onR
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url); // Clean up
-    } else if (data) {
-      // For attached files (FileAttachment), use base64 data
-      const url = `data:${mimeType};base64,${data}`;
+    } else if (fileAttachment && messageId && sessionId && blobIndex !== undefined) {
+      // For attached files (FileAttachment), use the backend endpoint
+      console.log('Attempting download with:', { fileAttachment, messageId, sessionId, blobIndex });
+      const downloadUrl = `/api/chat/${sessionId}/blob/${messageId}.${blobIndex}`;
       const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
+      a.href = downloadUrl;
+      a.download = fileName; // Suggest download filename
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

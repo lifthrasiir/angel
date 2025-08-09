@@ -1,14 +1,17 @@
 package main
 
 import (
-	"database/sql"
+	"context"
+	"crypto/sha512" // For SHA-512/256
+	"database/sql"  // For base64 encoding/decoding
+	"encoding/hex"  // For encoding hash to string
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 )
 
 // createTables creates the necessary tables in the database.
@@ -42,7 +45,7 @@ func createTables(db *sql.DB) error {
 		role TEXT NOT NULL,
 		text TEXT NOT NULL,
 		type TEXT NOT NULL DEFAULT 'text',
-		attachments TEXT,
+		attachments TEXT, -- This will store JSON array of blob hashes
 		cumul_token_count INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		model TEXT NOT NULL
@@ -66,6 +69,11 @@ func createTables(db *sql.DB) error {
 		name TEXT PRIMARY KEY,
 		config_json TEXT NOT NULL,
 		enabled BOOLEAN NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS blobs (
+		id TEXT PRIMARY KEY, -- SHA-512/256 hash of the data
+		data BLOB NOT NULL
 	);`
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
@@ -127,7 +135,8 @@ type Branch struct {
 type FileAttachment struct {
 	FileName string `json:"fileName"`
 	MimeType string `json:"mimeType"`
-	Data     string `json:"data"` // Base64 encoded file content
+	Hash     string `json:"hash"`           // SHA-512/256 hash of the data
+	Data     []byte `json:"data,omitempty"` // Raw binary data, used temporarily for upload/download
 }
 
 // Message struct to hold message data for database interaction
@@ -160,6 +169,7 @@ type FrontendMessage struct {
 	Type            string                `json:"type"`
 	Attachments     []FileAttachment      `json:"attachments,omitempty"`
 	CumulTokenCount *int                  `json:"cumul_token_count,omitempty"`
+	SessionID       string                `json:"sessionId,omitempty"` // Add SessionID to FrontendMessage
 	BranchID        string                `json:"branchId,omitempty"`
 	ParentMessageID *string               `json:"parentMessageId,omitempty"`
 	ChosenNextID    *string               `json:"chosenNextId,omitempty"`
@@ -277,7 +287,7 @@ func CreateBranch(db *sql.DB, branchID string, sessionID string, parentBranchID 
 }
 
 func UpdateSessionSystemPrompt(db *sql.DB, sessionID string, systemPrompt string) error {
-	_, err := db.Exec("UPDATE sessions SET system_prompt = ? WHERE id = ?", systemPrompt, sessionID)
+	_, err := db.Exec("UPDATE sessions SET system_prompt = ? WHERE id = ?", sessionID, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session system prompt: %w", err)
 	}
@@ -354,13 +364,25 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 }
 
 // AddMessageToSession now accepts a message type, attachments, and numTokens, and branch_id, parent_message_id, chosen_next_id
-func AddMessageToSession(db *sql.DB, sessionID string, branchID string, parentMessageID *int, chosenNextID *int, role string, text string, msgType string, attachments []FileAttachment, cumulTokenCount *int, model string) (int, error) {
-	attachmentsJSON, err := json.Marshal(attachments)
+func AddMessageToSession(ctx context.Context, db *sql.DB, msg Message) (int, error) {
+	// Process attachments: save blob data and store only hashes
+	for i := range msg.Attachments {
+		if msg.Attachments[i].Data != nil {
+			hash, err := SaveBlob(ctx, db, msg.Attachments[i].Data)
+			if err != nil {
+				return 0, fmt.Errorf("failed to save attachment blob: %w", err)
+			}
+			msg.Attachments[i].Hash = hash
+			msg.Attachments[i].Data = nil // Clear the data after saving
+		}
+	}
+
+	attachmentsJSON, err := json.Marshal(msg.Attachments)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal attachments: %w", err)
 	}
 
-	result, err := db.Exec("INSERT INTO messages (session_id, branch_id, parent_message_id, chosen_next_id, role, text, type, attachments, cumul_token_count, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", sessionID, branchID, parentMessageID, chosenNextID, role, text, msgType, string(attachmentsJSON), cumulTokenCount, model)
+	result, err := db.Exec("INSERT INTO messages (session_id, branch_id, parent_message_id, chosen_next_id, role, text, type, attachments, cumul_token_count, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Role, msg.Text, msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model)
 	if err != nil {
 		log.Printf("AddMessageToSession: Failed to add message to session: %v", err)
 		return 0, fmt.Errorf("failed to add message to session: %w", err)
@@ -525,7 +547,6 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 				}
 
 				var parts []Part
-				var attachments []FileAttachment
 				var tokens *int
 
 				if m.CumulTokenCount != nil {
@@ -536,9 +557,8 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 					parts = append(parts, Part{Text: m.Text})
 				}
 
-				if m.Attachments != nil {
-					attachments = m.Attachments
-				}
+				// m.Attachments is already []FileAttachment type, use it directly
+				// No need for a separate 'attachments' variable here.
 
 				var fmParentMessageID *string
 				if m.ParentMessageID != nil {
@@ -592,8 +612,9 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 					Role:            m.Role,
 					Parts:           parts,
 					Type:            m.Type,
-					Attachments:     attachments,
+					Attachments:     m.Attachments, // Use m.Attachments directly
 					CumulTokenCount: tokens,
+					SessionID:       m.SessionID, // Populate SessionID
 					BranchID:        m.BranchID,
 					ParentMessageID: fmParentMessageID,
 					ChosenNextID:    fmChosenNextID,
@@ -799,4 +820,67 @@ func GetFirstMessageOfBranch(db *sql.DB, parentMessageID int, branchID string) (
 		return 0, fmt.Errorf("failed to find first message of branch: %w", err)
 	}
 	return firstMessageID, nil
+}
+
+// GetMessageByID retrieves a single message by its ID.
+func GetMessageByID(db *sql.DB, messageID int) (*Message, error) {
+	var m Message
+	var attachmentsJSON sql.NullString // Use sql.NullString to handle NULL attachments
+
+	err := db.QueryRow(`
+		SELECT
+			id, session_id, branch_id, parent_message_id, chosen_next_id,
+			role, text, type, attachments, cumul_token_count, created_at, model
+		FROM messages
+		WHERE id = ?
+	`, messageID).Scan(
+		&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
+		&m.Role, &m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("message not found")
+		}
+		return nil, fmt.Errorf("failed to get message by ID: %w", err)
+	}
+
+	// Unmarshal attachments JSON if it's not NULL
+	if attachmentsJSON.Valid {
+		if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
+			log.Printf("Failed to unmarshal attachments for message %d: %v", m.ID, err)
+			// Continue even if unmarshaling fails, as the message itself is valid
+		}
+	}
+
+	return &m, nil
+}
+
+// SaveBlob saves a blob to the blobs table. If a blob with the same hash already exists, it replaces it.
+// It returns the SHA-512/256 hash of the data.
+func SaveBlob(ctx context.Context, db *sql.DB, data []byte) (string, error) {
+	hasher := sha512.New512_256()
+	hasher.Write(data)
+	hash := hasher.Sum(nil)
+	hashStr := hex.EncodeToString(hash)
+
+	_, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO blobs (id, data) VALUES (?, ?)", hashStr, data)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert or replace blob: %w", err)
+	}
+
+	return hashStr, nil
+}
+
+// GetBlob retrieves a blob from the blobs table by its SHA-512/256 hash.
+func GetBlob(db *sql.DB, hashStr string) ([]byte, error) {
+	var data []byte
+	err := db.QueryRow("SELECT data FROM blobs WHERE id = ?", hashStr).Scan(&data)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("blob not found for hash: %s", hashStr)
+		}
+		return nil, fmt.Errorf("failed to get blob: %w", err)
+	}
+	return data, nil
 }

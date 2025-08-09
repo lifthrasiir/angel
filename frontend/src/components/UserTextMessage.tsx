@@ -9,9 +9,12 @@ interface UserTextMessageProps {
   text?: string;
   attachments?: FileAttachment[];
   messageInfo?: React.ReactNode;
+  messageId?: string; // New: message ID from ChatMessage
+  sessionId?: string; // New: session ID from ChatMessage
 }
 
-const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, messageInfo }) => {
+const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, messageInfo, messageId, sessionId }) => {
+  console.log('UserTextMessage attachments:', attachments);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
@@ -45,7 +48,13 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, me
           <div className="user-message-attachments-container">
             <div className="user-message-attachments-list">
               {attachments.map((file, index) => (
-                <FileAttachmentPreview key={index} file={file} />
+                <FileAttachmentPreview
+                  key={index}
+                  file={file}
+                  messageId={messageId}
+                  sessionId={sessionId}
+                  blobIndex={index}
+                />
               ))}
             </div>
           </div>

@@ -7,6 +7,8 @@
 
 - **Leverages Gemini Code Assist Free Tier**: The application integrates with the Gemini Code Assist API for LLM functionalities, utilizing the free tier. Authentication is handled via Google OAuth.
 - **Multi-session and Workspaces**: Users can create and manage multiple chat sessions, which can be organized into distinct workspaces.
+- **Branching**: Users can create new conversation branches from existing user messages and switch between different branches within a session, allowing for exploration of alternative conversation paths.
+  - **Creating a Branch from a Message**: When creating a new branch from a specific `updatedMessageId` (via `/api/chat/{sessionId}/branch` POST), the new branch's conversation path begins from the *parent* of the `updatedMessageId`. The `updatedMessageId` itself is a reference point, and its parent's `chosen_next_id` is updated to point to the first message of the new branch, making it the active path.
 - **Configurable System Prompt per Session**: Each chat session allows for a custom system prompt. These prompts support Go templating for dynamic generation, with a preview feature available in the UI.
 - **Automatic Session Name Inference**: The LLM can infer and update session names based on conversation content.
 - **Thought Display**: The LLM's internal thought processes are streamed as "thought" messages to the user interface. These thoughts are grouped and can be expanded/collapsed for detailed viewing.
@@ -16,20 +18,28 @@
 ## Go Backend
 
 - **Authentication (`auth.go`, `main.go`, `gemini.go`, `db.go`)**:
+  - Defines the `Auth` interface, abstracting authentication functionalities for pluggable authentication methods.
   - Authentication method is selected based on environment variables (`GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_CLOUD_PROJECT`/`GOOGLE_CLOUD_LOCATION`) or Google OAuth login.
   - The `GoogleOauthConfig` is intentionally hard-coded to match `gemini-cli` and **must never be removed**.
   - Handles OAuth2 login and callbacks, including CSRF protection using `oauthStates`.
   - Authentication tokens are stored and loaded from an SQLite database (`angel.db`, `oauth_tokens` table).
+  - Authentication tokens are automatically saved to the database after being obtained or refreshed via `tokenSaverSource`.
   - Manages user email information and login status.
+  - The `InitCurrentProvider` function handles the initialization of the LLM client, including proactive token refresh for OAuth and automatic acquisition of the `ProjectID` via `LoadCodeAssist` and `OnboardUser` calls.
+  - The `Validate` method ensures that the LLM client is properly initialized and a `ProjectID` is set before processing API requests, attempting re-initialization if necessary.
 - **Database (`db.go`)**:
   - Uses SQLite (`angel.db`) for persistent storage.
-  - Key tables include `sessions`, `messages`, `oauth_tokens`, `workspaces`, and `mcp_configs`.
+  - Key tables include `sessions`, `messages`, `oauth_tokens`, `workspaces`, `mcp_configs`, and `branches`.
+  - The `messages` table utilizes `parent_message_id` and `chosen_next_id` to define conversation threads and active branches, and `branch_id` to associate messages with specific branches.
   - Supports storing file attachments (`attachments` field) and token counts (`cumul_token_count`) within messages.
-  - Provides CRUD operations for workspaces, sessions, and messages.
-- **Gemini API Interaction (`gemini.go`, `gemini_types.go`)**:
+  - Provides CRUD operations for workspaces, sessions, messages, and branches.
+- **Gemini API Interaction (`gemini.go`, `gemini_types.go`, `llm.go`)**:
+  - Defines the `LLMProvider` interface as an abstraction layer for interacting with various Large Language Models, enabling extensibility.
   - The `CodeAssistClient` facilitates communication with the Gemini API.
   - Supports both streaming (`streamGenerateContent`) and one-shot (`GenerateContentOneShot`) responses.
   - Includes functionalities for token counting (`CountTokens`), loading code assist features (`LoadCodeAssist`), and user onboarding (`OnboardUser`).
+  - Interacts with internal Google API endpoints for `streamGenerateContent`, `countTokens`, `loadCodeAssist`, and `onboardUser`.
+  - The `LoadCodeAssist` function handles free tier eligibility checks and displays privacy notices to the user.
   - **Important**: The streaming protocol is a custom JSON stream format, not standard Server-Sent Events (SSE), and intentionally avoids the `event:` prefix.
   - `gemini_types.go` is strictly reserved for official Gemini API types and should not contain any other definitions.
 - **Model Context Protocol (MCP) Management (`mcp.go`)**:
@@ -54,6 +64,7 @@
   - Serves static frontend files, either from the filesystem during development or embedded files in production.
   - Initializes global state and services, including `GlobalGeminiState`, database (`InitDB`), Model Context Protocol manager (`InitMCPManager`), and authentication (`InitAuth`).
   - Includes common helper functions for JSON request/response handling, SSE header setup, and authentication validation.
+  - Exposes `/api/models` endpoint to list available LLM models and their token limits.
 
 ## React/TypeScript Frontend
 
@@ -63,9 +74,12 @@
   - **`ChatLayout.tsx`**: Defines the overall application layout, handling authentication rendering, integrating the sidebar and chat area, and displaying toast messages.
   - **`SystemPromptEditor.tsx`**: Provides the UI for editing and previewing system prompts. It supports selecting prompt types, custom editing, evaluating Go templates via the backend API (`/api/evaluatePrompt`), expanding/collapsing content, and a read-only mode for existing sessions.
   - **`InitialState`**: This struct is used to send the initial state of a chat session to the frontend. It includes the `SessionId` (which corresponds to the `sessions.id` in the database and is used for URL updates), the `History` of messages, the `SystemPrompt` for the session, the `WorkspaceID` it belongs to, and the `BranchID` of the currently active branch within that session. The `SessionId` is a string generated by `generateID()` and is used consistently across the frontend for routing and identification.
-- **State Management**: Utilizes React Context API and `useReducer` for global state management across the chat application.
+  - **Global Error Handling**: Implements a global `window.onerror` handler to catch uncaught JavaScript errors and display them using the `ToastMessage` component for improved user feedback.
+  - **Model Selection**: Allows users to select different LLM models for their chat sessions, leveraging the `/api/models` endpoint to fetch available models and their token limits.
+  - **MCP Settings**: Provides a user interface (`MCPSettings.tsx`) for managing Model Context Protocol (MCP) server configurations, including viewing connection status, available tools, and adding/deleting configurations.
+- **State Management**: Utilizes Jotai for global state management across the chat application.
 - **Custom Hooks**:
-  - **`useChatSession.ts`**: A central hub hook that encapsulates all chat session-related state and logic. It integrates `useChat`, `useMessageSending`, `useSessionInitialization`, and `useWorkspaceAndSessions` to manage the overall chat session state and logic. Its connection to the backend is indirect, facilitated by the integrated hooks.
+  - **`useChatSession.ts`**: A central hub hook that encapsulates all chat session-related state and logic. It integrates `useChat`, `useMessageSending`, `useSessionInitialization`, `useWorkspaceAndSessions`, and manages model selection, ensuring the UI reflects the currently used model. Its connection to the backend is indirect, facilitated by the integrated hooks.
   - **`useMessageSending.ts`**: Encapsulates the logic for sending messages and streaming subsequent responses.
     - **Backend Connection**: Sends user messages (with attachments) via POST requests to the `/api/chat` endpoint (for new sessions) or `/api/chat/{sessionId}` (for existing sessions).
     - **Streaming Processing**: Processes streaming responses from the backend (using SSE event types defined in `sse.go`) to update the UI in real-time.
@@ -90,7 +104,7 @@
   - `old_string`/`new_string` must exactly match, including all whitespace, indentation, and newlines.
   - For complex modifications, prefer `write_file` (read file, modify in memory, then overwrite).
   - **Caution for Agents**: When providing string literals containing newlines to `replace` or `write_file` tools, ensure that newlines are *double-escaped* (e.g., `\n` becomes `\\n`, `\r\n` becomes `\\r\\n`). This is to prevent issues during JSON serialization of the tool arguments.
-- **Responsiveness:** Always prioritize and act on the user's *latest* input. If a new instruction arrives during an ongoing task, immediately halt and address the new instruction; do not assume continuation.
+- **Responsiveness:** Always prioritize and act on the user's *latest* input. If a new instruction arrives during an ongoing task, you *must* immediately halt the current task and address the new instruction; do not assume continuation.
 
 # Specific instructions
 

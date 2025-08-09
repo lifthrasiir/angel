@@ -145,6 +145,7 @@ export const useSessionInitialization = ({
                 setChatSessionId(data.sessionId);
                 setSystemPrompt(data.systemPrompt);
                 setIsSystemPromptEditing(false);
+                console.log('InitialState history:', data.history);
                 setMessages(
                   (data.history || []).map((msg: any) => {
                     const chatMessage: ChatMessage = {

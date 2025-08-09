@@ -1,7 +1,8 @@
 export interface FileAttachment {
   fileName: string;
   mimeType: string;
-  data: string;
+  hash?: string; // SHA-512/256 hash of the data (optional, filled by backend)
+  data?: string; // Base64 encoded binary data, used for upload
 }
 
 export interface PossibleNextMessage {
@@ -31,6 +32,7 @@ export interface ChatMessage {
   chosenNextId?: string;
   possibleNextIds?: PossibleNextMessage[];
   model?: string; // New field for the model that generated the message
+  sessionId?: string; // New field for the session ID
 }
 
 export interface InitialState {

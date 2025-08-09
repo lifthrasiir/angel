@@ -130,6 +130,10 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 	ctx := context.Background()
 	var clientProvider HTTPClientProvider
 
+	// Clear CurrentProviders at the beginning of InitCurrentProvider
+	// to ensure a clean state before re-populating.
+	CurrentProviders = make(map[string]LLMProvider)
+
 	switch ga.SelectedAuthType {
 	case AuthTypeLoginWithGoogle:
 		if ga.Token == nil {
@@ -243,6 +247,17 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 		ga.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
 	default:
 		log.Fatalf("InitCurrentProvider: Unsupported authentication type: %s", ga.SelectedAuthType)
+	}
+
+	// Centralized CurrentProviders population
+	if ga.TokenSource != nil {
+		flashClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+		CurrentProviders["gemini-2.5-flash"] = flashClient
+
+		proClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+		CurrentProviders["gemini-2.5-pro"] = proClient
+	} else {
+		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")
 	}
 }
 

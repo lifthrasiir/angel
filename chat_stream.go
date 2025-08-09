@@ -20,7 +20,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var finalTotalTokenCount *int
-	currentHistory := convertFrontendMessagesToContent(initialState.History)
+	currentHistory := convertFrontendMessagesToContent(db, initialState.History)
 
 	// Track the ID of the last message added to the database
 	lastAddedMessageID := lastUserMessageID
@@ -87,7 +87,18 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
-				if _, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, nil, nil, "model", errorMessage, "model_error", nil, nil, modelToUse); err != nil {
+				if _, err := AddMessageToSession(ctx, db, Message{
+					SessionID:       initialState.SessionId,
+					BranchID:        initialState.PrimaryBranchID,
+					ParentMessageID: nil,
+					ChosenNextID:    nil,
+					Role:            "model",
+					Text:            errorMessage,
+					Type:            "model_error",
+					Attachments:     nil,
+					CumulTokenCount: nil,
+					Model:           modelToUse,
+				}); err != nil {
 					log.Printf("Failed to add model error message to DB: %v", err)
 				}
 			}
@@ -151,7 +162,18 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					} else {
 						parentMessageID = nil
 					}
-					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", string(fcJson), "function_call", nil, nil, modelToUse)
+					messageID, err := AddMessageToSession(ctx, db, Message{
+						SessionID:       initialState.SessionId,
+						BranchID:        initialState.PrimaryBranchID,
+						ParentMessageID: parentMessageID,
+						ChosenNextID:    nil,
+						Role:            "model",
+						Text:            string(fcJson),
+						Type:            "function_call",
+						Attachments:     nil,
+						CumulTokenCount: nil,
+						Model:           modelToUse,
+					})
 					if err != nil {
 						log.Printf("Failed to save function call message: %v", err)
 						return fmt.Errorf("failed to save function call message: %w", err)
@@ -195,7 +217,18 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					} else {
 						parentMessageID = nil
 					}
-					messageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "user", string(frJson), "function_response", nil, promptTokens, modelToUse)
+					messageID, err = AddMessageToSession(ctx, db, Message{
+						SessionID:       initialState.SessionId,
+						BranchID:        initialState.PrimaryBranchID,
+						ParentMessageID: parentMessageID,
+						ChosenNextID:    nil,
+						Role:            "user",
+						Text:            string(frJson),
+						Type:            "function_response",
+						Attachments:     nil,
+						CumulTokenCount: promptTokens,
+						Model:           modelToUse,
+					})
 					if err != nil {
 						log.Printf("Failed to save function response message: %v", err)
 						return fmt.Errorf("failed to save function response message: %w", err)
@@ -234,7 +267,18 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					} else {
 						parentMessageID = nil
 					}
-					messageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "thought", thoughtText, "thought", nil, nil, modelToUse)
+					messageID, err := AddMessageToSession(ctx, db, Message{
+						SessionID:       initialState.SessionId,
+						BranchID:        initialState.PrimaryBranchID,
+						ParentMessageID: parentMessageID,
+						ChosenNextID:    nil,
+						Role:            "thought",
+						Text:            thoughtText,
+						Type:            "thought",
+						Attachments:     nil,
+						CumulTokenCount: nil,
+						Model:           modelToUse,
+					})
 					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
@@ -258,7 +302,18 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 							parentMessageID = nil
 						}
 						// Add the initial model message to DB with empty text
-						modelMessageID, err = AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, parentMessageID, nil, "model", "", "text", nil, nil, modelToUse) // Changed part.Text to ""
+						modelMessageID, err = AddMessageToSession(ctx, db, Message{
+							SessionID:       initialState.SessionId,
+							BranchID:        initialState.PrimaryBranchID,
+							ParentMessageID: parentMessageID,
+							ChosenNextID:    nil,
+							Role:            "model",
+							Text:            "",
+							Type:            "text",
+							Attachments:     nil,
+							CumulTokenCount: nil,
+							Model:           modelToUse,
+						})
 						if err != nil {
 							log.Printf("Failed to add new model message to DB: %v", err)
 							return fmt.Errorf("failed to add new model message to DB: %w", err)
@@ -298,7 +353,18 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			}
 
 			// Add a separate error message to the database
-			errorMessageID, err := AddMessageToSession(db, initialState.SessionId, initialState.PrimaryBranchID, &lastAddedMessageID, nil, "model", "user canceled request", "error", nil, nil, modelToUse)
+			errorMessageID, err := AddMessageToSession(ctx, db, Message{
+				SessionID:       initialState.SessionId,
+				BranchID:        initialState.PrimaryBranchID,
+				ParentMessageID: &lastAddedMessageID,
+				ChosenNextID:    nil,
+				Role:            "model",
+				Text:            "user canceled request",
+				Type:            "error",
+				Attachments:     nil,
+				CumulTokenCount: nil,
+				Model:           modelToUse,
+			})
 			if err != nil {
 				log.Printf("Failed to add error message to DB: %v", err)
 			} else {
