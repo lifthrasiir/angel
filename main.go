@@ -117,8 +117,8 @@ func main() {
 	ga := NewGeminiAuth(db)
 	ga.Init()
 
-	// Initialize CurrentProviders map
-	CurrentProviders = make(map[string]LLMProvider)
+	// Add angel-eval provider after default models are initialized
+	CurrentProviders["angel-eval"] = &AngelEvalProvider{}
 
 	router := mux.NewRouter()
 	router.Use(makeContextMiddleware(db, ga))

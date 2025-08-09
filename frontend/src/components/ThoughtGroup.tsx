@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useAtom } from 'jotai';
 
-import { messagesAtom, lastAutoDisplayedThoughtIdAtom } from '../atoms/chatAtoms';
+import { lastAutoDisplayedThoughtIdAtom } from '../atoms/chatAtoms';
 import type { ChatMessage } from '../types/chat';
 import ChatMessageComponent from './ChatMessage';
 
 interface ThoughtGroupProps {
   groupId: string; // Unique ID for this thought group
   isAutoDisplayMode: boolean;
+  thoughts: ChatMessage[]; // 새로 추가: thoughts 배열을 props로 받음
 }
 
-export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(({ groupId, isAutoDisplayMode }) => {
-  const [messages] = useAtom(messagesAtom);
-  const thoughts = messages.filter((msg) => msg.type === 'thought');
+export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(({ groupId, isAutoDisplayMode, thoughts }) => {
   const [lastAutoDisplayedThoughtId] = useAtom(lastAutoDisplayedThoughtIdAtom);
 
   const [activeThoughtId, setActiveThoughtId] = useState<string | null>(null);

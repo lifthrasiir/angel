@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
@@ -31,6 +31,11 @@ export const useChatSession = () => {
   const chatSessionId = useAtomValue(chatSessionIdAtom);
   const messages = useAtomValue(messagesAtom);
   const inputMessage = useAtomValue(inputMessageAtom);
+  const inputMessageRef = useRef(inputMessage);
+
+  useEffect(() => {
+    inputMessageRef.current = inputMessage;
+  }, [inputMessage]);
   const sessions = useAtomValue(sessionsAtom);
   const lastAutoDisplayedThoughtId = useAtomValue(lastAutoDisplayedThoughtIdAtom);
   const isStreaming = useAtomValue(isStreamingAtom);
@@ -90,10 +95,10 @@ export const useChatSession = () => {
     }
   }, [messages, availableModels, setSelectedModel]);
 
-  const handleLoginRedirect = () => {
+  const handleLoginRedirect = useCallback(() => {
     const currentPath = location.pathname + location.search;
-    handleLogin(currentPath, inputMessage);
-  };
+    handleLogin(currentPath, inputMessageRef.current);
+  }, [location.pathname, location.search]);
 
   const handleFilesSelectedWrapper = (files: File[]) => {
     setSelectedFiles(handleFilesSelected(selectedFiles, files));

@@ -113,7 +113,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           j++;
         }
         renderedElements.push(
-          <ThoughtGroup key={`thought-group-${i}`} groupId={`thought-group-${i}`} isAutoDisplayMode={true} />,
+          <ThoughtGroup
+            key={`thought-group-${i}`}
+            groupId={`thought-group-${i}`}
+            isAutoDisplayMode={true}
+            thoughts={thoughtGroup}
+          />,
         );
         i = j; // Move index past the grouped thoughts
       } else {

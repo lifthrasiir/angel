@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useSetAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import type { ChatMessage, InitialState } from '../types/chat';
 import {
   EventComplete,
@@ -57,6 +57,7 @@ export const useSessionInitialization = ({
   const setIsStreaming = useSetAtom(isStreamingAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
   const setMessages = useSetAtom(messagesAtom);
+  const [messages] = useAtom(messagesAtom);
   const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
   const setSystemPrompt = useSetAtom(systemPromptAtom);
@@ -126,9 +127,11 @@ export const useSessionInitialization = ({
         return;
       }
 
-      if (currentSessionId !== chatSessionId) {
+      if (currentSessionId && currentSessionId !== chatSessionId) {
+        setChatSessionId(currentSessionId);
         setSelectedFiles([]);
         setIsStreaming(false);
+        setMessages([]); // Clear messages from previous session
       }
 
       if (currentSessionId) {
@@ -146,34 +149,39 @@ export const useSessionInitialization = ({
                 setSystemPrompt(data.systemPrompt);
                 setIsSystemPromptEditing(false);
                 console.log('InitialState history:', data.history);
-                setMessages(
-                  (data.history || []).map((msg: any) => {
-                    const chatMessage: ChatMessage = {
-                      ...msg,
-                      id: msg.id,
-                      attachments: msg.attachments,
-                      cumulTokenCount: msg.cumul_token_count,
-                    };
-                    if (msg.type === 'thought') {
-                      chatMessage.type = 'thought';
-                    } else if (msg.type === 'model_error') {
-                      chatMessage.type = 'model_error';
-                    } else if (msg.parts?.[0]?.functionCall) {
-                      chatMessage.type = 'function_call';
-                      chatMessage.parts[0] = {
-                        functionCall: msg.parts[0].functionCall,
+
+                // Only set history if messagesAtom is empty.
+                // This prevents duplication if useMessageSending.ts is already adding messages.
+                if (messages.length === 0) {
+                  setMessages(
+                    (data.history || []).map((msg: any) => {
+                      const chatMessage: ChatMessage = {
+                        ...msg,
+                        id: msg.id,
+                        attachments: msg.attachments,
+                        cumulTokenCount: msg.cumul_token_count,
                       };
-                    } else if (msg.parts?.[0]?.functionResponse) {
-                      chatMessage.type = 'function_response';
-                      chatMessage.parts[0] = {
-                        functionResponse: msg.parts[0].functionResponse,
-                      };
-                    } else {
-                      chatMessage.type = msg.role;
-                    }
-                    return chatMessage;
-                  }),
-                );
+                      if (msg.type === 'thought') {
+                        chatMessage.type = 'thought';
+                      } else if (msg.type === 'model_error') {
+                        chatMessage.type = 'model_error';
+                      } else if (msg.parts?.[0]?.functionCall) {
+                        chatMessage.type = 'function_call';
+                        chatMessage.parts[0] = {
+                          functionCall: msg.parts[0].functionCall,
+                        };
+                      } else if (msg.parts?.[0]?.functionResponse) {
+                        chatMessage.type = 'function_response';
+                        chatMessage.parts[0] = {
+                          functionResponse: msg.parts[0].functionResponse,
+                        };
+                      } else {
+                        chatMessage.type = msg.role;
+                      }
+                      return chatMessage;
+                    }),
+                  );
+                }
                 setWorkspaceId(data.workspaceId);
                 setPrimaryBranchId(data.primaryBranchId);
 

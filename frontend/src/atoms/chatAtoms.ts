@@ -23,20 +23,7 @@ export const addMessageAtom = atom(
   null, // This is a write-only atom, so the first argument is null
   (_get, set, newMessage: ChatMessage) => {
     const currentMessages = _get(messagesAtom);
-    const lastMessage = currentMessages[currentMessages.length - 1];
-
-    if (
-      newMessage.type === 'thought' &&
-      lastMessage &&
-      lastMessage.type === 'model' &&
-      lastMessage.parts[0]?.text === ''
-    ) {
-      const newMessages = [...currentMessages];
-      newMessages.splice(newMessages.length - 1, 0, newMessage);
-      set(messagesAtom, newMessages);
-    } else {
-      set(messagesAtom, [...currentMessages, newMessage]);
-    }
+    set(messagesAtom, [...currentMessages, newMessage]);
   },
 );
 
