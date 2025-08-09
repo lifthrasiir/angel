@@ -78,6 +78,18 @@ export const useChatSession = () => {
     }
   }, [currentWorkspace, error, setWorkspaceName]);
 
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.model) {
+        const modelToSelect = availableModels.get(lastMessage.model);
+        if (modelToSelect) {
+          setSelectedModel(modelToSelect);
+        }
+      }
+    }
+  }, [messages, availableModels, setSelectedModel]);
+
   const handleLoginRedirect = () => {
     const currentPath = location.pathname + location.search;
     handleLogin(currentPath, inputMessage);
