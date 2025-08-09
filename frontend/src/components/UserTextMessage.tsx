@@ -14,7 +14,6 @@ interface UserTextMessageProps {
 }
 
 const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, messageInfo, messageId, sessionId }) => {
-  console.log('UserTextMessage attachments:', attachments);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);

@@ -43,7 +43,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
   }, [chatSessionId, children, chatInputRef, chatAreaRef]);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
       {userEmail ? (
         <>
           <Sidebar workspaces={workspaces} refreshWorkspaces={refreshWorkspaces} />

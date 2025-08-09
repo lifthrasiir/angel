@@ -193,7 +193,6 @@ export const useMessageSending = ({
       });
 
       if (response.ok) {
-        console.log(`Streaming call for session ${chatSessionId} cancelled.`);
         setIsStreaming(false);
         addErrorMessage('Request cancelled by user.');
       } else {

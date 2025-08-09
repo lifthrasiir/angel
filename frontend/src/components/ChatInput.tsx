@@ -152,7 +152,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               }
             }}
             style={{
-              padding: '8px',
+              padding: '0 8px',
               borderRadius: '5px',
               border: '1px solid #ccc',
               backgroundColor: '#fff',

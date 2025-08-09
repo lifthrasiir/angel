@@ -148,7 +148,6 @@ export const useSessionLoader = ({
                 setChatSessionId(data.sessionId);
                 setSystemPrompt(data.systemPrompt);
                 setIsSystemPromptEditing(false);
-                console.log('InitialState history:', data.history);
 
                 // Only set history if messagesAtom is empty.
                 // This prevents duplication if useMessageSending.ts is already adding messages.

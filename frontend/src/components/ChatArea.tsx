@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom } from 'jotai';
 import type { ChatMessage as ChatMessageType } from '../types/chat';
 import ChatInput from './ChatInput';
+import TokenCountMeter from './TokenCountMeter';
 import ChatMessage from './ChatMessage';
 import FileAttachmentPreview from './FileAttachmentPreview';
 import SystemPromptEditor from './SystemPromptEditor';
@@ -139,6 +140,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     <div
       style={{
         flexGrow: 1,
+        width: '0',
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
@@ -180,6 +182,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               ))}
             </div>
           )}
+          <TokenCountMeter />
           <ChatInput
             handleSendMessage={handleSendMessage}
             onFilesSelected={onFilesSelected}

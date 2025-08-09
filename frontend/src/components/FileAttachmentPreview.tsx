@@ -81,7 +81,6 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
       URL.revokeObjectURL(url); // Clean up
     } else if (fileAttachment && messageId && sessionId && blobIndex !== undefined) {
       // For attached files (FileAttachment), use the backend endpoint
-      console.log('Attempting download with:', { fileAttachment, messageId, sessionId, blobIndex });
       const downloadUrl = `/api/chat/${sessionId}/blob/${messageId}.${blobIndex}`;
       const a = document.createElement('a');
       a.href = downloadUrl;
