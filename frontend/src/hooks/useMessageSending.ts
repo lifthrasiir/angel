@@ -13,6 +13,7 @@ import {
   lastAutoDisplayedThoughtIdAtom,
   selectedFilesAtom,
   setSessionNameAtom,
+  sessionsAtom,
   systemPromptAtom,
   primaryBranchIdAtom,
   updateAgentMessageAtom,
@@ -50,6 +51,7 @@ export const useMessageSending = ({
   const setLastAutoDisplayedThoughtId = useSetAtom(lastAutoDisplayedThoughtIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
   const setSessionName = useSetAtom(setSessionNameAtom);
+  const setSessions = useSetAtom(sessionsAtom);
   const setSystemPrompt = useSetAtom(systemPromptAtom);
   const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
   const addMessage = useSetAtom(addMessageAtom);
@@ -143,6 +145,11 @@ export const useMessageSending = ({
           setChatSessionId(sessionId);
           setSystemPrompt(systemPrompt);
           setPrimaryBranchId(primaryBranchId);
+          // Add the new session to the sessionsAtom with a temporary name
+          setSessions((prevSessions) => [
+            { id: sessionId, name: '', isEditing: false, last_updated_at: new Date().toISOString() },
+            ...prevSessions,
+          ]);
           navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
         },
         onSessionNameUpdate: (sessionId: string, newName: string) => {

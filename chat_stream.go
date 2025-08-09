@@ -73,7 +73,12 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 			// Continue with the Gemini API call
 		}
 
-		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{Contents: currentHistory, ModelName: modelToUse, SystemPrompt: initialState.SystemPrompt, ThinkingConfig: &ThinkingConfig{IncludeThoughts: true}})
+		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{
+			Contents:       currentHistory,
+			ModelName:      modelToUse,
+			SystemPrompt:   initialState.SystemPrompt,
+			ThinkingConfig: &ThinkingConfig{IncludeThoughts: true},
+		})
 		if err != nil {
 			failCall(initialState.SessionId, err) // Mark the call as failed
 			// Save a model_error message to the database
@@ -466,6 +471,27 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		return
 	}
 
+	// Check for (NAME: session name) comment ONLY FOR angel-eval model
+	if modelToUse == "angel-eval" {
+		nameCommentPattern := regexp.MustCompile(`\(NAME:\s*(.*?)\)`)
+		matches := nameCommentPattern.FindStringSubmatch(userMessage)
+		if len(matches) > 1 {
+			extractedName := strings.TrimSpace(matches[1])
+			if extractedName != "" {
+				inferredName = extractedName
+				if err := UpdateSessionName(db, sessionId, inferredName); err != nil {
+					log.Printf("Failed to update session name from comment for %s: %v", sessionId, err)
+				}
+				log.Printf("inferAndSetSessionName: Inferred name from comment for session %s: %s", sessionId, inferredName)
+				return // Name inferred from comment, no need for LLM
+			}
+		}
+		// If angel-eval model and no comment found, skip LLM inference
+		log.Printf("inferAndSetSessionName: Skipping LLM name inference for angel-eval model as no comment was found.")
+		return // inferredName remains empty if no comment was found
+	}
+
+	// Existing LLM inference logic (only for non-angel-eval models)
 	nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(userMessage, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

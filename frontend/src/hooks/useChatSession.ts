@@ -22,7 +22,7 @@ import {
 } from '../atoms/chatAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
-import { useSessionInitialization } from './useSessionInitialization';
+import { useSessionLoader } from './useSessionLoader';
 import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
 import { getAvailableModels, ModelInfo } from '../api/models';
 
@@ -114,7 +114,7 @@ export const useChatSession = () => {
     setWorkspaceId(urlWorkspaceId);
   }, [urlWorkspaceId, setWorkspaceId]);
 
-  useSessionInitialization({
+  useSessionLoader({
     chatSessionId,
     isStreaming,
     handleLoginRedirect,

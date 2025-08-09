@@ -79,12 +79,12 @@
   - **MCP Settings**: Provides a user interface (`MCPSettings.tsx`) for managing Model Context Protocol (MCP) server configurations, including viewing connection status, available tools, and adding/deleting configurations.
 - **State Management**: Utilizes Jotai for global state management across the chat application.
 - **Custom Hooks**:
-  - **`useChatSession.ts`**: A central hub hook that encapsulates all chat session-related state and logic. It integrates `useChat`, `useMessageSending`, `useSessionInitialization`, `useWorkspaceAndSessions`, and manages model selection, ensuring the UI reflects the currently used model. Its connection to the backend is indirect, facilitated by the integrated hooks.
+  - **`useChatSession.ts`**: A central hub hook that encapsulates all chat session-related state and logic. It integrates `useChat`, `useMessageSending`, `useSessionLoader`, `useWorkspaceAndSessions`, and manages model selection, ensuring the UI reflects the currently used model. Its connection to the backend is indirect, facilitated by the integrated hooks.
   - **`useMessageSending.ts`**: Encapsulates the logic for sending messages and streaming subsequent responses.
     - **Backend Connection**: Sends user messages (with attachments) via POST requests to the `/api/chat` endpoint (for new sessions) or `/api/chat/{sessionId}` (for existing sessions).
     - **Streaming Processing**: Processes streaming responses from the backend (using SSE event types defined in `sse.go`) to update the UI in real-time.
     - **Cancellation**: Sends a DELETE request to `/api/chat/{sessionId}/call` to cancel ongoing streaming, which is handled by the `cancelCall` function in `call_manager.go` on the backend.
-  - **`useSessionInitialization.ts`**: Encapsulates the logic for loading existing chat sessions and possibly streaming the ongoing call.
+  - **`useSessionLoader.ts`**: Encapsulates the logic for loading existing chat sessions and possibly streaming the ongoing call.
     - **Backend Connection**: Establishes an SSE connection to the `/api/chat/{sessionId}` endpoint via the `loadSession` function to receive session history and real-time updates.
     - **Authentication**: Fetches user information from the `/api/userinfo` endpoint via `fetchUserInfo` to verify login status.
   - **`useWorkspaceAndSessions.ts`**: Encapsulates the logic for fetching workspace and session data.

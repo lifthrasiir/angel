@@ -32,19 +32,19 @@ import {
   updateAgentMessageAtom,
 } from '../atoms/chatAtoms';
 
-interface UseSessionInitializationProps {
+interface UseSessionLoaderProps {
   chatSessionId: string | null;
   isStreaming: boolean;
   handleLoginRedirect: () => void;
   primaryBranchId: string;
 }
 
-export const useSessionInitialization = ({
+export const useSessionLoader = ({
   chatSessionId,
   isStreaming,
   handleLoginRedirect,
   primaryBranchId,
-}: UseSessionInitializationProps) => {
+}: UseSessionLoaderProps) => {
   const navigate = useNavigate();
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
     sessionId?: string;
@@ -113,7 +113,7 @@ export const useSessionInitialization = ({
       return;
     }
 
-    const initializeChatSession = async () => {
+    const loadChatSession = async () => {
       const currentSessionId = urlSessionId;
       if (location.pathname.endsWith('/new') && !currentSessionId) {
         resetChatSessionState();
@@ -265,6 +265,6 @@ export const useSessionInitialization = ({
       }
     };
 
-    initializeChatSession();
+    loadChatSession();
   }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, isStreaming, chatSessionId, primaryBranchId]);
 };
