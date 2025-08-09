@@ -393,7 +393,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 	modelName := requestBody.Model
 	if modelName == "" {
-		modelName = "gemini-2.5-flash" // Default model if not provided
+		modelName = DefaultGeminiModel // Default model if not provided
 	}
 
 	provider, ok := CurrentProviders[modelName]
@@ -593,11 +593,25 @@ func handleNotFound(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// ModelInfo represents the information about an LLM model.
+type ModelInfo struct {
+	Name      string `json:"name"`
+	MaxTokens int    `json:"maxTokens"`
+}
+
 func listModelsHandler(w http.ResponseWriter, r *http.Request) {
-	var models []string
-	for modelName := range CurrentProviders {
-		models = append(models, modelName)
+	var models []ModelInfo
+	for modelName, provider := range CurrentProviders {
+		models = append(models, ModelInfo{
+			Name:      modelName,
+			MaxTokens: provider.MaxTokens(),
+		})
 	}
-	sort.Strings(models)
+
+	// Sort models by name
+	sort.Slice(models, func(i, j int) bool {
+		return models[i].Name < models[j].Name
+	})
+
 	sendJSONResponse(w, models)
 }

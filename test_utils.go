@@ -66,8 +66,11 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 		CountTokensFunc: func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
 			return &CaCountTokenResponse{TotalTokens: 10}, nil
 		},
+		MaxTokensFunc: func() int {
+			return 1048576 // Mocked max tokens
+		},
 	}
-	CurrentProviders["gemini-2.5-flash"] = mockLLMProvider
+	CurrentProviders[DefaultGeminiModel] = mockLLMProvider
 
 	// Create a new router for testing
 	router := mux.NewRouter()
@@ -85,8 +88,8 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 }
 
 func replaceProvider(provider LLMProvider) LLMProvider {
-	oldProvider := CurrentProviders["gemini-2.5-flash"]
-	CurrentProviders["gemini-2.5-flash"] = provider
+	oldProvider := CurrentProviders[DefaultGeminiModel]
+	CurrentProviders[DefaultGeminiModel] = provider
 	return oldProvider
 }
 

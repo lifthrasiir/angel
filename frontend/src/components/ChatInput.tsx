@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
 import { FaPaperclip } from 'react-icons/fa';
+import { ModelInfo } from '../api/models';
 
 interface ChatInputProps {
   inputMessage: string;
@@ -10,9 +11,9 @@ interface ChatInputProps {
   onFilesSelected: (files: File[]) => void; // New prop for file selection
   handleCancelStreaming: () => void; // New prop for canceling streaming
   inputRef: React.RefObject<HTMLTextAreaElement>;
-  availableModels: string[];
-  selectedModel: string;
-  setSelectedModel: (model: string) => void;
+  availableModels: Map<string, ModelInfo>;
+  selectedModel: ModelInfo | null;
+  setSelectedModel: (model: ModelInfo) => void;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -139,8 +140,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
           </label>
           <select
             id="model-select"
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
+            value={selectedModel?.name || ''} // Use selectedModel?.name || ''
+            onChange={(e) => {
+              const selectedModelName = e.target.value;
+              const model = availableModels.get(selectedModelName); // Get ModelInfo from map
+              if (model) {
+                setSelectedModel(model);
+              }
+            }}
             style={{
               padding: '8px',
               borderRadius: '5px',
@@ -149,9 +156,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
               cursor: 'pointer',
             }}
           >
-            {availableModels.map((model) => (
-              <option key={model} value={model}>
-                {model}
+            {Array.from(availableModels.values()).map((model) => (
+              <option key={model.name} value={model.name}>
+                {model.name}
               </option>
             ))}
           </select>

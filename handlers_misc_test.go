@@ -12,7 +12,7 @@ func TestCountTokensHandler(t *testing.T) {
 	router, _, _ := setupTest(t)
 
 	// Mock the CountTokens method of CurrentProvider
-	mockLLMProvider := CurrentProviders["gemini-2.5-flash"].(*MockLLMProvider)
+	mockLLMProvider := CurrentProviders[DefaultGeminiModel].(*MockLLMProvider)
 	mockLLMProvider.CountTokensFunc = func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
 		// Simulate token counting based on input text length
 		totalTokens := len(contents[0].Parts[0].Text) / 2 // Example: 2 chars per token

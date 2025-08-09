@@ -7,6 +7,7 @@ import FileAttachmentPreview from './FileAttachmentPreview';
 import SystemPromptEditor from './SystemPromptEditor';
 import { ThoughtGroup } from './ThoughtGroup';
 import FunctionPairMessage from './FunctionPairMessage';
+import { ModelInfo } from '../api/models'; // Import ModelInfo
 
 interface ChatAreaProps {
   isLoggedIn: boolean;
@@ -27,9 +28,9 @@ interface ChatAreaProps {
   handleCancelStreaming: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef: React.RefObject<HTMLDivElement>;
-  availableModels: string[]; // New prop
-  selectedModel: string; // New prop
-  setSelectedModel: (model: string) => void; // New prop
+  availableModels: Map<string, ModelInfo>; // Changed type to Map<string, ModelInfo>
+  selectedModel: ModelInfo | null; // Changed type to ModelInfo | null
+  setSelectedModel: (model: ModelInfo) => void; // Changed type to ModelInfo
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -67,6 +68,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     let i = 0;
     while (i < messages.length) {
       const currentMessage = messages[i];
+
+      // Find maxTokens for the current message's model
+      const currentModelMaxTokens = currentMessage.model
+        ? availableModels.get(currentMessage.model)?.maxTokens
+        : undefined;
 
       // Check for function_call followed by function_response
       if (
@@ -108,12 +114,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         );
         i = j; // Move index past the grouped thoughts
       } else {
-        renderedElements.push(<ChatMessage key={currentMessage.id} message={currentMessage} />);
+        renderedElements.push(
+          <ChatMessage
+            key={currentMessage.id}
+            message={currentMessage}
+            maxTokens={currentModelMaxTokens} // Pass maxTokens to ChatMessage
+          />,
+        );
         i++;
       }
     }
     return renderedElements;
-  }, [messages, lastAutoDisplayedThoughtId]);
+  }, [messages, lastAutoDisplayedThoughtId, availableModels]); // Add availableModels to dependencies
 
   return (
     <div

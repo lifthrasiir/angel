@@ -9,7 +9,7 @@ import SystemMessage from './SystemMessage';
 import UserTextMessage from './UserTextMessage';
 import MessageInfo from './MessageInfo'; // Import MessageInfo
 
-const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message }) => {
+const ChatMessage: React.FC<{ message: ChatMessage; maxTokens?: number }> = React.memo(({ message, maxTokens }) => {
   const { type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, possibleNextIds, model } =
     message;
   const { text, functionCall, functionResponse } = message.parts?.[0] || {};
@@ -22,6 +22,7 @@ const ChatMessage: React.FC<{ message: ChatMessage }> = React.memo(({ message })
       chosenNextId={chosenNextId}
       possibleNextIds={possibleNextIds}
       model={model}
+      maxTokens={maxTokens}
     />
   );
 

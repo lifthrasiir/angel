@@ -1,4 +1,5 @@
 import type { ChatMessage, Session } from '../types/chat';
+import { ModelInfo } from '../api/models';
 
 // Action Types
 export const SET_USER_EMAIL = 'SET_USER_EMAIL';
@@ -39,8 +40,8 @@ export interface ChatState {
   workspaceId?: string; // Added workspaceId to state
   workspaceName?: string; // Added workspaceName to state
   primaryBranchId: string; // New field for primary branch ID
-  availableModels: string[]; // New field for available models
-  selectedModel: string; // New field for selected model
+  availableModels: Map<string, ModelInfo>; // New field for available models
+  selectedModel: ModelInfo | null; // New field for selected model, can be null
 }
 
 // Initial State
@@ -58,8 +59,8 @@ export const initialState: ChatState = {
   workspaceId: undefined, // Added workspaceId to initial state
   workspaceName: undefined, // Added workspaceName to initial state
   primaryBranchId: '',
-  availableModels: [], // Initialize availableModels
-  selectedModel: 'gemini-2.5-flash', // Initialize selectedModel
+  availableModels: new Map(), // Initialize availableModels as a Map
+  selectedModel: null, // Initialize selectedModel as null
 };
 
 // Action Interface
@@ -87,8 +88,8 @@ export type ChatAction =
   | { type: typeof SET_PRIMARY_BRANCH_ID; payload: string }
   | { type: typeof UPDATE_USER_MESSAGE_ID; payload: { temporaryId: string; newId: string } }
   | { type: typeof UPDATE_MESSAGE_TOKEN_COUNT; payload: { messageId: string; cumulTokenCount: number } }
-  | { type: typeof SET_AVAILABLE_MODELS; payload: string[] }
-  | { type: typeof SET_SELECTED_MODEL; payload: string };
+  | { type: typeof SET_AVAILABLE_MODELS; payload: Map<string, ModelInfo> }
+  | { type: typeof SET_SELECTED_MODEL; payload: ModelInfo | null };
 
 // Reducer Function
 export const chatReducer = (state: ChatState, action: ChatAction): ChatState => {

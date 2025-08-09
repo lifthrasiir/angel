@@ -19,6 +19,7 @@ import {
   UPDATE_USER_MESSAGE_ID,
   UPDATE_MESSAGE_TOKEN_COUNT,
 } from './chatReducer';
+import { ModelInfo } from '../api/models';
 
 interface UseMessageSendingProps {
   inputMessage: string;
@@ -28,7 +29,7 @@ interface UseMessageSendingProps {
   dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
   primaryBranchId: string;
-  selectedModel: string; // New field for selected model
+  selectedModel: ModelInfo | null; // Changed type to ModelInfo | null
 }
 
 export const useMessageSending = ({
@@ -59,7 +60,7 @@ export const useMessageSending = ({
         parts: [{ text: inputMessage }],
         type: 'user',
         attachments: attachments,
-        model: selectedModel, // Include selected model in user message
+        model: selectedModel?.name, // Use selectedModel?.name
       };
       dispatch({ type: ADD_MESSAGE, payload: userMessage });
       dispatch({ type: SET_INPUT_MESSAGE, payload: '' });
@@ -76,7 +77,7 @@ export const useMessageSending = ({
         systemPrompt,
         workspaceId,
         primaryBranchId,
-        selectedModel, // Pass selected model to sendMessage
+        selectedModel?.name, // Pass selectedModel?.name to sendMessage
       );
 
       if (response.status === 401) {

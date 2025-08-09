@@ -15,7 +15,7 @@ import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
 import { useSessionInitialization } from './useSessionInitialization';
 import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
-import { getAvailableModels } from '../api/models'; // Import the new API function
+import { getAvailableModels, ModelInfo } from '../api/models'; // Import ModelInfo
 
 export const useChatSession = () => {
   const { state, dispatch } = useChat();
@@ -46,10 +46,12 @@ export const useChatSession = () => {
   useEffect(() => {
     const fetchModels = async () => {
       try {
-        const models = await getAvailableModels();
-        dispatch({ type: SET_AVAILABLE_MODELS, payload: models });
-        if (models.length > 0) {
-          dispatch({ type: SET_SELECTED_MODEL, payload: models[0] }); // Set first model as default
+        const modelsMap = await getAvailableModels();
+        dispatch({ type: SET_AVAILABLE_MODELS, payload: modelsMap });
+        if (modelsMap.size > 0) {
+          // Get the first model from the map values
+          const firstModel = modelsMap.values().next().value;
+          dispatch({ type: SET_SELECTED_MODEL, payload: firstModel || null });
         }
       } catch (err) {
         console.error('Failed to fetch available models:', err);
@@ -115,7 +117,7 @@ export const useChatSession = () => {
     selectedModel,
   });
 
-  const setSelectedModel = (model: string) => {
+  const setSelectedModel = (model: ModelInfo) => {
     dispatch({ type: SET_SELECTED_MODEL, payload: model });
   };
 

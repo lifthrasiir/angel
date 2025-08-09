@@ -1,7 +1,17 @@
-export const getAvailableModels = async (): Promise<string[]> => {
+export interface ModelInfo {
+  name: string;
+  maxTokens: number;
+}
+
+export const getAvailableModels = async (): Promise<Map<string, ModelInfo>> => {
   const response = await fetch('/api/models');
   if (!response.ok) {
     throw new Error(`Failed to fetch models: ${response.statusText}`);
   }
-  return response.json();
+  const modelsArray: ModelInfo[] = await response.json();
+  const modelsMap = new Map<string, ModelInfo>();
+  modelsArray.forEach((model) => {
+    modelsMap.set(model.name, model);
+  });
+  return modelsMap;
 };

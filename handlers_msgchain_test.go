@@ -75,6 +75,10 @@ func (m *MockGeminiProvider) CountTokens(ctx context.Context, contents []Content
 	return &CaCountTokenResponse{TotalTokens: 10}, nil
 }
 
+func (m *MockGeminiProvider) MaxTokens() int {
+	return 1048576 // Mocked max tokens for tests
+}
+
 // mockCloser implements io.Closer for testing purposes
 type mockCloser struct{}
 
@@ -465,7 +469,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	defer dummySseW.Close()
 
 	// Call streamGeminiResponse to add thought and model messages for C
-	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, "gemini-2.5-flash"); err != nil {
+	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel); err != nil {
 		t.Fatalf("Error streaming Gemini response for C: %v", err)
 	}
 

@@ -299,3 +299,9 @@ func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserReque
 
 	return &lroRes, nil
 }
+
+// MaxTokens implements the LLMProvider interface for CodeAssistClient.
+func (c *CodeAssistClient) MaxTokens() int {
+	// Both gemini-2.5-flash and gemini-2.5-pro have a token limit of 1048576
+	return 1048576
+}
