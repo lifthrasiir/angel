@@ -1,6 +1,6 @@
 import type React from 'react';
-import { useEffect, useMemo, useRef } from 'react'; // Add useRef here
-import { useAtom } from 'jotai'; // useSetAtom is not needed here if setters are not directly used
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
 import type { ChatMessage as ChatMessageType } from '../types/chat';
 import ChatInput from './ChatInput';
 import ChatMessage from './ChatMessage';
@@ -40,6 +40,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [availableModels] = useAtom(availableModelsAtom);
   const [userEmail] = useAtom(userEmailAtom);
+  const [isDragging, setIsDragging] = useState(false); // State for drag and drop
 
   const isLoggedIn = !!userEmail;
 
@@ -48,6 +49,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onFilesSelected(Array.from(e.dataTransfer.files));
+    }
+  };
 
   // Logic to group consecutive thought messages
   const renderedMessages = useMemo(() => {
@@ -115,7 +137,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
+        border: isDragging ? '2px dashed #007bff' : '2px dashed transparent',
+        transition: 'border-color 0.3s ease-in-out',
       }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       {!isLoggedIn && (
         <div style={{ padding: '20px', textAlign: 'center' }}>

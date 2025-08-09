@@ -114,6 +114,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
               handleSendMessage();
             }
           }}
+          onPaste={(e) => {
+            if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+              onFilesSelected(Array.from(e.clipboardData.files));
+            }
+          }}
           placeholder="Enter your message..."
           rows={1}
           style={{
