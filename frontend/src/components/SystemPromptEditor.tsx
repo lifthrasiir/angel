@@ -1,22 +1,22 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
+import { useAtom, useSetAtom } from 'jotai';
+import { systemPromptAtom, isSystemPromptEditingAtom, messagesAtom } from '../atoms/chatAtoms';
 
 interface SystemPromptEditorProps {
-  systemPrompt: string;
-  setSystemPrompt: (prompt: string) => void;
-  isSystemPromptEditing: boolean;
-  messagesLength: number;
+  // No props needed, all state managed by Jotai
 }
 
 type PromptType = 'default' | 'empty' | 'custom';
 
-const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
-  systemPrompt,
-  setSystemPrompt,
-  isSystemPromptEditing,
-  messagesLength,
-}) => {
+const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
+  const [systemPrompt] = useAtom(systemPromptAtom);
+  const setSystemPrompt = useSetAtom(systemPromptAtom);
+  const [isSystemPromptEditing] = useAtom(isSystemPromptEditingAtom);
+  const [messages] = useAtom(messagesAtom);
+  const messagesLength = messages.length;
+
   const systemPromptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [evaluatedPrompt, setEvaluatedPrompt] = useState<string>('');
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
@@ -84,7 +84,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
       setEvaluatedPrompt('');
       setEvaluationError(null);
     }
-  }, [systemPrompt, isSystemPromptEditing]);
+  }, [systemPrompt, isSystemPromptEditing, evaluateTemplate, promptType]);
 
   const handlePromptTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newPromptType = e.target.value as PromptType;
@@ -109,7 +109,6 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
         onClick={() => (clickAnywhereToExpand ? setIsExpanded(true) : null)}
       >
         {isSystemPromptEditing ? (
-          // Editable mode
           <div
             style={{
               display: 'flex',
@@ -197,7 +196,6 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
             )}
           </div>
         ) : (
-          // Read-only mode
           <div
             style={{
               display: 'flex',

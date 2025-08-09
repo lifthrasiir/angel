@@ -1,5 +1,6 @@
 import type React from 'react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react'; // Add useRef here
+import { useAtom } from 'jotai'; // useSetAtom is not needed here if setters are not directly used
 import type { ChatMessage as ChatMessageType } from '../types/chat';
 import ChatInput from './ChatInput';
 import ChatMessage from './ChatMessage';
@@ -7,55 +8,41 @@ import FileAttachmentPreview from './FileAttachmentPreview';
 import SystemPromptEditor from './SystemPromptEditor';
 import { ThoughtGroup } from './ThoughtGroup';
 import FunctionPairMessage from './FunctionPairMessage';
-import { ModelInfo } from '../api/models'; // Import ModelInfo
+import {
+  messagesAtom,
+  lastAutoDisplayedThoughtIdAtom,
+  chatSessionIdAtom,
+  selectedFilesAtom,
+  availableModelsAtom,
+  userEmailAtom,
+} from '../atoms/chatAtoms';
 
 interface ChatAreaProps {
-  isLoggedIn: boolean;
-  messages: ChatMessageType[];
-  lastAutoDisplayedThoughtId: string | null;
-  systemPrompt: string;
-  setSystemPrompt: (prompt: string) => void;
-  isSystemPromptEditing: boolean;
-  chatSessionId: string | null;
-
-  inputMessage: string;
-  setInputMessage: (message: string) => void;
   handleSendMessage: () => void;
-  isStreaming: boolean;
   onFilesSelected: (files: File[]) => void;
-  selectedFiles: File[];
   handleRemoveFile: (index: number) => void;
   handleCancelStreaming: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef: React.RefObject<HTMLDivElement>;
-  availableModels: Map<string, ModelInfo>; // Changed type to Map<string, ModelInfo>
-  selectedModel: ModelInfo | null; // Changed type to ModelInfo | null
-  setSelectedModel: (model: ModelInfo) => void; // Changed type to ModelInfo
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
-  isLoggedIn,
-  messages,
-  lastAutoDisplayedThoughtId,
-  systemPrompt,
-  setSystemPrompt,
-  isSystemPromptEditing,
-  chatSessionId,
-
-  inputMessage,
-  setInputMessage,
   handleSendMessage,
-  isStreaming,
   onFilesSelected,
-  selectedFiles,
   handleRemoveFile,
   handleCancelStreaming,
   chatInputRef,
   chatAreaRef,
-  availableModels,
-  selectedModel,
-  setSelectedModel,
 }) => {
+  const [messages] = useAtom(messagesAtom);
+  const [lastAutoDisplayedThoughtId] = useAtom(lastAutoDisplayedThoughtIdAtom);
+  const [chatSessionId] = useAtom(chatSessionIdAtom);
+  const [selectedFiles] = useAtom(selectedFilesAtom);
+  const [availableModels] = useAtom(availableModelsAtom);
+  const [userEmail] = useAtom(userEmailAtom);
+
+  const isLoggedIn = !!userEmail;
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -104,13 +91,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           j++;
         }
         renderedElements.push(
-          <ThoughtGroup
-            key={`thought-group-${i}`}
-            groupId={`thought-group-${i}`}
-            thoughts={thoughtGroup}
-            isAutoDisplayMode={true}
-            lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId}
-          />,
+          <ThoughtGroup key={`thought-group-${i}`} groupId={`thought-group-${i}`} isAutoDisplayMode={true} />,
         );
         i = j; // Move index past the grouped thoughts
       } else {
@@ -125,7 +106,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       }
     }
     return renderedElements;
-  }, [messages, lastAutoDisplayedThoughtId, availableModels]); // Add availableModels to dependencies
+  }, [messages, lastAutoDisplayedThoughtId, availableModels]);
 
   return (
     <div
@@ -146,13 +127,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <>
           <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
             <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
-              <SystemPromptEditor
-                key={chatSessionId}
-                systemPrompt={systemPrompt}
-                setSystemPrompt={setSystemPrompt}
-                isSystemPromptEditing={isSystemPromptEditing}
-                messagesLength={messages.length}
-              />
+              <SystemPromptEditor key={chatSessionId} />
               {renderedMessages}
               <div ref={messagesEndRef} />
             </div>
@@ -174,16 +149,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           )}
           <ChatInput
-            inputMessage={inputMessage}
-            setInputMessage={setInputMessage}
             handleSendMessage={handleSendMessage}
-            isStreaming={isStreaming}
             onFilesSelected={onFilesSelected}
             handleCancelStreaming={handleCancelStreaming}
             inputRef={chatInputRef}
-            availableModels={availableModels}
-            selectedModel={selectedModel}
-            setSelectedModel={setSelectedModel}
           />
         </>
       )}

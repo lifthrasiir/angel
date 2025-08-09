@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useSetAtom } from 'jotai';
 import type { ChatMessage, InitialState } from '../types/chat';
 import {
   EventComplete,
@@ -15,27 +16,25 @@ import { loadSession } from '../utils/sessionManager';
 import { splitOnceByNewline } from '../utils/stringUtils';
 import { fetchUserInfo } from '../utils/userManager';
 import {
-  ADD_ERROR_MESSAGE,
-  ADD_MESSAGE,
-  type ChatAction,
-  RESET_CHAT_SESSION_STATE,
-  SET_CHAT_SESSION_ID,
-  SET_INPUT_MESSAGE,
-  SET_IS_STREAMING,
-  SET_IS_SYSTEM_PROMPT_EDITING,
-  SET_MESSAGES,
-  SET_PRIMARY_BRANCH_ID,
-  SET_SELECTED_FILES,
-  SET_SYSTEM_PROMPT,
-  SET_USER_EMAIL,
-  SET_WORKSPACE_ID, // Import SET_WORKSPACE_ID
-  UPDATE_AGENT_MESSAGE,
-} from './chatReducer';
+  addErrorMessageAtom,
+  addMessageAtom,
+  resetChatSessionStateAtom,
+  chatSessionIdAtom,
+  inputMessageAtom,
+  isStreamingAtom,
+  isSystemPromptEditingAtom,
+  messagesAtom,
+  primaryBranchIdAtom,
+  selectedFilesAtom,
+  systemPromptAtom,
+  userEmailAtom,
+  workspaceIdAtom,
+  updateAgentMessageAtom,
+} from '../atoms/chatAtoms';
 
 interface UseSessionInitializationProps {
   chatSessionId: string | null;
   isStreaming: boolean;
-  dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
   primaryBranchId: string;
 }
@@ -43,7 +42,6 @@ interface UseSessionInitializationProps {
 export const useSessionInitialization = ({
   chatSessionId,
   isStreaming,
-  dispatch,
   handleLoginRedirect,
   primaryBranchId,
 }: UseSessionInitializationProps) => {
@@ -51,23 +49,31 @@ export const useSessionInitialization = ({
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
     sessionId?: string;
     workspaceId?: string;
-  }>(); // Renamed to urlWorkspaceId
+  }>();
   const location = useLocation();
 
-  const resetChatSessionState = () => {
-    dispatch({ type: RESET_CHAT_SESSION_STATE });
-  };
+  const setChatSessionId = useSetAtom(chatSessionIdAtom);
+  const setInputMessage = useSetAtom(inputMessageAtom);
+  const setIsStreaming = useSetAtom(isStreamingAtom);
+  const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
+  const setMessages = useSetAtom(messagesAtom);
+  const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
+  const setSelectedFiles = useSetAtom(selectedFilesAtom);
+  const setSystemPrompt = useSetAtom(systemPromptAtom);
+  const setUserEmail = useSetAtom(userEmailAtom);
+  const setWorkspaceId = useSetAtom(workspaceIdAtom);
+  const addMessage = useSetAtom(addMessageAtom);
+  const updateAgentMessage = useSetAtom(updateAgentMessageAtom);
+  const addErrorMessage = useSetAtom(addErrorMessageAtom);
+  const resetChatSessionState = useSetAtom(resetChatSessionStateAtom);
 
   useEffect(() => {
-    if (isStreaming) {
-      return;
-    }
     const params = new URLSearchParams(location.search);
     const redirectTo = params.get('redirect_to');
     const draftMessage = params.get('draft_message');
 
     if (draftMessage) {
-      dispatch({ type: SET_INPUT_MESSAGE, payload: draftMessage });
+      setInputMessage(draftMessage);
     }
 
     if (redirectTo) {
@@ -77,29 +83,52 @@ export const useSessionInitialization = ({
         console.warn('Invalid redirectTo URL detected, redirecting to home:', redirectTo);
         navigate('/', { replace: true });
       }
+    }
+  }, [location.search, navigate]);
+
+  useEffect(() => {
+    const loadUserInfo = async () => {
+      try {
+        const userInfo = await fetchUserInfo();
+        if (userInfo && userInfo.success) {
+          if (userInfo.email) {
+            setUserEmail(userInfo.email);
+          } else {
+            handleLoginRedirect();
+          }
+        } else {
+          handleLoginRedirect();
+        }
+      } catch (error) {
+        console.error('Failed to fetch user info:', error);
+        handleLoginRedirect();
+      }
+    };
+    loadUserInfo();
+  }, [handleLoginRedirect, setUserEmail]);
+
+  useEffect(() => {
+    if (isStreaming) {
       return;
     }
 
     const initializeChatSession = async () => {
       const currentSessionId = urlSessionId;
-      // If the path ends with /new and no sessionId is provided in the URL, treat it as a new session
       if (location.pathname.endsWith('/new') && !currentSessionId) {
         resetChatSessionState();
-        // If navigating to /w/:workspaceId/new, set the workspaceId in state
         if (urlWorkspaceId) {
-          dispatch({ type: SET_WORKSPACE_ID, payload: urlWorkspaceId });
+          setWorkspaceId(urlWorkspaceId);
         } else {
-          // /new 경로일 경우, 기본 워크스페이스를 나타내기 위해 빈 문자열로 설정
-          dispatch({ type: SET_WORKSPACE_ID, payload: '' });
+          setWorkspaceId('');
         }
         const defaultPrompt = `{{.Builtin.SystemPrompt}}`;
-        dispatch({ type: SET_SYSTEM_PROMPT, payload: defaultPrompt });
+        setSystemPrompt(defaultPrompt);
         return;
       }
 
       if (currentSessionId !== chatSessionId) {
-        dispatch({ type: SET_SELECTED_FILES, payload: [] });
-        dispatch({ type: SET_IS_STREAMING, payload: false });
+        setSelectedFiles([]);
+        setIsStreaming(false);
       }
 
       if (currentSessionId) {
@@ -113,21 +142,11 @@ export const useSessionInitialization = ({
 
               if (eventType === EventInitialState || eventType === EventInitialStateNoCall) {
                 const data: InitialState = JSON.parse(eventData);
-                dispatch({
-                  type: SET_CHAT_SESSION_ID,
-                  payload: data.sessionId,
-                });
-                dispatch({
-                  type: SET_SYSTEM_PROMPT,
-                  payload: data.systemPrompt,
-                });
-                dispatch({
-                  type: SET_IS_SYSTEM_PROMPT_EDITING,
-                  payload: false,
-                });
-                dispatch({
-                  type: SET_MESSAGES,
-                  payload: (data.history || []).map((msg: any) => {
+                setChatSessionId(data.sessionId);
+                setSystemPrompt(data.systemPrompt);
+                setIsSystemPromptEditing(false);
+                setMessages(
+                  (data.history || []).map((msg: any) => {
                     const chatMessage: ChatMessage = {
                       ...msg,
                       id: msg.id,
@@ -153,77 +172,62 @@ export const useSessionInitialization = ({
                     }
                     return chatMessage;
                   }),
-                });
-                dispatch({ type: SET_WORKSPACE_ID, payload: data.workspaceId });
-                dispatch({ type: SET_PRIMARY_BRANCH_ID, payload: data.primaryBranchId });
+                );
+                setWorkspaceId(data.workspaceId);
+                setPrimaryBranchId(data.primaryBranchId);
 
-                dispatch({
-                  type: SET_IS_STREAMING,
-                  payload: eventType === EventInitialState,
-                });
+                setIsStreaming(eventType === EventInitialState);
                 if (eventType === EventInitialStateNoCall) {
                   eventSource?.close();
                 }
               } else if (eventType === EventModelMessage) {
                 const [messageId, text] = splitOnceByNewline(eventData);
-                dispatch({ type: UPDATE_AGENT_MESSAGE, payload: { messageId, text } });
+                updateAgentMessage({ messageId, text });
               } else if (eventType === EventFunctionCall) {
                 const [messageId, rest] = splitOnceByNewline(eventData);
                 const [functionName, argsJson] = splitOnceByNewline(rest);
-                dispatch({
-                  type: ADD_MESSAGE,
-                  payload: {
-                    id: messageId,
-                    role: 'model',
-                    parts: [
-                      {
-                        functionCall: {
-                          name: functionName,
-                          args: JSON.parse(argsJson),
-                        },
+                addMessage({
+                  id: messageId,
+                  role: 'model',
+                  parts: [
+                    {
+                      functionCall: {
+                        name: functionName,
+                        args: JSON.parse(argsJson),
                       },
-                    ],
-                    type: 'function_call',
-                  },
+                    },
+                  ],
+                  type: 'function_call',
                 });
               } else if (eventType === EventFunctionReply) {
                 const [messageId, functionResponseJson] = splitOnceByNewline(eventData);
-                dispatch({
-                  type: ADD_MESSAGE,
-                  payload: {
-                    id: messageId,
-                    role: 'user',
-                    parts: [{ functionResponse: JSON.parse(functionResponseJson) }],
-                    type: 'function_response',
-                  },
+                addMessage({
+                  id: messageId,
+                  role: 'user',
+                  parts: [{ functionResponse: JSON.parse(functionResponseJson) }],
+                  type: 'function_response',
                 });
               } else if (eventType === EventThought) {
                 const [messageId, thoughtText] = splitOnceByNewline(eventData);
-                dispatch({
-                  type: ADD_MESSAGE,
-                  payload: {
-                    id: messageId,
-                    role: 'thought',
-                    parts: [{ text: thoughtText }],
-                    type: 'thought',
-                  },
+                addMessage({
+                  id: messageId,
+                  role: 'thought',
+                  parts: [{ text: thoughtText }],
+                  type: 'thought',
                 });
               } else if (eventType === EventError) {
                 console.error('SSE Error:', eventData);
-                dispatch({ type: SET_IS_STREAMING, payload: false });
-                eventSource?.close(); // Close EventSource on error
-                dispatch({ type: ADD_ERROR_MESSAGE, payload: eventData });
+                setIsStreaming(false);
+                eventSource?.close();
+                addErrorMessage(eventData);
               } else if (eventType === EventComplete) {
-                dispatch({ type: SET_IS_STREAMING, payload: false });
-                eventSource?.close(); // Close EventSource on stream finished
+                setIsStreaming(false);
+                eventSource?.close();
               }
             },
             (errorEvent: Event) => {
               console.error('EventSource error:', errorEvent);
-              // Handle connection errors, e.g., redirect to login if unauthorized
               if (errorEvent.target && (errorEvent.target as EventSource).readyState === EventSource.CLOSED) {
-                // Connection closed, might be due to server error or network issue
-                // Check if it's an auth issue by trying to fetch user info again
                 fetchUserInfo()
                   .then((userInfo) => {
                     if (!userInfo || !userInfo.success || !userInfo.email) {
@@ -234,7 +238,7 @@ export const useSessionInitialization = ({
                     handleLoginRedirect();
                   });
               }
-              dispatch({ type: SET_IS_STREAMING, payload: false });
+              setIsStreaming(false);
             },
           );
         } catch (error) {
@@ -253,26 +257,5 @@ export const useSessionInitialization = ({
     };
 
     initializeChatSession();
-
-    const loadUserInfo = async () => {
-      try {
-        const userInfo = await fetchUserInfo();
-        if (userInfo && userInfo.success) {
-          if (userInfo.email) {
-            dispatch({ type: SET_USER_EMAIL, payload: userInfo.email });
-          } else {
-            // 401 response - not authenticated, redirect to login
-            handleLoginRedirect();
-          }
-        } else {
-          // Network or other error, redirect to login
-          handleLoginRedirect();
-        }
-      } catch (error) {
-        console.error('Failed to fetch user info:', error);
-        handleLoginRedirect();
-      }
-    };
-    loadUserInfo();
-  }, [urlSessionId, urlWorkspaceId, navigate, location.search, location.pathname, isStreaming, dispatch]);
+  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, isStreaming, chatSessionId, primaryBranchId]);
 };

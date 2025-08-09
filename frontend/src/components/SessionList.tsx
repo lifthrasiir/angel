@@ -1,22 +1,22 @@
 import type React from 'react';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
+import { useAtom } from 'jotai';
 import type { Session } from '../types/chat';
+import { sessionsAtom, chatSessionIdAtom } from '../atoms/chatAtoms';
 
 interface SessionListProps {
-  sessions: Session[];
-  chatSessionId: string | null;
-  updateSessionState: (sessionId: string, updateFn: (session: Session) => Session) => void;
   handleDeleteSession: (sessionId: string) => Promise<void>;
 }
 
-const SessionList: React.FC<SessionListProps> = ({
-  sessions,
-  chatSessionId,
-  updateSessionState,
-  handleDeleteSession,
-}) => {
+const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
   const navigate = useNavigate();
+  const [sessions, setSessions] = useAtom(sessionsAtom);
+  const [chatSessionId] = useAtom(chatSessionIdAtom);
+
+  const updateSessionState = (sessionId: string, updateFn: (session: Session) => Session) => {
+    setSessions(sessions.map((s) => (s.id === sessionId ? updateFn(s) : s)));
+  };
 
   return (
     <ul
@@ -48,7 +48,6 @@ const SessionList: React.FC<SessionListProps> = ({
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: session.name || '' }),
                       });
-                      // No need to fetchSessions, name is already updated via updateSessionState
                     } catch (error) {
                       console.error('Error updating session name:', error);
                     }

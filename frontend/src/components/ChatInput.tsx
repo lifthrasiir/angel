@@ -1,33 +1,29 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
 import { FaPaperclip } from 'react-icons/fa';
-import { ModelInfo } from '../api/models';
+import { useAtom, useSetAtom } from 'jotai';
+import { inputMessageAtom, isStreamingAtom, availableModelsAtom, selectedModelAtom } from '../atoms/chatAtoms';
 
 interface ChatInputProps {
-  inputMessage: string;
-  setInputMessage: (message: string) => void;
   handleSendMessage: () => void;
-  isStreaming: boolean;
-  onFilesSelected: (files: File[]) => void; // New prop for file selection
-  handleCancelStreaming: () => void; // New prop for canceling streaming
+  onFilesSelected: (files: File[]) => void;
+  handleCancelStreaming: () => void;
   inputRef: React.RefObject<HTMLTextAreaElement>;
-  availableModels: Map<string, ModelInfo>;
-  selectedModel: ModelInfo | null;
-  setSelectedModel: (model: ModelInfo) => void;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
-  inputMessage,
-  setInputMessage,
   handleSendMessage,
-  isStreaming,
   onFilesSelected,
   handleCancelStreaming,
   inputRef,
-  availableModels,
-  selectedModel,
-  setSelectedModel,
 }) => {
+  const [inputMessage] = useAtom(inputMessageAtom);
+  const setInputMessage = useSetAtom(inputMessageAtom);
+  const [isStreaming] = useAtom(isStreamingAtom);
+  const [availableModels] = useAtom(availableModelsAtom);
+  const [selectedModel] = useAtom(selectedModelAtom);
+  const setSelectedModel = useSetAtom(selectedModelAtom);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Debounce utility function
@@ -140,10 +136,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
           </label>
           <select
             id="model-select"
-            value={selectedModel?.name || ''} // Use selectedModel?.name || ''
+            value={selectedModel?.name || ''}
             onChange={(e) => {
               const selectedModelName = e.target.value;
-              const model = availableModels.get(selectedModelName); // Get ModelInfo from map
+              const model = availableModels.get(selectedModelName);
               if (model) {
                 setSelectedModel(model);
               }

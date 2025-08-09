@@ -1,12 +1,12 @@
 import React, { lazy, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { Provider } from 'jotai';
 import './index.css';
 
 import ChatLayout from './components/ChatLayout';
 import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
-import { ChatProvider } from './hooks/ChatContext';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
 
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -90,11 +90,11 @@ const Root = () => {
 
   return (
     <React.StrictMode>
-      <ChatProvider>
+      <Provider>
         <WorkspaceProvider>
           <RouterProvider router={router} />
         </WorkspaceProvider>
-      </ChatProvider>
+      </Provider>
       <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
     </React.StrictMode>
   );

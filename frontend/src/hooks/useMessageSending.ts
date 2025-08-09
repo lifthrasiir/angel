@@ -1,24 +1,24 @@
 import { useNavigate, useParams } from 'react-router-dom';
+import { useSetAtom } from 'jotai';
 import type { ChatMessage, FileAttachment } from '../types/chat';
 import { convertFilesToAttachments } from '../utils/fileHandler';
 import { processStreamResponse, type StreamEventHandlers, sendMessage } from '../utils/messageHandler';
 import {
-  ADD_ERROR_MESSAGE,
-  ADD_MESSAGE,
-  type ChatAction,
-  SET_CHAT_SESSION_ID,
-  SET_INPUT_MESSAGE,
-  SET_IS_STREAMING,
-  SET_IS_SYSTEM_PROMPT_EDITING,
-  SET_LAST_AUTO_DISPLAYED_THOUGHT_ID,
-  SET_SELECTED_FILES,
-  SET_SESSION_NAME,
-  SET_SYSTEM_PROMPT,
-  SET_PRIMARY_BRANCH_ID,
-  UPDATE_AGENT_MESSAGE,
-  UPDATE_USER_MESSAGE_ID,
-  UPDATE_MESSAGE_TOKEN_COUNT,
-} from './chatReducer';
+  addErrorMessageAtom,
+  addMessageAtom,
+  chatSessionIdAtom,
+  inputMessageAtom,
+  isStreamingAtom,
+  isSystemPromptEditingAtom,
+  lastAutoDisplayedThoughtIdAtom,
+  selectedFilesAtom,
+  setSessionNameAtom,
+  systemPromptAtom,
+  primaryBranchIdAtom,
+  updateAgentMessageAtom,
+  updateUserMessageIdAtom,
+  updateMessageTokenCountAtom,
+} from '../atoms/chatAtoms';
 import { ModelInfo } from '../api/models';
 
 interface UseMessageSendingProps {
@@ -26,10 +26,9 @@ interface UseMessageSendingProps {
   selectedFiles: File[];
   chatSessionId: string | null;
   systemPrompt: string;
-  dispatch: React.Dispatch<ChatAction>;
   handleLoginRedirect: () => void;
   primaryBranchId: string;
-  selectedModel: ModelInfo | null; // Changed type to ModelInfo | null
+  selectedModel: ModelInfo | null;
 }
 
 export const useMessageSending = ({
@@ -37,7 +36,6 @@ export const useMessageSending = ({
   selectedFiles,
   chatSessionId,
   systemPrompt,
-  dispatch,
   handleLoginRedirect,
   primaryBranchId,
   selectedModel,
@@ -45,10 +43,25 @@ export const useMessageSending = ({
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
 
+  const setChatSessionId = useSetAtom(chatSessionIdAtom);
+  const setInputMessage = useSetAtom(inputMessageAtom);
+  const setIsStreaming = useSetAtom(isStreamingAtom);
+  const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
+  const setLastAutoDisplayedThoughtId = useSetAtom(lastAutoDisplayedThoughtIdAtom);
+  const setSelectedFiles = useSetAtom(selectedFilesAtom);
+  const setSessionName = useSetAtom(setSessionNameAtom);
+  const setSystemPrompt = useSetAtom(systemPromptAtom);
+  const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
+  const addMessage = useSetAtom(addMessageAtom);
+  const updateAgentMessage = useSetAtom(updateAgentMessageAtom);
+  const updateUserMessageId = useSetAtom(updateUserMessageIdAtom);
+  const updateMessageTokenCount = useSetAtom(updateMessageTokenCountAtom);
+  const addErrorMessage = useSetAtom(addErrorMessageAtom);
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() && selectedFiles.length === 0) return;
 
-    dispatch({ type: SET_IS_STREAMING, payload: true });
+    setIsStreaming(true);
 
     try {
       const attachments: FileAttachment[] = await convertFilesToAttachments(selectedFiles);
@@ -60,14 +73,14 @@ export const useMessageSending = ({
         parts: [{ text: inputMessage }],
         type: 'user',
         attachments: attachments,
-        model: selectedModel?.name, // Use selectedModel?.name
+        model: selectedModel?.name,
       };
-      dispatch({ type: ADD_MESSAGE, payload: userMessage });
-      dispatch({ type: SET_INPUT_MESSAGE, payload: '' });
-      dispatch({ type: SET_SELECTED_FILES, payload: [] });
+      addMessage(userMessage);
+      setInputMessage('');
+      setSelectedFiles([]);
 
       if (chatSessionId === null) {
-        dispatch({ type: SET_IS_SYSTEM_PROMPT_EDITING, payload: false });
+        setIsSystemPromptEditing(false);
       }
 
       const response = await sendMessage(
@@ -77,7 +90,7 @@ export const useMessageSending = ({
         systemPrompt,
         workspaceId,
         primaryBranchId,
-        selectedModel?.name, // Pass selectedModel?.name to sendMessage
+        selectedModel?.name,
       );
 
       if (response.status === 401) {
@@ -88,29 +101,23 @@ export const useMessageSending = ({
       if (!response.ok) {
         const errorMessage =
           response.status === 499 ? 'Request cancelled by user.' : 'Failed to send message or receive stream.';
-        dispatch({ type: ADD_ERROR_MESSAGE, payload: errorMessage });
+        addErrorMessage(errorMessage);
         return;
       }
 
       const handlers: StreamEventHandlers = {
         onMessage: (messageId: string, text: string) => {
-          dispatch({ type: UPDATE_AGENT_MESSAGE, payload: { messageId, text } });
-          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
+          updateAgentMessage({ messageId, text });
+          setLastAutoDisplayedThoughtId(null);
         },
         onThought: (messageId: string, thoughtText: string) => {
-          dispatch({
-            type: ADD_MESSAGE,
-            payload: {
-              id: messageId,
-              role: 'model',
-              parts: [{ text: thoughtText }],
-              type: 'thought',
-            } as ChatMessage,
-          });
-          dispatch({
-            type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID,
-            payload: messageId,
-          });
+          addMessage({
+            id: messageId,
+            role: 'model',
+            parts: [{ text: thoughtText }],
+            type: 'thought',
+          } as ChatMessage);
+          setLastAutoDisplayedThoughtId(messageId);
         },
         onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => {
           const message: ChatMessage = {
@@ -119,8 +126,8 @@ export const useMessageSending = ({
             parts: [{ functionCall: { name: functionName, args: functionArgs } }],
             type: 'function_call',
           };
-          dispatch({ type: ADD_MESSAGE, payload: message });
-          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
+          addMessage(message);
+          setLastAutoDisplayedThoughtId(null);
         },
         onFunctionResponse: (messageId: string, functionName: string, functionResponse: any) => {
           const message: ChatMessage = {
@@ -129,54 +136,44 @@ export const useMessageSending = ({
             parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
             type: 'function_response',
           };
-          dispatch({ type: ADD_MESSAGE, payload: message });
-          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
+          addMessage(message);
+          setLastAutoDisplayedThoughtId(null);
         },
         onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => {
-          dispatch({ type: SET_CHAT_SESSION_ID, payload: sessionId });
-          dispatch({ type: SET_SYSTEM_PROMPT, payload: systemPrompt });
-          dispatch({ type: SET_PRIMARY_BRANCH_ID, payload: primaryBranchId });
+          setChatSessionId(sessionId);
+          setSystemPrompt(systemPrompt);
+          setPrimaryBranchId(primaryBranchId);
           navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
         },
         onSessionNameUpdate: (sessionId: string, newName: string) => {
-          dispatch({
-            type: SET_SESSION_NAME,
-            payload: { sessionId, name: newName },
-          });
+          setSessionName({ sessionId, name: newName });
         },
         onEnd: () => {
-          dispatch({ type: SET_LAST_AUTO_DISPLAYED_THOUGHT_ID, payload: null });
-          dispatch({ type: SET_IS_STREAMING, payload: false });
+          setLastAutoDisplayedThoughtId(null);
+          setIsStreaming(false);
         },
         onError: (errorData: string) => {
-          dispatch({ type: ADD_ERROR_MESSAGE, payload: errorData });
+          addErrorMessage(errorData);
         },
         onAcknowledge: (messageId: string) => {
-          dispatch({ type: UPDATE_USER_MESSAGE_ID, payload: { temporaryId: userMessage.id, newId: messageId } });
+          updateUserMessageId({ temporaryId: userMessage.id, newId: messageId });
         },
         onTokenCount: (messageId: string, cumulTokenCount: number) => {
-          dispatch({ type: UPDATE_MESSAGE_TOKEN_COUNT, payload: { messageId, cumulTokenCount } });
+          updateMessageTokenCount({ messageId, cumulTokenCount });
         },
       };
 
       const { qReceived, nReceived } = await processStreamResponse(response, handlers);
 
       if (!qReceived || !nReceived) {
-        // This indicates a backend bug or unexpected stream termination
         console.error('Backend bug: Stream ended without receiving both Q and N events.', { qReceived, nReceived });
-        dispatch({
-          type: ADD_ERROR_MESSAGE,
-          payload: 'An unexpected error occurred: Stream did not finalize correctly.',
-        });
+        addErrorMessage('An unexpected error occurred: Stream did not finalize correctly.');
       }
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
-      dispatch({
-        type: ADD_ERROR_MESSAGE,
-        payload: 'Error sending message or receiving stream.',
-      });
+      addErrorMessage('Error sending message or receiving stream.');
     } finally {
-      dispatch({ type: SET_IS_STREAMING, payload: false });
+      setIsStreaming(false);
     }
   };
 
@@ -190,21 +187,15 @@ export const useMessageSending = ({
 
       if (response.ok) {
         console.log(`Streaming call for session ${chatSessionId} cancelled.`);
-        dispatch({ type: SET_IS_STREAMING, payload: false });
-        dispatch({
-          type: ADD_ERROR_MESSAGE,
-          payload: 'Request cancelled by user.',
-        });
+        setIsStreaming(false);
+        addErrorMessage('Request cancelled by user.');
       } else {
         console.error(
           `Failed to cancel streaming call for session ${chatSessionId}:`,
           response.status,
           response.statusText,
         );
-        dispatch({
-          type: ADD_ERROR_MESSAGE,
-          payload: `Failed to cancel request: ${response.status} ${response.statusText}`,
-        });
+        addErrorMessage(`Failed to cancel request: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
       console.error(`Error cancelling streaming call for session ${chatSessionId}:`, error);

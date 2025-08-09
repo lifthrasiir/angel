@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react';
-import type { Session, Workspace } from '../types/chat';
+import { useSetAtom } from 'jotai';
+import type { Workspace } from '../types/chat';
 import { fetchSessions } from '../utils/sessionManager';
+import { sessionsAtom } from '../atoms/chatAtoms';
 
 interface UseWorkspaceAndSessionsResult {
   currentWorkspace: Workspace | null;
-  sessions: Session[];
+  // sessions: Session[]; // sessions will be managed by Jotai
   loading: boolean;
   error: string | null;
 }
 
-// This hook now takes the workspaceId as a prop
 export const useWorkspaceAndSessions = (workspaceIdFromState: string | undefined): UseWorkspaceAndSessionsResult => {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const setSessions = useSetAtom(sessionsAtom);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +35,6 @@ export const useWorkspaceAndSessions = (workspaceIdFromState: string | undefined
           setLoading(false);
         }
       } else {
-        // workspaceIdFromState가 undefined일 경우 로딩 상태를 즉시 해제하고 세션을 비웁니다.
         setCurrentWorkspace(null);
         setSessions([]);
         setLoading(false);
@@ -42,7 +42,7 @@ export const useWorkspaceAndSessions = (workspaceIdFromState: string | undefined
     };
 
     loadData();
-  }, [workspaceIdFromState]); // Depend on the passed workspaceId
+  }, [workspaceIdFromState, setSessions]);
 
-  return { currentWorkspace, sessions, loading, error };
+  return { currentWorkspace, loading, error };
 };

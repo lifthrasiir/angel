@@ -2,50 +2,32 @@ import type React from 'react';
 import { useState } from 'react';
 import { FaArrowLeft, FaCog, FaFolder, FaPlus } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
-import { useChat } from '../hooks/ChatContext';
-import type { Session, Workspace } from '../types/chat';
+import { useAtom } from 'jotai';
+import type { Workspace } from '../types/chat';
+import { sessionsAtom, chatSessionIdAtom, workspaceNameAtom, workspaceIdAtom } from '../atoms/chatAtoms';
 import LogoAnimation from './LogoAnimation';
 import SessionList from './SessionList';
 import WorkspaceList from './WorkspaceList';
 
 interface SidebarProps {
-  sessions: Session[];
-  chatSessionId: string | null;
-  workspaceName?: string;
-  workspaceId?: string;
   workspaces: Workspace[];
   refreshWorkspaces: () => Promise<void>;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({
-  sessions,
-  chatSessionId,
-  workspaceName,
-  workspaceId,
-  workspaces,
-  refreshWorkspaces,
-}) => {
+const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   const navigate = useNavigate();
-  const { dispatch } = useChat();
-  // const { workspaceId } = useParams<{ workspaceId?: string }>(); // Remove this line
+  const [sessions, setSessions] = useAtom(sessionsAtom);
+  const [chatSessionId] = useAtom(chatSessionIdAtom);
+  const [workspaceName] = useAtom(workspaceNameAtom);
+  const [workspaceId] = useAtom(workspaceIdAtom);
   const [showWorkspaces, setShowWorkspaces] = useState(false);
-
-  const updateSessionState = (sessionId: string, updateFn: (session: Session) => Session) => {
-    dispatch({
-      type: 'SET_SESSIONS',
-      payload: sessions.map((s) => (s.id === sessionId ? updateFn(s) : s)),
-    });
-  };
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
       await fetch(`/api/chat/${sessionId}`, {
         method: 'DELETE',
       });
-      dispatch({
-        type: 'SET_SESSIONS',
-        payload: sessions.filter((s) => s.id !== sessionId),
-      });
+      setSessions(sessions.filter((s) => s.id !== sessionId));
       if (chatSessionId === sessionId) {
         navigate('/new');
       }
@@ -161,12 +143,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         ) : sessions && sessions.length === 0 ? (
           <p>No sessions yet.</p>
         ) : (
-          <SessionList
-            sessions={sessions}
-            chatSessionId={chatSessionId}
-            updateSessionState={updateSessionState}
-            handleDeleteSession={handleDeleteSession}
-          />
+          <SessionList handleDeleteSession={handleDeleteSession} />
         )}
       </div>
       <hr

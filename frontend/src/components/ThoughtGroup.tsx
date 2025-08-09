@@ -1,54 +1,58 @@
 import React, { useEffect, useState } from 'react';
-import type { ChatMessage as ChatMessageType } from '../types/chat';
-import ChatMessage from './ChatMessage';
+import { useAtom } from 'jotai';
+
+import { messagesAtom, lastAutoDisplayedThoughtIdAtom } from '../atoms/chatAtoms';
+import type { ChatMessage } from '../types/chat';
+import ChatMessageComponent from './ChatMessage';
 
 interface ThoughtGroupProps {
-  thoughts: ChatMessageType[]; // Array of thought messages
   groupId: string; // Unique ID for this thought group
   isAutoDisplayMode: boolean;
-  lastAutoDisplayedThoughtId: string | null;
 }
 
-export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(
-  ({ thoughts, groupId, isAutoDisplayMode, lastAutoDisplayedThoughtId }) => {
-    const [activeThoughtIndex, setActiveThoughtIndex] = useState<number | null>(null);
-    const [hasBeenManuallySelected, setHasBeenManuallySelected] = useState(false);
+export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(({ groupId, isAutoDisplayMode }) => {
+  const [messages] = useAtom(messagesAtom);
+  const thoughts = messages.filter((msg) => msg.type === 'thought');
+  const [lastAutoDisplayedThoughtId] = useAtom(lastAutoDisplayedThoughtIdAtom);
 
-    useEffect(() => {
-      if (isAutoDisplayMode && !hasBeenManuallySelected) {
-        const autoDisplayIndex = thoughts.findIndex((thought) => thought.id === lastAutoDisplayedThoughtId);
-        setActiveThoughtIndex(autoDisplayIndex !== -1 ? autoDisplayIndex : null);
-      } else if (!isAutoDisplayMode && !hasBeenManuallySelected) {
-        setActiveThoughtIndex(null);
-      }
-    }, [isAutoDisplayMode, lastAutoDisplayedThoughtId, thoughts, groupId, hasBeenManuallySelected]);
+  const [activeThoughtId, setActiveThoughtId] = useState<string | null>(null);
+  const [hasBeenManuallySelected, setHasBeenManuallySelected] = useState(false);
 
-    const handleCircleClick = (index: number) => {
-      setHasBeenManuallySelected(true); // Mark this group as manually selected
-      if (activeThoughtIndex === index) {
-        // If the same circle is clicked, hide the thought
-        setActiveThoughtIndex(null);
-      } else {
-        // Display the clicked thought
-        setActiveThoughtIndex(index);
-      }
-    };
+  useEffect(() => {
+    if (isAutoDisplayMode && !hasBeenManuallySelected) {
+      const autoDisplayThought = thoughts.find((thought) => thought.id === lastAutoDisplayedThoughtId);
+      setActiveThoughtId(autoDisplayThought ? autoDisplayThought.id : null);
+    } else if (!isAutoDisplayMode && !hasBeenManuallySelected) {
+      setActiveThoughtId(null);
+    }
+  }, [isAutoDisplayMode, lastAutoDisplayedThoughtId, thoughts, groupId, hasBeenManuallySelected]);
 
-    return (
-      <div className="thought-group-container">
-        <div className="thought-circle-container">
-          {thoughts.map((thought, index) => (
-            <div
-              key={thought.id}
-              className={`thought-circle ${activeThoughtIndex === index ? 'selected' : ''}`}
-              onClick={() => handleCircleClick(index)}
-            ></div>
-          ))}
-        </div>
-        {activeThoughtIndex !== null && (
-          <ChatMessage key={thoughts[activeThoughtIndex].id} message={thoughts[activeThoughtIndex]} />
-        )}
+  const handleCircleClick = (thought: ChatMessage) => {
+    setHasBeenManuallySelected(true);
+    if (activeThoughtId === thought.id) {
+      setActiveThoughtId(null);
+    } else {
+      setActiveThoughtId(thought.id);
+    }
+  };
+
+  return (
+    <div className="thought-group-container">
+      <div className="thought-circle-container">
+        {thoughts.map((thought) => (
+          <div
+            key={thought.id}
+            className={`thought-circle ${activeThoughtId === thought.id ? 'selected' : ''}`}
+            onClick={() => handleCircleClick(thought)}
+          ></div>
+        ))}
       </div>
-    );
-  },
-);
+      {activeThoughtId !== null && thoughts.find((thought) => thought.id === activeThoughtId) && (
+        <ChatMessageComponent
+          key={activeThoughtId}
+          message={thoughts.find((thought) => thought.id === activeThoughtId)!}
+        />
+      )}
+    </div>
+  );
+});

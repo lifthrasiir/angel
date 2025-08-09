@@ -1,46 +1,28 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
-import { useChat } from '../hooks/ChatContext';
-import { SET_INPUT_MESSAGE, SET_SYSTEM_PROMPT } from '../hooks/chatReducer';
-import { useChatSession } from '../hooks/useChatSession'; // Re-import useChatSession
-import useEscToCancel from '../hooks/useEscToCancel'; // Import the new hook
+import { useAtomValue } from 'jotai'; // Changed useAtom to useAtomValue
+import { userEmailAtom, chatSessionIdAtom } from '../atoms/chatAtoms'; // Removed sessionsAtom, workspaceIdAtom, workspaceNameAtom
+import { useChatSession } from '../hooks/useChatSession';
+import useEscToCancel from '../hooks/useEscToCancel';
 import { useWorkspaces } from '../hooks/WorkspaceContext';
 import ChatArea from './ChatArea';
 import LogoAnimation from './LogoAnimation';
 import Sidebar from './Sidebar';
-import ToastMessage from './ToastMessage'; // Import ToastMessage
+import ToastMessage from './ToastMessage';
 
 interface ChatLayoutProps {
   children?: React.ReactNode;
 }
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
-  const { dispatch } = useChat();
+  const userEmail = useAtomValue(userEmailAtom); // Changed
+  const chatSessionId = useAtomValue(chatSessionIdAtom); // Changed
+
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
-  const {
-    userEmail,
-    chatSessionId,
-    messages,
-    inputMessage,
-    sessions,
-    lastAutoDisplayedThoughtId,
-    isStreaming,
-    systemPrompt,
-    isSystemPromptEditing,
-    selectedFiles,
-    workspaceId,
-    workspaceName,
-    availableModels,
-    selectedModel,
-    setSelectedModel,
-    handleLogin,
-    handleFilesSelected,
-    handleRemoveFile,
-    handleSendMessage,
-    cancelStreamingCall,
-  } = useChatSession();
+  const { handleLogin, handleFilesSelected, handleRemoveFile, handleSendMessage, cancelStreamingCall, isStreaming } =
+    useChatSession();
 
   const { toastMessage, setToastMessage } = useEscToCancel({
     isStreaming,
@@ -64,14 +46,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       {userEmail ? (
         <>
-          <Sidebar
-            sessions={sessions}
-            chatSessionId={chatSessionId}
-            workspaceName={workspaceName}
-            workspaceId={workspaceId}
-            workspaces={workspaces}
-            refreshWorkspaces={refreshWorkspaces}
-          />
+          <Sidebar workspaces={workspaces} refreshWorkspaces={refreshWorkspaces} />
 
           {children ? (
             <div
@@ -86,26 +61,12 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
             </div>
           ) : (
             <ChatArea
-              isLoggedIn={!!userEmail}
-              messages={messages}
-              lastAutoDisplayedThoughtId={lastAutoDisplayedThoughtId}
-              systemPrompt={systemPrompt}
-              setSystemPrompt={(prompt) => dispatch({ type: SET_SYSTEM_PROMPT, payload: prompt })}
-              isSystemPromptEditing={isSystemPromptEditing}
-              chatSessionId={chatSessionId}
-              inputMessage={inputMessage}
-              setInputMessage={(message) => dispatch({ type: SET_INPUT_MESSAGE, payload: message })}
               handleSendMessage={handleSendMessage}
-              isStreaming={isStreaming}
               onFilesSelected={handleFilesSelected}
-              selectedFiles={selectedFiles}
               handleRemoveFile={handleRemoveFile}
               handleCancelStreaming={cancelStreamingCall}
               chatInputRef={chatInputRef}
               chatAreaRef={chatAreaRef}
-              availableModels={availableModels}
-              selectedModel={selectedModel}
-              setSelectedModel={setSelectedModel}
             />
           )}
           <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
