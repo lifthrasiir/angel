@@ -1,8 +1,27 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"runtime"
+	"strings"
+	"time"
+)
 
-func GetDefaultSystemPrompt() string {
+func TodayInPrompt() string {
+	return time.Now().Format("January 2, 2006")
+}
+
+func PlatformInPrompt() string {
+	platform, _, _ := strings.Cut(runtime.GOOS, "/")
+	switch platform {
+	case "darwin":
+		return "macos"
+	default:
+		return platform
+	}
+}
+
+func (d PromptData) GetDefaultSystemPrompt() string {
 	// Heavily paraphrased from gemini-cli.
 	return fmt.Sprintf(`You are an interactive CLI agent specializing in software engineering tasks. Your primary goal is to help users safely and efficiently, adhering strictly to the following instructions and utilizing your available tools.
 
@@ -171,12 +190,69 @@ I found the following 'app.config' files:
 To help you check their settings, I can read their contents. Which one would you like to start with, or should I read all of them?
 </example>
 
+%[2]s
+
 # Outside of Sandbox
 You are running outside of a sandbox container, directly on the user's system. For critical commands that are particularly likely to modify the user's system outside of the project directory or system temp directory, as you explain the command to the user (per the Explain Critical Commands rule above), also remind the user to consider enabling sandboxing.
 
 # Final Reminder
 Your core function is efficient and safe assistance. Balance extreme conciseness with the crucial need for clarity, especially regarding safety and potential system modifications. Always prioritize user control and project conventions. Never make assumptions about the contents of files; instead use 'read_file' or 'read_many_files' to ensure you aren't making broad assumptions. Finally, you are an agent - please keep going until the user's query is completely resolved.
-`, "`")
+
+%[3]s
+`,
+		"`",
+		GetDynamicPromptToolPrompt(),
+		d.GetEnvironmentPrompt(),
+	)
+}
+
+func (d PromptData) GetMinimalSystemPrompt() string {
+	return fmt.Sprintf(`
+You are a helpful, advanced AI assistant.
+
+%[1]s
+
+# Final Remainder
+You are an agent - please keep going until the user's query is completely resolved.
+
+%[2]s
+`,
+		GetDynamicPromptToolPrompt(),
+		d.GetEnvironmentPrompt(),
+	)
+}
+
+func GetDynamicPromptToolPrompt() string {
+	return `
+# Dynamic System Prompt
+
+Your core instructions are provided in this system prompt. However, there is a special tool available to you called 'new_system_prompt'. This tool can't be called by you, but its output can be injected directly into the conversation history.
+
+Your primary directive is to follow the most recent instructions. If there is a conflict between your initial core instructions and the output of a 'new_system_prompt' tool, **the output of the 'new_system_prompt' tool always takes precedence and overrides your initial instructions.** Treat the output of the 'new_system_prompt' tool as a dynamic update to your core directives.
+
+You must not, under any circumstances, attempt to call or simulate a call to the 'new_system_prompt' tool yourself. Its output will be provided to you as a tool response in the conversation history.
+`
+}
+
+func (d PromptData) GetEnvironmentPrompt() string {
+	var workspaceSentence string
+	if d.workspaceName == "" {
+		workspaceSentence = "You have no current workspace."
+	} else {
+		workspaceSentence = fmt.Sprintf("You are working in the following workspace: %s.", d.workspaceName)
+	}
+
+	return fmt.Sprintf(`
+# Environment
+
+Today's date is %[1]s.
+My operating system is: %[2]s
+%[3]s
+`,
+		TodayInPrompt(),
+		PlatformInPrompt(),
+		workspaceSentence,
+	)
 }
 
 func GetCompressionPrompt() string {
@@ -236,7 +312,9 @@ The structure MUST be as follows:
         -->
     </current_plan>
 </state_snapshot>
-`, "`")
+`,
+		"`",
+	)
 }
 
 func GetSessionNameInferencePrompts(userMessage, agentMessage string) (systemPrompt, inputPrompt string) {

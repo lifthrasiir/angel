@@ -20,6 +20,7 @@ import {
   isSystemPromptEditingAtom,
   globalPromptsAtom,
 } from '../atoms/chatAtoms';
+import { useChatSession } from '../hooks/useChatSession'; // Import useChatSession
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -38,6 +39,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   chatInputRef,
   chatAreaRef,
 }) => {
+  const { workspaceId } = useChatSession(); // Get workspaceId from useChatSession
   const [messages] = useAtom(messagesAtom);
   const [lastAutoDisplayedThoughtId] = useAtom(lastAutoDisplayedThoughtIdAtom);
   const [chatSessionId] = useAtom(chatSessionIdAtom);
@@ -181,6 +183,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 }}
                 isEditing={isSystemPromptEditing}
                 predefinedPrompts={globalPrompts}
+                workspaceId={workspaceId} // Pass workspaceId
               />
               {renderedMessages}
               <div ref={messagesEndRef} />

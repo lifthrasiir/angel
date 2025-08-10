@@ -211,10 +211,11 @@ func TestNewSessionAndMessage_BranchIDConsistency(t *testing.T) {
 	router, testDB, _ := setupTest(t)
 
 	t.Run("BranchIDConsistency", func(t *testing.T) {
+		// Create the workspace before making the request
+		CreateWorkspace(testDB, "testWsConsistency", "Consistency Workspace", "")
+
 		payload := []byte(`{"message": "Initial message for consistency test", "workspaceId": "testWsConsistency"}`)
 		_ = testRequest(t, router, "POST", "/api/chat", payload, http.StatusOK)
-
-		CreateWorkspace(testDB, "testWsConsistency", "Consistency Workspace", "")
 
 		var sessionID string
 		var primaryBranchIDFromSession string

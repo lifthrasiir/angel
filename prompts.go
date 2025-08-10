@@ -8,48 +8,61 @@ import (
 
 // PromptData holds data that can be passed to the prompt templates.
 type PromptData struct {
-	Builtin BuiltinPrompts
+	workspaceName string
 }
+
+func (PromptData) String() string {
+	return `Available methods:
+
+.Builtin    Built-in prompts. Print to inspect.
+.Today      Current date in 'August 10, 2025' format.
+.Platform   Current operating system (windows, macos, linux etc).
+.Workspace  Workspace information. Print to inspect.
+`
+}
+
+func (d PromptData) Builtin() BuiltinPrompts    { return BuiltinPrompts{data: d} }
+func (PromptData) Today() string                { return TodayInPrompt() }
+func (PromptData) Platform() string             { return PlatformInPrompt() }
+func (d PromptData) Workspace() PromptWorkspace { return PromptWorkspace{data: d} }
 
 // BuiltinPrompts holds references to the default system prompts.
-type BuiltinPrompts struct {
+type BuiltinPrompts struct{ data PromptData }
+
+func (BuiltinPrompts) String() string {
+	return `Available methods:
+
+.Builtin.SystemPrompt       Default system prompt.
+.Builtin.DynamicPromptTool  Context for dynamic prompt tool ('new_system_prompt').
+`
 }
 
-// SystemPrompt returns the default system prompt.
-func (b BuiltinPrompts) SystemPrompt() string {
-	return GetDefaultSystemPrompt()
+func (p BuiltinPrompts) SystemPrompt() string { return p.data.GetDefaultSystemPrompt() }
+
+// PromptWorkspace holds the current workspace information.
+type PromptWorkspace struct{ data PromptData }
+
+func (PromptWorkspace) String() string {
+	return `Available methods:
+
+.Workspace.Name     Workspace name.
+`
 }
 
-// String returns a string representation of available methods.
-func (b BuiltinPrompts) String() string {
-	return "Available methods: .SystemPrompt()"
-}
+func (w PromptWorkspace) Name() string { return w.data.workspaceName }
 
 // EvaluatePrompt evaluates the given prompt string as a Go template.
-func EvaluatePrompt(promptContent string) (string, error) {
+func (d PromptData) EvaluatePrompt(promptContent string) (string, error) {
 	tmpl, err := template.New("prompt").Parse(promptContent)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse prompt template: %w", err)
 	}
 
-	data := PromptData{
-		Builtin: BuiltinPrompts{},
-	}
-
 	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, data)
+	err = tmpl.Execute(&buf, d)
 	if err != nil {
 		return "", fmt.Errorf("failed to execute prompt template: %w", err)
 	}
 
 	return buf.String(), nil
-}
-
-// GetEvaluatedSystemPrompt evaluates the system prompt template and returns the result.
-func GetEvaluatedSystemPrompt(systemPromptTemplate string) (string, error) {
-	evaluatedPrompt, err := EvaluatePrompt(systemPromptTemplate)
-	if err != nil {
-		return "", fmt.Errorf("error evaluating system prompt template: %w", err)
-	}
-	return evaluatedPrompt, nil
 }

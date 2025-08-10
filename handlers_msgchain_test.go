@@ -140,6 +140,12 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	// Setup router and context middleware
 	router, db, _ := setupTest(t)
 
+	// Create the workspace for this test
+	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	if err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
+	}
+
 	// Setup Mock Gemini Provider
 	provider := replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
@@ -155,7 +161,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	reqBody := map[string]interface{}{
 		"message":      initialUserMessage,
 		"systemPrompt": "You are a helpful assistant.",
-		"workspaceId":  "test-workspace",
+		"workspaceId":  "testWorkspace",
 	}
 	body, _ := json.Marshal(reqBody)
 	rr := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
@@ -292,6 +298,12 @@ func TestBranchingMessageChain(t *testing.T) {
 	// Setup router and context middleware
 	router, db, _ := setupTest(t)
 
+	// Create the workspace for this test
+	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	if err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
+	}
+
 	// i) Create three messages: A-B-C
 	// 1. Send initial user message (A)
 	provider := replaceProvider(&MockGeminiProvider{
@@ -306,7 +318,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	reqBodyA1 := map[string]interface{}{
 		"message":      msgA1Text,
 		"systemPrompt": "You are a helpful assistant.",
-		"workspaceId":  "test-workspace",
+		"workspaceId":  "testWorkspace",
 	}
 	bodyA1, _ := json.Marshal(reqBodyA1)
 	rrA1 := testStreamingRequest(t, router, "POST", "/api/chat", bodyA1, http.StatusOK)
@@ -429,7 +441,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	rrC1 := testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch", sessionId), bodyC1, http.StatusOK)
 
 	var branchResponseC map[string]string
-	err := json.Unmarshal(rrC1.Body.Bytes(), &branchResponseC)
+	err = json.Unmarshal(rrC1.Body.Bytes(), &branchResponseC)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal branch response: %v", err)
 	}
@@ -457,11 +469,12 @@ func TestBranchingMessageChain(t *testing.T) {
 	})
 
 	// Prepare initial state for streaming for the new branch
+	// Prepare initial state for streaming for the new branch
 	initialStateCStream := InitialState{
 		SessionId:       sessionId,
 		History:         []FrontendMessage{},
 		SystemPrompt:    "You are a helpful assistant.",
-		WorkspaceID:     "test-workspace",
+		WorkspaceID:     "testWorkspace",
 		PrimaryBranchID: newBranchCID,
 	}
 
@@ -579,6 +592,12 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 	// Setup router and context middleware
 	router, db, _ := setupTest(t)
 
+	// Create the workspace for this test
+	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	if err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
+	}
+
 	// Setup Mock Gemini Provider to stream "A", "B", "C" and then complete
 	provider := replaceProvider(&MockGeminiProvider{
 		Responses: []CaGenerateContentResponse{
@@ -594,7 +613,7 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 	reqBody := map[string]interface{}{
 		"message":      initialUserMessage,
 		"systemPrompt": "You are a helpful assistant.",
-		"workspaceId":  "test-workspace",
+		"workspaceId":  "testWorkspace",
 	}
 	body, _ := json.Marshal(reqBody)
 	rr := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
@@ -653,7 +672,13 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 }
 
 func TestSyncDuringThought(t *testing.T) {
-	router, _, _ := setupTest(t)
+	router, db, _ := setupTest(t) // Get db from setupTest
+
+	// Create the workspace for this test
+	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	if err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
+	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
 	provider := replaceProvider(&MockGeminiProvider{
@@ -674,7 +699,7 @@ func TestSyncDuringThought(t *testing.T) {
 	reqBody := map[string]interface{}{
 		"message":      initialUserMessage,
 		"systemPrompt": "You are a helpful assistant.",
-		"workspaceId":  "test-workspace",
+		"workspaceId":  "testWorkspace",
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -811,7 +836,13 @@ func TestSyncDuringThought(t *testing.T) {
 }
 
 func TestSyncDuringResponse(t *testing.T) {
-	router, _, _ := setupTest(t)
+	router, db, _ := setupTest(t) // Get db from setupTest
+
+	// Create the workspace for this test
+	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	if err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
+	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
 	provider := replaceProvider(&MockGeminiProvider{
@@ -832,7 +863,7 @@ func TestSyncDuringResponse(t *testing.T) {
 	reqBody := map[string]interface{}{
 		"message":      initialUserMessage,
 		"systemPrompt": "You are a helpful assistant.",
-		"workspaceId":  "test-workspace",
+		"workspaceId":  "testWorkspace",
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -961,7 +992,13 @@ func TestSyncDuringResponse(t *testing.T) {
 }
 
 func TestCancelDuringSync(t *testing.T) {
-	router, _, _ := setupTest(t)
+	router, db, _ := setupTest(t) // Get db from setupTest
+
+	// Create the workspace for this test
+	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	if err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
+	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
 	provider := replaceProvider(&MockGeminiProvider{
@@ -984,7 +1021,7 @@ func TestCancelDuringSync(t *testing.T) {
 	reqBody := map[string]interface{}{
 		"message":      initialUserMessage,
 		"systemPrompt": "You are a helpful assistant.",
-		"workspaceId":  "test-workspace",
+		"workspaceId":  "testWorkspace",
 	}
 	body, _ := json.Marshal(reqBody)
 

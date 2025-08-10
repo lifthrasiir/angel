@@ -74,8 +74,8 @@ func TestHandleEvaluatePrompt(t *testing.T) {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}
 
-		if response["evaluatedPrompt"] != GetDefaultSystemPrompt() {
-			t.Errorf("expected %q, got %q", GetDefaultSystemPrompt(), response["evaluatedPrompt"])
+		if response["evaluatedPrompt"] != (PromptData{}).GetDefaultSystemPrompt() {
+			t.Errorf("expected %q, got %q", (PromptData{}).GetDefaultSystemPrompt(), response["evaluatedPrompt"])
 		}
 	})
 

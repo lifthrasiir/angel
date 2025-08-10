@@ -45,8 +45,20 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	sessionId := generateID()
 
+	var workspaceName string
+	if requestBody.WorkspaceID != "" {
+		workspace, err := GetWorkspace(db, requestBody.WorkspaceID)
+		if err != nil {
+			log.Printf("newSessionAndMessage: Failed to get workspace %s: %v", requestBody.WorkspaceID, err)
+			http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusInternalServerError)
+			return
+		}
+		workspaceName = workspace.Name
+	}
+
 	// Evaluate system prompt
-	systemPrompt, err := GetEvaluatedSystemPrompt(requestBody.SystemPrompt)
+	data := PromptData{workspaceName: workspaceName}
+	systemPrompt, err := data.EvaluatePrompt(requestBody.SystemPrompt)
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to evaluate system prompt: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to evaluate system prompt: %v", err), http.StatusInternalServerError)

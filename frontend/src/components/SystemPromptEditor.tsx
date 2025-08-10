@@ -16,6 +16,7 @@ interface SystemPromptEditorProps {
   isEditing: boolean;
   predefinedPrompts?: PredefinedPrompt[];
   isGlobalSettings?: boolean; // New prop to indicate if it's used in global settings
+  workspaceId?: string; // New prop for workspaceId
 }
 
 const CUSTOM_PROMPT_SYMBOL = Symbol('custom');
@@ -27,6 +28,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
   isEditing,
   predefinedPrompts = [],
   isGlobalSettings = false,
+  workspaceId, // Destructure new prop
 }) => {
   const [systemPrompt, setSystemPromptInternal] = useState(initialPrompt);
   const [internalLabel, setInternalLabel] = useState(currentLabel); // Internal state for label
@@ -100,12 +102,17 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
   // Function to evaluate the template
   const evaluateTemplate = async (template: string) => {
     try {
+      const requestBody: { template: string; workspaceId?: string } = { template };
+      if (workspaceId) {
+        requestBody.workspaceId = workspaceId;
+      }
+
       const response = await fetch('/api/evaluatePrompt', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ template }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {

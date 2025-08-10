@@ -458,15 +458,30 @@ func handleCall(w http.ResponseWriter, r *http.Request) {
 
 // handleEvaluatePrompt evaluates a Go template string and returns the result
 func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r) // Get DB from context
+
 	var requestBody struct {
-		Template string `json:"template"`
+		Template    string `json:"template"`
+		WorkspaceID string `json:"workspaceId"` // Add WorkspaceID
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "handleEvaluatePrompt") {
 		return
 	}
 
-	evaluatedPrompt, err := EvaluatePrompt(requestBody.Template)
+	var workspaceName string
+	if requestBody.WorkspaceID != "" {
+		workspace, err := GetWorkspace(db, requestBody.WorkspaceID)
+		if err != nil {
+			log.Printf("handleEvaluatePrompt: Failed to get workspace %s: %v", requestBody.WorkspaceID, err)
+			http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusInternalServerError)
+			return
+		}
+		workspaceName = workspace.Name
+	}
+
+	data := PromptData{workspaceName: workspaceName}
+	evaluatedPrompt, err := data.EvaluatePrompt(requestBody.Template)
 	if err != nil {
 		log.Printf("Error evaluating prompt template: %v", err)
 		http.Error(w, fmt.Sprintf("Error evaluating prompt template: %v", err), http.StatusBadRequest)
