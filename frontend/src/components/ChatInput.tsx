@@ -1,8 +1,14 @@
 import type React from 'react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FaPaperclip } from 'react-icons/fa';
 import { useAtom, useSetAtom } from 'jotai';
-import { inputMessageAtom, isStreamingAtom, availableModelsAtom, selectedModelAtom } from '../atoms/chatAtoms';
+import {
+  inputMessageAtom,
+  isStreamingAtom,
+  availableModelsAtom,
+  selectedModelAtom,
+  selectedFilesAtom,
+} from '../atoms/chatAtoms';
 
 interface ChatInputProps {
   handleSendMessage: () => void;
@@ -23,6 +29,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [availableModels] = useAtom(availableModelsAtom);
   const [selectedModel] = useAtom(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
+  const [selectedFiles] = useAtom(selectedFilesAtom);
+
+  const [isCommandMode, setIsCommandMode] = useState(false);
+  const [commandPrefix, setCommandPrefix] = useState('');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,13 +73,29 @@ const ChatInput: React.FC<ChatInputProps> = ({
     fileInputRef.current?.click();
   };
 
+  const handleSendOrRunCommand = () => {
+    if (isCommandMode) {
+      setInputMessage('');
+      setIsCommandMode(false);
+      setCommandPrefix('');
+      setStatusMessage('Invalid command.');
+    } else {
+      handleSendMessage();
+    }
+  };
+
+  const isSendButtonDisabled = inputMessage.trim() === '' && selectedFiles.length === 0;
+
   return (
     <div
       style={{
-        padding: '10px 20px',
+        padding: '10px',
         borderTop: '1px solid #ccc',
-        display: 'flex',
-        alignItems: 'center',
+        display: 'grid',
+        gridTemplateColumns: 'auto auto 1fr auto',
+        gridTemplateRows: '1fr auto',
+        gap: '0',
+        alignItems: 'top',
         background: 'white',
       }}
     >
@@ -82,118 +109,177 @@ const ChatInput: React.FC<ChatInputProps> = ({
       <button
         onClick={triggerFileInput}
         style={{
+          height: '100%',
           padding: '10px',
           marginRight: '10px',
           background: '#f0f0f0',
           border: '1px solid #ccc',
           borderRadius: '5px',
           cursor: 'pointer',
+          gridArea: '1 / 1',
         }}
         aria-label="Attach files"
       >
         <FaPaperclip />
       </button>
+      <span
+        style={{
+          padding: commandPrefix ? '6px 5px 6px 0' : '0',
+          fontFamily: 'monospace',
+          gridArea: '1 / 2',
+          color: isCommandMode ? '#1e7e34' : 'inherit',
+        }}
+      >
+        {commandPrefix}
+      </span>
+      <textarea
+        ref={inputRef}
+        value={inputMessage}
+        onChange={(e) => setInputMessage(e.target.value)}
+        onInput={(e) => {
+          setStatusMessage(null);
+          debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && e.ctrlKey && !isStreaming) {
+            e.preventDefault();
+            handleSendOrRunCommand();
+          }
+
+          // Command mode entry
+          if (e.key === '/' && inputRef.current?.selectionStart === 0 && !isCommandMode) {
+            e.preventDefault();
+            setIsCommandMode(true);
+            setCommandPrefix('/');
+            const end = inputRef.current?.selectionEnd || 0;
+            const newInputValue = inputMessage.substring(end);
+            setInputMessage(newInputValue);
+            setTimeout(() => {
+              if (inputRef.current) {
+                inputRef.current.focus();
+                inputRef.current.setSelectionRange(0, 0);
+              }
+            }, 0);
+          }
+
+          // Command mode exit
+          if (
+            isCommandMode &&
+            e.key === 'Backspace' &&
+            inputRef.current?.selectionStart === 0 &&
+            inputRef.current?.selectionEnd === 0
+          ) {
+            e.preventDefault();
+            setIsCommandMode(false);
+            setCommandPrefix('');
+            setInputMessage('/' + inputMessage);
+            setTimeout(() => {
+              if (inputRef.current) {
+                inputRef.current.focus();
+                inputRef.current.setSelectionRange(1, 1);
+              }
+            }, 0);
+          }
+        }}
+        onPaste={(e) => {
+          if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+            onFilesSelected(Array.from(e.clipboardData.files));
+          }
+        }}
+        placeholder={isCommandMode ? 'Enter a slash command...' : 'Enter your message...'}
+        rows={2}
+        style={{
+          height: '100%',
+          padding: '5px',
+          border: '1px solid #ccc',
+          borderRadius: '5px',
+          resize: 'none',
+          overflowY: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          gridArea: '1 / 3',
+          color: isCommandMode ? '#1e7e34' : 'inherit',
+        }}
+        aria-label="Message input"
+      />
       <div
         style={{
           display: 'flex',
-          flexDirection: 'column',
-          flexGrow: 1,
-          marginRight: '10px',
+          justifyContent: 'flex-end',
+          gridArea: '2 / 2 / 2 / span 2',
         }}
       >
-        <textarea
-          ref={inputRef}
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          onInput={(e) => {
-            debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.ctrlKey && !isStreaming) {
-              e.preventDefault();
-              handleSendMessage();
-            }
-          }}
-          onPaste={(e) => {
-            if (e.clipboardData.files && e.clipboardData.files.length > 0) {
-              onFilesSelected(Array.from(e.clipboardData.files));
-            }
-          }}
-          placeholder="Enter your message..."
-          rows={1}
-          style={{
-            flexGrow: 1,
-            padding: '10px',
-            border: '1px solid #eee',
-            borderRadius: '5px',
-            resize: 'none',
-            overflowY: 'hidden',
-          }}
-          aria-label="Message input"
-        />
         <div
           style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            marginTop: '5px',
+            marginRight: 'auto',
+            color: statusMessage === 'Invalid command.' ? 'red' : 'inherit',
           }}
         >
-          <label htmlFor="model-select" style={{ marginRight: '10px' }}>
-            Model:
-          </label>
-          <select
-            id="model-select"
-            value={selectedModel?.name || ''}
-            onChange={(e) => {
-              const selectedModelName = e.target.value;
-              const model = availableModels.get(selectedModelName);
-              if (model) {
-                setSelectedModel(model);
-              }
-            }}
-            style={{
-              padding: '0 8px',
-              borderRadius: '5px',
-              border: '1px solid #ccc',
-              backgroundColor: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            {Array.from(availableModels.values()).map((model) => (
-              <option key={model.name} value={model.name}>
-                {model.name}
-              </option>
-            ))}
-          </select>
+          {statusMessage === null ? (isCommandMode ? '' : 'Type / to enter command mode') : statusMessage}
         </div>
+        <label htmlFor="model-select" style={{ marginRight: '10px' }}>
+          Model:
+        </label>
+        <select
+          id="model-select"
+          value={selectedModel?.name || ''}
+          onChange={(e) => {
+            const selectedModelName = e.target.value;
+            const model = availableModels.get(selectedModelName);
+            if (model) {
+              setSelectedModel(model);
+            }
+          }}
+          style={{
+            padding: '0 8px',
+            borderRadius: '5px',
+            border: '1px solid #ccc',
+            backgroundColor: '#fff',
+            cursor: 'pointer',
+          }}
+        >
+          {Array.from(availableModels.values()).map((model) => (
+            <option key={model.name} value={model.name}>
+              {model.name}
+            </option>
+          ))}
+        </select>
       </div>
       {isStreaming ? (
         <button
           onClick={handleCancelStreaming}
           style={{
+            height: '100%',
             padding: '10px 20px',
+            marginLeft: '10px',
             background: '#dc3545',
             color: 'white',
             border: 'none',
             borderRadius: '5px',
             cursor: 'pointer',
+            gridArea: '1 / 4',
           }}
         >
           Cancel
         </button>
       ) : (
         <button
-          onClick={handleSendMessage}
+          onClick={handleSendOrRunCommand}
+          disabled={isSendButtonDisabled}
           style={{
+            height: '100%',
             padding: '10px 20px',
-            background: '#007bff',
+            marginLeft: '10px',
+            background: isCommandMode ? '#28a745' : '#007bff',
             color: 'white',
             border: 'none',
             borderRadius: '5px',
-            cursor: 'pointer',
+            cursor: isSendButtonDisabled ? 'not-allowed' : 'pointer',
+            opacity: isSendButtonDisabled ? 0.5 : 1,
+            gridArea: '1 / 4',
           }}
         >
-          Send
+          {isCommandMode ? 'Run' : 'Send'}
         </button>
       )}
     </div>
