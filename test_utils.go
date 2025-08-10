@@ -69,6 +69,9 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 		MaxTokensFunc: func() int {
 			return 1048576 // Mocked max tokens
 		},
+		RelativeDisplayOrderFunc: func() int {
+			return 0 // Mocked relative display order
+		},
 	}
 	CurrentProviders[DefaultGeminiModel] = mockLLMProvider
 

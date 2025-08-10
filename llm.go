@@ -25,6 +25,7 @@ type LLMProvider interface {
 	GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error)
 	CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 	MaxTokens() int
+	RelativeDisplayOrder() int
 }
 
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.
@@ -33,6 +34,7 @@ type MockLLMProvider struct {
 	GenerateContentOneShotFunc func(ctx context.Context, params SessionParams) (string, error)
 	CountTokensFunc            func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 	MaxTokensFunc              func() int
+	RelativeDisplayOrderFunc   func() int
 }
 
 // SendMessageStream implements the LLMProvider interface for MockLLMProvider.
@@ -65,4 +67,12 @@ func (m *MockLLMProvider) MaxTokens() int {
 		return m.MaxTokensFunc()
 	}
 	return 0 // Default or error value
+}
+
+// RelativeDisplayOrder implements the LLMProvider interface for MockLLMProvider.
+func (m *MockLLMProvider) RelativeDisplayOrder() int {
+	if m.RelativeDisplayOrderFunc != nil {
+		return m.RelativeDisplayOrderFunc()
+	}
+	return 0 // Default value for mock
 }

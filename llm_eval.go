@@ -66,6 +66,11 @@ func (p *AngelEvalProvider) MaxTokens() int {
 	return 1024 // A reasonable default for a simple eval model
 }
 
+// RelativeDisplayOrder implements the LLMProvider interface for AngelEvalProvider.
+func (p *AngelEvalProvider) RelativeDisplayOrder() int {
+	return -100
+}
+
 // Forth-like language interpreter logic will go here.
 // This will involve a stack and functions for each operation.
 

@@ -305,3 +305,8 @@ func (c *CodeAssistClient) MaxTokens() int {
 	// Both gemini-2.5-flash and gemini-2.5-pro have a token limit of 1048576
 	return 1048576
 }
+
+// RelativeDisplayOrder implements the LLMProvider interface for CodeAssistClient.
+func (c *CodeAssistClient) RelativeDisplayOrder() int {
+	return 0
+}

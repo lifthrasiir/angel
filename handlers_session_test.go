@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -97,7 +98,8 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	_, err = AddMessageToSession(testDB, sessionID, primaryBranchID, nil, nil, "user", "Hello", "text", nil, nil, "")
+	msg := Message{SessionID: sessionID, BranchID: primaryBranchID, Role: "user", Text: "Hello", Type: "text"}
+	_, err = AddMessageToSession(context.Background(), testDB, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}
@@ -217,7 +219,8 @@ func TestChatMessage(t *testing.T) {
 			t.Fatalf("Failed to get session: %v", err)
 		}
 		// Add an initial message to the session
-		_, err = AddMessageToSession(testDB, sessionId, sessionData.PrimaryBranchID, nil, nil, "user", "Initial message", "text", nil, nil, DefaultGeminiModel)
+		msg := Message{SessionID: sessionId, BranchID: sessionData.PrimaryBranchID, Role: "user", Text: "Initial message", Type: "text", Model: DefaultGeminiModel}
+		_, err = AddMessageToSession(context.Background(), testDB, msg)
 		if err != nil {
 			t.Fatalf("Failed to add initial message: %v", err)
 		}
@@ -257,11 +260,13 @@ func TestLoadChatSession(t *testing.T) {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
-	msg1ID, err := AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "user", "User message 1", "text", nil, nil, DefaultGeminiModel)
+	msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "User message 1", Type: "text", Model: DefaultGeminiModel}
+	msg1ID, err := AddMessageToSession(context.Background(), testDB, msg1)
 	if err != nil {
 		t.Fatalf("Failed to add message 1: %v", err)
 	}
-	msg2ID, err := AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "model", "Model response 1", "text", nil, nil, DefaultGeminiModel)
+	msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "model", Text: "Model response 1", Type: "text", Model: DefaultGeminiModel}
+	msg2ID, err := AddMessageToSession(context.Background(), testDB, msg2)
 	if err != nil {
 		t.Fatalf("Failed to add message 2: %v", err)
 	}
@@ -370,7 +375,8 @@ func TestDeleteSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	_, err = AddMessageToSession(testDB, sessionId, primaryBranchID, nil, nil, "user", "Message to be deleted", "text", nil, nil, "")
+	msg := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "Message to be deleted", Type: "text"}
+	_, err = AddMessageToSession(context.Background(), testDB, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}

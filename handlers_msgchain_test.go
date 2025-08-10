@@ -75,8 +75,14 @@ func (m *MockGeminiProvider) CountTokens(ctx context.Context, contents []Content
 	return &CaCountTokenResponse{TotalTokens: 10}, nil
 }
 
+// MaxTokens is a placeholder for angel-eval.
 func (m *MockGeminiProvider) MaxTokens() int {
-	return 1048576 // Mocked max tokens for tests
+	return 1024 // A reasonable default for a simple eval model
+}
+
+// RelativeDisplayOrder implements the LLMProvider interface for MockGeminiProvider.
+func (m *MockGeminiProvider) RelativeDisplayOrder() int {
+	return 0
 }
 
 // mockCloser implements io.Closer for testing purposes

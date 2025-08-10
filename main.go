@@ -596,19 +596,40 @@ type ModelInfo struct {
 	MaxTokens int    `json:"maxTokens"`
 }
 
+// sortableModelInfo is an internal struct used for sorting models before sending to frontend.
+type sortableModelInfo struct {
+	Name                 string
+	MaxTokens            int
+	RelativeDisplayOrder int
+}
+
 func listModelsHandler(w http.ResponseWriter, r *http.Request) {
-	var models []ModelInfo
+	var sortableModels []sortableModelInfo
 	for modelName, provider := range CurrentProviders {
-		models = append(models, ModelInfo{
-			Name:      modelName,
-			MaxTokens: provider.MaxTokens(),
+		sortableModels = append(sortableModels, sortableModelInfo{
+			Name:                 modelName,
+			MaxTokens:            provider.MaxTokens(),
+			RelativeDisplayOrder: provider.RelativeDisplayOrder(),
 		})
 	}
 
-	// Sort models by name
-	sort.Slice(models, func(i, j int) bool {
-		return models[i].Name < models[j].Name
+	// Sort models:
+	// 1. By RelativeDisplayOrder in descending order
+	// 2. Then by Name in ascending order
+	sort.Slice(sortableModels, func(i, j int) bool {
+		if sortableModels[i].RelativeDisplayOrder != sortableModels[j].RelativeDisplayOrder {
+			return sortableModels[i].RelativeDisplayOrder > sortableModels[j].RelativeDisplayOrder // Descending
+		}
+		return sortableModels[i].Name < sortableModels[j].Name // Ascending
 	})
+
+	var models []ModelInfo
+	for _, sm := range sortableModels {
+		models = append(models, ModelInfo{
+			Name:      sm.Name,
+			MaxTokens: sm.MaxTokens,
+		})
+	}
 
 	sendJSONResponse(w, models)
 }

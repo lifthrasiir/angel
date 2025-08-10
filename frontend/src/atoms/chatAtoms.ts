@@ -80,6 +80,7 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(isSystemPromptEditingAtom, true);
   set(selectedFilesAtom, []);
   set(primaryBranchIdAtom, '');
+  set(selectedModelAtom, null); // Add this line
 });
 
 // Derived atom for setting session name
