@@ -173,6 +173,8 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/mcp/configs/{name}", deleteMCPConfigHandler).Methods("DELETE")
 	router.HandleFunc("/api/models", listModelsHandler).Methods("GET") // New endpoint
 	router.HandleFunc("/api/chat/{sessionId}/blob/{messageId}.{blobIndex}", handleDownloadBlob).Methods("GET")
+	router.HandleFunc("/api/systemPrompts", getSystemPromptsHandler).Methods("GET")
+	router.HandleFunc("/api/systemPrompts", saveSystemPromptsHandler).Methods("PUT")
 	router.HandleFunc("/api", handleNotFound)
 
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
@@ -716,4 +718,49 @@ func handleDownloadBlob(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to write blob data for hash %s: %v", blobHash, err)
 		// Error writing to client, but response headers might already be sent
 	}
+}
+
+// getSystemPromptsHandler handles GET requests for /api/systemPrompts
+func getSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	prompts, err := GetGlobalPrompts(db)
+	if err != nil {
+		log.Printf("Failed to retrieve global prompts: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve global prompts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// If no prompts are found, initialize with default values and save them
+	if len(prompts) == 0 {
+		prompts = []PredefinedPrompt{
+			{Label: "Default prompt", Value: "{{.Builtin.SystemPrompt}}"},
+			{Label: "Empty prompt", Value: ""},
+		}
+		// Save these defaults to the DB immediately
+		if err := SaveGlobalPrompts(db, prompts); err != nil {
+			log.Printf("Failed to save default global prompts: %v", err)
+			// Continue even if saving fails, as prompts are in memory
+		}
+	}
+
+	sendJSONResponse(w, prompts)
+}
+
+// saveSystemPromptsHandler handles PUT requests for /api/systemPrompts
+func saveSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	var prompts []PredefinedPrompt
+	if !decodeJSONRequest(r, w, &prompts, "saveSystemPromptsHandler") {
+		return
+	}
+
+	if err := SaveGlobalPrompts(db, prompts); err != nil {
+		log.Printf("Failed to save global prompts: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to save global prompts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"status": "success", "message": "Global prompts updated successfully"})
 }

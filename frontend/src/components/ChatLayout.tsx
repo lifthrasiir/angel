@@ -1,7 +1,14 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
-import { useAtomValue } from 'jotai'; // Changed useAtom to useAtomValue
-import { userEmailAtom, chatSessionIdAtom } from '../atoms/chatAtoms'; // Removed sessionsAtom, workspaceIdAtom, workspaceNameAtom
+import { useAtomValue, useSetAtom } from 'jotai'; // Changed useAtom to useAtomValue
+import {
+  userEmailAtom,
+  chatSessionIdAtom,
+  globalPromptsAtom,
+  selectedGlobalPromptAtom,
+  systemPromptAtom,
+} from '../atoms/chatAtoms'; // Removed sessionsAtom, workspaceIdAtom, workspaceNameAtom
+import { PredefinedPrompt } from './SystemPromptEditor';
 import { useChatSession } from '../hooks/useChatSession';
 import useEscToCancel from '../hooks/useEscToCancel';
 import { useWorkspaces } from '../hooks/WorkspaceContext';
@@ -17,6 +24,10 @@ interface ChatLayoutProps {
 const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
   const userEmail = useAtomValue(userEmailAtom); // Changed
   const chatSessionId = useAtomValue(chatSessionIdAtom); // Changed
+
+  const setGlobalPrompts = useSetAtom(globalPromptsAtom);
+  const setSelectedGlobalPrompt = useSetAtom(selectedGlobalPromptAtom);
+  const setSystemPrompt = useSetAtom(systemPromptAtom);
 
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -40,6 +51,25 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
         chatAreaRef.current?.focus();
       }
     }
+
+    const fetchGlobalPrompts = async () => {
+      try {
+        const response = await fetch('/api/systemPrompts');
+        if (response.ok) {
+          const data: PredefinedPrompt[] = await response.json();
+          setGlobalPrompts(data);
+          if (data.length > 0) {
+            setSelectedGlobalPrompt(data[0].label); // Set initial active prompt label for display
+            setSystemPrompt(data[0].value); // Set the actual system prompt value
+          }
+        } else {
+          console.error('Failed to fetch global prompts:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('Error fetching global prompts:', error);
+      }
+    };
+    fetchGlobalPrompts();
   }, [chatSessionId, children, chatInputRef, chatAreaRef]);
 
   return (

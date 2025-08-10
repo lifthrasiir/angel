@@ -74,6 +74,12 @@ func createTables(db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS blobs (
 		id TEXT PRIMARY KEY, -- SHA-512/256 hash of the data
 		data BLOB NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS global_prompts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		label TEXT NOT NULL UNIQUE,
+		value TEXT NOT NULL
 	);`
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
@@ -238,25 +244,23 @@ func DeleteWorkspace(db *sql.DB, workspaceID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback() // Rollback on error
 
 	// Delete messages associated with the sessions in the workspace
 	_, err = tx.Exec("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
 	if err != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to delete messages for workspace %s: %w", workspaceID, err)
 	}
 
 	// Delete sessions associated with the workspace
 	_, err = tx.Exec("DELETE FROM sessions WHERE workspace_id = ?", workspaceID)
 	if err != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to delete sessions for workspace %s: %w", workspaceID, err)
 	}
 
 	// Delete the workspace itself
 	_, err = tx.Exec("DELETE FROM workspaces WHERE id = ?", workspaceID)
 	if err != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to delete workspace %s: %w", workspaceID, err)
 	}
 
@@ -287,7 +291,7 @@ func CreateBranch(db *sql.DB, branchID string, sessionID string, parentBranchID 
 }
 
 func UpdateSessionSystemPrompt(db *sql.DB, sessionID string, systemPrompt string) error {
-	_, err := db.Exec("UPDATE sessions SET system_prompt = ? WHERE id = ?", sessionID, sessionID)
+	_, err := db.Exec("UPDATE sessions SET system_prompt = ? WHERE id = ?", systemPrompt, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session system prompt: %w", err)
 	}
@@ -659,18 +663,17 @@ func DeleteSession(db *sql.DB, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback() // Rollback on error
 
 	// Delete messages associated with the session
 	_, err = tx.Exec("DELETE FROM messages WHERE session_id = ?", sessionID)
 	if err != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to delete messages for session %s: %w", sessionID, err)
 	}
 
 	// Delete the session itself
 	_, err = tx.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
 	if err != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to delete session %s: %w", sessionID, err)
 	}
 
@@ -883,4 +886,77 @@ func GetBlob(db *sql.DB, hashStr string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to get blob: %w", err)
 	}
 	return data, nil
+}
+
+// GlobalPrompt struct to hold global prompt data
+type PredefinedPrompt struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// SaveGlobalPrompts saves a list of global prompts to the database.
+// It deletes all existing global prompts and then inserts the new ones.
+func SaveGlobalPrompts(db *sql.DB, prompts []PredefinedPrompt) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // Rollback on error
+
+	// Validate prompts for uniqueness and non-empty labels
+	seenLabels := make(map[string]bool)
+	for _, p := range prompts {
+		if p.Label == "" {
+			return fmt.Errorf("prompt label cannot be empty")
+		}
+		if seenLabels[p.Label] {
+			return fmt.Errorf("duplicate prompt label found: %s", p.Label)
+		}
+		seenLabels[p.Label] = true
+	}
+
+	// Clear existing global prompts
+	_, err = tx.Exec("DELETE FROM global_prompts")
+	if err != nil {
+		return fmt.Errorf("failed to clear existing global prompts: %w", err)
+	}
+
+	// Insert new global prompts
+	stmt, err := tx.Prepare("INSERT INTO global_prompts (label, value) VALUES (?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert statement for global prompts: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, p := range prompts {
+		_, err := stmt.Exec(p.Label, p.Value)
+		if err != nil {
+			return fmt.Errorf("failed to insert global prompt %s: %w", p.Label, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetGlobalPrompts retrieves all global prompts from the database.
+func GetGlobalPrompts(db *sql.DB) ([]PredefinedPrompt, error) {
+	rows, err := db.Query("SELECT label, value FROM global_prompts ORDER BY id ASC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query global prompts: %w", err)
+	}
+	defer rows.Close()
+
+	var prompts []PredefinedPrompt
+	for rows.Next() {
+		var p PredefinedPrompt
+		if err := rows.Scan(&p.Label, &p.Value); err != nil {
+			return nil, fmt.Errorf("failed to scan global prompt: %w", err)
+		}
+		prompts = append(prompts, p)
+	}
+
+	if prompts == nil {
+		return []PredefinedPrompt{}, nil // Return empty slice instead of nil
+	}
+	return prompts, nil
 }

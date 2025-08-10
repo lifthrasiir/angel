@@ -1,28 +1,83 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
-import { useAtom, useSetAtom } from 'jotai';
-import { systemPromptAtom, isSystemPromptEditingAtom, messagesAtom } from '../atoms/chatAtoms';
+import { useAtom } from 'jotai';
+import { messagesAtom } from '../atoms/chatAtoms';
 
-interface SystemPromptEditorProps {
-  // No props needed, all state managed by Jotai
+export interface PredefinedPrompt {
+  label: string;
+  value: string;
 }
 
-type PromptType = 'default' | 'empty' | 'custom';
+interface SystemPromptEditorProps {
+  initialPrompt: string;
+  currentLabel: string; // New prop for the label
+  onPromptUpdate: (prompt: PredefinedPrompt) => void; // Changed prop
+  isEditing: boolean;
+  predefinedPrompts?: PredefinedPrompt[];
+  isGlobalSettings?: boolean; // New prop to indicate if it's used in global settings
+}
 
-const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
-  const [systemPrompt] = useAtom(systemPromptAtom);
-  const setSystemPrompt = useSetAtom(systemPromptAtom);
-  const [isSystemPromptEditing] = useAtom(isSystemPromptEditingAtom);
+const CUSTOM_PROMPT_SYMBOL = Symbol('custom');
+
+const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
+  initialPrompt,
+  currentLabel, // Destructure new prop
+  onPromptUpdate, // Destructure changed prop
+  isEditing,
+  predefinedPrompts = [],
+  isGlobalSettings = false,
+}) => {
+  const [systemPrompt, setSystemPromptInternal] = useState(initialPrompt);
+  const [internalLabel, setInternalLabel] = useState(currentLabel); // Internal state for label
   const [messages] = useAtom(messagesAtom);
   const messagesLength = messages.length;
 
+  // Update internal state when initialPrompt prop changes
+  useEffect(() => {
+    setSystemPromptInternal(initialPrompt);
+  }, [initialPrompt]);
+
+  // Update internal label state when currentLabel prop changes
+  useEffect(() => {
+    setInternalLabel(currentLabel);
+  }, [currentLabel]);
+
+  const setSystemPrompt = (prompt: string) => {
+    setSystemPromptInternal(prompt);
+    onPromptUpdate({ label: internalLabel, value: prompt }); // Call with both label and value
+  };
+
   const systemPromptTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const evaluatedPromptRef = useRef<HTMLPreElement>(null); // 변경: HTMLDivElement -> HTMLPreElement
+  const evaluatedPromptRef = useRef<HTMLPreElement>(null);
   const [evaluatedPrompt, setEvaluatedPrompt] = useState<string>('');
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
-  const [promptType, setPromptType] = useState<PromptType>('default');
-  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+
+  // Always treat as custom prompt if isGlobalSettings is true
+  const [promptType, setPromptType] = useState<string | symbol>(CUSTOM_PROMPT_SYMBOL);
+  const [isManuallySetToCustom, setIsManuallySetToCustom] = useState(false);
+
+  // Always expanded if isGlobalSettings is true
+  const [isExpanded, setIsExpanded] = useState<boolean>(isGlobalSettings ? true : false);
+
+  // Update promptType whenever systemPrompt or predefinedPrompts change
+  useEffect(() => {
+    if (isGlobalSettings) {
+      setPromptType(CUSTOM_PROMPT_SYMBOL); // Always custom for global settings
+      setIsExpanded(true); // Always expanded for global settings
+      return;
+    }
+    // Don't auto-change if user manually set to custom
+    if (isManuallySetToCustom) {
+      return;
+    }
+    const foundPrompt = predefinedPrompts.find((p) => p.value === systemPrompt);
+    if (foundPrompt) {
+      setPromptType(foundPrompt.value);
+    } else {
+      setPromptType(CUSTOM_PROMPT_SYMBOL); // Custom prompt
+    }
+  }, [systemPrompt, predefinedPrompts, isGlobalSettings, isManuallySetToCustom]);
 
   const adjustSystemPromptTextareaHeight = useCallback(() => {
     if (systemPromptTextareaRef.current) {
@@ -33,14 +88,14 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
   }, []);
 
   // Determine if the controls should be read-only
-  const isReadOnly = messagesLength !== 0;
+  const isReadOnly = !isGlobalSettings && messagesLength !== 0;
 
   useEffect(() => {
     // Only adjust height if it's a custom prompt and not read-only
-    if (promptType === 'custom' && isSystemPromptEditing && !isReadOnly) {
+    if (promptType === CUSTOM_PROMPT_SYMBOL && isEditing && !isReadOnly) {
       adjustSystemPromptTextareaHeight();
     }
-  }, [systemPrompt, isSystemPromptEditing, promptType, adjustSystemPromptTextareaHeight, isReadOnly]);
+  }, [systemPrompt, isEditing, promptType, adjustSystemPromptTextareaHeight, isReadOnly]);
 
   // Function to evaluate the template
   const evaluateTemplate = async (template: string) => {
@@ -68,8 +123,9 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
   };
 
   useEffect(() => {
-    if (isSystemPromptEditing) {
-      if (promptType === 'custom') {
+    if (isEditing) {
+      // Always evaluate for global settings, or if custom prompt
+      if (isGlobalSettings || promptType === CUSTOM_PROMPT_SYMBOL) {
         const handler = setTimeout(() => {
           evaluateTemplate(systemPrompt);
         }, 200); // 200ms debounce time
@@ -85,20 +141,27 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
       setEvaluatedPrompt('');
       setEvaluationError(null);
     }
-  }, [systemPrompt, isSystemPromptEditing, evaluateTemplate, promptType]);
+  }, [systemPrompt, isEditing, evaluateTemplate, promptType, isGlobalSettings]);
 
   const handlePromptTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newPromptType = e.target.value as PromptType;
-    setPromptType(newPromptType);
-    if (newPromptType === 'default') {
-      setSystemPrompt('{{.Builtin.SystemPrompt}}');
-    } else if (newPromptType === 'empty') {
-      setSystemPrompt('');
+    const selectedIndex = e.target.selectedIndex;
+    const customOptionIndex = predefinedPrompts.length; // Assuming "Custom" is always the last option
+
+    if (selectedIndex === customOptionIndex) {
+      // User selected "Custom"
+      setPromptType(CUSTOM_PROMPT_SYMBOL);
+      setIsManuallySetToCustom(true);
+      // Don't change systemPrompt here to avoid triggering the useEffect
+    } else {
+      // User selected a predefined prompt
+      const selectedPrompt = predefinedPrompts[selectedIndex];
+      setPromptType(selectedPrompt.value);
+      setIsManuallySetToCustom(false);
+      setSystemPrompt(selectedPrompt.value);
     }
-    // If 'custom', keep the current systemPrompt value
   };
 
-  const clickAnywhereToExpand = !isSystemPromptEditing && !isExpanded;
+  const clickAnywhereToExpand = !isEditing && !isExpanded;
 
   // 최상위 렌더링 요소를 조건부로 할당
   const RootElement = clickAnywhereToExpand ? 'button' : 'div';
@@ -106,7 +169,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
   return (
     <div className="chat-message-container system-prompt-message">
       <RootElement
-        className={`chat-bubble system-prompt-bubble ${isExpanded || promptType === 'custom' ? 'expanded' : ''}`}
+        className={`chat-bubble system-prompt-bubble ${isExpanded || promptType === CUSTOM_PROMPT_SYMBOL ? 'expanded' : ''}`}
         style={{
           cursor: clickAnywhereToExpand ? 'pointer' : '',
         }}
@@ -115,7 +178,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
             ? () => {
                 setIsExpanded(true);
                 setTimeout(() => {
-                  if (!isSystemPromptEditing) {
+                  if (!isEditing) {
                     evaluatedPromptRef.current?.focus();
                   }
                 }, 0);
@@ -124,9 +187,9 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
         } // onClick 핸들러 조건부 할당
         aria-label={clickAnywhereToExpand ? 'Expand system prompt' : undefined}
         tabIndex={clickAnywhereToExpand ? undefined : -1} // tabIndex 조건부 할당
-        role={clickAnywhereToExpand ? undefined : isSystemPromptEditing ? undefined : 'button'} // role 조건부 할당
+        role={clickAnywhereToExpand ? undefined : isEditing ? undefined : 'button'} // role 조건부 할당
       >
-        {isSystemPromptEditing ? (
+        {isEditing ? (
           <div
             style={{
               display: 'flex',
@@ -142,37 +205,61 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                 justifyContent: 'space-between',
               }}
             >
-              <select
-                value={promptType}
-                onChange={handlePromptTypeChange}
-                disabled={isReadOnly}
-                style={{
-                  padding: '5px',
-                  borderRadius: '5px',
-                  border: '1px solid #ccc',
-                }}
-              >
-                <option value="default">Default Prompt</option>
-                <option value="empty">Empty Prompt</option>
-                <option value="custom">Custom</option>
-              </select>
-              <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '1.2em',
-                  marginLeft: '0.8ex',
-                  color: 'var(--color-system-verydark)',
-                }}
-                aria-label={isExpanded ? 'Collapse prompt preview' : 'Expand prompt preview'}
-              >
-                {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
-              </button>
+              {isGlobalSettings ? (
+                <input
+                  type="text"
+                  placeholder="Prompt Label"
+                  value={internalLabel}
+                  onChange={(e) => {
+                    setInternalLabel(e.target.value);
+                    onPromptUpdate({ label: e.target.value, value: systemPrompt }); // Update label immediately
+                  }}
+                  style={{
+                    padding: '5px',
+                    borderRadius: '5px',
+                    border: '1px solid #ccc',
+                    flexGrow: 1, // Allow it to take available space
+                  }}
+                />
+              ) : (
+                <select
+                  value={typeof promptType === 'symbol' ? promptType.description : promptType} // Use description for symbol value
+                  onChange={handlePromptTypeChange}
+                  disabled={isReadOnly}
+                  style={{
+                    padding: '5px',
+                    borderRadius: '5px',
+                    border: '1px solid #ccc',
+                  }}
+                >
+                  {predefinedPrompts.map((p) => (
+                    <option key={p.label} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_PROMPT_SYMBOL.description}>Custom</option>
+                </select>
+              )}
+              {!isGlobalSettings && ( // Hide chevron for global settings
+                <button
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '1.2em',
+                    marginLeft: '0.8ex',
+                    color: 'var(--color-system-verydark)',
+                  }}
+                  aria-label={isExpanded ? 'Collapse prompt preview' : 'Expand prompt preview'}
+                >
+                  {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
+                </button>
+              )}
             </div>
 
-            {promptType === 'custom' && (
+            {/* Always show textarea for global settings, or if custom prompt */}
+            {(isGlobalSettings || promptType === CUSTOM_PROMPT_SYMBOL) && (
               <textarea
                 ref={systemPromptTextareaRef}
                 value={systemPrompt}
@@ -183,7 +270,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                   target.style.height = target.scrollHeight + 'px';
                 }}
                 readOnly={isReadOnly}
-                className={isSystemPromptEditing ? 'system-prompt-textarea-editable' : ''}
+                className={isEditing ? 'system-prompt-textarea-editable' : ''}
                 style={{
                   width: '100%',
                   marginTop: '10px',
@@ -249,7 +336,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                   }}
                   onClick={() => setIsExpanded(false)}
                   aria-label="Collapse prompt"
-                  tabIndex={isExpanded ? undefined : -1} // 변경
+                  tabIndex={isExpanded ? undefined : -1}
                 />
               ) : (
                 <FaChevronDown
@@ -261,7 +348,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                   }}
                   onClick={() => setIsExpanded(true)}
                   aria-label="Expand prompt"
-                  tabIndex={isExpanded ? undefined : -1} // 변경
+                  tabIndex={isExpanded ? undefined : -1}
                 />
               )}
             </div>
@@ -272,15 +359,15 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = () => {
                 }}
               >
                 <pre
-                  ref={evaluatedPromptRef} // ref를 pre 태그로 이동
-                  tabIndex={-1} // tabIndex를 pre 태그로 이동
+                  ref={evaluatedPromptRef}
+                  tabIndex={-1}
                   style={{
                     whiteSpace: 'pre-wrap',
                     background: '#f9f9f9',
                     padding: '10px',
                     borderRadius: '5px',
-                    overflowY: 'auto', // 스크롤 가능하게
-                    maxHeight: '200px', // 적절한 높이 설정
+                    overflowY: 'auto',
+                    maxHeight: '200px',
                   }}
                 >
                   {systemPrompt}

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import type { ChatMessage as ChatMessageType } from '../types/chat';
 import ChatInput from './ChatInput';
 import TokenCountMeter from './TokenCountMeter';
@@ -16,6 +16,9 @@ import {
   selectedFilesAtom,
   availableModelsAtom,
   userEmailAtom,
+  systemPromptAtom,
+  isSystemPromptEditingAtom,
+  globalPromptsAtom,
 } from '../atoms/chatAtoms';
 
 interface ChatAreaProps {
@@ -41,6 +44,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [availableModels] = useAtom(availableModelsAtom);
   const [userEmail] = useAtom(userEmailAtom);
+  const [systemPrompt, setSystemPrompt] = useAtom(systemPromptAtom);
+  const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
+  const [globalPrompts] = useAtom(globalPromptsAtom);
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
 
   const isLoggedIn = !!userEmail;
@@ -134,7 +140,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       }
     }
     return renderedElements;
-  }, [messages, lastAutoDisplayedThoughtId, availableModels]);
+  }, [messages, lastAutoDisplayedThoughtId, availableModels, globalPrompts, systemPrompt]);
+
+  const currentSystemPromptLabel = useMemo(() => {
+    const found = globalPrompts.find((p) => p.value === systemPrompt);
+    return found ? found.label : ''; // Return label if found, else empty string for custom
+  }, [systemPrompt, globalPrompts]);
 
   return (
     <div
@@ -161,7 +172,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <>
           <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
             <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
-              <SystemPromptEditor key={chatSessionId} />
+              <SystemPromptEditor
+                key={chatSessionId}
+                initialPrompt={systemPrompt}
+                currentLabel={currentSystemPromptLabel} // Pass the derived label
+                onPromptUpdate={(updatedPrompt) => {
+                  setSystemPrompt(updatedPrompt.value); // Only update the value of systemPrompt atom
+                }}
+                isEditing={isSystemPromptEditing}
+                predefinedPrompts={globalPrompts}
+              />
               {renderedMessages}
               <div ref={messagesEndRef} />
             </div>
