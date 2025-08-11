@@ -536,8 +536,18 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Handle chosen_next_id for the OLD primary branch ---
-	if oldPrimaryBranchID != "" && oldPrimaryBranchID != requestBody.NewPrimaryBranchID {
+	handleOldPrimaryBranchChosenNextID(db, sessionId, oldPrimaryBranchID, requestBody.NewPrimaryBranchID)
+	handleNewPrimaryBranchChosenNextID(db, sessionId, requestBody.NewPrimaryBranchID)
+
+	sendJSONResponse(w, map[string]string{
+		"status":          "success",
+		"primaryBranchId": requestBody.NewPrimaryBranchID,
+	})
+}
+
+// handleOldPrimaryBranchChosenNextID handles the chosen_next_id logic for the old primary branch.
+func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchID, newPrimaryBranchID string) {
+	if oldPrimaryBranchID != "" && oldPrimaryBranchID != newPrimaryBranchID {
 		oldBranch, err := GetBranch(db, oldPrimaryBranchID)
 		if err != nil {
 			log.Printf("switchBranchHandler: Failed to get old branch %s: %v", oldPrimaryBranchID, err)
@@ -600,25 +610,27 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
 
-	// --- Handle chosen_next_id for the NEW primary branch ---
+// handleNewPrimaryBranchChosenNextID handles the chosen_next_id logic for the new primary branch.
+func handleNewPrimaryBranchChosenNextID(db *sql.DB, sessionId, newPrimaryBranchID string) {
 	// If the new primary branch is a branched branch, update its branch_from_message_id's chosen_next_id
 	// to point to the first message of this new primary branch.
-	newBranch, err := GetBranch(db, requestBody.NewPrimaryBranchID)
+	newBranch, err := GetBranch(db, newPrimaryBranchID)
 	if err != nil {
-		log.Printf("switchBranchHandler: Failed to get new branch %s: %v", requestBody.NewPrimaryBranchID, err)
+		log.Printf("switchBranchHandler: Failed to get new branch %s: %v", newPrimaryBranchID, err)
 		// Non-fatal, continue
 	} else if newBranch.BranchFromMessageID != nil {
 		parentMsgID := *newBranch.BranchFromMessageID
 
 		// Find the first message of the new primary branch that has parentMsgID as its parent
 		var firstMessageOfNewBranchID int
-		firstMessageOfNewBranchID, err := GetFirstMessageOfBranch(db, parentMsgID, requestBody.NewPrimaryBranchID)
+		firstMessageOfNewBranchID, err := GetFirstMessageOfBranch(db, parentMsgID, newPrimaryBranchID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				log.Printf("switchBranchHandler: No first message found for new branch %s. Skipping chosen_next_id update.", requestBody.NewPrimaryBranchID)
+				log.Printf("switchBranchHandler: No first message found for new branch %s. Skipping chosen_next_id update.", newPrimaryBranchID)
 			} else {
-				log.Printf("switchBranchHandler: Failed to find first message of new branch %s: %v", requestBody.NewPrimaryBranchID, err)
+				log.Printf("switchBranchHandler: Failed to find first message of new branch %s: %v", newPrimaryBranchID, err)
 			}
 			// Non-fatal, continue
 		} else {
@@ -628,11 +640,6 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
-	sendJSONResponse(w, map[string]string{
-		"status":          "success",
-		"primaryBranchId": requestBody.NewPrimaryBranchID,
-	})
 }
 
 // New endpoint to delete a chat session

@@ -11,7 +11,6 @@ import { ThoughtGroup } from './ThoughtGroup';
 import FunctionPairMessage from './FunctionPairMessage';
 import {
   messagesAtom,
-  lastAutoDisplayedThoughtIdAtom,
   chatSessionIdAtom,
   selectedFilesAtom,
   availableModelsAtom,
@@ -41,7 +40,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 }) => {
   const { workspaceId } = useChatSession(); // Get workspaceId from useChatSession
   const [messages] = useAtom(messagesAtom);
-  const [lastAutoDisplayedThoughtId] = useAtom(lastAutoDisplayedThoughtIdAtom);
   const [chatSessionId] = useAtom(chatSessionIdAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [availableModels] = useAtom(availableModelsAtom);
@@ -80,69 +78,85 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
+  const renderMessageOrGroup = (
+    currentMessage: ChatMessageType,
+    messages: ChatMessageType[],
+    currentIndex: number,
+    availableModels: Map<string, { maxTokens: number }>,
+  ): { element: JSX.Element; messagesConsumed: number } => {
+    // Find maxTokens for the current message's model
+    const currentModelMaxTokens = currentMessage.model
+      ? availableModels.get(currentMessage.model)?.maxTokens
+      : undefined;
+
+    // Check for function_call followed by function_response
+    if (
+      currentMessage.type === 'function_call' &&
+      currentMessage.parts &&
+      currentMessage.parts.length > 0 &&
+      currentMessage.parts[0].functionCall &&
+      currentIndex + 1 < messages.length &&
+      messages[currentIndex + 1].type === 'function_response' &&
+      messages[currentIndex + 1].parts &&
+      messages[currentIndex + 1].parts.length > 0 &&
+      messages[currentIndex + 1].parts[0].functionResponse
+    ) {
+      const functionCall = currentMessage.parts[0].functionCall!;
+      const functionResponse = messages[currentIndex + 1].parts[0].functionResponse!;
+      return {
+        element: (
+          <FunctionPairMessage
+            key={`function-pair-${currentMessage.id}-${messages[currentIndex + 1].id}`}
+            functionCall={functionCall}
+            functionResponse={functionResponse}
+          />
+        ),
+        messagesConsumed: 2,
+      };
+    } else if (currentMessage.type === 'thought') {
+      const thoughtGroup: ChatMessageType[] = [];
+      let j = currentIndex;
+      while (j < messages.length && messages[j].type === 'thought') {
+        thoughtGroup.push(messages[j]);
+        j++;
+      }
+      return {
+        element: (
+          <ThoughtGroup
+            key={`thought-group-${currentIndex}`}
+            groupId={`thought-group-${currentIndex}`}
+            isAutoDisplayMode={true}
+            thoughts={thoughtGroup}
+          />
+        ),
+        messagesConsumed: j - currentIndex,
+      };
+    } else {
+      return {
+        element: (
+          <ChatMessage
+            key={currentMessage.id}
+            message={currentMessage}
+            maxTokens={currentModelMaxTokens} // Pass maxTokens to ChatMessage
+          />
+        ),
+        messagesConsumed: 1,
+      };
+    }
+  };
+
   // Logic to group consecutive thought messages
   const renderedMessages = useMemo(() => {
     const renderedElements: JSX.Element[] = [];
     let i = 0;
     while (i < messages.length) {
       const currentMessage = messages[i];
-
-      // Find maxTokens for the current message's model
-      const currentModelMaxTokens = currentMessage.model
-        ? availableModels.get(currentMessage.model)?.maxTokens
-        : undefined;
-
-      // Check for function_call followed by function_response
-      if (
-        currentMessage.type === 'function_call' &&
-        currentMessage.parts &&
-        currentMessage.parts.length > 0 &&
-        currentMessage.parts[0].functionCall &&
-        i + 1 < messages.length &&
-        messages[i + 1].type === 'function_response' &&
-        messages[i + 1].parts &&
-        messages[i + 1].parts.length > 0 &&
-        messages[i + 1].parts[0].functionResponse
-      ) {
-        const functionCall = currentMessage.parts[0].functionCall!;
-        const functionResponse = messages[i + 1].parts[0].functionResponse!;
-        renderedElements.push(
-          <FunctionPairMessage
-            key={`function-pair-${currentMessage.id}-${messages[i + 1].id}`}
-            functionCall={functionCall}
-            functionResponse={functionResponse}
-          />,
-        );
-        i += 2; // Skip both messages
-      } else if (currentMessage.type === 'thought') {
-        const thoughtGroup: ChatMessageType[] = [];
-        let j = i;
-        while (j < messages.length && messages[j].type === 'thought') {
-          thoughtGroup.push(messages[j]);
-          j++;
-        }
-        renderedElements.push(
-          <ThoughtGroup
-            key={`thought-group-${i}`}
-            groupId={`thought-group-${i}`}
-            isAutoDisplayMode={true}
-            thoughts={thoughtGroup}
-          />,
-        );
-        i = j; // Move index past the grouped thoughts
-      } else {
-        renderedElements.push(
-          <ChatMessage
-            key={currentMessage.id}
-            message={currentMessage}
-            maxTokens={currentModelMaxTokens} // Pass maxTokens to ChatMessage
-          />,
-        );
-        i++;
-      }
+      const { element, messagesConsumed } = renderMessageOrGroup(currentMessage, messages, i, availableModels);
+      renderedElements.push(element);
+      i += messagesConsumed;
     }
     return renderedElements;
-  }, [messages, lastAutoDisplayedThoughtId, availableModels, globalPrompts, systemPrompt]);
+  }, [messages, availableModels, globalPrompts, systemPrompt]);
 
   const currentSystemPromptLabel = useMemo(() => {
     const found = globalPrompts.find((p) => p.value === systemPrompt);

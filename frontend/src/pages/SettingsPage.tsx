@@ -210,6 +210,142 @@ const SettingsPage: React.FC = () => {
     setIsAddingNewPrompt(false);
   };
 
+  interface AuthSettingsProps {
+    isLoggedIn: boolean;
+    userEmail: string | null;
+    handleLogout: () => void;
+    handleLogin: () => void;
+  }
+
+  const AuthSettings: React.FC<AuthSettingsProps> = ({ isLoggedIn, userEmail, handleLogout, handleLogin }) => {
+    return (
+      <div>
+        <h3>Authentication</h3>
+        {isLoggedIn ? (
+          <p>
+            Logged in as: <strong>{userEmail}</strong>
+            <button onClick={handleLogout} style={{ marginLeft: '10px', padding: '5px 10px' }}>
+              Logout
+            </button>
+          </p>
+        ) : (
+          <p>
+            Not logged in.
+            <button onClick={handleLogin} style={{ marginLeft: '10px', padding: '5px 10px' }}>
+              Login
+            </button>
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  interface PromptSettingsProps {
+    globalPrompts: PredefinedPrompt[];
+    editingPrompt: PredefinedPrompt | null;
+    isAddingNewPrompt: boolean;
+    newPromptLabel: string;
+    newPromptValue: string;
+    setNewPromptLabel: (label: string) => void;
+    setNewPromptValue: (value: string) => void;
+    handleSavePrompt: () => void;
+    handleCancelEdit: () => void;
+    handleEditPrompt: (prompt: PredefinedPrompt) => void;
+    handleDeletePrompt: (prompt: PredefinedPrompt) => void;
+    handleAddNewPrompt: () => void;
+    handleMoveUp: (index: number) => void;
+    handleMoveDown: (index: number) => void;
+  }
+
+  const PromptSettings: React.FC<PromptSettingsProps> = ({
+    globalPrompts,
+    editingPrompt,
+    isAddingNewPrompt,
+    newPromptLabel,
+    newPromptValue,
+    setNewPromptLabel,
+    setNewPromptValue,
+    handleSavePrompt,
+    handleCancelEdit,
+    handleEditPrompt,
+    handleDeletePrompt,
+    handleAddNewPrompt,
+    handleMoveUp,
+    handleMoveDown,
+  }) => {
+    return (
+      <div>
+        <h3>Global System Prompts</h3>
+        {editingPrompt || isAddingNewPrompt ? (
+          <div style={{ border: '1px solid #eee', padding: '10px', minHeight: '100px' }}>
+            <h4>{isAddingNewPrompt ? 'Add New Prompt' : 'Edit Prompt'}</h4>
+            <SystemPromptEditor
+              initialPrompt={newPromptValue}
+              currentLabel={newPromptLabel}
+              onPromptUpdate={(updatedPrompt) => {
+                setNewPromptLabel(updatedPrompt.label);
+                setNewPromptValue(updatedPrompt.value);
+              }}
+              isEditing={true}
+              isGlobalSettings={true}
+            />
+            <div style={{ marginTop: '10px' }}>
+              <button onClick={handleSavePrompt} style={{ marginRight: '10px' }}>
+                Save
+              </button>
+              <button onClick={handleCancelEdit}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ border: '1px solid #eee', padding: '10px', minHeight: '100px' }}>
+              {globalPrompts.length === 0 ? (
+                <p>No global prompts defined. Add one below!</p>
+              ) : (
+                <ul>
+                  {globalPrompts.map((prompt, index) => (
+                    <li key={prompt.label} style={{ marginBottom: '5px', display: 'flex', alignItems: 'center' }}>
+                      <strong>{prompt.label}:</strong> {prompt.value.substring(0, Math.min(prompt.value.length, 50))}...
+                      <button
+                        onClick={() => handleEditPrompt(prompt)}
+                        style={{ marginLeft: '10px', padding: '2px 8px' }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeletePrompt(prompt)}
+                        style={{ marginLeft: '5px', padding: '2px 8px' }}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => handleMoveUp(index)}
+                        disabled={index === 0}
+                        style={{ marginLeft: '5px', padding: '2px 8px' }}
+                      >
+                        Move Up
+                      </button>
+                      <button
+                        onClick={() => handleMoveDown(index)}
+                        disabled={index === globalPrompts.length - 1}
+                        style={{ marginLeft: '5px', padding: '2px 8px' }}
+                      >
+                        Move Down
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div style={{ marginTop: '10px' }}>
+              <button onClick={handleAddNewPrompt}>Add New Prompt</button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100%' }}>
       {/* Settings Sidebar/Header */}
@@ -298,100 +434,34 @@ const SettingsPage: React.FC = () => {
       </div>
 
       {/* Settings Content */}
+      {/* Settings Content */}
       <div style={{ flexGrow: 1, padding: '20px', overflowY: 'auto' }}>
         {activeTab === 'auth' && (
-          <div>
-            <h3>Authentication</h3>
-            {isLoggedIn ? (
-              <p>
-                Logged in as: <strong>{userEmail}</strong>
-                <button onClick={handleLogout} style={{ marginLeft: '10px', padding: '5px 10px' }}>
-                  Logout
-                </button>
-              </p>
-            ) : (
-              <p>
-                Not logged in.
-                <button onClick={handleLogin} style={{ marginLeft: '10px', padding: '5px 10px' }}>
-                  Login
-                </button>
-              </p>
-            )}
-          </div>
+          <AuthSettings
+            isLoggedIn={isLoggedIn}
+            userEmail={userEmail}
+            handleLogout={handleLogout}
+            handleLogin={handleLogin}
+          />
         )}
         {activeTab === 'mcp' && <MCPSettings />}
         {activeTab === 'prompts' && (
-          <div>
-            <h3>Global System Prompts</h3>
-            {editingPrompt || isAddingNewPrompt ? (
-              <div style={{ border: '1px solid #eee', padding: '10px', minHeight: '100px' }}>
-                <h4>{isAddingNewPrompt ? 'Add New Prompt' : 'Edit Prompt'}</h4>
-                {/* Label input is now handled by SystemPromptEditor */}
-                <SystemPromptEditor
-                  initialPrompt={newPromptValue}
-                  currentLabel={newPromptLabel} // Pass current label
-                  onPromptUpdate={(updatedPrompt) => {
-                    setNewPromptLabel(updatedPrompt.label);
-                    setNewPromptValue(updatedPrompt.value);
-                  }}
-                  isEditing={true}
-                  isGlobalSettings={true}
-                />
-                <div style={{ marginTop: '10px' }}>
-                  <button onClick={handleSavePrompt} style={{ marginRight: '10px' }}>
-                    Save
-                  </button>
-                  <button onClick={handleCancelEdit}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div style={{ border: '1px solid #eee', padding: '10px', minHeight: '100px' }}>
-                  {globalPrompts.length === 0 ? (
-                    <p>No global prompts defined. Add one below!</p>
-                  ) : (
-                    <ul>
-                      {globalPrompts.map((prompt, index) => (
-                        <li key={prompt.label} style={{ marginBottom: '5px', display: 'flex', alignItems: 'center' }}>
-                          <strong>{prompt.label}:</strong>{' '}
-                          {prompt.value.substring(0, Math.min(prompt.value.length, 50))}...
-                          <button
-                            onClick={() => handleEditPrompt(prompt)}
-                            style={{ marginLeft: '10px', padding: '2px 8px' }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDeletePrompt(prompt)}
-                            style={{ marginLeft: '5px', padding: '2px 8px' }}
-                          >
-                            Delete
-                          </button>
-                          <button
-                            onClick={() => handleMoveUp(index)}
-                            disabled={index === 0}
-                            style={{ marginLeft: '5px', padding: '2px 8px' }}
-                          >
-                            Move Up
-                          </button>
-                          <button
-                            onClick={() => handleMoveDown(index)}
-                            disabled={index === globalPrompts.length - 1}
-                            style={{ marginLeft: '5px', padding: '2px 8px' }}
-                          >
-                            Move Down
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div style={{ marginTop: '10px' }}>
-                  <button onClick={handleAddNewPrompt}>Add New Prompt</button>
-                </div>
-              </>
-            )}
-          </div>
+          <PromptSettings
+            globalPrompts={globalPrompts}
+            editingPrompt={editingPrompt}
+            isAddingNewPrompt={isAddingNewPrompt}
+            newPromptLabel={newPromptLabel}
+            newPromptValue={newPromptValue}
+            setNewPromptLabel={setNewPromptLabel}
+            setNewPromptValue={setNewPromptValue}
+            handleSavePrompt={handleSavePrompt}
+            handleCancelEdit={handleCancelEdit}
+            handleEditPrompt={handleEditPrompt}
+            handleDeletePrompt={handleDeletePrompt}
+            handleAddNewPrompt={handleAddNewPrompt}
+            handleMoveUp={handleMoveUp}
+            handleMoveDown={handleMoveDown}
+          />
         )}
       </div>
     </div>

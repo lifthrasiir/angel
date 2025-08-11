@@ -502,6 +502,93 @@ func GetBranch(db *sql.DB, branchID string) (Branch, error) {
 	return b, nil
 }
 
+// createFrontendMessage converts a Message DB struct and related data into a FrontendMessage.
+// It also handles skipping thought messages if discardThoughts is true.
+// Returns the FrontendMessage, a boolean indicating if the message was skipped, and an error.
+func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNextIDsAndBranchesStr string, discardThoughts bool) (FrontendMessage, bool, error) {
+	if discardThoughts && m.Role == "thought" {
+		return FrontendMessage{}, true, nil // Skip thought messages
+	}
+
+	if attachmentsJSON.Valid {
+		if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
+			log.Printf("Failed to unmarshal attachments for message %d: %v", m.ID, err)
+			// Continue even if unmarshaling fails, as the message itself is valid
+		}
+	}
+
+	var parts []Part
+	var tokens *int
+
+	if m.CumulTokenCount != nil {
+		tokens = m.CumulTokenCount
+	}
+
+	if m.Text != "" {
+		parts = append(parts, Part{Text: m.Text})
+	}
+
+	var fmParentMessageID *string
+	if m.ParentMessageID != nil {
+		s := fmt.Sprintf("%d", *m.ParentMessageID)
+		fmParentMessageID = &s
+	}
+
+	var fmChosenNextID *string
+	if m.ChosenNextID != nil {
+		s := fmt.Sprintf("%d", *m.ChosenNextID)
+		fmChosenNextID = &s
+	}
+
+	var fmPossibleNextIDs []PossibleNextMessage
+	if possibleNextIDsAndBranchesStr != "" {
+		possibleNextIDsAndBranches := strings.Split(possibleNextIDsAndBranchesStr, ",")
+		for i := 0; i < len(possibleNextIDsAndBranches); i += 2 {
+			if i+1 < len(possibleNextIDsAndBranches) { // Ensure there's a branch ID for the message ID
+				fmPossibleNextIDs = append(fmPossibleNextIDs, PossibleNextMessage{
+					MessageID: possibleNextIDsAndBranches[i],
+					BranchID:  possibleNextIDsAndBranches[i+1],
+				})
+			} else {
+				log.Printf("Warning: Malformed possibleNextIDsAndBranchesStr for message %d: %s", m.ID, possibleNextIDsAndBranchesStr)
+			}
+		}
+	}
+
+	switch m.Type {
+	case "function_call":
+		var fc FunctionCall
+		if err := json.Unmarshal([]byte(m.Text), &fc); err != nil {
+			log.Printf("Failed to unmarshal FunctionCall for message %d: %v", m.ID, err)
+		} else {
+			parts = []Part{{FunctionCall: &fc}}
+		}
+	case "function_response":
+		var fr FunctionResponse
+		if err := json.Unmarshal([]byte(m.Text), &fr); err != nil {
+			log.Printf("Failed to unmarshal FunctionResponse for message %d: %v", m.ID, err)
+		} else {
+			parts = []Part{{FunctionResponse: &fr}}
+		}
+	}
+
+	fm := FrontendMessage{
+		ID:              fmt.Sprintf("%d", m.ID),
+		Role:            m.Role,
+		Parts:           parts,
+		Type:            m.Type,
+		Attachments:     m.Attachments,
+		CumulTokenCount: tokens,
+		SessionID:       m.SessionID,
+		BranchID:        m.BranchID,
+		ParentMessageID: fmParentMessageID,
+		ChosenNextID:    fmChosenNextID,
+		PossibleNextIDs: fmPossibleNextIDs,
+		Model:           m.Model,
+	}
+	return fm, false, nil
+}
+
 // GetSessionHistory retrieves the chat history for a given session and its primary branch,
 // recursively fetching messages from parent branches.
 func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, discardThoughts bool) ([]FrontendMessage, error) {
@@ -539,92 +626,19 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 				); err != nil {
 					return fmt.Errorf("failed to scan message: %w", err)
 				}
-				if attachmentsJSON.Valid {
-					if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
-						log.Printf("Failed to unmarshal attachments for message %d: %v", m.ID, err)
-					}
+
+				fm, skipped, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, discardThoughts)
+				if err != nil {
+					return fmt.Errorf("failed to create frontend message: %w", err)
+				}
+				if skipped {
+					continue // Skip thought messages
 				}
 
-				if discardThoughts && m.Role == "thought" {
-					// Skip thought messages
-					continue
+				if len(messages) == 0 && fm.ParentMessageID != nil {
+					parentBranchMessageID = *m.ParentMessageID // Use m.ParentMessageID directly
 				}
-
-				var parts []Part
-				var tokens *int
-
-				if m.CumulTokenCount != nil {
-					tokens = m.CumulTokenCount
-				}
-
-				if m.Text != "" {
-					parts = append(parts, Part{Text: m.Text})
-				}
-
-				// m.Attachments is already []FileAttachment type, use it directly
-				// No need for a separate 'attachments' variable here.
-
-				var fmParentMessageID *string
-				if m.ParentMessageID != nil {
-					s := fmt.Sprintf("%d", *m.ParentMessageID)
-					fmParentMessageID = &s
-					if len(messages) == 0 {
-						parentBranchMessageID = *m.ParentMessageID
-					}
-				}
-
-				var fmChosenNextID *string
-				if m.ChosenNextID != nil {
-					s := fmt.Sprintf("%d", *m.ChosenNextID)
-					fmChosenNextID = &s
-				}
-
-				var fmPossibleNextIDs []PossibleNextMessage
-				if possibleNextIDsAndBranchesStr != "" {
-					possibleNextIDsAndBranches := strings.Split(possibleNextIDsAndBranchesStr, ",")
-					for i := 0; i < len(possibleNextIDsAndBranches); i += 2 {
-						if i+1 < len(possibleNextIDsAndBranches) { // Ensure there's a branch ID for the message ID
-							fmPossibleNextIDs = append(fmPossibleNextIDs, PossibleNextMessage{
-								MessageID: possibleNextIDsAndBranches[i],
-								BranchID:  possibleNextIDsAndBranches[i+1],
-							})
-						} else {
-							log.Printf("Warning: Malformed possibleNextIDsAndBranchesStr for message %d: %s", m.ID, possibleNextIDsAndBranchesStr)
-						}
-					}
-				}
-
-				switch m.Type {
-				case "function_call":
-					var fc FunctionCall
-					if err := json.Unmarshal([]byte(m.Text), &fc); err != nil {
-						log.Printf("Failed to unmarshal FunctionCall for message %d: %v", m.ID, err)
-					} else {
-						parts = []Part{{FunctionCall: &fc}}
-					}
-				case "function_response":
-					var fr FunctionResponse
-					if err := json.Unmarshal([]byte(m.Text), &fr); err != nil {
-						log.Printf("Failed to unmarshal FunctionResponse for message %d: %v", m.ID, err)
-					} else {
-						parts = []Part{{FunctionResponse: &fr}}
-					}
-				}
-
-				messages = append(messages, FrontendMessage{
-					ID:              fmt.Sprintf("%d", m.ID),
-					Role:            m.Role,
-					Parts:           parts,
-					Type:            m.Type,
-					Attachments:     m.Attachments, // Use m.Attachments directly
-					CumulTokenCount: tokens,
-					SessionID:       m.SessionID, // Populate SessionID
-					BranchID:        m.BranchID,
-					ParentMessageID: fmParentMessageID,
-					ChosenNextID:    fmChosenNextID,
-					PossibleNextIDs: fmPossibleNextIDs,
-					Model:           m.Model,
-				})
+				messages = append(messages, fm)
 			}
 
 			if len(messages) == 0 {

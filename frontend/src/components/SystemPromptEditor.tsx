@@ -19,6 +19,248 @@ interface SystemPromptEditorProps {
   workspaceId?: string; // New prop for workspaceId
 }
 
+interface EditablePromptViewProps {
+  systemPrompt: string;
+  setSystemPrompt: (prompt: string) => void;
+  internalLabel: string;
+  setInternalLabel: (label: string) => void;
+  onPromptUpdate: (prompt: PredefinedPrompt) => void;
+  isGlobalSettings: boolean;
+  promptType: string | symbol;
+  handlePromptTypeChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  predefinedPrompts: PredefinedPrompt[];
+  isEditing: boolean;
+  isReadOnly: boolean;
+  isExpanded: boolean;
+  setIsExpanded: (expanded: boolean) => void;
+  systemPromptTextareaRef: React.RefObject<HTMLTextAreaElement>;
+  evaluatedPrompt: string;
+  evaluationError: string | null;
+}
+
+const EditablePromptView: React.FC<EditablePromptViewProps> = ({
+  systemPrompt,
+  setSystemPrompt,
+  internalLabel,
+  setInternalLabel,
+  onPromptUpdate,
+  isGlobalSettings,
+  promptType,
+  handlePromptTypeChange,
+  predefinedPrompts,
+  isEditing,
+  isReadOnly,
+  isExpanded,
+  setIsExpanded,
+  systemPromptTextareaRef,
+  evaluatedPrompt,
+  evaluationError,
+}) => {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        width: '100%',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        {isGlobalSettings ? (
+          <input
+            type="text"
+            placeholder="Prompt Label"
+            value={internalLabel}
+            onChange={(e) => {
+              setInternalLabel(e.target.value);
+              onPromptUpdate({ label: e.target.value, value: systemPrompt }); // Update label immediately
+            }}
+            style={{
+              padding: '5px',
+              borderRadius: '5px',
+              border: '1px solid #ccc',
+              flexGrow: 1, // Allow it to take available space
+            }}
+          />
+        ) : (
+          <select
+            value={typeof promptType === 'symbol' ? promptType.description : promptType} // Use description for symbol value
+            onChange={handlePromptTypeChange}
+            disabled={isReadOnly}
+            style={{
+              padding: '5px',
+              borderRadius: '5px',
+              border: '1px solid #ccc',
+            }}
+          >
+            {predefinedPrompts.map((p) => (
+              <option key={p.label} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+            <option value={CUSTOM_PROMPT_SYMBOL.description}>Custom</option>
+          </select>
+        )}
+        {!isGlobalSettings && ( // Hide chevron for global settings
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '1.2em',
+              marginLeft: '0.8ex',
+              color: 'var(--color-system-verydark)',
+            }}
+            aria-label={isExpanded ? 'Collapse prompt preview' : 'Expand prompt preview'}
+          >
+            {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
+          </button>
+        )}
+      </div>
+
+      {/* Always show textarea for global settings, or if custom prompt */}
+      {(isGlobalSettings || promptType === CUSTOM_PROMPT_SYMBOL) && (
+        <textarea
+          ref={systemPromptTextareaRef}
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          onInput={(e) => {
+            const target = e.target as HTMLTextAreaElement;
+            target.style.height = 'auto';
+            target.style.height = target.scrollHeight + 'px';
+          }}
+          readOnly={isReadOnly}
+          className={isEditing ? 'system-prompt-textarea-editable' : ''}
+          style={{
+            width: '100%',
+            marginTop: '10px',
+            resize: 'none',
+            border: 'none',
+            background: 'transparent',
+            outline: 'none',
+          }}
+          aria-label="System prompt editor"
+        />
+      )}
+
+      {isExpanded && (
+        <div style={{ width: '100%' }}>
+          {evaluationError ? (
+            <p style={{ color: 'red' }}>Error: {evaluationError}</p>
+          ) : (
+            <pre
+              style={{
+                whiteSpace: 'pre-wrap',
+                background: '#f9f9f9',
+                padding: '10px',
+                borderRadius: '5px',
+              }}
+            >
+              {evaluatedPrompt}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface ReadOnlyPromptViewProps {
+  isExpanded: boolean;
+  setIsExpanded: (expanded: boolean) => void;
+  evaluatedPromptRef: React.RefObject<HTMLPreElement>;
+  systemPrompt: string;
+}
+
+const ReadOnlyPromptView: React.FC<ReadOnlyPromptViewProps> = ({
+  isExpanded,
+  setIsExpanded,
+  evaluatedPromptRef,
+  systemPrompt,
+}) => {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        width: '100%',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <span
+          style={{
+            fontWeight: 'bold',
+            color: 'var(--color-system-verydark)',
+          }}
+        >
+          View Prompt
+        </span>
+        {isExpanded ? (
+          <FaChevronUp
+            style={{
+              fontSize: '1.2em',
+              color: 'var(--color-system-verydark)',
+              cursor: 'pointer',
+              marginLeft: '0.8ex',
+            }}
+            onClick={() => setIsExpanded(false)}
+            aria-label="Collapse prompt"
+            tabIndex={isExpanded ? undefined : -1}
+          />
+        ) : (
+          <FaChevronDown
+            style={{
+              fontSize: '1.2em',
+              color: 'var(--color-system-verydark)',
+              cursor: 'pointer',
+              marginLeft: '0.8ex',
+            }}
+            onClick={() => setIsExpanded(true)}
+            aria-label="Expand prompt"
+            tabIndex={isExpanded ? undefined : -1}
+          />
+        )}
+      </div>
+      {isExpanded && (
+        <div
+          style={{
+            width: '100%',
+          }}
+        >
+          <pre
+            ref={evaluatedPromptRef}
+            tabIndex={-1}
+            style={{
+              whiteSpace: 'pre-wrap',
+              background: '#f9f9f9',
+              padding: '10px',
+              borderRadius: '5px',
+              overflowY: 'auto',
+              maxHeight: '200px',
+            }}
+          >
+            {systemPrompt}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CUSTOM_PROMPT_SYMBOL = Symbol('custom');
 
 const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
@@ -197,191 +439,31 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
         role={clickAnywhereToExpand ? undefined : isEditing ? undefined : 'button'} // role 조건부 할당
       >
         {isEditing ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              width: '100%',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              {isGlobalSettings ? (
-                <input
-                  type="text"
-                  placeholder="Prompt Label"
-                  value={internalLabel}
-                  onChange={(e) => {
-                    setInternalLabel(e.target.value);
-                    onPromptUpdate({ label: e.target.value, value: systemPrompt }); // Update label immediately
-                  }}
-                  style={{
-                    padding: '5px',
-                    borderRadius: '5px',
-                    border: '1px solid #ccc',
-                    flexGrow: 1, // Allow it to take available space
-                  }}
-                />
-              ) : (
-                <select
-                  value={typeof promptType === 'symbol' ? promptType.description : promptType} // Use description for symbol value
-                  onChange={handlePromptTypeChange}
-                  disabled={isReadOnly}
-                  style={{
-                    padding: '5px',
-                    borderRadius: '5px',
-                    border: '1px solid #ccc',
-                  }}
-                >
-                  {predefinedPrompts.map((p) => (
-                    <option key={p.label} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                  <option value={CUSTOM_PROMPT_SYMBOL.description}>Custom</option>
-                </select>
-              )}
-              {!isGlobalSettings && ( // Hide chevron for global settings
-                <button
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '1.2em',
-                    marginLeft: '0.8ex',
-                    color: 'var(--color-system-verydark)',
-                  }}
-                  aria-label={isExpanded ? 'Collapse prompt preview' : 'Expand prompt preview'}
-                >
-                  {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
-                </button>
-              )}
-            </div>
-
-            {/* Always show textarea for global settings, or if custom prompt */}
-            {(isGlobalSettings || promptType === CUSTOM_PROMPT_SYMBOL) && (
-              <textarea
-                ref={systemPromptTextareaRef}
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                onInput={(e) => {
-                  const target = e.target as HTMLTextAreaElement;
-                  target.style.height = 'auto';
-                  target.style.height = target.scrollHeight + 'px';
-                }}
-                readOnly={isReadOnly}
-                className={isEditing ? 'system-prompt-textarea-editable' : ''}
-                style={{
-                  width: '100%',
-                  marginTop: '10px',
-                  resize: 'none',
-                  border: 'none',
-                  background: 'transparent',
-                  outline: 'none',
-                }}
-                aria-label="System prompt editor"
-              />
-            )}
-
-            {isExpanded && (
-              <div style={{ width: '100%' }}>
-                {evaluationError ? (
-                  <p style={{ color: 'red' }}>Error: {evaluationError}</p>
-                ) : (
-                  <pre
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      background: '#f9f9f9',
-                      padding: '10px',
-                      borderRadius: '5px',
-                    }}
-                  >
-                    {evaluatedPrompt}
-                  </pre>
-                )}
-              </div>
-            )}
-          </div>
+          <EditablePromptView
+            systemPrompt={systemPrompt}
+            setSystemPrompt={setSystemPrompt}
+            internalLabel={internalLabel}
+            setInternalLabel={setInternalLabel}
+            onPromptUpdate={onPromptUpdate}
+            isGlobalSettings={isGlobalSettings}
+            promptType={promptType}
+            handlePromptTypeChange={handlePromptTypeChange}
+            predefinedPrompts={predefinedPrompts}
+            isEditing={isEditing}
+            isReadOnly={isReadOnly}
+            isExpanded={isExpanded}
+            setIsExpanded={setIsExpanded}
+            systemPromptTextareaRef={systemPromptTextareaRef}
+            evaluatedPrompt={evaluatedPrompt}
+            evaluationError={evaluationError}
+          />
         ) : (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              width: '100%',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <span
-                style={{
-                  fontWeight: 'bold',
-                  color: 'var(--color-system-verydark)',
-                }}
-              >
-                View Prompt
-              </span>
-              {isExpanded ? (
-                <FaChevronUp
-                  style={{
-                    fontSize: '1.2em',
-                    color: 'var(--color-system-verydark)',
-                    cursor: 'pointer',
-                    marginLeft: '0.8ex',
-                  }}
-                  onClick={() => setIsExpanded(false)}
-                  aria-label="Collapse prompt"
-                  tabIndex={isExpanded ? undefined : -1}
-                />
-              ) : (
-                <FaChevronDown
-                  style={{
-                    fontSize: '1.2em',
-                    color: 'var(--color-system-verydark)',
-                    cursor: 'pointer',
-                    marginLeft: '0.8ex',
-                  }}
-                  onClick={() => setIsExpanded(true)}
-                  aria-label="Expand prompt"
-                  tabIndex={isExpanded ? undefined : -1}
-                />
-              )}
-            </div>
-            {isExpanded && (
-              <div
-                style={{
-                  width: '100%',
-                }}
-              >
-                <pre
-                  ref={evaluatedPromptRef}
-                  tabIndex={-1}
-                  style={{
-                    whiteSpace: 'pre-wrap',
-                    background: '#f9f9f9',
-                    padding: '10px',
-                    borderRadius: '5px',
-                    overflowY: 'auto',
-                    maxHeight: '200px',
-                  }}
-                >
-                  {systemPrompt}
-                </pre>
-              </div>
-            )}
-          </div>
+          <ReadOnlyPromptView
+            isExpanded={isExpanded}
+            setIsExpanded={setIsExpanded}
+            evaluatedPromptRef={evaluatedPromptRef}
+            systemPrompt={systemPrompt}
+          />
         )}
       </RootElement>
     </div>
