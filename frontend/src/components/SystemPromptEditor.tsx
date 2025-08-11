@@ -176,7 +176,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
   return (
     <div className="chat-message-container system-prompt-message">
       <RootElement
-        className={`chat-bubble system-prompt-bubble ${isExpanded || promptType === CUSTOM_PROMPT_SYMBOL ? 'expanded' : ''}`}
+        className={`chat-bubble system-prompt-bubble ${isExpanded || (isEditing && promptType === CUSTOM_PROMPT_SYMBOL) ? 'expanded' : ''}`}
         style={{
           cursor: clickAnywhereToExpand ? 'pointer' : '',
         }}
