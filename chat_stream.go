@@ -198,7 +198,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
 					hasFunctionCall = true
 
-					functionResponseValue, err := callFunction(fc)
+					functionResponseValue, err := CallToolFunction(fc)
 					if err != nil {
 						log.Printf("Error executing function %s: %v", fc.Name, err)
 						functionResponseValue = map[string]interface{}{"error": err.Error()}
