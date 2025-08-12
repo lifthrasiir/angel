@@ -28,8 +28,9 @@ var embeddedFiles embed.FS
 
 // serveStaticFiles serves static files from the filesystem first, then from embedded files
 func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
-	// Try to serve from filesystem first (for development)
-	fsPath := filepath.Join("frontend", "dist", r.URL.Path)
+	// Strip the /assets/ prefix for serving from frontend/dist/assets
+	assetPath := strings.TrimPrefix(r.URL.Path, "/assets/")
+	fsPath := filepath.Join("frontend", "dist", "assets", assetPath)
 
 	// Check if the requested path is for a file that exists on disk
 	if _, err := os.Stat(fsPath); err == nil {
@@ -38,13 +39,9 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If not found on filesystem, try to serve from embedded files
-	// The embedded files are rooted at frontend/dist, so we need to strip the prefix
-	// We need to create a sub-filesystem that is rooted at "frontend/dist" within the embedded files.
-	// This ensures that http.FileServer correctly resolves paths like "/index.html" to "frontend/dist/index.html"
-	// within the embedded filesystem.
-	fsys, err := fs.Sub(embeddedFiles, "frontend/dist")
+	fsys, err := fs.Sub(embeddedFiles, "frontend/dist/assets")
 	if err != nil {
-		log.Printf("Error creating sub-filesystem: %v", err)
+		log.Printf("Error creating sub-filesystem for assets: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -82,6 +79,52 @@ func serveSPAIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write(content)
 }
 
+// serveFile serves a specific file from frontend/dist (or embedded)
+func serveFile(filePath string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Try to serve from filesystem first (for development)
+		fsPath := filepath.Join("frontend", "dist", filePath)
+
+		if _, err := os.Stat(fsPath); err == nil {
+			http.ServeFile(w, r, fsPath)
+			return
+		}
+
+		// If not found on filesystem, try to serve from embedded files
+		file, err := embeddedFiles.Open(filepath.Join("frontend/dist", filePath))
+		if err != nil {
+			log.Printf("Error opening embedded file %s: %v", filePath, err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		if err != nil {
+			log.Printf("Error reading embedded file %s: %v", filePath, err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		// Determine content type based on file extension
+		contentType := ""
+		switch filepath.Ext(filePath) {
+		case ".ico":
+			contentType = "image/x-icon"
+		case ".webmanifest":
+			contentType = "application/manifest+json"
+		case ".svg":
+			contentType = "image/svg+xml"
+		case ".png":
+			contentType = "image/png"
+		default:
+			contentType = "application/octet-stream" // Fallback
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Write(content)
+	}
+}
+
 // decodeJSONRequest decodes JSON request body with error handling
 func decodeJSONRequest(r *http.Request, w http.ResponseWriter, target interface{}, handlerName string) bool {
 	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
@@ -105,7 +148,6 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 }
 
 func main() {
-
 	db, err := InitDB("angel.db")
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
@@ -137,6 +179,11 @@ func main() {
 }
 
 func InitRouter(router *mux.Router) {
+	// Explicitly handle root-level static files
+	router.HandleFunc("/favicon.ico", serveFile("favicon.ico")).Methods("GET")
+	router.HandleFunc("/manifest.webmanifest", serveFile("manifest.webmanifest")).Methods("GET")
+	router.HandleFunc("/angel-logo-colored.svg", serveFile("angel-logo-colored.svg")).Methods("GET")
+
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
 
@@ -164,6 +211,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/chat/{sessionId}", deleteSession).Methods("DELETE")
 	router.HandleFunc("/api/chat/{sessionId}/branch", createBranchHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/branch", switchBranchHandler).Methods("PUT")
+	router.HandleFunc("/api/chat/{sessionId}/blob/{messageId}.{blobIndex}", handleDownloadBlob).Methods("GET")
 
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
@@ -171,14 +219,14 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/mcp/configs", getMCPConfigsHandler).Methods("GET")
 	router.HandleFunc("/api/mcp/configs", saveMCPConfigHandler).Methods("POST")
 	router.HandleFunc("/api/mcp/configs/{name}", deleteMCPConfigHandler).Methods("DELETE")
-	router.HandleFunc("/api/models", listModelsHandler).Methods("GET") // New endpoint
-	router.HandleFunc("/api/chat/{sessionId}/blob/{messageId}.{blobIndex}", handleDownloadBlob).Methods("GET")
+	router.HandleFunc("/api/models", listModelsHandler).Methods("GET")
 	router.HandleFunc("/api/systemPrompts", getSystemPromptsHandler).Methods("GET")
 	router.HandleFunc("/api/systemPrompts", saveSystemPromptsHandler).Methods("PUT")
 	router.HandleFunc("/api", handleNotFound)
 
+	router.PathPrefix("/assets/").HandlerFunc(serveStaticFiles)
+
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
-	router.PathPrefix("/").HandlerFunc(serveStaticFiles)
 }
 
 // Context keys for storing values in context.Context
