@@ -18,6 +18,7 @@ import (
 const (
 	URL_FETCH_TIMEOUT_MS = 10000
 	MAX_CONTENT_LENGTH   = 100000
+	USER_AGENT           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Angel/0.0"
 )
 
 // WebFetchToolParams represents the parameters for the WebFetch tool.
@@ -74,6 +75,8 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
+	req.Header.Add("User-Agent", USER_AGENT)
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL %s: %w", targetURL, err)
@@ -116,13 +119,7 @@ func (t *WebFetchTool) executeFallback(ctx context.Context, params WebFetchToolP
 		textContent = textContent[:MAX_CONTENT_LENGTH]
 	}
 
-	fallbackPrompt := fmt.Sprintf(`The user requested the following: "%s".
-
-I was unable to access the URL directly. Instead, I have fetched the raw content of the page. Please use the following content to answer the user's request. Do not attempt to access the URL again.
-
----
-%s
----`, params.Prompt, textContent)
+	fallbackPrompt := GetWebFetchFallbackPrompt(params.Prompt, textContent)
 
 	sessionParams := SessionParams{
 		ModelName: params.ModelName,
@@ -189,7 +186,7 @@ func (t *WebFetchTool) CallToolFunction(ctx context.Context, args map[string]int
 			allSuccessful := true
 			for _, meta := range oneShotResult.URLContextMetadata.URLMetadata {
 				if meta.URLRetrievalStatus != "URL_RETRIEVAL_STATUS_SUCCESS" {
-					log.Printf("WebFetchTool: Processing error detected (%s returned %s). Attempting fallback.", meta.URL, meta.URLRetrievalStatus)
+					log.Printf("WebFetchTool: Processing error detected (%s returned %s). Attempting fallback.", meta.RetrievedURL, meta.URLRetrievalStatus)
 					allSuccessful = false
 					break
 				}
@@ -214,12 +211,4 @@ func (t *WebFetchTool) CallToolFunction(ctx context.Context, args map[string]int
 		"llmContent":    oneShotResult.Text,
 		"returnDisplay": fmt.Sprintf("Content processed from prompt."),
 	}, nil
-}
-
-// Helper for min function
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

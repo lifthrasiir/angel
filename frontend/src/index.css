@@ -158,6 +158,11 @@ textarea {
   margin-bottom: -10px !important;
 }
 
+/* Title only */
+.function-title-bar:first-child:last-child {
+  white-space: inherit;
+}
+
 .function-call-title-bar {
   background-color: var(--color-agent-dark); /* Darker blue for function call title */
 }
@@ -592,9 +597,13 @@ textarea {
   align-items: flex-start;
 }
 
+.function-pair-container .chat-message-container {
+  max-width: calc(50% - 15px);
+}
+
 .function-pair-container .chat-bubble {
   width: auto;
-  max-width: 100%;
+  max-width: calc(100% - 32px);
 }
 
 .function-pair-bar {

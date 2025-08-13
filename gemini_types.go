@@ -273,7 +273,7 @@ type URLContextMetadata struct {
 
 // URLMetadata matches URLMetadata in TypeScript
 type URLMetadata struct {
-	URL                string `json:"url,omitempty"`
+	RetrievedURL       string `json:"retrievedUrl,omitempty"`
 	URLRetrievalStatus string `json:"urlRetrievalStatus,omitempty"`
 }
 

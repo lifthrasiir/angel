@@ -335,3 +335,14 @@ func GetSessionNameInferencePrompts(userMessage, agentMessage string) (systemPro
 < %s`, userMessage, agentMessage)
 	return systemPrompt, inputPrompt
 }
+
+func GetWebFetchFallbackPrompt(prompt string, textContent string) string {
+	// Heavily paraphrased from gemini-cli.
+	return fmt.Sprintf(`The user requested the following: "%s".
+
+The previous agent was unable to access the URL directly. Instead, I have fetched the raw content of the page. Please use the following content to answer the user's request. Do not attempt to access the URL again.
+
+---
+%s
+---`, prompt, textContent)
+}
