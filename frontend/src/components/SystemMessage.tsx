@@ -3,13 +3,14 @@ import MarkdownRenderer from './MarkdownRenderer';
 
 interface SystemMessageProps {
   text?: string;
+  className?: string;
   messageInfo?: React.ReactNode;
 }
 
-const SystemMessage: React.FC<SystemMessageProps> = ({ text, messageInfo }) => {
+const SystemMessage: React.FC<SystemMessageProps> = ({ text, className, messageInfo }) => {
   return (
-    <div className="chat-message-container agent-message">
-      <div className="chat-bubble system-prompt-bubble">
+    <div className={`chat-message-container system-message ${className || ''}`}>
+      <div className="chat-bubble">
         <MarkdownRenderer content={text || ''} />
       </div>
       {messageInfo} {/* Render MessageInfo outside chat-bubble */}

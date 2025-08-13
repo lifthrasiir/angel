@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
@@ -147,18 +148,29 @@ type FileAttachment struct {
 
 // Message struct to hold message data for database interaction
 type Message struct {
-	ID              int              `json:"id"`
-	SessionID       string           `json:"session_id"`        // Existing
-	BranchID        string           `json:"branch_id"`         // New field
-	ParentMessageID *int             `json:"parent_message_id"` // New field, pointer for nullable
-	ChosenNextID    *int             `json:"chosen_next_id"`    // New field, pointer for nullable
-	Role            string           `json:"role"`
-	Text            string           `json:"text"`
-	Type            string           `json:"type"`
-	Attachments     []FileAttachment `json:"attachments,omitempty"`
-	CumulTokenCount *int             `json:"cumul_token_count,omitempty"`
-	CreatedAt       string           `json:"created_at"`
-	Model           string           `json:"model,omitempty"` // New field for the model that generated the message
+	ID                      int              `json:"id"`
+	SessionID               string           `json:"session_id"`        // Existing
+	BranchID                string           `json:"branch_id"`         // New field
+	ParentMessageID         *int             `json:"parent_message_id"` // New field, pointer for nullable
+	ChosenNextID            *int             `json:"chosen_next_id"`    // New field, pointer for nullable
+	Role                    string           `json:"role"`
+	Text                    string           `json:"text"`
+	Type                    string           `json:"type"`
+	Attachments             []FileAttachment `json:"attachments,omitempty"`
+	CumulTokenCount         *int             `json:"cumul_token_count,omitempty"`
+	CreatedAt               string           `json:"created_at"`
+	Model                   string           `json:"model,omitempty"`                       // New field for the model that generated the message
+	CompressedUpToMessageID *int             `json:"compressed_up_to_message_id,omitempty"` // New field for compression
+}
+
+// DbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
+type DbOrTx interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 }
 
 // PossibleNextMessage struct to hold possible next message data for the frontend
@@ -368,7 +380,7 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 }
 
 // AddMessageToSession now accepts a message type, attachments, and numTokens, and branch_id, parent_message_id, chosen_next_id
-func AddMessageToSession(ctx context.Context, db *sql.DB, msg Message) (int, error) {
+func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, error) {
 	// Process attachments: save blob data and store only hashes
 	for i := range msg.Attachments {
 		if msg.Attachments[i].Data != nil {
@@ -402,7 +414,7 @@ func AddMessageToSession(ctx context.Context, db *sql.DB, msg Message) (int, err
 }
 
 // UpdateMessageChosenNextID updates the chosen_next_id for a specific message.
-func UpdateMessageChosenNextID(db *sql.DB, messageID int, chosenNextID *int) error {
+func UpdateMessageChosenNextID(db DbOrTx, messageID int, chosenNextID *int) error {
 	_, err := db.Exec("UPDATE messages SET chosen_next_id = ? WHERE id = ?", chosenNextID, messageID)
 	if err != nil {
 		return fmt.Errorf("failed to update message chosen_next_id: %w", err)
@@ -503,13 +515,7 @@ func GetBranch(db *sql.DB, branchID string) (Branch, error) {
 }
 
 // createFrontendMessage converts a Message DB struct and related data into a FrontendMessage.
-// It also handles skipping thought messages if discardThoughts is true.
-// Returns the FrontendMessage, a boolean indicating if the message was skipped, and an error.
-func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNextIDsAndBranchesStr string, discardThoughts bool) (FrontendMessage, bool, error) {
-	if discardThoughts && m.Role == "thought" {
-		return FrontendMessage{}, true, nil // Skip thought messages
-	}
-
+func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNextIDsAndBranchesStr string, ignoreBeforeLastCompression bool) (FrontendMessage, *int, error) {
 	if attachmentsJSON.Valid {
 		if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
 			log.Printf("Failed to unmarshal attachments for message %d: %v", m.ID, err)
@@ -518,29 +524,28 @@ func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNe
 	}
 
 	var parts []Part
-	var tokens *int
+	var tokens *int = nil // Initialize to nil
 
 	if m.CumulTokenCount != nil {
 		tokens = m.CumulTokenCount
 	}
 
-	if m.Text != "" {
-		parts = append(parts, Part{Text: m.Text})
-	}
+	var compressedUpToMessageID *int
 
-	var fmParentMessageID *string
+	var fmParentMessageID *string = nil               // Initialize to nil
+	var fmChosenNextID *string = nil                  // Initialize to nil
+	var fmPossibleNextIDs []PossibleNextMessage = nil // Initialize to nil
+
 	if m.ParentMessageID != nil {
 		s := fmt.Sprintf("%d", *m.ParentMessageID)
 		fmParentMessageID = &s
 	}
 
-	var fmChosenNextID *string
 	if m.ChosenNextID != nil {
 		s := fmt.Sprintf("%d", *m.ChosenNextID)
 		fmChosenNextID = &s
 	}
 
-	var fmPossibleNextIDs []PossibleNextMessage
 	if possibleNextIDsAndBranchesStr != "" {
 		possibleNextIDsAndBranches := strings.Split(possibleNextIDsAndBranchesStr, ",")
 		for i := 0; i < len(possibleNextIDsAndBranches); i += 2 {
@@ -555,23 +560,7 @@ func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNe
 		}
 	}
 
-	switch m.Type {
-	case "function_call":
-		var fc FunctionCall
-		if err := json.Unmarshal([]byte(m.Text), &fc); err != nil {
-			log.Printf("Failed to unmarshal FunctionCall for message %d: %v", m.ID, err)
-		} else {
-			parts = []Part{{FunctionCall: &fc}}
-		}
-	case "function_response":
-		var fr FunctionResponse
-		if err := json.Unmarshal([]byte(m.Text), &fr); err != nil {
-			log.Printf("Failed to unmarshal FunctionResponse for message %d: %v", m.ID, err)
-		} else {
-			parts = []Part{{FunctionResponse: &fr}}
-		}
-	}
-
+	// Define fm here, before the switch statement
 	fm := FrontendMessage{
 		ID:              fmt.Sprintf("%d", m.ID),
 		Role:            m.Role,
@@ -586,16 +575,109 @@ func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNe
 		PossibleNextIDs: fmPossibleNextIDs,
 		Model:           m.Model,
 	}
-	return fm, false, nil
+
+	switch m.Type {
+	case "function_call":
+		var fc FunctionCall
+		if err := json.Unmarshal([]byte(m.Text), &fc); err != nil {
+			log.Printf("Failed to unmarshal FunctionCall for message %d: %v", m.ID, err)
+		} else {
+			fm.Parts = []Part{{FunctionCall: &fc}}
+		}
+	case "function_response":
+		var fr FunctionResponse
+		if err := json.Unmarshal([]byte(m.Text), &fr); err != nil {
+			log.Printf("Failed to unmarshal FunctionResponse for message %d: %v", m.ID, err)
+		} else {
+			fm.Parts = []Part{{FunctionResponse: &fr}}
+		}
+	case "compression":
+		// For compression messages, the text is in the format "ID\nSummary"
+		textBefore, textAfter, found := strings.Cut(m.Text, "\n")
+		if found {
+			parsedID, err := strconv.Atoi(textBefore)
+			if err != nil {
+				log.Printf("Failed to parse CompressedUpToMessageId for message %d: %v", m.ID, err)
+			} else {
+				compressedUpToMessageID = &parsedID
+			}
+			// If ignoreBeforeLastCompression is true, only show the summary part.
+			// Otherwise, show the full text (ID\nSummary).
+			if ignoreBeforeLastCompression {
+				fm.Parts = []Part{{Text: textAfter}}
+			} else {
+				fm.Parts = []Part{{Text: m.Text}}
+			}
+		} else {
+			log.Printf("Warning: Malformed compression message text for message %d: %s", m.ID, m.Text)
+			fm.Parts = []Part{{Text: m.Text}} // Fallback to raw text
+		}
+	default:
+		if m.Text != "" {
+			parts = append(parts, Part{Text: m.Text})
+		}
+		fm.Parts = parts // Assign the accumulated parts to fm.Parts
+	}
+	return fm, compressedUpToMessageID, nil
 }
 
-// GetSessionHistory retrieves the chat history for a given session and its primary branch,
-// recursively fetching messages from parent branches.
-func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, discardThoughts bool) ([]FrontendMessage, error) {
+// getSessionHistoryInternal retrieves the chat history for a given session and its primary branch,
+// recursively fetching messages from parent branches. It allows for discarding thoughts
+// and ignoring messages before the last compression message.
+func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID string, discardThoughts bool, ignoreBeforeLastCompression bool) ([]FrontendMessage, error) {
 	var history [][]FrontendMessage
 	messageIdLimit := math.MaxInt
 	branchID := primaryBranchID
 	keepGoing := true
+
+	var lastCompressionMessageID int = -1
+	var lastCompressedUpToMessageID *int // New variable to store the ID from the compression message
+
+	if ignoreBeforeLastCompression {
+		// Find the ID of the last compression message in the current branch
+		var compressionText string
+		err := db.QueryRow("SELECT id, text FROM messages WHERE session_id = ? AND branch_id = ? AND type = 'compression' ORDER BY id DESC LIMIT 1", sessionID, primaryBranchID).Scan(&lastCompressionMessageID, &compressionText)
+		if err == nil && lastCompressionMessageID != -1 {
+			before, _, found := strings.Cut(compressionText, "\n")
+			if found {
+				parsedID, parseErr := strconv.Atoi(before)
+				if parseErr == nil {
+					lastCompressedUpToMessageID = &parsedID
+				} else {
+					log.Printf("Warning: Failed to parse CompressedUpToMessageId from compression message text '%s': %v", before, parseErr)
+				}
+			} else {
+				log.Printf("Warning: Malformed compression message text: '%s'", compressionText)
+			}
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("failed to find last compression message: %w", err)
+		}
+		// If a compression message is found, parse its text to get the compressedUpToMessageID
+		if lastCompressionMessageID != -1 {
+			var textContent string
+			err := db.QueryRow("SELECT text FROM messages WHERE id = ?", lastCompressionMessageID).Scan(&textContent)
+			if err != nil {
+				log.Printf("Warning: Failed to retrieve text for last compression message %d: %v", lastCompressionMessageID, err)
+				lastCompressedUpToMessageID = nil
+			} else {
+				parts := strings.SplitN(textContent, "\n", 2)
+				if len(parts) == 2 {
+					parsedID, err := strconv.Atoi(parts[0])
+					if err == nil {
+						lastCompressedUpToMessageID = &parsedID
+					} else {
+						log.Printf("Warning: Failed to parse CompressedUpToMessageId from last compression message %d: %v", lastCompressionMessageID, err)
+						lastCompressedUpToMessageID = nil // Treat as if no valid ID was found
+					}
+				} else {
+					log.Printf("Warning: Malformed text in last compression message %d: %s", lastCompressionMessageID, textContent)
+					lastCompressedUpToMessageID = nil // Treat as if no valid ID was found
+				}
+			}
+		}
+	}
+
 	for keepGoing {
 		err := func() error {
 			rows, err := db.Query(`
@@ -627,12 +709,18 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 					return fmt.Errorf("failed to scan message: %w", err)
 				}
 
-				fm, skipped, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, discardThoughts)
+				// If ignoring before last compression, and current message is older than or equal to the compressed ID
+				if ignoreBeforeLastCompression && lastCompressedUpToMessageID != nil && m.ID <= *lastCompressedUpToMessageID && m.ID != lastCompressionMessageID {
+					continue // Skip this message, unless it's the compression message itself
+				}
+
+				if discardThoughts && m.Role == "thought" {
+					continue // Skip thought messages
+				}
+
+				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, ignoreBeforeLastCompression) // Pass ignoreBeforeLastCompression
 				if err != nil {
 					return fmt.Errorf("failed to create frontend message: %w", err)
-				}
-				if skipped {
-					continue // Skip thought messages
 				}
 
 				if len(messages) == 0 && fm.ParentMessageID != nil {
@@ -668,6 +756,18 @@ func GetSessionHistory(db *sql.DB, sessionID string, primaryBranchID string, dis
 		combinedHistory = append(combinedHistory, history[i]...)
 	}
 	return combinedHistory, nil
+}
+
+// GetSessionHistory retrieves the chat history for a given session and its primary branch.
+// It includes all messages, including thoughts.
+func GetSessionHistory(db DbOrTx, sessionID string, primaryBranchID string) ([]FrontendMessage, error) {
+	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false)
+}
+
+// GetSessionHistoryContext retrieves the chat history for a given session and its primary branch,
+// discarding thoughts and ignoring messages before the last compression message.
+func GetSessionHistoryContext(db DbOrTx, sessionID string, primaryBranchID string) ([]FrontendMessage, error) {
+	return getSessionHistoryInternal(db, sessionID, primaryBranchID, true, true)
 }
 
 // DeleteSession deletes a session and all its associated messages.
@@ -756,7 +856,7 @@ func DeleteMCPServerConfig(db *sql.DB, name string) error {
 }
 
 // UpdateMessageTokens updates the cumul_token_count for a specific message.
-func UpdateMessageTokens(db *sql.DB, messageID int, cumulTokenCount int) error {
+func UpdateMessageTokens(db DbOrTx, messageID int, cumulTokenCount int) error {
 	_, err := db.Exec("UPDATE messages SET cumul_token_count = ? WHERE id = ?", cumulTokenCount, messageID)
 	if err != nil {
 		return fmt.Errorf("failed to update message tokens: %w", err)
@@ -875,7 +975,7 @@ func GetMessageByID(db *sql.DB, messageID int) (*Message, error) {
 
 // SaveBlob saves a blob to the blobs table. If a blob with the same hash already exists, it replaces it.
 // It returns the SHA-512/256 hash of the data.
-func SaveBlob(ctx context.Context, db *sql.DB, data []byte) (string, error) {
+func SaveBlob(ctx context.Context, db DbOrTx, data []byte) (string, error) {
 	hasher := sha512.New512_256()
 	hasher.Write(data)
 	hash := hasher.Sum(nil)

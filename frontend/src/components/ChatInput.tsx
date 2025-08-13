@@ -8,13 +8,16 @@ import {
   availableModelsAtom,
   selectedModelAtom,
   selectedFilesAtom,
+  statusMessageAtom,
 } from '../atoms/chatAtoms';
+import { useCommandProcessor } from '../hooks/useCommandProcessor';
 
 interface ChatInputProps {
   handleSendMessage: () => void;
   onFilesSelected: (files: File[]) => void;
   handleCancelStreaming: () => void;
   inputRef: React.RefObject<HTMLTextAreaElement>;
+  sessionId: string | null; // Add sessionId prop
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -22,6 +25,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onFilesSelected,
   handleCancelStreaming,
   inputRef,
+  sessionId,
 }) => {
   const [inputMessage] = useAtom(inputMessageAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
@@ -30,10 +34,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [selectedModel] = useAtom(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
+  const [statusMessage, setStatusMessage] = useAtom(statusMessageAtom);
+
+  const { runCommand } = useCommandProcessor(sessionId);
 
   const [isCommandMode, setIsCommandMode] = useState(false);
   const [commandPrefix, setCommandPrefix] = useState('');
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,6 +68,50 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [inputMessage]);
 
+  const handleCtrlEnter = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && e.ctrlKey) {
+      e.preventDefault();
+      handleSendOrRunCommand();
+    }
+  };
+
+  const handleSlashKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === '/' && inputRef.current?.selectionStart === 0 && !isCommandMode) {
+      e.preventDefault();
+      setIsCommandMode(true);
+      setCommandPrefix('/');
+      const end = inputRef.current?.selectionEnd || 0;
+      const newInputValue = inputMessage.substring(end);
+      setInputMessage(newInputValue);
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.setSelectionRange(0, 0);
+        }
+      }, 0);
+    }
+  };
+
+  const handleBackspaceInCommandMode = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      isCommandMode &&
+      e.key === 'Backspace' &&
+      inputRef.current?.selectionStart === 0 &&
+      inputRef.current?.selectionEnd === 0
+    ) {
+      e.preventDefault();
+      setIsCommandMode(false);
+      setCommandPrefix('');
+      setInputMessage('/' + inputMessage);
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.setSelectionRange(1, 1);
+        }
+      }, 0);
+    }
+  };
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       onFilesSelected(Array.from(event.target.files));
@@ -74,11 +124,24 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleSendOrRunCommand = () => {
+    if (isStreaming) {
+      handleCancelStreaming();
+      return;
+    }
+
     if (isCommandMode) {
+      const commandText = inputMessage.trim();
+      if (commandText) {
+        const parts = commandText.split(' ');
+        const command = parts[0];
+        const args = parts.slice(1).join(' ');
+        runCommand(command, args);
+      } else {
+        setStatusMessage('Please enter a command.');
+      }
       setInputMessage('');
       setIsCommandMode(false);
       setCommandPrefix('');
-      setStatusMessage('Invalid command.');
     } else {
       handleSendMessage();
     }
@@ -141,45 +204,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
           debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && e.ctrlKey && !isStreaming) {
-            e.preventDefault();
-            handleSendOrRunCommand();
-          }
-
-          // Command mode entry
-          if (e.key === '/' && inputRef.current?.selectionStart === 0 && !isCommandMode) {
-            e.preventDefault();
-            setIsCommandMode(true);
-            setCommandPrefix('/');
-            const end = inputRef.current?.selectionEnd || 0;
-            const newInputValue = inputMessage.substring(end);
-            setInputMessage(newInputValue);
-            setTimeout(() => {
-              if (inputRef.current) {
-                inputRef.current.focus();
-                inputRef.current.setSelectionRange(0, 0);
-              }
-            }, 0);
-          }
-
-          // Command mode exit
-          if (
-            isCommandMode &&
-            e.key === 'Backspace' &&
-            inputRef.current?.selectionStart === 0 &&
-            inputRef.current?.selectionEnd === 0
-          ) {
-            e.preventDefault();
-            setIsCommandMode(false);
-            setCommandPrefix('');
-            setInputMessage('/' + inputMessage);
-            setTimeout(() => {
-              if (inputRef.current) {
-                inputRef.current.focus();
-                inputRef.current.setSelectionRange(1, 1);
-              }
-            }, 0);
-          }
+          handleCtrlEnter(e);
+          handleSlashKey(e);
+          handleBackspaceInCommandMode(e);
         }}
         onPaste={(e) => {
           if (e.clipboardData.files && e.clipboardData.files.length > 0) {

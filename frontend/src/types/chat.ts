@@ -24,7 +24,15 @@ export interface ChatMessage {
   id: string;
   role: string;
   parts: { text?: string; functionCall?: FunctionCall; functionResponse?: FunctionResponse }[];
-  type?: 'model' | 'thought' | 'system' | 'user' | 'function_call' | 'function_response' | 'model_error';
+  type?:
+    | 'model'
+    | 'thought'
+    | 'system'
+    | 'user'
+    | 'function_call'
+    | 'function_response'
+    | 'model_error'
+    | 'compression';
   attachments?: FileAttachment[];
   cumulTokenCount?: number | null;
   branchId?: string;

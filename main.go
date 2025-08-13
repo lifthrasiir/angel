@@ -90,6 +90,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/chat/{sessionId}/branch", createBranchHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/branch", switchBranchHandler).Methods("PUT")
 	router.HandleFunc("/api/chat/{sessionId}/blob/{messageId}.{blobIndex}", handleDownloadBlob).Methods("GET")
+	router.HandleFunc("/api/chat/{sessionId}/compress", compressSessionHandler).Methods("POST")
 
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")

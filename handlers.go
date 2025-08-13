@@ -363,6 +363,37 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "MCP config deleted successfully"})
 }
 
+func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	auth := getAuth(w, r)
+
+	if !auth.Validate("compressSessionHandler", w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionID := vars["sessionId"]
+	if sessionID == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := CompressSession(r.Context(), db, sessionID, DefaultGeminiModel)
+	if err != nil {
+		log.Printf("compressSessionHandler: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]interface{}{
+		"status":               "success",
+		"message":              "Chat history compressed successfully",
+		"originalTokenCount":   result.OriginalTokenCount,
+		"newTokenCount":        result.NewTokenCount,
+		"compressionMessageId": result.CompressionMsgID,
+	})
+}
+
 // handleNotFound handles requests for paths that don't match any other routes.
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)

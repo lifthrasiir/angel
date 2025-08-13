@@ -255,7 +255,7 @@ My operating system is: %[2]s
 	)
 }
 
-func GetCompressionPrompt() string {
+func GetCompressionPrompt() (systemPrompt string, triggerPrompt string) {
 	// Heavily paraphrased from gemini-cli.
 	return fmt.Sprintf(`
 You are the component that summarizes internal chat history into a given structure.
@@ -314,7 +314,7 @@ The structure MUST be as follows:
 </state_snapshot>
 `,
 		"`",
-	)
+	), `First, reason in your scratchpad. Then, generate the <state_snapshot>.`
 }
 
 func GetSessionNameInferencePrompts(userMessage, agentMessage string) (systemPrompt, inputPrompt string) {

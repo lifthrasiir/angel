@@ -51,6 +51,7 @@ body {
 }
 
 .user-message,
+.system-message,
 .system-prompt-message,
 .agent-function-response {
   align-items: flex-end;
@@ -58,8 +59,7 @@ body {
 
 .agent-message,
 .agent-error-message,
-.agent-thought,
-.system-message {
+.agent-thought {
   align-items: flex-start;
 }
 
@@ -217,13 +217,13 @@ textarea {
 }
 
 .user-message .chat-bubble {
-  background-color: var(--color-user-light); /* Light green */
+  background-color: var(--color-user-light);
   color: #333;
   border: 2px solid var(--color-user-dark);
 }
 
 .agent-message .chat-bubble {
-  background-color: var(--color-agent-light); /* Very light blue */
+  background-color: var(--color-agent-light);
   color: #333;
   border: 2px solid var(--color-agent-dark);
 }
@@ -232,6 +232,12 @@ textarea {
   background-color: var(--color-agent-dark);
   color: #333;
   border: 2px solid var(--color-agent-dark);
+}
+
+.system-message .chat-bubble {
+  background-color: var(--color-system-light);
+  color: #333;
+  border: 2px solid var(--color-system-dark);
 }
 
 /* Specific styles for agent's internal messages */

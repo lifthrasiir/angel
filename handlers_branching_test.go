@@ -204,6 +204,205 @@ func TestBranchingLogic(t *testing.T) {
 		}
 	})
 
+	t.Run("TestGetSessionHistory_And_Context_InBranching", func(t *testing.T) {
+		sessionId := generateID()
+		primaryBranchID, err := CreateSession(testDB, sessionId, "System prompt for history test", "default")
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// 1. Create linear message flow
+		// Message 1 (user)
+		msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "User message 1", Type: "text"}
+		msg1ID, err := AddMessageToSession(context.Background(), testDB, msg1)
+		if err != nil {
+			t.Fatalf("Failed to add msg1: %v", err)
+		}
+
+		// Message 2 (model)
+		msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg1ID, Role: "model", Text: "Model message 2", Type: "text"}
+		msg2ID, err := AddMessageToSession(context.Background(), testDB, msg2)
+		if err != nil {
+			t.Fatalf("Failed to add msg2: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msg1ID, &msg2ID)
+
+		// Message 3 (thought) - should be discarded by GetSessionHistoryContext
+		msg3 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg2ID, Role: "thought", Text: "Thought message 3", Type: "text"}
+		msg3ID, err := AddMessageToSession(context.Background(), testDB, msg3)
+		if err != nil {
+			t.Fatalf("Failed to add msg3: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msg2ID, &msg3ID)
+
+		// Message 4 (user)
+		msg4 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg3ID, Role: "user", Text: "User message 4", Type: "text"}
+		msg4ID, err := AddMessageToSession(context.Background(), testDB, msg4)
+		if err != nil {
+			t.Fatalf("Failed to add msg4: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msg3ID, &msg4ID)
+
+		// Message 5 (compression) - should affect GetSessionHistoryContext
+		compressionText := fmt.Sprintf("%d\nSummary of messages up to msg4", msg4ID)
+		msg5 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg4ID, Role: "model", Text: compressionText, Type: "compression"}
+		msg5ID, err := AddMessageToSession(context.Background(), testDB, msg5)
+		if err != nil {
+			t.Fatalf("Failed to add msg5: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msg4ID, &msg5ID)
+
+		// Message 6 (model) - after compression
+		msg6 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg5ID, Role: "model", Text: "Model message 6 (after compression)", Type: "text"}
+		msg6ID, err := AddMessageToSession(context.Background(), testDB, msg6)
+		if err != nil {
+			t.Fatalf("Failed to add msg6: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msg5ID, &msg6ID)
+
+		// Message 7 (user)
+		msg7 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg6ID, Role: "user", Text: "User message 7", Type: "text"}
+		msg7ID, err := AddMessageToSession(context.Background(), testDB, msg7)
+		if err != nil {
+			t.Fatalf("Failed to add msg7: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msg6ID, &msg7ID)
+
+		// 2. Create a branch (branch from msg4)
+		newBranchID, err := CreateBranch(testDB, generateID(), sessionId, &primaryBranchID, &msg4ID)
+		if err != nil {
+			t.Fatalf("Failed to create new branch: %v", err)
+		}
+		// Update chosen_next_id for msg4 to point to the first message of the new branch
+		// This is handled by the CreateBranch function internally, but let's ensure it's correct.
+		// For this test, we'll manually add messages to the new branch.
+
+		// Message A (new branch, user) - parent is msg4
+		msgA := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msg4ID, Role: "user", Text: "User message A (new branch)", Type: "text"}
+		msgAID, err := AddMessageToSession(context.Background(), testDB, msgA)
+		if err != nil {
+			t.Fatalf("Failed to add msgA: %v", err)
+		}
+		// Update chosen_next_id for msg4 to point to msgA
+		UpdateMessageChosenNextID(testDB, msg4ID, &msgAID)
+
+		// Message B (new branch, model)
+		msgB := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgAID, Role: "model", Text: "Model message B (new branch)", Type: "text"}
+		msgBID, err := AddMessageToSession(context.Background(), testDB, msgB)
+		if err != nil {
+			t.Fatalf("Failed to add msgB: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msgAID, &msgBID)
+
+		// Message C (new branch, thought) - should be discarded by GetSessionHistoryContext
+		msgC := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgBID, Role: "thought", Text: "Thought message C (new branch)", Type: "text"}
+		msgCID, err := AddMessageToSession(context.Background(), testDB, msgC)
+		if err != nil {
+			t.Fatalf("Failed to add msgC: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msgBID, &msgCID)
+
+		// Message D (new branch, user)
+		msgD := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgCID, Role: "user", Text: "User message D (new branch)", Type: "text"}
+		msgDID, err := AddMessageToSession(context.Background(), testDB, msgD)
+		if err != nil {
+			t.Fatalf("Failed to add msgD: %v", err)
+		}
+		UpdateMessageChosenNextID(testDB, msgCID, &msgDID)
+
+		// 3. GetSessionHistory 테스트 (primaryBranchID)
+		t.Run("GetSessionHistory_PrimaryBranch", func(t *testing.T) {
+			history, err := GetSessionHistory(testDB, sessionId, primaryBranchID)
+			if err != nil {
+				t.Fatalf("GetSessionHistory failed: %v", err)
+			}
+
+			expectedTexts := []string{
+				"User message 1",
+				"Model message 2",
+				"Thought message 3",
+				"User message 4",
+				compressionText,
+				"Model message 6 (after compression)",
+				"User message 7",
+			}
+
+			if len(history) != len(expectedTexts) {
+				t.Errorf("Expected %d messages, got %d", len(expectedTexts), len(history))
+			}
+
+			for i, msg := range history {
+				if i >= len(expectedTexts) {
+					break
+				}
+				if msg.Parts[0].Text != expectedTexts[i] {
+					t.Errorf("Message %d: Expected '%s', got '%s'", i, expectedTexts[i], msg.Parts[0].Text)
+				}
+			}
+		})
+
+		// 4. GetSessionHistoryContext 테스트 (primaryBranchID)
+		t.Run("GetSessionHistoryContext_PrimaryBranch", func(t *testing.T) {
+			history, err := GetSessionHistoryContext(testDB, sessionId, primaryBranchID)
+			if err != nil {
+				t.Fatalf("GetSessionHistoryContext failed: %v", err)
+			}
+
+			// Expected: msg5 (compression), msg6, msg7
+			expectedTexts := []string{
+				"Summary of messages up to msg4", // Only the summary part should be in FrontendMessage.Parts[0].Text
+				"Model message 6 (after compression)",
+				"User message 7",
+			}
+
+			if len(history) != len(expectedTexts) {
+				t.Errorf("Expected %d messages, got %d", len(expectedTexts), len(history))
+			}
+
+			for i, msg := range history {
+				if i >= len(expectedTexts) {
+					break
+				}
+				if msg.Parts[0].Text != expectedTexts[i] {
+					t.Errorf("Message %d: Expected '%s', got '%s'", i, expectedTexts[i], msg.Parts[0].Text)
+				}
+			}
+		})
+
+		// 5. Test GetSessionHistoryContext (newBranchID)
+		t.Run("GetSessionHistoryContext_NewBranch", func(t *testing.T) {
+			history, err := GetSessionHistoryContext(testDB, sessionId, newBranchID)
+			if err != nil {
+				t.Fatalf("GetSessionHistoryContext failed: %v", err)
+			}
+
+			// Expected: msg1, msg2, msg4 (branch point), msgA, msgB, msgD
+			// msg3 (thought) and msgC (thought) should be discarded.
+			// No compression message in this branch, so it should go from the beginning of the branch.
+			expectedTexts := []string{
+				"User message 1",
+				"Model message 2",
+				"User message 4", // Branch point
+				"User message A (new branch)",
+				"Model message B (new branch)",
+				"User message D (new branch)",
+			}
+
+			if len(history) != len(expectedTexts) {
+				t.Errorf("Expected %d messages, got %d", len(expectedTexts), len(history))
+			}
+
+			for i, msg := range history {
+				if i >= len(expectedTexts) {
+					break
+				}
+				if msg.Parts[0].Text != expectedTexts[i] {
+					t.Errorf("Message %d: Expected '%s', got '%s'", i, expectedTexts[i], msg.Parts[0].Text)
+				}
+			}
+		})
+	})
+
 }
 
 // TestNewSessionAndMessage_BranchIDConsistency tests that branch IDs are consistent when a new session is created.

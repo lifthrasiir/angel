@@ -16,7 +16,7 @@ import (
 
 type InitialState struct {
 	SessionId       string            `json:"sessionId"`
-	History         []FrontendMessage `json:"history"`
+	History         []FrontendMessage `json:"history"` // May or may not include thoughts
 	SystemPrompt    string            `json:"systemPrompt"`
 	WorkspaceID     string            `json:"workspaceId"`
 	PrimaryBranchID string            `json:"primaryBranchId"`
@@ -119,7 +119,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	defer removeSseWriter(sessionId, sseW)
 
 	// Retrieve session history from DB for Gemini API
-	frontendHistory, err := GetSessionHistory(db, sessionId, primaryBranchID, true) // Pass primaryBranchID
+	frontendHistory, err := GetSessionHistoryContext(db, sessionId, primaryBranchID) // Pass primaryBranchID
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
@@ -264,7 +264,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
 
 	// Retrieve session history from DB for Gemini API
-	frontendHistory, err := GetSessionHistory(db, sessionId, primaryBranchID, true) // Pass primaryBranchID
+	frontendHistory, err := GetSessionHistoryContext(db, sessionId, primaryBranchID) // Pass primaryBranchID
 	if err != nil {
 		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
@@ -321,7 +321,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Use the primary_branch_id from the session to load history
-	history, err := GetSessionHistory(db, sessionId, session.PrimaryBranchID, false)
+	history, err := GetSessionHistory(db, sessionId, session.PrimaryBranchID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
 		return

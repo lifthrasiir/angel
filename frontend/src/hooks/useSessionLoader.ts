@@ -174,6 +174,8 @@ export const useSessionLoader = ({
                         chatMessage.parts[0] = {
                           functionResponse: msg.parts[0].functionResponse,
                         };
+                      } else if (msg.type !== 'text') {
+                        chatMessage.type = msg.type;
                       } else {
                         chatMessage.type = msg.role;
                       }

@@ -26,8 +26,9 @@ const ChatMessage: React.FC<{ message: ChatMessage; maxTokens?: number }> = Reac
     />
   );
 
-  if (type === 'function_response' && functionResponse) {
-    return <FunctionResponseMessage functionResponse={functionResponse} messageInfo={messageInfoComponent} />;
+  if (type === 'function_response') {
+    if (functionResponse)
+      return <FunctionResponseMessage functionResponse={functionResponse} messageInfo={messageInfoComponent} />;
   } else if (type === 'user') {
     return (
       <UserTextMessage
@@ -42,12 +43,20 @@ const ChatMessage: React.FC<{ message: ChatMessage; maxTokens?: number }> = Reac
     const [subject, description] = splitOnceByNewline(text || '');
     const thoughtText = `**Thought: ${subject}**\n${description || ''}`;
     return <ModelTextMessage text={thoughtText} className="agent-thought" messageInfo={messageInfoComponent} />;
-  } else if (type === 'function_call' && functionCall) {
-    return <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} />;
+  } else if (type === 'function_call') {
+    if (functionCall) return <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} />;
   } else if (type === 'system') {
     return <SystemMessage text={text} messageInfo={messageInfoComponent} />;
   } else if (type === 'model_error') {
     return <ModelTextMessage text={text} className="agent-error-message" messageInfo={messageInfoComponent} />;
+  } else if (type === 'compression') {
+    return (
+      <SystemMessage
+        text={`Compression Snapshot:\n${text}`}
+        className="compression-message"
+        messageInfo={messageInfoComponent}
+      />
+    );
   } else if (type === 'model') {
     return <ModelTextMessage text={text} className="agent-message" messageInfo={messageInfoComponent} />;
   }
