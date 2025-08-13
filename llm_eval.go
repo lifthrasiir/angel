@@ -45,8 +45,8 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 }
 
 // GenerateContentOneShot is not fully supported for angel-eval, as it's stream-based.
-func (p *AngelEvalProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error) {
-	return "", fmt.Errorf("GenerateContentOneShot not supported for angel-eval, use SendMessageStream")
+func (p *AngelEvalProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
+	return OneShotResult{}, fmt.Errorf("GenerateContentOneShot not supported for angel-eval, use SendMessageStream")
 }
 
 // CountTokens is a placeholder for angel-eval.

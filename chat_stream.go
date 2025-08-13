@@ -198,7 +198,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
 					hasFunctionCall = true
 
-					functionResponseValue, err := CallToolFunction(fc)
+					functionResponseValue, err := CallToolFunction(ctx, fc, ToolHandlerParams{ModelName: modelToUse})
 					if err != nil {
 						log.Printf("Error executing function %s: %v", fc.Name, err)
 						functionResponseValue = map[string]interface{}{"error": err.Error()}
@@ -510,7 +510,7 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		TopP:        1.0,
 	}
 
-	llmInferredName, err := provider.GenerateContentOneShot(ctx, SessionParams{
+	oneShotResult, err := provider.GenerateContentOneShot(ctx, SessionParams{
 		Contents: []Content{
 			{
 				Role:  "user",
@@ -527,13 +527,13 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		return // inferredName remains empty
 	}
 
-	llmInferredName = strings.TrimSpace(llmInferredName)
-	if len(llmInferredName) > 100 || strings.Contains(llmInferredName, "\n") {
-		log.Printf("Inferred name for session %s is invalid (too long or multi-line): %s", sessionId, llmInferredName)
+	llmInferredNameText := strings.TrimSpace(oneShotResult.Text)
+	if len(llmInferredNameText) > 100 || strings.Contains(llmInferredNameText, "\n") {
+		log.Printf("Inferred name for session %s is invalid (too long or multi-line): %s", sessionId, llmInferredNameText)
 		return // inferredName remains empty
 	}
 
-	inferredName = llmInferredName // Set inferredName only if successful
+	inferredName = llmInferredNameText // Set inferredName only if successful
 
 	if err := UpdateSessionName(db, sessionId, inferredName); err != nil {
 		log.Printf("Failed to update session name for %s: %v", sessionId, err)

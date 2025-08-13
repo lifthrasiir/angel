@@ -49,7 +49,6 @@ func (ts *tokenSaverSource) Token() (*oauth2.Token, error) {
 }
 
 func (ts *tokenSaverSource) Client(ctx context.Context) *http.Client {
-	log.Println("tokenSaverSource: Creating new HTTP client with oauth2.TokenSource.")
 	return oauth2.NewClient(ctx, ts.TokenSource)
 }
 
@@ -84,6 +83,9 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 		log.Printf("makeAPIRequest: Failed to marshal request body: %v", err)
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
+
+	// Log the request body for debugging
+	//log.Printf("makeAPIRequest: Sending request to %s with body: %s", url, string(jsonBody))
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
@@ -145,7 +147,16 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 					},
 				}
 			}(),
-			Tools: GetToolsForGemini(),
+			Tools: func() []Tool {
+				currentTools := GetToolsForGemini()
+				if params.ToolConfig != nil {
+					if _, ok := params.ToolConfig["urlContext"]; ok {
+						// Add a new Tool with URLContext
+						currentTools = []Tool{{URLContext: &URLContext{}}}
+					}
+				}
+				return currentTools
+			}(),
 			GenerationConfig: &GenerationConfig{
 				ThinkingConfig: &ThinkingConfig{
 					IncludeThoughts: params.IncludeThoughts,
@@ -206,32 +217,48 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, params Session
 }
 
 // GenerateContentOneShot calls the streamGenerateContent of Code Assist API and returns a single response.
-func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error) {
+func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
 	seq, closer, err := c.SendMessageStream(ctx, params)
 	if err != nil {
 		log.Printf("GenerateContentOneShot: SendMessageStream failed: %v", err)
-		return "", err
+		return OneShotResult{}, err
 	}
 	defer closer.Close()
 
 	var fullResponse strings.Builder // Use a strings.Builder for efficient concatenation
+	var urlContextMeta *URLContextMetadata
+	var groundingMetadata *GroundingMetadata
 
 	for caResp := range seq {
-		if len(caResp.Response.Candidates) > 0 && len(caResp.Response.Candidates[0].Content.Parts) > 0 {
-			for _, part := range caResp.Response.Candidates[0].Content.Parts {
-				if part.Text != "" { // Check if it's a text part
-					fullResponse.WriteString(part.Text)
+		if len(caResp.Response.Candidates) > 0 {
+			candidate := caResp.Response.Candidates[0]
+			if len(candidate.Content.Parts) > 0 {
+				for _, part := range candidate.Content.Parts {
+					if part.Text != "" { // Check if it's a text part
+						fullResponse.WriteString(part.Text)
+					}
+					// TODO: Handle other part types if necessary (e.g., function_call, function_response)
 				}
-				// TODO: Handle other part types if necessary (e.g., function_call, function_response)
+			}
+			// Extract metadata from the last candidate (assuming it's cumulative or final)
+			if candidate.URLContextMetadata != nil {
+				urlContextMeta = candidate.URLContextMetadata
+			}
+			if candidate.GroundingMetadata != nil {
+				groundingMetadata = candidate.GroundingMetadata
 			}
 		}
 	}
 
 	if fullResponse.Len() > 0 {
-		return fullResponse.String(), nil
+		return OneShotResult{
+			Text:               fullResponse.String(),
+			URLContextMetadata: urlContextMeta,
+			GroundingMetadata:  groundingMetadata,
+		}, nil
 	}
 
-	return "", fmt.Errorf("no text content found in LLM response")
+	return OneShotResult{}, fmt.Errorf("no text content found in LLM response")
 }
 
 // CountTokens calls the countTokens of Code Assist API.

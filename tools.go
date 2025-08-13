@@ -76,14 +76,14 @@ var availableTools = map[string]ToolDefinition{
 			Required: []string{"path"},
 		},
 		// Implement the actual function call logic here
-		Handler: func(args map[string]interface{}) (map[string]interface{}, error) {
+		Handler: func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
 			path, ok := args["path"].(string)
 			if !ok {
 				return nil, fmt.Errorf("invalid path argument for list_directory")
 			}
 			// TODO: Call the actual list_directory function from sandbox
 			// For now, let's mock it
-			log.Printf("Calling mock list_directory for path: %s", path)
+			log.Printf("Calling mock list_directory for path: %s (model: %s)", path, params.ModelName)
 			result := []string{"file1.txt", "file2.txt", "subdir/"} // Mock result
 			return map[string]interface{}{"files": result}, nil
 		},
@@ -102,16 +102,34 @@ var availableTools = map[string]ToolDefinition{
 			Required: []string{"absolute_path"},
 		},
 		// Implement the actual function call logic here
-		Handler: func(args map[string]interface{}) (map[string]interface{}, error) {
+		Handler: func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
 			absolutePath, ok := args["absolute_path"].(string)
 			if !ok {
 				return nil, fmt.Errorf("invalid absolute_path argument for read_file")
 			}
 			// TODO: Call the actual read_file function from sandbox
 			// For now, let's mock it
-			log.Printf("Calling mock read_file for path: %s", absolutePath)
+			log.Printf("Calling mock read_file for path: %s (model: %s)", absolutePath, params.ModelName)
 			content := "Mock file content for " + absolutePath // Mock content
 			return map[string]interface{}{"content": content}, nil
+		},
+	},
+	"web_fetch": {
+		Name:        "web_fetch",
+		Description: "Processes content from URL(s), including local and private network addresses (e.g., localhost), embedded in a prompt. Include up to 20 URLs and instructions (e.g., summarize, extract specific data) directly in the 'prompt' parameter.",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"prompt": {
+					Type:        TypeString,
+					Description: "A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content (e.g., \"Summarize https://example.com/article and extract key points from https://another.com/data\"). Must contain as least one URL starting with http:// or https://.",
+				},
+			},
+			Required: []string{"prompt"},
+		},
+		Handler: func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
+			webFetchTool := WebFetchTool{} // Create an instance of the tool
+			return webFetchTool.CallToolFunction(ctx, args, params.ModelName)
 		},
 	},
 }
@@ -124,12 +142,17 @@ func GetBuiltinToolNames() map[string]bool {
 	return builtinToolNames
 }
 
+// ToolHandlerParams contains parameters passed to a tool's handler function.
+type ToolHandlerParams struct {
+	ModelName string
+}
+
 // ToolDefinition represents a tool with its schema and handler function.
 type ToolDefinition struct {
 	Name        string
 	Description string
 	Parameters  *Schema
-	Handler     func(args map[string]interface{}) (map[string]interface{}, error)
+	Handler     func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error)
 }
 
 // GetToolsForGemini returns a slice of Tool for Gemini API.
@@ -180,10 +203,10 @@ func GetToolsForGemini() []Tool {
 }
 
 // CallToolFunction executes the handler for the given function call.
-func CallToolFunction(fc FunctionCall) (map[string]interface{}, error) {
+func CallToolFunction(ctx context.Context, fc FunctionCall, params ToolHandlerParams) (map[string]interface{}, error) {
 	// Check if it's a local tool first
 	if toolDef, ok := availableTools[fc.Name]; ok {
-		return toolDef.Handler(fc.Args)
+		return toolDef.Handler(ctx, fc.Args, params)
 	}
 
 	// Check if it's an MCP tool (potentially with a mapped name)

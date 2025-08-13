@@ -60,8 +60,8 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 			// Default mock implementation: return an empty sequence
 			return iter.Seq[CaGenerateContentResponse](func(yield func(CaGenerateContentResponse) bool) {}), io.NopCloser(nil), nil
 		},
-		GenerateContentOneShotFunc: func(ctx context.Context, params SessionParams) (string, error) {
-			return "Mocked one-shot response", nil
+		GenerateContentOneShotFunc: func(ctx context.Context, params SessionParams) (OneShotResult, error) {
+			return OneShotResult{Text: "Mocked one-shot response"}, nil
 		},
 		CountTokensFunc: func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
 			return &CaCountTokenResponse{TotalTokens: 10}, nil

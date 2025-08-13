@@ -170,6 +170,7 @@ type GenerationConfig struct {
 
 type Tool struct {
 	FunctionDeclarations []FunctionDeclaration `json:"functionDeclarations,omitempty"`
+	URLContext           *URLContext           `json:"urlContext,omitempty"` // Added for web_fetch tool
 }
 
 type FunctionDeclaration struct {
@@ -181,6 +182,9 @@ type FunctionDeclaration struct {
 type ToolConfig struct {
 	FunctionCallingConfig *FunctionCallingConfig `json:"functionCallingConfig,omitempty"`
 }
+
+// URLContext is an empty struct for the url_context field in the API request.
+type URLContext struct{}
 
 type FunctionCallingConfig struct {
 	Mode                 string   `json:"mode,omitempty"`
@@ -229,16 +233,20 @@ type UsageMetadata struct {
 }
 
 type Candidate struct {
-	Content                         Content         `json:"content"`
-	AutomaticFunctionCallingHistory []Content       `json:"automaticFunctionCallingHistory,omitempty"`
-	PromptFeedback                  *PromptFeedback `json:"promptFeedback,omitempty"`
-	UsageMetadata                   *UsageMetadata  `json:"usageMetadata,omitempty"`
+	Content                         Content             `json:"content"`
+	AutomaticFunctionCallingHistory []Content           `json:"automaticFunctionCallingHistory,omitempty"`
+	PromptFeedback                  *PromptFeedback     `json:"promptFeedback,omitempty"`
+	UsageMetadata                   *UsageMetadata      `json:"usageMetadata,omitempty"`
+	URLContextMetadata              *URLContextMetadata `json:"urlContextMetadata,omitempty"`
+	GroundingMetadata               *GroundingMetadata  `json:"groundingMetadata,omitempty"`
 }
 
 type VertexGenerateContentResponse struct {
-	Candidates     []Candidate     `json:"candidates"`
-	PromptFeedback *PromptFeedback `json:"promptFeedback,omitempty"`
-	UsageMetadata  *UsageMetadata  `json:"usageMetadata,omitempty"`
+	Candidates         []Candidate         `json:"candidates"`
+	PromptFeedback     *PromptFeedback     `json:"promptFeedback,omitempty"`
+	UsageMetadata      *UsageMetadata      `json:"usageMetadata,omitempty"`
+	URLContextMetadata *URLContextMetadata `json:"urlContextMetadata,omitempty"`
+	GroundingMetadata  *GroundingMetadata  `json:"groundingMetadata,omitempty"`
 }
 
 type CaGenerateContentResponse struct {
@@ -258,11 +266,48 @@ type CaCountTokenResponse struct {
 	TotalTokens int `json:"totalTokens"`
 }
 
-// Define ChatSession struct (used instead of genai.ChatSession)
-type ChatSession struct {
-	History []*Content
-	Name    string `json:"name"`
+// URLContextMetadata matches URLContextMetadata in TypeScript
+type URLContextMetadata struct {
+	URLMetadata []URLMetadata `json:"urlMetadata,omitempty"`
 }
+
+// URLMetadata matches URLMetadata in TypeScript
+type URLMetadata struct {
+	URL                string `json:"url,omitempty"`
+	URLRetrievalStatus string `json:"urlRetrievalStatus,omitempty"`
+}
+
+// GroundingMetadata matches GroundingMetadata in TypeScript
+type GroundingMetadata struct {
+	GroundingChunks   []GroundingChunkItem   `json:"groundingChunks,omitempty"`
+	GroundingSupports []GroundingSupportItem `json:"groundingSupports,omitempty"`
+}
+
+// GroundingChunkItem matches GroundingChunkItem in TypeScript
+type GroundingChunkItem struct {
+	Web *GroundingChunkWeb `json:"web,omitempty"`
+}
+
+// GroundingChunkWeb matches GroundingChunkWeb in TypeScript
+type GroundingChunkWeb struct {
+	URI   string `json:"uri,omitempty"`
+	Title string `json:"title,omitempty"`
+}
+
+// GroundingSupportItem matches GroundingSupportItem in TypeScript
+type GroundingSupportItem struct {
+	Segment               *GroundingSupportSegment `json:"segment,omitempty"`
+	GroundingChunkIndices []int                    `json:"groundingChunkIndices,omitempty"`
+}
+
+// GroundingSupportSegment matches GroundingSupportSegment in TypeScript
+type GroundingSupportSegment struct {
+	StartIndex int    `json:"startIndex,omitempty"`
+	EndIndex   int    `json:"endIndex,omitempty"`
+	Text       string `json:"text,omitempty"`
+}
+
+// Define ChatSession struct (used instead of genai.ChatSession)
 
 // GeminiEventType enum definition (matches GeminiEventType in TypeScript)
 type GeminiEventType string

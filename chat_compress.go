@@ -152,7 +152,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		TopP:        1.0,
 	}
 
-	summaryXML, err := provider.GenerateContentOneShot(ctx, SessionParams{
+	oneShotResult, err := provider.GenerateContentOneShot(ctx, SessionParams{
 		Contents:         llmRequestContents,
 		SystemPrompt:     systemPrompt,
 		ModelName:        modelName,
@@ -163,13 +163,13 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		err = fmt.Errorf("GenerateContentOneShot API call failed for compression: %w", err)
 		return
 	}
-	if summaryXML == "" {
+	if oneShotResult.Text == "" {
 		err = fmt.Errorf("LLM returned empty summary")
 		return
 	}
 
 	// Define extractedSummary by extracting content from <state_snapshot>
-	extractedSummary := extractStateSnapshotContent(summaryXML)
+	extractedSummary := extractStateSnapshotContent(oneShotResult.Text)
 
 	// 7. Parse the XML summary (optional, but good for validation/extraction if needed).
 	// For now, we'll store the raw XML in the message text.

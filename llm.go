@@ -18,6 +18,7 @@ type SessionParams struct {
 	SystemPrompt     string
 	IncludeThoughts  bool                     // New field for direct control
 	GenerationParams *SessionGenerationParams // New field for generation parameters
+	ToolConfig       map[string]interface{}   // New field for tool-specific configurations
 }
 
 // SessionGenerationParams holds common generation parameters for a session.
@@ -27,10 +28,18 @@ type SessionGenerationParams struct {
 	TopP        float32
 }
 
+// OneShotResult holds the result of a single-shot content generation,
+// including text and any associated metadata.
+type OneShotResult struct {
+	Text               string
+	URLContextMetadata *URLContextMetadata // Assuming this struct will be defined in gemini_types.go or similar
+	GroundingMetadata  *GroundingMetadata  // Assuming this struct will be defined in gemini_types.go or similar
+}
+
 // LLMProvider defines the interface for interacting with an LLM.
 type LLMProvider interface {
 	SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
-	GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error)
+	GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error)
 	CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 	MaxTokens() int
 	RelativeDisplayOrder() int
@@ -40,7 +49,7 @@ type LLMProvider interface {
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.
 type MockLLMProvider struct {
 	SendMessageStreamFunc        func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
-	GenerateContentOneShotFunc   func(ctx context.Context, params SessionParams) (string, error)
+	GenerateContentOneShotFunc   func(ctx context.Context, params SessionParams) (OneShotResult, error)
 	CountTokensFunc              func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 	MaxTokensValue               int
 	RelativeDisplayOrderValue    int
@@ -56,11 +65,11 @@ func (m *MockLLMProvider) SendMessageStream(ctx context.Context, params SessionP
 }
 
 // GenerateContentOneShot implements the LLMProvider interface for MockLLMProvider.
-func (m *MockLLMProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error) {
+func (m *MockLLMProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
 	if m.GenerateContentOneShotFunc != nil {
 		return m.GenerateContentOneShotFunc(ctx, params)
 	}
-	return "", fmt.Errorf("GenerateContentOneShot not implemented in mock")
+	return OneShotResult{}, fmt.Errorf("GenerateContentOneShot not implemented in mock")
 }
 
 // CountTokens implements the LLMProvider interface for MockLLMProvider.
