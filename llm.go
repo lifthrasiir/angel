@@ -13,10 +13,18 @@ var CurrentProviders = make(map[string]LLMProvider)
 
 // SessionParams holds the parameters for a chat session.
 type SessionParams struct {
-	Contents       []Content
-	ModelName      string
-	SystemPrompt   string
-	ThinkingConfig *ThinkingConfig
+	Contents         []Content
+	ModelName        string
+	SystemPrompt     string
+	IncludeThoughts  bool                     // New field for direct control
+	GenerationParams *SessionGenerationParams // New field for generation parameters
+}
+
+// SessionGenerationParams holds common generation parameters for a session.
+type SessionGenerationParams struct {
+	Temperature float32
+	TopK        int32
+	TopP        float32
 }
 
 // LLMProvider defines the interface for interacting with an LLM.
@@ -26,15 +34,17 @@ type LLMProvider interface {
 	CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 	MaxTokens() int
 	RelativeDisplayOrder() int
+	DefaultGenerationParams() SessionGenerationParams // New method
 }
 
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.
 type MockLLMProvider struct {
-	SendMessageStreamFunc      func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
-	GenerateContentOneShotFunc func(ctx context.Context, params SessionParams) (string, error)
-	CountTokensFunc            func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
-	MaxTokensFunc              func() int
-	RelativeDisplayOrderFunc   func() int
+	SendMessageStreamFunc        func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
+	GenerateContentOneShotFunc   func(ctx context.Context, params SessionParams) (string, error)
+	CountTokensFunc              func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
+	MaxTokensValue               int
+	RelativeDisplayOrderValue    int
+	DefaultGenerationParamsValue SessionGenerationParams
 }
 
 // SendMessageStream implements the LLMProvider interface for MockLLMProvider.
@@ -63,16 +73,15 @@ func (m *MockLLMProvider) CountTokens(ctx context.Context, contents []Content, m
 
 // MaxTokens implements the LLMProvider interface for MockLLMProvider.
 func (m *MockLLMProvider) MaxTokens() int {
-	if m.MaxTokensFunc != nil {
-		return m.MaxTokensFunc()
-	}
-	return 0 // Default or error value
+	return m.MaxTokensValue
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface for MockLLMProvider.
 func (m *MockLLMProvider) RelativeDisplayOrder() int {
-	if m.RelativeDisplayOrderFunc != nil {
-		return m.RelativeDisplayOrderFunc()
-	}
-	return 0 // Default value for mock
+	return m.RelativeDisplayOrderValue
+}
+
+// DefaultGenerationParams implements the LLMProvider interface for MockLLMProvider.
+func (m *MockLLMProvider) DefaultGenerationParams() SessionGenerationParams {
+	return m.DefaultGenerationParamsValue
 }

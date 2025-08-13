@@ -74,10 +74,10 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		}
 
 		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{
-			Contents:       currentHistory,
-			ModelName:      modelToUse,
-			SystemPrompt:   initialState.SystemPrompt,
-			ThinkingConfig: &ThinkingConfig{IncludeThoughts: true},
+			Contents:        currentHistory,
+			ModelName:       modelToUse,
+			SystemPrompt:    initialState.SystemPrompt,
+			IncludeThoughts: true,
 		})
 		if err != nil {
 			failCall(initialState.SessionId, err) // Mark the call as failed
@@ -503,6 +503,13 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		return
 	}
 
+	// Specific generation parameters for session name inference
+	sessionNameGenParams := SessionGenerationParams{
+		Temperature: 0.0,
+		TopK:        -1, // Use default
+		TopP:        1.0,
+	}
+
 	llmInferredName, err := provider.GenerateContentOneShot(ctx, SessionParams{
 		Contents: []Content{
 			{
@@ -510,9 +517,10 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 				Parts: []Part{{Text: nameInputPrompt}},
 			},
 		},
-		ModelName:      modelToUse,
-		SystemPrompt:   nameSystemPrompt,
-		ThinkingConfig: &ThinkingConfig{IncludeThoughts: false},
+		ModelName:        modelToUse,
+		SystemPrompt:     nameSystemPrompt,
+		IncludeThoughts:  false,
+		GenerationParams: &sessionNameGenParams,
 	})
 	if err != nil {
 		log.Printf("Failed to infer session name for %s: %v", sessionId, err)

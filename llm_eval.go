@@ -71,6 +71,10 @@ func (p *AngelEvalProvider) RelativeDisplayOrder() int {
 	return -100
 }
 
+func (p *AngelEvalProvider) DefaultGenerationParams() SessionGenerationParams {
+	return SessionGenerationParams{}
+}
+
 // Forth-like language interpreter logic will go here.
 // This will involve a stack and functions for each operation.
 

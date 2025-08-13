@@ -85,6 +85,11 @@ func (m *MockGeminiProvider) RelativeDisplayOrder() int {
 	return 0
 }
 
+// DefaultGenerationParams implements the LLMProvider interface for MockGeminiProvider.
+func (m *MockGeminiProvider) DefaultGenerationParams() SessionGenerationParams {
+	return SessionGenerationParams{}
+}
+
 // mockCloser implements io.Closer for testing purposes
 type mockCloser struct{}
 

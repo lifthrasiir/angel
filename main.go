@@ -58,6 +58,10 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/manifest.webmanifest", serveFile("manifest.webmanifest")).Methods("GET")
 	router.HandleFunc("/angel-logo-colored.svg", serveFile("angel-logo-colored.svg")).Methods("GET")
 
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/new", http.StatusFound)
+	}).Methods("GET")
+
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
 

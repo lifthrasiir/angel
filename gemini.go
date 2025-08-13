@@ -114,6 +114,22 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
 func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params SessionParams) (io.ReadCloser, error) {
+	// Get default generation parameters
+	genParams := c.DefaultGenerationParams()
+
+	// Determine final generation parameters, prioritizing SessionParams
+	if params.GenerationParams != nil {
+		if params.GenerationParams.Temperature >= 0 { // Assuming >=0 means set
+			genParams.Temperature = params.GenerationParams.Temperature
+		}
+		if params.GenerationParams.TopP >= 0 { // Assuming >=0 means set
+			genParams.TopP = params.GenerationParams.TopP
+		}
+		if params.GenerationParams.TopK >= 0 { // Assuming >=0 means set
+			genParams.TopK = params.GenerationParams.TopK
+		}
+	}
+
 	reqBody := CAGenerateContentRequest{
 		Model:   params.ModelName,
 		Project: c.projectID,
@@ -131,7 +147,12 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 			}(),
 			Tools: GetToolsForGemini(),
 			GenerationConfig: &GenerationConfig{
-				ThinkingConfig: params.ThinkingConfig,
+				ThinkingConfig: &ThinkingConfig{
+					IncludeThoughts: params.IncludeThoughts,
+				},
+				Temperature: &genParams.Temperature,
+				TopP:        &genParams.TopP,
+				TopK:        &genParams.TopK,
 			},
 		},
 	}
@@ -193,13 +214,21 @@ func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, params Se
 	}
 	defer closer.Close()
 
+	var fullResponse strings.Builder // Use a strings.Builder for efficient concatenation
+
 	for caResp := range seq {
 		if len(caResp.Response.Candidates) > 0 && len(caResp.Response.Candidates[0].Content.Parts) > 0 {
-			textPart := caResp.Response.Candidates[0].Content.Parts[0].Text
-			if textPart != "" {
-				return textPart, nil
+			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+				if part.Text != "" { // Check if it's a text part
+					fullResponse.WriteString(part.Text)
+				}
+				// TODO: Handle other part types if necessary (e.g., function_call, function_response)
 			}
 		}
+	}
+
+	if fullResponse.Len() > 0 {
+		return fullResponse.String(), nil
 	}
 
 	return "", fmt.Errorf("no text content found in LLM response")
@@ -309,4 +338,14 @@ func (c *CodeAssistClient) MaxTokens() int {
 // RelativeDisplayOrder implements the LLMProvider interface for CodeAssistClient.
 func (c *CodeAssistClient) RelativeDisplayOrder() int {
 	return 0
+}
+
+// DefaultGenerationParams implements the LLMProvider interface for CodeAssistClient.
+func (c *CodeAssistClient) DefaultGenerationParams() SessionGenerationParams {
+	// For gemini-2.5-flash and gemini-2.5-pro
+	return SessionGenerationParams{
+		Temperature: 1.0,
+		TopK:        64,
+		TopP:        0.95,
+	}
 }

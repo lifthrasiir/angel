@@ -66,12 +66,8 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 		CountTokensFunc: func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
 			return &CaCountTokenResponse{TotalTokens: 10}, nil
 		},
-		MaxTokensFunc: func() int {
-			return 1048576 // Mocked max tokens
-		},
-		RelativeDisplayOrderFunc: func() int {
-			return 0 // Mocked relative display order
-		},
+		MaxTokensValue:            1048576, // Mocked max tokens
+		RelativeDisplayOrderValue: 0,       // Mocked relative display order
 	}
 	CurrentProviders[DefaultGeminiModel] = mockLLMProvider
 
