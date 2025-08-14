@@ -16,7 +16,7 @@ import (
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string) error {
+func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string, sendInitialState bool) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var finalTotalTokenCount *int
@@ -38,13 +38,15 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 	}
 	defer removeCall(initialState.SessionId) // Ensure call is removed from manager when function exits
 
-	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
-	initialStateJSON, err := json.Marshal(initialState) // initialState struct를 JSON으로 마샬링
-	if err != nil {
-		log.Printf("streamGeminiResponse: Failed to marshal initial state: %v", err)
-		return err
+	if sendInitialState {
+		// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
+		initialStateJSON, err := json.Marshal(initialState) // initialState struct를 JSON으로 마샬링
+		if err != nil {
+			log.Printf("streamGeminiResponse: Failed to marshal initial state: %v", err)
+			return err
+		}
+		sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 	}
-	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1

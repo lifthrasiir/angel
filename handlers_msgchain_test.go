@@ -67,8 +67,8 @@ func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, params Sessi
 	return seq, &mockCloser{}, nil // Return a mock io.Closer
 }
 
-func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (string, error) {
-	return "inferred name", nil
+func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
+	return OneShotResult{Text: "inferred name"}, nil
 }
 
 func (m *MockGeminiProvider) CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
@@ -493,8 +493,15 @@ func TestBranchingMessageChain(t *testing.T) {
 	defer dummySseW.Close()
 
 	// Call streamGeminiResponse to add thought and model messages for C
-	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel); err != nil {
+	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false); err != nil {
 		t.Fatalf("Error streaming Gemini response for C: %v", err)
+	}
+
+	// Verify that EventInitialState was NOT sent
+	for event := range parseSseStream(t, rrDummy.Result()) {
+		if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
+			t.Errorf("Expected NO EventInitialState or EventInitialStateNoCall, but received %c", event.Type)
+		}
 	}
 
 	printMessages(t, db, "After A1-A3-C1-C3 branch creation")
