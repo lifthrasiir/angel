@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import type { ChatMessage, InitialState } from '../types/chat';
@@ -59,6 +59,17 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
   const resetChatSessionState = useSetAtom(resetChatSessionStateAtom);
 
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const isStreamEndedNormallyRef = useRef(false);
+
+  const closeEventSourceNormally = () => {
+    if (eventSourceRef.current) {
+      isStreamEndedNormallyRef.current = true;
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const redirectTo = params.get('redirect_to');
@@ -79,7 +90,8 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
   }, [location.search, navigate]);
 
   useEffect(() => {
-    if (isStreaming) {
+    // 스트리밍 중이거나, 현재 URL 세션 ID가 이미 로드된 세션 ID와 같으면 아무것도 하지 않음
+    if (isStreaming || (urlSessionId && urlSessionId === chatSessionId)) {
       return;
     }
 
@@ -94,6 +106,12 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
         }
         const defaultPrompt = `{{.Builtin.SystemPrompt}}`;
         setSystemPrompt(defaultPrompt);
+        // 기존 EventSource가 있다면 닫고, 정상 종료로 표시
+        if (eventSourceRef.current) {
+          isStreamEndedNormallyRef.current = true; // 정상 종료로 표시
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
         return;
       }
 
@@ -105,11 +123,8 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
       }
 
       if (currentSessionId) {
-        let eventSource: EventSource | null = null;
-        let isStreamEndedNormally = false; // Add flag
-
         try {
-          eventSource = loadSession(
+          eventSourceRef.current = loadSession(
             currentSessionId,
             primaryBranchId,
             (event: MessageEvent) => {
@@ -160,7 +175,7 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
 
                 setIsStreaming(eventType === EventInitialState);
                 if (eventType === EventInitialStateNoCall) {
-                  eventSource?.close();
+                  closeEventSourceNormally();
                 }
               } else if (eventType === EventModelMessage) {
                 const [messageId, text] = splitOnceByNewline(eventData);
@@ -200,18 +215,19 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
               } else if (eventType === EventError) {
                 console.error('SSE Error:', eventData);
                 setIsStreaming(false);
-                eventSource?.close();
+                closeEventSourceNormally();
                 addErrorMessage(eventData);
               } else if (eventType === EventComplete) {
-                isStreamEndedNormally = true; // Set flag on normal completion
+                isStreamEndedNormallyRef.current = true; // 정상 종료로 표시
                 setIsStreaming(false);
-                eventSource?.close();
+                closeEventSourceNormally();
               }
             },
             (errorEvent: Event) => {
               console.error('EventSource error:', errorEvent);
               if (errorEvent.target && (errorEvent.target as EventSource).readyState === EventSource.CLOSED) {
-                if (!isStreamEndedNormally) {
+                if (!isStreamEndedNormallyRef.current) {
+                  // useRef 값 사용
                   // Only reload if not ended normally
                   window.location.reload();
                 }
@@ -225,9 +241,7 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
         }
 
         return () => {
-          if (eventSource) {
-            eventSource.close();
-          }
+          closeEventSourceNormally();
         };
       } else {
         resetChatSessionState();
