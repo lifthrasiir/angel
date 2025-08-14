@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
-import { handleLogin } from '../utils/userManager';
+
 import {
   userEmailAtom,
   chatSessionIdAtom,
@@ -53,7 +53,6 @@ export const useChatSession = () => {
   const selectedModel = useAtomValue(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
 
-  const location = useLocation();
   const { workspaceId: urlWorkspaceId } = useParams<{ workspaceId?: string }>();
 
   const { currentWorkspace, error } = useWorkspaceAndSessions(stateWorkspaceId);
@@ -95,11 +94,6 @@ export const useChatSession = () => {
     }
   }, [messages, availableModels, setSelectedModel]);
 
-  const handleLoginRedirect = useCallback(() => {
-    const currentPath = location.pathname + location.search;
-    handleLogin(currentPath, inputMessageRef.current);
-  }, [location.pathname, location.search]);
-
   const handleFilesSelectedWrapper = (files: File[]) => {
     setSelectedFiles(handleFilesSelected(selectedFiles, files));
   };
@@ -117,7 +111,6 @@ export const useChatSession = () => {
   useSessionLoader({
     chatSessionId,
     isStreaming,
-    handleLoginRedirect,
     primaryBranchId,
   });
 
@@ -126,7 +119,6 @@ export const useChatSession = () => {
     selectedFiles,
     chatSessionId,
     systemPrompt,
-    handleLoginRedirect,
     primaryBranchId,
     selectedModel,
   });
@@ -151,7 +143,6 @@ export const useChatSession = () => {
     primaryBranchId,
     availableModels,
     selectedModel,
-    handleLogin: handleLoginRedirect,
     handleFilesSelected: handleFilesSelectedWrapper,
     handleRemoveFile: handleRemoveFileWrapper,
     handleSendMessage,

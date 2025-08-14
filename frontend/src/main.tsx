@@ -5,6 +5,7 @@ import { Provider } from 'jotai';
 import './index.css';
 
 import ChatLayout from './components/ChatLayout';
+import { SessionPage } from './pages/SessionPage';
 import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
@@ -20,19 +21,7 @@ const router = createBrowserRouter([
   },
   {
     path: '/new',
-    element: <ChatLayout />,
-  },
-  {
-    path: '/:sessionId',
-    element: <ChatLayout />,
-  },
-  {
-    path: '/settings',
-    element: <SettingsPage />,
-  },
-  {
-    path: '/w',
-    element: <NotFoundPage />,
+    element: <SessionPage />,
   },
   {
     path: '/w/new',
@@ -47,12 +36,16 @@ const router = createBrowserRouter([
     element: <Navigate to="new" replace />,
   },
   {
-    path: '/w/:workspaceId/new',
-    element: <ChatLayout />,
-  },
-  {
     path: '/w/:workspaceId/:sessionId',
     element: <SessionRedirector />,
+  },
+  {
+    path: '/:sessionId',
+    element: <SessionPage />,
+  },
+  {
+    path: '/settings',
+    element: <SettingsPage />,
   },
   {
     path: '*',

@@ -45,7 +45,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   // Debounce utility function
   const debounce = (func: Function, delay: number) => {
-    let timeout: number;
+    let timeout: ReturnType<typeof setTimeout>;
     return (...args: any[]) => {
       clearTimeout(timeout);
       timeout = setTimeout(() => func(...args), delay);

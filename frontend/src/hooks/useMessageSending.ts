@@ -27,7 +27,6 @@ interface UseMessageSendingProps {
   selectedFiles: File[];
   chatSessionId: string | null;
   systemPrompt: string;
-  handleLoginRedirect: () => void;
   primaryBranchId: string;
   selectedModel: ModelInfo | null;
 }
@@ -37,7 +36,6 @@ export const useMessageSending = ({
   selectedFiles,
   chatSessionId,
   systemPrompt,
-  handleLoginRedirect,
   primaryBranchId,
   selectedModel,
 }: UseMessageSendingProps) => {
@@ -96,7 +94,7 @@ export const useMessageSending = ({
       );
 
       if (response.status === 401) {
-        handleLoginRedirect();
+        window.location.reload(); // Reload the page on 401 to re-check login status
         return;
       }
 

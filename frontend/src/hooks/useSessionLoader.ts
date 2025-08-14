@@ -14,7 +14,6 @@ import {
 } from '../utils/messageHandler';
 import { loadSession } from '../utils/sessionManager';
 import { splitOnceByNewline } from '../utils/stringUtils';
-import { fetchUserInfo } from '../utils/userManager';
 import {
   addErrorMessageAtom,
   addMessageAtom,
@@ -27,7 +26,6 @@ import {
   primaryBranchIdAtom,
   selectedFilesAtom,
   systemPromptAtom,
-  userEmailAtom,
   workspaceIdAtom,
   updateAgentMessageAtom,
 } from '../atoms/chatAtoms';
@@ -35,16 +33,10 @@ import {
 interface UseSessionLoaderProps {
   chatSessionId: string | null;
   isStreaming: boolean;
-  handleLoginRedirect: () => void;
   primaryBranchId: string;
 }
 
-export const useSessionLoader = ({
-  chatSessionId,
-  isStreaming,
-  handleLoginRedirect,
-  primaryBranchId,
-}: UseSessionLoaderProps) => {
+export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }: UseSessionLoaderProps) => {
   const navigate = useNavigate();
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
     sessionId?: string;
@@ -61,7 +53,6 @@ export const useSessionLoader = ({
   const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
   const setSystemPrompt = useSetAtom(systemPromptAtom);
-  const setUserEmail = useSetAtom(userEmailAtom);
   const setWorkspaceId = useSetAtom(workspaceIdAtom);
   const addMessage = useSetAtom(addMessageAtom);
   const updateAgentMessage = useSetAtom(updateAgentMessageAtom);
@@ -86,27 +77,6 @@ export const useSessionLoader = ({
       }
     }
   }, [location.search, navigate]);
-
-  useEffect(() => {
-    const loadUserInfo = async () => {
-      try {
-        const userInfo = await fetchUserInfo();
-        if (userInfo && userInfo.success) {
-          if (userInfo.email) {
-            setUserEmail(userInfo.email);
-          } else {
-            handleLoginRedirect();
-          }
-        } else {
-          handleLoginRedirect();
-        }
-      } catch (error) {
-        console.error('Failed to fetch user info:', error);
-        handleLoginRedirect();
-      }
-    };
-    loadUserInfo();
-  }, [handleLoginRedirect, setUserEmail]);
 
   useEffect(() => {
     if (isStreaming) {
@@ -136,6 +106,8 @@ export const useSessionLoader = ({
 
       if (currentSessionId) {
         let eventSource: EventSource | null = null;
+        let isStreamEndedNormally = false; // Add flag
+
         try {
           eventSource = loadSession(
             currentSessionId,
@@ -231,6 +203,7 @@ export const useSessionLoader = ({
                 eventSource?.close();
                 addErrorMessage(eventData);
               } else if (eventType === EventComplete) {
+                isStreamEndedNormally = true; // Set flag on normal completion
                 setIsStreaming(false);
                 eventSource?.close();
               }
@@ -238,15 +211,10 @@ export const useSessionLoader = ({
             (errorEvent: Event) => {
               console.error('EventSource error:', errorEvent);
               if (errorEvent.target && (errorEvent.target as EventSource).readyState === EventSource.CLOSED) {
-                fetchUserInfo()
-                  .then((userInfo) => {
-                    if (!userInfo || !userInfo.success || !userInfo.email) {
-                      handleLoginRedirect();
-                    }
-                  })
-                  .catch(() => {
-                    handleLoginRedirect();
-                  });
+                if (!isStreamEndedNormally) {
+                  // Only reload if not ended normally
+                  window.location.reload();
+                }
               }
               setIsStreaming(false);
             },
