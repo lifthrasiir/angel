@@ -7,7 +7,7 @@
     "build-frontend": "npm run build --prefix frontend",
     "build-backend": "goimports -w . && go build .",
     "build": "npm run build-frontend && npm run build-backend",
-    "test-backend": "goimports -w . && go test -count=3 ./...",
+    "test-backend": "goimports -w . && go test -count=3 ./... ./src/fs/...",
     "test": "npm run test-backend",
     "pack": "upx --lzma -9 -o angel.dist.exe angel.exe",
     "start": "node -e \"require('child_process').execSync(process.platform === 'win32' ? 'angel.exe' : '.\\angel', { stdio: 'inherit' })"

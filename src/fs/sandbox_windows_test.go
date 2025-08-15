@@ -1,22 +1,43 @@
-package sandbox
+//go:build windows
+
+package fs
 
 import (
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
-func TestLifecycle(t *testing.T) {
+var removeSandboxBaseDirMutex sync.Mutex
+
+func removeSandboxBaseDir(sessionId string) {
+	removeSandboxBaseDirMutex.Lock()
+	defer removeSandboxBaseDirMutex.Unlock()
+
+	os.RemoveAll(GetSandboxBaseDir(sessionId))
+
+	// If the directory SandboxBaseDirPrefix is totally empty, ensure that it is also removed.
+	children, err := os.ReadDir(SandboxBaseDirPrefix)
+	if err == nil && len(children) == 0 {
+		os.RemoveAll(SandboxBaseDirPrefix)
+	}
+}
+
+func TestSandboxLifecycle(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("Skipping lifecycle test in CI environment")
 	}
 
-	s, err := New()
+	sessionId := "testSandboxLifecycle"
+
+	s, err := NewSandbox(sessionId)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
+	defer removeSandboxBaseDir(sessionId)
 
 	drivePath := s.driveLetter + ":\\"
 	if _, err := os.Stat(drivePath); os.IsNotExist(err) {
@@ -30,25 +51,28 @@ func TestLifecycle(t *testing.T) {
 	if _, err := os.Stat(drivePath); !os.IsNotExist(err) {
 		t.Errorf("Sandbox drive was not unmounted: %s", drivePath)
 	}
-	if _, err := os.Stat(s.rootPath); !os.IsNotExist(err) {
-		t.Errorf("Sandbox root directory was not removed: %s", s.rootPath)
+	if _, err := os.Stat(s.BaseDir()); err != nil {
+		t.Errorf("Sandbox root directory should be retained even after close: %v", err)
 	}
 }
 
-func TestFSInterface(t *testing.T) {
+func TestSandboxFSInterface(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("Skipping FS interface test in CI environment")
 	}
 
-	s, err := New()
+	sessionId := "testSandboxFSInterface"
+
+	s, err := NewSandbox(sessionId)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
 	defer s.Close()
+	defer removeSandboxBaseDir(sessionId)
 
 	testContent := "hello world"
 	testFile := "test.txt"
-	err = os.WriteFile(filepath.Join(s.rootPath, testFile), []byte(testContent), 0644)
+	err = os.WriteFile(filepath.Join(s.BaseDir(), testFile), []byte(testContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
@@ -64,72 +88,19 @@ func TestFSInterface(t *testing.T) {
 	}
 }
 
-func TestMountUnmount(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping mount/unmount test in CI environment")
-	}
-
-	// 1. Create sandbox
-	s, err := New()
-	if err != nil {
-		t.Fatalf("Failed to create sandbox: %v", err)
-	}
-	defer s.Close()
-
-	// 2. Create a source directory with a file to mount
-	sourceDir, err := os.MkdirTemp("", "mount-source-*")
-	if err != nil {
-		t.Fatalf("Failed to create source dir: %v", err)
-	}
-	defer os.RemoveAll(sourceDir)
-
-	testContent := "mounted file content"
-	testFile := "mounted.txt"
-	err = os.WriteFile(filepath.Join(sourceDir, testFile), []byte(testContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write to source file: %v", err)
-	}
-
-	// 3. Mount the source directory into the sandbox
-	mountTarget := "my-project"
-	err = s.Mount(sourceDir, mountTarget)
-	if err != nil {
-		t.Fatalf("Failed to mount directory: %v", err)
-	}
-
-	// 4. Verify the mounted file can be accessed
-	mountedFilePathInSandbox := filepath.Join(mountTarget, testFile)
-	content, err := fs.ReadFile(s, mountedFilePathInSandbox)
-	if err != nil {
-		t.Fatalf("Failed to read mounted file: %v", err)
-	}
-	if string(content) != testContent {
-		t.Errorf("Mounted file content mismatch. Got '%s', want '%s'", string(content), testContent)
-	}
-
-	// 5. Unmount the directory
-	err = s.Unmount(mountTarget)
-	if err != nil {
-		t.Fatalf("Failed to unmount directory: %v", err)
-	}
-
-	// 6. Verify the mounted file is no longer accessible
-	_, err = fs.ReadFile(s, mountedFilePathInSandbox)
-	if err == nil {
-		t.Error("Expected error reading from unmounted path, but got none")
-	}
-}
-
-func TestRunCommand(t *testing.T) {
+func TestSandboxRunCommand(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("Skipping run command test in CI environment")
 	}
 
-	s, err := New()
+	sessionId := "testSandboxRunCommand"
+
+	s, err := NewSandbox(sessionId)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
 	defer s.Close()
+	defer removeSandboxBaseDir(sessionId)
 
 	testFile := "output.txt"
 	testContent := "hello from command"
@@ -152,22 +123,25 @@ func TestRunCommand(t *testing.T) {
 	}
 }
 
-func TestGlob(t *testing.T) {
+func TestSandboxGlob(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("Skipping glob test in CI environment")
 	}
 
-	s, err := New()
+	sessionId := "testSandboxGlob"
+
+	s, err := NewSandbox(sessionId)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
 	defer s.Close()
+	defer removeSandboxBaseDir(sessionId)
 
 	// Create some files and directories in the sandbox
-	os.MkdirAll(filepath.Join(s.rootPath, "dir1", "subdir"), 0755)
-	os.WriteFile(filepath.Join(s.rootPath, "dir1", "file1.txt"), []byte("file1"), 0644)
-	os.WriteFile(filepath.Join(s.rootPath, "dir1", "subdir", "file2.log"), []byte("file2"), 0644)
-	os.WriteFile(filepath.Join(s.rootPath, "root.txt"), []byte("root"), 0644)
+	os.MkdirAll(filepath.Join(s.BaseDir(), "dir1", "subdir"), 0755)
+	os.WriteFile(filepath.Join(s.BaseDir(), "dir1", "file1.txt"), []byte("file1"), 0644)
+	os.WriteFile(filepath.Join(s.BaseDir(), "dir1", "subdir", "file2.log"), []byte("file2"), 0644)
+	os.WriteFile(filepath.Join(s.BaseDir(), "root.txt"), []byte("root"), 0644)
 
 	testCases := []struct {
 		name     string
