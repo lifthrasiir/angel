@@ -350,9 +350,9 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	var args []interface{}
 
 	if workspaceID == "" {
-		query = "SELECT id, last_updated_at, system_prompt, name, workspace_id FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
 	} else {
-		query = "SELECT id, last_updated_at, system_prompt, name, workspace_id FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
 		args = append(args, workspaceID)
 	}
 
@@ -365,7 +365,7 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID); err != nil {
+		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.Name, &s.WorkspaceID); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 		sessions = append(sessions, s)
@@ -434,6 +434,7 @@ func UpdateSessionPrimaryBranchID(db *sql.DB, sessionID string, branchID string)
 
 // GetMessagePossibleNextIDs retrieves all possible next message IDs and their branch IDs for a given message ID.
 func GetMessagePossibleNextIDs(db *sql.DB, messageID int) ([]PossibleNextMessage, error) {
+
 	rows, err := db.Query("SELECT id, branch_id FROM messages WHERE parent_message_id = ?", messageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query possible next message IDs: %w", err)
@@ -680,6 +681,7 @@ func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID stri
 
 	for keepGoing {
 		err := func() error {
+
 			rows, err := db.Query(`
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
@@ -815,6 +817,7 @@ func SaveMCPServerConfig(db *sql.DB, config MCPServerConfig) error {
 
 // GetMCPServerConfigs retrieves all MCP server configurations from the database.
 func GetMCPServerConfigs(db *sql.DB) ([]MCPServerConfig, error) {
+
 	rows, err := db.Query("SELECT name, config_json, enabled FROM mcp_configs")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query MCP server configs: %w", err)
@@ -1054,6 +1057,7 @@ func SaveGlobalPrompts(db *sql.DB, prompts []PredefinedPrompt) error {
 
 // GetGlobalPrompts retrieves all global prompts from the database.
 func GetGlobalPrompts(db *sql.DB) ([]PredefinedPrompt, error) {
+
 	rows, err := db.Query("SELECT label, value FROM global_prompts ORDER BY id ASC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query global prompts: %w", err)
