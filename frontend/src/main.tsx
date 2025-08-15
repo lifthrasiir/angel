@@ -36,6 +36,10 @@ const router = createBrowserRouter([
     element: <Navigate to="new" replace />,
   },
   {
+    path: '/w/:workspaceId/new',
+    element: <SessionPage />,
+  },
+  {
     path: '/w/:workspaceId/:sessionId',
     element: <SessionRedirector />,
   },

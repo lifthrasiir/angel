@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useAtom, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
 import type { ChatMessage, InitialState } from '../types/chat';
 import {
   EventComplete,
@@ -49,7 +49,6 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
   const setIsStreaming = useSetAtom(isStreamingAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
   const setMessages = useSetAtom(messagesAtom);
-  const [messages] = useAtom(messagesAtom);
   const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
   const setSystemPrompt = useSetAtom(systemPromptAtom);
@@ -116,13 +115,12 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
       }
 
       if (currentSessionId && currentSessionId !== chatSessionId) {
+        closeEventSourceNormally();
         setChatSessionId(currentSessionId);
         setSelectedFiles([]);
         setIsStreaming(false);
         setMessages([]); // Clear messages from previous session
-      }
 
-      if (currentSessionId) {
         try {
           eventSourceRef.current = loadSession(
             currentSessionId,
@@ -136,40 +134,36 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
                 setSystemPrompt(data.systemPrompt);
                 setIsSystemPromptEditing(false);
 
-                // Only set history if messagesAtom is empty.
-                // This prevents duplication if useMessageSending.ts is already adding messages.
-                if (messages.length === 0) {
-                  setMessages(
-                    (data.history || []).map((msg: any) => {
-                      const chatMessage: ChatMessage = {
-                        ...msg,
-                        id: msg.id,
-                        attachments: msg.attachments,
-                        cumulTokenCount: msg.cumul_token_count,
+                setMessages(
+                  (data.history || []).map((msg: any) => {
+                    const chatMessage: ChatMessage = {
+                      ...msg,
+                      id: msg.id,
+                      attachments: msg.attachments,
+                      cumulTokenCount: msg.cumul_token_count,
+                    };
+                    if (msg.type === 'thought') {
+                      chatMessage.type = 'thought';
+                    } else if (msg.type === 'model_error') {
+                      chatMessage.type = 'model_error';
+                    } else if (msg.parts?.[0]?.functionCall) {
+                      chatMessage.type = 'function_call';
+                      chatMessage.parts[0] = {
+                        functionCall: msg.parts[0].functionCall,
                       };
-                      if (msg.type === 'thought') {
-                        chatMessage.type = 'thought';
-                      } else if (msg.type === 'model_error') {
-                        chatMessage.type = 'model_error';
-                      } else if (msg.parts?.[0]?.functionCall) {
-                        chatMessage.type = 'function_call';
-                        chatMessage.parts[0] = {
-                          functionCall: msg.parts[0].functionCall,
-                        };
-                      } else if (msg.parts?.[0]?.functionResponse) {
-                        chatMessage.type = 'function_response';
-                        chatMessage.parts[0] = {
-                          functionResponse: msg.parts[0].functionResponse,
-                        };
-                      } else if (msg.type !== 'text') {
-                        chatMessage.type = msg.type;
-                      } else {
-                        chatMessage.type = msg.role;
-                      }
-                      return chatMessage;
-                    }),
-                  );
-                }
+                    } else if (msg.parts?.[0]?.functionResponse) {
+                      chatMessage.type = 'function_response';
+                      chatMessage.parts[0] = {
+                        functionResponse: msg.parts[0].functionResponse,
+                      };
+                    } else if (msg.type !== 'text') {
+                      chatMessage.type = msg.type;
+                    } else {
+                      chatMessage.type = msg.role;
+                    }
+                    return chatMessage;
+                  }),
+                );
                 setWorkspaceId(data.workspaceId);
                 setPrimaryBranchId(data.primaryBranchId);
 
@@ -243,7 +237,7 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
         return () => {
           closeEventSourceNormally();
         };
-      } else {
+      } else if (!currentSessionId) {
         resetChatSessionState();
       }
     };
