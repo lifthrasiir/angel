@@ -1,4 +1,4 @@
-module angel
+module github.com/lifthrasiir/angel
 
 go 1.23.0
 

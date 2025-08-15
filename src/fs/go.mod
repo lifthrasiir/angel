@@ -1,4 +1,4 @@
-module github.com/lifthrasiir/angel/sandbox
+module github.com/lifthrasiir/angel/fs
 
 go 1.24.4
 
