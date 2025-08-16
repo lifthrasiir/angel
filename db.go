@@ -25,7 +25,8 @@ func createTables(db *sql.DB) error {
 		system_prompt TEXT,
 		name TEXT DEFAULT '',
 		workspace_id TEXT DEFAULT '',
-		primary_branch_id TEXT -- New column for primary branch
+		primary_branch_id TEXT, -- New column for primary branch
+		roots TEXT DEFAULT '[]' -- New column for exposed roots, defaults to empty JSON array
 	);
 
 	CREATE TABLE IF NOT EXISTS branches (
@@ -81,10 +82,21 @@ func createTables(db *sql.DB) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		label TEXT NOT NULL UNIQUE,
 		value TEXT NOT NULL
-	);`
+	);
+`
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
 		return fmt.Errorf("Failed to create tables: %w", err)
+	}
+	return nil
+}
+
+// migrateDB handles database schema migrations.
+func migrateDB(db *sql.DB) error {
+	// Add 'roots' column to 'sessions' table if it doesn't exist
+	_, err := db.Exec(`ALTER TABLE sessions ADD COLUMN roots TEXT DEFAULT '[]'`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("failed to add roots column to sessions table: %w", err)
 	}
 	return nil
 }
@@ -113,6 +125,12 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
+	// Run migrations
+	if err = migrateDB(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to run database migrations: %w", err)
+	}
+
 	log.Println("Database initialized and tables created.")
 	return db, nil
 }
@@ -121,12 +139,13 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 
 // Session struct to hold session data
 type Session struct {
-	ID              string `json:"id"`
-	LastUpdated     string `json:"last_updated_at"`
-	SystemPrompt    string `json:"system_prompt"`
-	Name            string `json:"name"`
-	WorkspaceID     string `json:"workspace_id"`
-	PrimaryBranchID string `json:"primary_branch_id"` // Changed to string
+	ID              string   `json:"id"`
+	LastUpdated     string   `json:"last_updated_at"`
+	SystemPrompt    string   `json:"system_prompt"`
+	Name            string   `json:"name"`
+	WorkspaceID     string   `json:"workspace_id"`
+	PrimaryBranchID string   `json:"primary_branch_id"` // Changed to string
+	Roots           []string `json:"roots"`
 }
 
 // Branch struct to hold branch data
@@ -162,6 +181,15 @@ type Message struct {
 	Model                   string           `json:"model,omitempty"`                       // New field for the model that generated the message
 	CompressedUpToMessageID *int             `json:"compressed_up_to_message_id,omitempty"` // New field for compression
 }
+
+const (
+	MessageTypeText             = "text"
+	MessageTypeFunctionCall     = "function_call"
+	MessageTypeFunctionResponse = "function_response"
+	MessageTypeThought          = "thought"
+	MessageTypeCompression      = "compression"
+	MessageTypeSystemPrompt     = "system_prompt"
+)
 
 // DbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
 type DbOrTx interface {
@@ -499,11 +527,31 @@ func SessionExists(db *sql.DB, sessionID string) (bool, error) {
 
 func GetSession(db *sql.DB, sessionID string) (Session, error) {
 	var s Session
-	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, '') FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID)
+	var rootsJSON string
+	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, ''), COALESCE(roots, '[]') FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID, &rootsJSON)
 	if err != nil {
 		return s, err
 	}
+
+	if err := json.Unmarshal([]byte(rootsJSON), &s.Roots); err != nil {
+		return s, fmt.Errorf("failed to unmarshal session roots: %w", err)
+	}
+
 	return s, nil
+}
+
+// UpdateSessionRoots updates the roots for a session.
+func UpdateSessionRoots(db *sql.DB, sessionID string, roots []string) error {
+	rootsJSON, err := json.Marshal(roots)
+	if err != nil {
+		return fmt.Errorf("failed to marshal roots: %w", err)
+	}
+
+	_, err = db.Exec("UPDATE sessions SET roots = ? WHERE id = ?", string(rootsJSON), sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update session roots: %w", err)
+	}
+	return nil
 }
 
 func GetBranch(db *sql.DB, branchID string) (Branch, error) {
@@ -687,10 +735,10 @@ func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID stri
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
 					m.role, m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
 					coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
-				FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
-				GROUP BY m.id
-				HAVING m.branch_id = ? AND m.id <= ?
-				ORDER BY m.id ASC
+			FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
+			GROUP BY m.id
+			HAVING m.branch_id = ? AND m.id <= ?
+			ORDER BY m.id ASC
 			`, branchID, messageIdLimit)
 			if err != nil {
 				return fmt.Errorf("failed to query branch messages: %w", err)

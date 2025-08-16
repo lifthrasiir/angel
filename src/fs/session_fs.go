@@ -2,7 +2,6 @@ package fs
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -31,39 +30,44 @@ func NewSessionFS(sessionId string) (*SessionFS, error) {
 	return sf, nil
 }
 
-// AddRoot adds a new root directory to the session's accessible roots.
-// It checks for existence and prevents overlapping roots.
-func (sf *SessionFS) AddRoot(path string) error {
+// SetRoots sets the accessible root directories for the session.
+// It replaces the existing roots with the provided list, handling additions and removals.
+// It checks for existence and prevents overlapping roots among the new set.
+func (sf *SessionFS) SetRoots(newRoots []string) error {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("invalid path: %w", err)
+	// Normalize and validate new roots
+	normalizedNewRoots := make([]string, 0, len(newRoots))
+	for _, path := range newRoots {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return fmt.Errorf("invalid path: %w", err)
+		}
+
+		fileInfo, err := os.Stat(absPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("root path does not exist: %s", absPath)
+			}
+			return fmt.Errorf("failed to stat root path: %w", err)
+		}
+		if !fileInfo.IsDir() {
+			return fmt.Errorf("root path is not a directory: %s", absPath)
+		}
+		normalizedNewRoots = append(normalizedNewRoots, absPath)
 	}
 
-	fileInfo, err := os.Stat(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("root path does not exist: %s", absPath)
-		}
-		return fmt.Errorf("failed to stat root path: %w", err)
-	}
-	if !fileInfo.IsDir() {
-		return fmt.Errorf("root path is not a directory: %s", absPath)
-	}
-
-	for _, existingRoot := range sf.roots {
-		if absPath == existingRoot {
-			return errors.New("root already added")
-		}
-		// Check for overlapping roots
-		if containsPath(existingRoot, absPath) || containsPath(absPath, existingRoot) {
-			return fmt.Errorf("overlapping root detected: %s with %s", absPath, existingRoot)
+	// Check for overlapping roots within the new set
+	for i, root1 := range normalizedNewRoots {
+		for j, root2 := range normalizedNewRoots {
+			if i != j && containsPath(root1, root2) {
+				return fmt.Errorf("overlapping root detected: %s with %s", root1, root2)
+			}
 		}
 	}
 
-	sf.roots = append(sf.roots, absPath)
+	sf.roots = normalizedNewRoots
 	return nil
 }
 

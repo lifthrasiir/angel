@@ -83,7 +83,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	// 2. Calculate originalTokenCount.
-	originalTokenResp, err := provider.CountTokens(context.Background(), curatedHistory, modelName)
+	originalTokenResp, err := provider.CountTokens(ctx, curatedHistory, modelName)
 	if err != nil {
 		err = fmt.Errorf("CountTokens API call failed: %w", err)
 		return

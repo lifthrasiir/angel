@@ -37,7 +37,8 @@ func (BuiltinPrompts) String() string {
 `
 }
 
-func (p BuiltinPrompts) SystemPrompt() string { return p.data.GetDefaultSystemPrompt() }
+func (p BuiltinPrompts) SystemPrompt() string      { return p.data.GetDefaultSystemPrompt() }
+func (p BuiltinPrompts) DynamicPromptTool() string { return GetDynamicPromptToolPrompt() }
 
 // PromptWorkspace holds the current workspace information.
 type PromptWorkspace struct{ data PromptData }

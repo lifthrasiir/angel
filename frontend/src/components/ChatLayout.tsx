@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { chatSessionIdAtom, globalPromptsAtom, selectedGlobalPromptAtom, systemPromptAtom } from '../atoms/chatAtoms';
+import { chatSessionIdAtom, globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/chatAtoms';
 import { PredefinedPrompt } from './SystemPromptEditor';
 import { useChatSession } from '../hooks/useChatSession';
 import useEscToCancel from '../hooks/useEscToCancel';
@@ -19,7 +19,6 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
 
   const setGlobalPrompts = useSetAtom(globalPromptsAtom);
   const setSelectedGlobalPrompt = useSetAtom(selectedGlobalPromptAtom);
-  const setSystemPrompt = useSetAtom(systemPromptAtom);
 
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -52,7 +51,6 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
           setGlobalPrompts(data);
           if (data.length > 0) {
             setSelectedGlobalPrompt(data[0].label); // Set initial active prompt label for display
-            setSystemPrompt(data[0].value); // Set the actual system prompt value
           }
         } else {
           console.error('Failed to fetch global prompts:', response.status, response.statusText);

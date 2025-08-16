@@ -28,6 +28,7 @@ export interface ChatMessage {
     | 'model'
     | 'thought'
     | 'system'
+    | 'system_prompt'
     | 'user'
     | 'function_call'
     | 'function_response'

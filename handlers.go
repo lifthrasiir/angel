@@ -284,6 +284,7 @@ func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if frontendConfig.IsConnected {
+
 			toolsIterator := conn.Session.Tools(context.Background(), nil)
 			var tools []string
 			builtinToolNames := GetBuiltinToolNames()
@@ -441,6 +442,111 @@ func listModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, models)
+}
+
+func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	auth := getAuth(w, r)
+
+	if !auth.Validate("updateSessionRootsHandler", w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var requestBody struct {
+		Roots []string `json:"roots"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "updateSessionRootsHandler") {
+		return
+	}
+
+	// Get the SessionFS instance for this session
+	sessionFS, err := getSessionFS(r.Context(), sessionId)
+	if err != nil {
+		log.Printf("updateSessionRootsHandler: Failed to get SessionFS for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to manage exposed directories: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer releaseSessionFS(sessionId)
+
+	// Update SessionFS with the new roots
+	if err := sessionFS.SetRoots(requestBody.Roots); err != nil {
+		log.Printf("updateSessionRootsHandler: Failed to set roots for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to set exposed directories: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Update the database
+	if err := UpdateSessionRoots(db, sessionId, requestBody.Roots); err != nil {
+		log.Printf("updateSessionRootsHandler: Failed to update session roots in DB for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to update exposed directories in DB: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the session to find its primary branch ID
+	session, err := GetSession(db, sessionId)
+	if err != nil {
+		log.Printf("updateSessionRootsHandler: Failed to get session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to get session: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	primaryBranchID := session.PrimaryBranchID
+
+	// Get the last message in the primary branch to link the new system prompt message
+	lastMessageID, _, err := GetLastMessageInBranch(db, sessionId, primaryBranchID)
+	if err != nil {
+		log.Printf("updateSessionRootsHandler: Failed to get last message in branch %s for session %s: %v", primaryBranchID, sessionId, err)
+		// If no messages exist yet, we can still add the system prompt as the first message
+		// In this case, parentMessageID will remain nil
+		lastMessageID = 0 // Indicate no parent message
+	}
+
+	var parentMessageID *int
+	if lastMessageID != 0 {
+		parentMessageID = &lastMessageID
+	}
+
+	var messageText string
+	if len(requestBody.Roots) > 0 {
+		messageText = fmt.Sprintf("From now on the following directories are exposed: %s", strings.Join(requestBody.Roots, ", "))
+	} else {
+		messageText = "From now on no directories are exposed."
+	}
+
+	// Send a system prompt message to the frontend
+	// This message will be expanded into a FunctionCall and FunctionResponse by convertFrontendMessagesToContent
+	newSystemPromptMessageID, err := AddMessageToSession(r.Context(), db, Message{
+		SessionID:       sessionId,
+		BranchID:        primaryBranchID,
+		ParentMessageID: parentMessageID,
+		Role:            "user", // System messages are typically from the "user" role in this context
+		Text:            messageText,
+		Type:            MessageTypeSystemPrompt,
+	})
+	if err != nil {
+		log.Printf("updateSessionRootsHandler: Failed to add system prompt message: %v", err)
+		// Non-fatal, continue with response
+	}
+
+	// If there was a last message, update its chosen_next_id to point to the new system prompt message
+	if lastMessageID != 0 {
+		newSystemPromptMessageIDInt := int(newSystemPromptMessageID) // Convert int64 to int
+		err = UpdateMessageChosenNextID(db, lastMessageID, &newSystemPromptMessageIDInt)
+		if err != nil {
+			log.Printf("updateSessionRootsHandler: Failed to update chosen_next_id for message %d: %v", lastMessageID, err)
+			// Non-fatal, continue with response
+		}
+	}
+
+	sendJSONResponse(w, map[string]string{"status": "success", "message": "Exposed directories updated successfully"})
 }
 
 // handleDownloadBlob retrieves a blob by its message ID and attachment index and serves it as a download.

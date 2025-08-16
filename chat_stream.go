@@ -28,7 +28,8 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 
 	// Create a cancellable context for the Gemini API call
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // Ensure context is cancelled when function exits
+	defer cancel()                          // Ensure context is cancelled when function exits
+	ctx = context.WithValue(ctx, dbKey, db) // Required by tools
 
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {

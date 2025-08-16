@@ -47,6 +47,8 @@ const ChatMessage: React.FC<{ message: ChatMessage; maxTokens?: number }> = Reac
     if (functionCall) return <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} />;
   } else if (type === 'system') {
     return <SystemMessage text={text} messageInfo={messageInfoComponent} />;
+  } else if (type === 'system_prompt') {
+    return <SystemMessage text={text} messageInfo={messageInfoComponent} />;
   } else if (type === 'model_error') {
     return <ModelTextMessage text={text} className="agent-error-message" messageInfo={messageInfoComponent} />;
   } else if (type === 'compression') {

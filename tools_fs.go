@@ -21,7 +21,7 @@ var sessionFSMutex sync.Mutex // Mutex to protect sessionFSMap
 
 // getSessionFS retrieves or creates a SessionFS instance for a given session ID.
 // It increments the reference count for the SessionFS instance.
-func getSessionFS(sessionId string) (*fsPkg.SessionFS, error) {
+func getSessionFS(ctx context.Context, sessionId string) (*fsPkg.SessionFS, error) { // Modified signature
 	sessionFSMutex.Lock()
 	defer sessionFSMutex.Unlock()
 
@@ -31,6 +31,25 @@ func getSessionFS(sessionId string) (*fsPkg.SessionFS, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SessionFS for session %s: %w", sessionId, err)
 		}
+
+		// Get DB from context
+		db, err := getDbFromContext(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get DB from context in getSessionFS: %w", err)
+		}
+
+		// Get the session to retrieve roots
+		session, err := GetSession(db, sessionId)
+		if err != nil {
+			log.Printf("getSessionFS: Failed to get session %s to retrieve roots: %v", sessionId, err)
+			return nil, fmt.Errorf("failed to get session roots for session %s: %w", sessionId, err)
+		}
+
+		// Set the roots for the new SessionFS instance
+		if err := sf.SetRoots(session.Roots); err != nil {
+			return nil, fmt.Errorf("failed to set roots for SessionFS for session %s: %w", sessionId, err)
+		}
+
 		entry = &sessionFSEntry{
 			sessionFS: sf,
 			refCount:  0, // Will be incremented below
@@ -77,7 +96,7 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params ToolH
 		return nil, fmt.Errorf("invalid file_path argument for read_file")
 	}
 
-	sf, err := getSessionFS(params.SessionId)
+	sf, err := getSessionFS(ctx, params.SessionId) // Modified call
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SessionFS for read_file: %w", err)
 	}
@@ -105,7 +124,7 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params Tool
 		return nil, fmt.Errorf("invalid content argument for write_file")
 	}
 
-	sf, err := getSessionFS(params.SessionId)
+	sf, err := getSessionFS(ctx, params.SessionId) // Modified call
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SessionFS for write_file: %w", err)
 	}
@@ -129,7 +148,7 @@ func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params 
 		return nil, fmt.Errorf("invalid path argument for list_directory")
 	}
 
-	sf, err := getSessionFS(params.SessionId)
+	sf, err := getSessionFS(ctx, params.SessionId) // Modified call
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SessionFS for list_directory: %w", err)
 	}

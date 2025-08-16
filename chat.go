@@ -673,7 +673,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 	for _, fm := range frontendMessages {
 		var parts []Part
 		// Add text part if present
-		if fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
+		if len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
 			parts = append(parts, Part{Text: fm.Parts[0].Text})
 		}
 
@@ -697,10 +697,27 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		}
 
 		// Handle function calls and responses (these should override text/attachments for their specific message types)
-		if fm.Type == "function_call" && fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
+		if fm.Type == MessageTypeFunctionCall && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
 			parts = append(parts, Part{FunctionCall: fm.Parts[0].FunctionCall})
-		} else if fm.Type == "function_response" && fm.Parts != nil && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
+		} else if fm.Type == MessageTypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
 			parts = append(parts, Part{FunctionResponse: fm.Parts[0].FunctionResponse})
+		} else if fm.Type == MessageTypeSystemPrompt && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
+			// System_prompt should expand to *two* `Content`s
+			contents = append(contents,
+				Content{
+					Role: "model",
+					Parts: []Part{
+						{FunctionCall: &FunctionCall{Name: "new_system_prompt", Args: map[string]interface{}{}}},
+					},
+				},
+				Content{
+					Role: "user",
+					Parts: []Part{
+						{FunctionResponse: &FunctionResponse{Name: "new_system_prompt", Response: map[string]interface{}{"prompt": fm.Parts[0].Text}}},
+					},
+				},
+			)
+			continue
 		}
 
 		// If parts is still empty, add an empty text part to satisfy Gemini API requirements

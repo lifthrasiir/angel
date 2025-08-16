@@ -85,6 +85,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/chat/{sessionId}", chatMessage).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}", loadChatSession).Methods("GET")
 	router.HandleFunc("/api/chat/{sessionId}/name", updateSessionNameHandler).Methods("POST")
+	router.HandleFunc("/api/chat/{sessionId}/roots", updateSessionRootsHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/call", handleCall).Methods("GET", "DELETE")
 	router.HandleFunc("/api/chat/{sessionId}", deleteSession).Methods("DELETE")
 	router.HandleFunc("/api/chat/{sessionId}/branch", createBranchHandler).Methods("POST")
@@ -131,7 +132,6 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.FileServer(http.FS(fsys)).ServeHTTP(w, r)
-	return
 }
 
 // serveSPAIndex serves the index.html file for SPA fallback
@@ -263,6 +263,15 @@ func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
 		runtime.Goexit()
 	}
 	return db
+}
+
+// getDbFromContext retrieves the *sql.DB instance from the given context.Context.
+func getDbFromContext(ctx context.Context) (*sql.DB, error) {
+	db, ok := ctx.Value(dbKey).(*sql.DB)
+	if !ok {
+		return nil, fmt.Errorf("database connection not found in context")
+	}
+	return db, nil
 }
 
 func getAuth(w http.ResponseWriter, r *http.Request) Auth {
