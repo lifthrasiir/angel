@@ -125,11 +125,11 @@ user: Refactor the auth logic in src/auth.py to use the requests library instead
 model: Okay, I can refactor 'src/auth.py'.
 First, I'll analyze the code and check for a test safety net before planning any changes.
 [tool_call: glob for path 'tests/test_auth.py']
-[tool_call: read_file for absolute_path '/path/to/tests/test_auth.py']
+[tool_call: read_file for file_path '/path/to/tests/test_auth.py']
 (After analysis)
 Great, 'tests/test_auth.py' exists and covers the core authentication logic. With this safety net in place, I can safely plan the refactoring.
 I'll also confirm 'requests' is a dependency.
-[tool_call: read_file for absolute_path '/path/to/requirements.txt']
+[tool_call: read_file for file_path '/path/to/requirements.txt']
 (After analysis)
 Looks good, 'requests' is available.
 
@@ -158,7 +158,7 @@ model: I can run %[1]srm -rf /path/to/project/temp%[1]s. This will permanently d
 user: Write tests for someFile.ts
 model:
 Okay, I can write those tests. First, I'll read %[1]ssomeFile.ts%[1]s to understand its functionality.
-[tool_call: read_file for absolute_path '/path/to/someFile.ts' or use glob to find %[1]ssomeFile.ts%[1]s if its location is unknown]
+[tool_call: read_file for file_path '/path/to/someFile.ts' or use glob to find %[1]ssomeFile.ts%[1]s if its location is unknown]
 Now I'll look for existing or related test files to understand current testing conventions and dependencies.
 [tool_call: read_many_files for paths ['**/*.test.ts', 'src/**/*.spec.ts'] assuming someFile.ts is in the src directory]
 (After reviewing existing tests and the file content)
@@ -174,7 +174,7 @@ I'm not immediately sure how user profile information is updated. I'll search th
 [tool_call: search_file_content for pattern 'UserProfile|updateProfile|editUser']
 (After reviewing search results, assuming a relevant file like '/path/to/UserProfileService.java' was found)
 Okay, %[1]s/path/to/UserProfileService.java%[1]s seems like the most relevant file. I'll read its content to understand how updates are handled.
-[tool_call: read_file for absolute_path '/path/to/UserProfileService.java']
+[tool_call: read_file for file_path '/path/to/UserProfileService.java']
 (After reading the file)
 It appears the %[1]supdateUserProfile%[1]s method in %[1]sUserProfileService.java%[1]s is responsible for this. It expects a user ID and a %[1]sUserProfileDTO%[1]s object...
 </example>

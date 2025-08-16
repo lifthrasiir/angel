@@ -21,18 +21,6 @@ const (
 	USER_AGENT           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Angel/0.0"
 )
 
-// WebFetchToolParams represents the parameters for the WebFetch tool.
-type WebFetchToolParams struct {
-	Prompt    string `json:"prompt"`
-	ModelName string `json:"modelName"`
-}
-
-// WebFetchTool implements the ToolDefinition handler for web_fetch.
-type WebFetchTool struct {
-	// Config and LLMProvider will need to be passed or accessed globally.
-	// For now, we'll assume access via GlobalGeminiState or similar.
-}
-
 var httpUrlPattern = regexp.MustCompile(`(https?://[^\s]+)`)
 
 // extractURLs extracts URLs from a given text.
@@ -95,9 +83,9 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 	return string(bodyBytes), nil
 }
 
-// executeFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
-func (t *WebFetchTool) executeFallback(ctx context.Context, params WebFetchToolParams, llmProvider LLMProvider) (map[string]interface{}, error) {
-	urls := extractURLs(params.Prompt)
+// executeWebFetchFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
+func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (map[string]interface{}, error) {
+	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("Error: No URL found in the prompt for fallback.")
 	}
@@ -119,10 +107,10 @@ func (t *WebFetchTool) executeFallback(ctx context.Context, params WebFetchToolP
 		textContent = textContent[:MAX_CONTENT_LENGTH]
 	}
 
-	fallbackPrompt := GetWebFetchFallbackPrompt(params.Prompt, textContent)
+	fallbackPrompt := GetWebFetchFallbackPrompt(prompt, textContent)
 
 	sessionParams := SessionParams{
-		ModelName: params.ModelName,
+		ModelName: modelName,
 		Contents:  []Content{{Role: "user", Parts: []Part{{Text: fallbackPrompt}}}},
 	}
 
@@ -139,36 +127,23 @@ func (t *WebFetchTool) executeFallback(ctx context.Context, params WebFetchToolP
 	}, nil
 }
 
-// CallToolFunction implements the handler for the web_fetch tool.
-func (t *WebFetchTool) CallToolFunction(ctx context.Context, args map[string]interface{}, modelName string) (map[string]interface{}, error) {
-	prompt, ok := args["prompt"].(string)
-	if !ok || strings.TrimSpace(prompt) == "" {
-		return nil, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
-	}
-
-	params := WebFetchToolParams{Prompt: prompt, ModelName: modelName}
-
-	urls := extractURLs(params.Prompt)
+func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (map[string]interface{}, error) {
+	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("the 'prompt' must contain at least one valid URL (starting with http:// or https://).")
-	}
-
-	llmProvider := CurrentProviders[modelName]
-	if llmProvider == nil {
-		return nil, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s)", modelName)
 	}
 
 	// Check for private IP before calling LLM
 	urlToProcess := urls[0] // Assuming we only process the first URL for private IP check
 	if isPrivateIp(urlToProcess) {
 		log.Printf("WebFetchTool: Detected private IP for %s. Bypassing LLM and performing manual fetch.", urlToProcess)
-		return t.executeFallback(ctx, params, llmProvider)
+		return executeWebFetchFallback(ctx, prompt, modelName, llmProvider)
 	}
 
 	// --- Primary Gemini API call with urlContext ---
 	sessionParams := SessionParams{
 		ModelName: modelName,
-		Contents:  []Content{{Role: "user", Parts: []Part{{Text: params.Prompt}}}},
+		Contents:  []Content{{Role: "user", Parts: []Part{{Text: prompt}}}},
 		ToolConfig: map[string]interface{}{
 			"urlContext": map[string]interface{}{}, // Empty object as per Gemini API
 		},
@@ -203,12 +178,30 @@ func (t *WebFetchTool) CallToolFunction(ctx context.Context, args map[string]int
 
 	if processingError {
 		// Perform fallback for the original prompt
-		return t.executeFallback(ctx, params, llmProvider)
+		return executeWebFetchFallback(ctx, prompt, modelName, llmProvider)
 	}
 
 	// If no processing error, return the LLM's response
 	return map[string]interface{}{
 		"llmContent":    oneShotResult.Text,
-		"returnDisplay": fmt.Sprintf("Content processed from prompt."),
+		"returnDisplay": "Content processed from prompt.",
 	}, nil
+}
+
+// WebFetchTool implements the handler for the web_fetch tool.
+func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
+	if err := EnsureKnownKeys("web_fetch", args, "prompt"); err != nil {
+		return nil, err
+	}
+	prompt, ok := args["prompt"].(string)
+	if !ok || strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
+	}
+
+	llmProvider := CurrentProviders[params.ModelName]
+	if llmProvider == nil {
+		return nil, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s)", params.ModelName)
+	}
+
+	return executeWebFetch(ctx, prompt, params.ModelName, llmProvider)
 }
