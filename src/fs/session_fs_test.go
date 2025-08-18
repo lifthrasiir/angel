@@ -87,50 +87,38 @@ func TestSessionFS_AddRoot(t *testing.T) {
 	defer os.RemoveAll(testRoot)
 
 	// Test adding a valid root
-	err = sf.AddRoot(testRoot)
-	checkError(t, err, "AddRoot failed for valid root")
-	found := false
-	for _, r := range sf.Roots() {
-		if r == testRoot {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("Expected roots to contain '%s', but it didn't", testRoot)
+	err = sf.SetRoots([]string{testRoot})
+	checkError(t, err, "SetRoots failed for valid root")
+	if len(sf.Roots()) != 1 || sf.Roots()[0] != testRoot {
+		t.Errorf("Expected roots to be [\"%s\"], but got %v", testRoot, sf.Roots())
 	}
 
-	// Test adding a non-existent path
+	// Test setting a non-existent path as root
 	nonExistentPath := filepath.Join(testRoot, "non-existent")
-	err = sf.AddRoot(nonExistentPath)
+	err = sf.SetRoots([]string{nonExistentPath})
 	checkExpectedError(t, err, "root path does not exist")
 
-	// Test adding a file (not a directory)
+	// Test setting a file (not a directory) as root
 	testFile := filepath.Join(testRoot, "testfile.txt")
 	err = os.WriteFile(testFile, []byte("hello"), 0644)
 	checkError(t, err, "WriteFile failed")
-	err = sf.AddRoot(testFile)
+	err = sf.SetRoots([]string{testFile})
 	checkExpectedError(t, err, "is not a directory")
 
-	// Test adding a duplicate root
-	err = sf.AddRoot(testRoot)
-	checkExpectedError(t, err, "root already added")
+	// Test setting duplicate roots
+	err = sf.SetRoots([]string{testRoot, testRoot})
+	checkExpectedError(t, err, "overlapping root detected")
 
-	// Test adding overlapping roots
+	// Test setting overlapping roots
 	subDir := filepath.Join(testRoot, "subdir")
 	checkError(t, os.Mkdir(subDir, 0755), "Mkdir failed for subdir")
 
-	err = sf.AddRoot(subDir)
+	err = sf.SetRoots([]string{testRoot, subDir})
 	checkExpectedError(t, err, "overlapping root detected")
 
-	// Test adding a root that contains an existing root
+	// Test setting a root that contains an existing root
 	parentDir := filepath.Join(testRoot, "..") // Use ".." to get parent
-	// Temporarily remove the existing root to add its parent
-	sf.roots = []string{} // Clear roots for this specific test case
-	err = sf.AddRoot(parentDir)
-	checkError(t, err, "AddRoot failed for parentDir")
-
-	err = sf.AddRoot(testRoot)
+	err = sf.SetRoots([]string{parentDir, testRoot})
 	checkExpectedError(t, err, "overlapping root detected")
 }
 
@@ -188,8 +176,8 @@ func TestSessionFS_FileOperations(t *testing.T) {
 	testRoot, err := os.MkdirTemp("", "test-file-root-*")
 	checkError(t, err, "MkdirTemp failed")
 	defer os.RemoveAll(testRoot)
-	err = sf.AddRoot(testRoot)
-	checkError(t, err, "AddRoot failed")
+	err = sf.SetRoots([]string{testRoot})
+	checkError(t, err, "SetRoots failed")
 
 	content3 := []byte("content in registered root")
 	regFileName := filepath.Join(testRoot, "reg_file.txt") // Use absolute path for file in registered root
@@ -273,7 +261,9 @@ func TestSessionFS_Run(t *testing.T) {
 		testRoot, err := os.MkdirTemp("", "test-run-root-*")
 		checkError(t, err, "MkdirTemp failed")
 		defer os.RemoveAll(testRoot)
-		err = sf.AddRoot(testRoot)
+
+		err = sf.SetRoots([]string{testRoot})
+
 		checkError(t, err, "AddRoot failed")
 
 		stdout, _, exitCode, err := sf.Run("dir", testRoot)
