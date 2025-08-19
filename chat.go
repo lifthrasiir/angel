@@ -670,7 +670,10 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 // Helper function to convert FrontendMessage to Content for Gemini API
 func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMessage) []Content {
 	var contents []Content
-	for _, fm := range frontendMessages {
+	// Apply curation rules before converting to Content
+	curatedMessages := applyCurationRules(frontendMessages)
+
+	for _, fm := range curatedMessages {
 		var parts []Part
 		// Add text part if present
 		if len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
@@ -731,4 +734,57 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		})
 	}
 	return contents
+}
+
+// applyCurationRules applies the specified curation rules to a slice of FrontendMessage.
+func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
+	var curated []FrontendMessage
+	for i := 0; i < len(messages); i++ {
+		currentMsg := messages[i]
+
+		// Rule 1: Remove consecutive user text messages
+		// If current is user text and next is user text (ignoring thoughts/errors in between)
+		if currentMsg.Role == "user" && currentMsg.Type == MessageTypeText {
+			nextUserTextIndex := -1
+			for j := i + 1; j < len(messages); j++ {
+				if messages[j].Type == MessageTypeThought {
+					continue // Ignore thoughts and errors for continuity
+				}
+				if messages[j].Role == "user" && messages[j].Type == MessageTypeText {
+					nextUserTextIndex = j
+					break
+				}
+				// If we find any other type of message, it breaks the "consecutive user text" chain
+				break
+			}
+			if nextUserTextIndex != -1 {
+				// This 'currentMsg' is followed by another user text message, so skip it.
+				continue
+			}
+		}
+
+		// Rule 2: Remove function_call if not followed by function_response
+		// If current is model function_call
+		if currentMsg.Role == "model" && currentMsg.Type == MessageTypeFunctionCall {
+			foundResponse := false
+			for j := i + 1; j < len(messages); j++ {
+				if messages[j].Type == MessageTypeThought {
+					continue // Ignore thoughts and errors for continuity
+				}
+				if messages[j].Role == "user" && messages[j].Type == MessageTypeFunctionResponse {
+					foundResponse = true
+					break
+				}
+				// If we find any other type of message, it means no immediate function response
+				break
+			}
+			if !foundResponse {
+				// This 'currentMsg' (function_call) is not followed by a function_response, so skip it.
+				continue
+			}
+		}
+
+		curated = append(curated, currentMsg)
+	}
+	return curated
 }
