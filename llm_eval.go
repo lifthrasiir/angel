@@ -27,7 +27,7 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 	}
 
 	return func(yield func(CaGenerateContentResponse) bool) {
-		err := parseAndExecute(input, yield)
+		err := parseAndExecute(ctx, input, yield)
 		if err != nil {
 			yield(CaGenerateContentResponse{
 				Response: VertexGenerateContentResponse{
@@ -95,14 +95,14 @@ func (s *stack) pop() (interface{}, error) {
 }
 
 // parseAndExecute parses the input and executes Forth-like operations.
-func parseAndExecute(input string, yield func(CaGenerateContentResponse) bool) error {
+func parseAndExecute(ctx context.Context, input string, yield func(CaGenerateContentResponse) bool) error {
 	st := make(stack, 0)
 	tokens := tokenize(input)
 
 	for _, token := range tokens {
 		select {
-		case <-context.Background().Done(): // Check for context cancellation
-			return context.Background().Err()
+		case <-ctx.Done(): // Check for context cancellation
+			return ctx.Err()
 		default:
 		}
 
@@ -180,7 +180,12 @@ func parseAndExecute(input string, yield func(CaGenerateContentResponse) bool) e
 				if !ok {
 					return fmt.Errorf("type mismatch: expected number for 'sleep', got %T", val)
 				}
-				time.Sleep(time.Duration(sleepTime * float64(time.Second)))
+				select {
+				case <-time.After(time.Duration(sleepTime * float64(time.Second))):
+					// Sleep completed
+				case <-ctx.Done():
+					return ctx.Err() // Context was cancelled
+				}
 			default:
 				return fmt.Errorf("unknown operation: %s", token)
 			}
