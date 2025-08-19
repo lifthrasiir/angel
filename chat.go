@@ -537,7 +537,7 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleOldPrimaryBranchChosenNextID(db, sessionId, oldPrimaryBranchID, requestBody.NewPrimaryBranchID)
-	handleNewPrimaryBranchChosenNextID(db, sessionId, requestBody.NewPrimaryBranchID)
+	handleNewPrimaryBranchChosenNextID(db, requestBody.NewPrimaryBranchID)
 
 	sendJSONResponse(w, map[string]string{
 		"status":          "success",
@@ -613,7 +613,7 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 }
 
 // handleNewPrimaryBranchChosenNextID handles the chosen_next_id logic for the new primary branch.
-func handleNewPrimaryBranchChosenNextID(db *sql.DB, sessionId, newPrimaryBranchID string) {
+func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 	// If the new primary branch is a branched branch, update its branch_from_message_id's chosen_next_id
 	// to point to the first message of this new primary branch.
 	newBranch, err := GetBranch(db, newPrimaryBranchID)

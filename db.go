@@ -86,7 +86,7 @@ func createTables(db *sql.DB) error {
 `
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
-		return fmt.Errorf("Failed to create tables: %w", err)
+		return fmt.Errorf("failed to create tables: %w", err)
 	}
 	return nil
 }

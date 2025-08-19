@@ -25,8 +25,7 @@ func TestCountTokensHandler(t *testing.T) {
 		rr := testRequest(t, router, "POST", "/api/countTokens", payload, http.StatusOK)
 
 		var response map[string]int
-		var err error
-		err = json.Unmarshal(rr.Body.Bytes(), &response)
+		err := json.Unmarshal(rr.Body.Bytes(), &response)
 		if err != nil {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}
@@ -68,8 +67,7 @@ func TestHandleEvaluatePrompt(t *testing.T) {
 		rr := testRequest(t, router, "POST", "/api/evaluatePrompt", payload, http.StatusOK)
 
 		var response map[string]string
-		var err error
-		err = json.Unmarshal(rr.Body.Bytes(), &response)
+		err := json.Unmarshal(rr.Body.Bytes(), &response)
 		if err != nil {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}
@@ -139,8 +137,7 @@ func TestSaveMCPConfigHandler(t *testing.T) {
 		rr := testRequest(t, router, "POST", "/api/mcp/configs", payload, http.StatusOK)
 
 		var response MCPServerConfig
-		var err error
-		err = json.Unmarshal(rr.Body.Bytes(), &response)
+		err := json.Unmarshal(rr.Body.Bytes(), &response)
 		if err != nil {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}
@@ -176,8 +173,7 @@ func TestDeleteMCPConfigHandler(t *testing.T) {
 		rr := testRequest(t, router, "DELETE", "/api/mcp/configs/mcp-to-delete", nil, http.StatusOK)
 
 		var response map[string]string
-		var err error
-		err = json.Unmarshal(rr.Body.Bytes(), &response)
+		err := json.Unmarshal(rr.Body.Bytes(), &response)
 		if err != nil {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}

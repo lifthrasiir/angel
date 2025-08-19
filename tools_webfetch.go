@@ -87,7 +87,7 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (map[string]interface{}, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
-		return nil, fmt.Errorf("Error: No URL found in the prompt for fallback.")
+		return nil, fmt.Errorf("no URL found in the prompt for fallback")
 	}
 	urlToFetch := urls[0]
 
@@ -130,7 +130,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (map[string]interface{}, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
-		return nil, fmt.Errorf("the 'prompt' must contain at least one valid URL (starting with http:// or https://).")
+		return nil, fmt.Errorf("the 'prompt' must contain at least one valid URL (starting with http:// or https://)")
 	}
 
 	// Check for private IP before calling LLM

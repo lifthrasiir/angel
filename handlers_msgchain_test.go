@@ -749,7 +749,6 @@ func TestSyncDuringThought(t *testing.T) {
 				// Expected but do nothing
 			case EventComplete:
 				receivedComplete = true
-				break
 			case EventSessionName:
 				// Expected but do nothing
 			default:
@@ -918,7 +917,6 @@ func TestSyncDuringResponse(t *testing.T) {
 				}
 			case EventComplete:
 				receivedComplete = true
-				break
 			case EventSessionName:
 				// Expected but do nothing
 			default:
@@ -1073,7 +1071,6 @@ func TestCancelDuringSync(t *testing.T) {
 				// Expected but do nothing
 			case EventComplete, EventError:
 				receivedCompleteOrError = true
-				break
 			case EventSessionName:
 				// Expected but do nothing
 			default:

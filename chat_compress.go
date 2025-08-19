@@ -39,7 +39,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	// 1. Load session and all messages from the database for the given sessionID.
 	session, err := GetSession(db, sessionID)
 	if err != nil {
-		err = fmt.Errorf("Failed to get session %s: %w", sessionID, err)
+		err = fmt.Errorf("failed to get session %s: %w", sessionID, err)
 		return
 	}
 
@@ -47,7 +47,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	// We'll filter thoughts later if needed for the context sent to the LLM for summarization.
 	allMessages, err := GetSessionHistory(db, sessionID, session.PrimaryBranchID)
 	if err != nil {
-		err = fmt.Errorf("Failed to get session history for %s: %w", sessionID, err)
+		err = fmt.Errorf("failed to get session history for %s: %w", sessionID, err)
 		return
 	}
 
@@ -78,14 +78,14 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	// For now, use the default model. In a real scenario, this might come from session config.
 	provider, ok := CurrentProviders[modelName]
 	if !ok {
-		err = fmt.Errorf("Unsupported model: %s", modelName)
+		err = fmt.Errorf("unsupported model: %s", modelName)
 		return
 	}
 
 	// 2. Calculate originalTokenCount.
 	originalTokenResp, err := provider.CountTokens(ctx, curatedHistory, modelName)
 	if err != nil {
-		err = fmt.Errorf("CountTokens API call failed: %w", err)
+		err = fmt.Errorf("failed to call CountTokens API: %w", err)
 		return
 	}
 	originalTokenCount := originalTokenResp.TotalTokens
@@ -117,7 +117,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		var parsedID int
 		parsedID, err = strconv.Atoi(allMessages[compressBeforeIndex-1].ID) // Get the last FrontendMessage that was compressed
 		if err != nil {
-			err = fmt.Errorf("Failed to parse last message ID in historyToMessage: %w", err)
+			err = fmt.Errorf("failed to parse last message ID in historyToMessage: %w", err)
 			return
 		}
 		compressedUpToMessageID = &parsedID
@@ -128,7 +128,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		var parsedID int
 		parsedID, err = strconv.Atoi(allMessages[len(allMessages)-1].ID) // Get the ID of the last message in allMessages
 		if err != nil {
-			err = fmt.Errorf("Failed to parse parent message ID for compression message: %w", err)
+			err = fmt.Errorf("failed to parse parent message ID for compression message: %w", err)
 			return
 		}
 		compressionMsgParentID = &parsedID
@@ -182,14 +182,14 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	// Start a transaction for atomicity
 	tx, err := db.Begin()
 	if err != nil {
-		err = fmt.Errorf("Failed to begin transaction: %w", err)
+		err = fmt.Errorf("failed to begin transaction: %w", err)
 		return
 	}
 	defer tx.Rollback() // Rollback on error
 
 	// Find the last message in the current branch to link the new compression message
 	if err != nil {
-		err = fmt.Errorf("Failed to get last message in branch: %w", err)
+		err = fmt.Errorf("failed to get last message in branch: %w", err)
 		return
 	}
 
@@ -207,7 +207,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 
 	newCompressionMsgID, err := AddMessageToSession(ctx, tx, compressionMsg)
 	if err != nil {
-		err = fmt.Errorf("Failed to add compression message to session: %w", err)
+		err = fmt.Errorf("failed to add compression message to session: %w", err)
 		return
 	}
 
@@ -215,7 +215,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	if compressionMsgParentID != nil {
 		err = UpdateMessageChosenNextID(tx, *compressionMsgParentID, &newCompressionMsgID)
 		if err != nil {
-			err = fmt.Errorf("Failed to update chosen_next_id for message %d: %w", *compressionMsgParentID, err)
+			err = fmt.Errorf("failed to update chosen_next_id for message %d: %w", *compressionMsgParentID, err)
 			return
 		}
 	}
@@ -338,7 +338,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	// Update the cumul_token_count for the new compression message
 	err = UpdateMessageTokens(tx, newCompressionMsgID, newTotalTokenCount)
 	if err != nil {
-		err = fmt.Errorf("Failed to update token count for compression message: %w", err)
+		err = fmt.Errorf("failed to update token count for compression message: %w", err)
 		return
 	}
 
@@ -346,7 +346,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 
 	// Commit the transaction
 	if err = tx.Commit(); err != nil {
-		err = fmt.Errorf("Failed to commit transaction: %w", err)
+		err = fmt.Errorf("failed to commit transaction: %w", err)
 		return
 	}
 

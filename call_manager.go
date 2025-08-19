@@ -104,18 +104,6 @@ func failCall(sessionId string, err error) {
 	}
 }
 
-// getGeminiCallStatus retrieves the status of a specific Gemini API call.
-func getCallStatus(sessionId string) (GeminiCallStatus, error) {
-	callsMutex.Lock()
-	defer callsMutex.Unlock()
-
-	call, ok := activeCalls[sessionId]
-	if !ok {
-		return "", fmt.Errorf("no active call found for session ID: %s", sessionId)
-	}
-	return call.Status, nil
-}
-
 // hasActiveCall checks if there is an active call for the given session ID.
 func hasActiveCall(sessionId string) bool {
 	callsMutex.Lock()

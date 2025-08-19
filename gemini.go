@@ -319,7 +319,7 @@ func (c *CodeAssistClient) LoadCodeAssist(ctx context.Context, req LoadCodeAssis
 			}
 		}
 		// This means that the initial CloudAICompanion project will be assigned soon. (TODO: restart required for some reason)
-		return nil, fmt.Errorf("failed to load code assist: cloudaicompanionProject is not set and no specific ineligible tiers found. This still means that you are going to get assigned for the project, try to restart the application to take the effect.")
+		return nil, fmt.Errorf("failed to load code assist: cloudaicompanionProject is not set and no specific ineligible tiers found. This still means that you are going to get assigned for the project, try to restart the application to take the effect")
 	}
 
 	// If cloudaicompanionProject is set and showNotice is true, print the privacy notice to the console and a message indicating that continuing to use it automatically accepts the notice.

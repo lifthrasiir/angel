@@ -94,13 +94,6 @@ func (s *stack) pop() (interface{}, error) {
 	return v, nil
 }
 
-func (s *stack) peek() (interface{}, error) {
-	if len(*s) == 0 {
-		return nil, fmt.Errorf("stack empty")
-	}
-	return (*s)[len(*s)-1], nil
-}
-
 // parseAndExecute parses the input and executes Forth-like operations.
 func parseAndExecute(input string, yield func(CaGenerateContentResponse) bool) error {
 	st := make(stack, 0)

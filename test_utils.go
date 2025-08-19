@@ -92,18 +92,6 @@ func replaceProvider(provider LLMProvider) LLMProvider {
 	return oldProvider
 }
 
-// Dummy oauth2.Token for testing
-type oauth2Token struct {
-	AccessToken  string
-	TokenType    string
-	RefreshToken string
-	Expiry       time.Time
-}
-
-func (t *oauth2Token) Valid() bool {
-	return t != nil && t.AccessToken != "" && t.Expiry.After(time.Now())
-}
-
 type Sse struct {
 	Type    EventType
 	Payload string
