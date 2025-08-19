@@ -21,7 +21,7 @@ func PlatformInPrompt() string {
 	}
 }
 
-func (d PromptData) GetDefaultSystemPrompt() string {
+func (d PromptData) GetDefaultSystemPromptForCoding() string {
 	// Heavily paraphrased from gemini-cli.
 	return fmt.Sprintf(`You are an interactive agent specializing in software engineering tasks. Your primary goal is to help users safely and efficiently, adhering strictly to the following instructions and utilizing your available tools.
 

@@ -32,13 +32,21 @@ type BuiltinPrompts struct{ data PromptData }
 func (BuiltinPrompts) String() string {
 	return `Available methods:
 
-.Builtin.SystemPrompt       Default system prompt.
-.Builtin.DynamicPromptTool  Context for dynamic prompt tool ('new_system_prompt').
+.Builtin.SystemPrompt           Default, minimal system prompt.
+.Builtin.SystemPromptForCoding  System prompt suitable for coding agents.
+.Builtin.DynamicPromptTool      Context for dynamic prompt tool ('new_system_prompt').
 `
 }
 
-func (p BuiltinPrompts) SystemPrompt() string      { return p.data.GetDefaultSystemPrompt() }
-func (p BuiltinPrompts) DynamicPromptTool() string { return GetDynamicPromptToolPrompt() }
+func (p BuiltinPrompts) SystemPrompt() string {
+	return p.data.GetMinimalSystemPrompt()
+}
+func (p BuiltinPrompts) SystemPromptForCoding() string {
+	return p.data.GetDefaultSystemPromptForCoding()
+}
+func (p BuiltinPrompts) DynamicPromptTool() string {
+	return GetDynamicPromptToolPrompt()
+}
 
 // PromptWorkspace holds the current workspace information.
 type PromptWorkspace struct{ data PromptData }

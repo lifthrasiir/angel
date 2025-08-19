@@ -64,7 +64,7 @@ func TestHandleEvaluatePrompt(t *testing.T) {
 
 	// Test case 1: Successful template evaluation
 	t.Run("Success", func(t *testing.T) {
-		payload := []byte(`{"template": "{{.Builtin.SystemPrompt}}"}`)
+		payload := []byte(`{"template": "{{.Builtin.SystemPromptForCoding}}"}`)
 		rr := testRequest(t, router, "POST", "/api/evaluatePrompt", payload, http.StatusOK)
 
 		var response map[string]string
@@ -74,8 +74,8 @@ func TestHandleEvaluatePrompt(t *testing.T) {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}
 
-		if response["evaluatedPrompt"] != (PromptData{}).GetDefaultSystemPrompt() {
-			t.Errorf("expected %q, got %q", (PromptData{}).GetDefaultSystemPrompt(), response["evaluatedPrompt"])
+		if response["evaluatedPrompt"] != (PromptData{}).GetDefaultSystemPromptForCoding() {
+			t.Errorf("expected %q, got %q", (PromptData{}).GetDefaultSystemPromptForCoding(), response["evaluatedPrompt"])
 		}
 	})
 

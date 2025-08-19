@@ -648,6 +648,7 @@ func getSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
 	if len(prompts) == 0 {
 		prompts = []PredefinedPrompt{
 			{Label: "Default prompt", Value: "{{.Builtin.SystemPrompt}}"},
+			{Label: "Default prompt for coding agents", Value: "{{.Builtin.SystemPromptForCoding}}"},
 			{Label: "Empty prompt", Value: ""},
 		}
 		// Save these defaults to the DB immediately
