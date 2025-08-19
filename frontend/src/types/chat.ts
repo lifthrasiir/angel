@@ -40,8 +40,8 @@ export interface ChatMessage {
   parentMessageId?: string;
   chosenNextId?: string;
   possibleNextIds?: PossibleNextMessage[];
-  model?: string; // New field for the model that generated the message
-  sessionId?: string; // New field for the session ID
+  model?: string;
+  sessionId?: string;
 }
 
 export interface InitialState {
@@ -50,6 +50,7 @@ export interface InitialState {
   systemPrompt: string;
   workspaceId: string;
   primaryBranchId: string;
+  callElapsedTimeSeconds?: number;
 }
 
 export interface Session {

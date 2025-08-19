@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 
 interface UseEscToCancelProps {
-  isStreaming: boolean;
+  isProcessing: boolean;
   onCancel: () => void;
 }
 
-const useEscToCancel = ({ isStreaming, onCancel }: UseEscToCancelProps) => {
+const useEscToCancel = ({ isProcessing, onCancel }: UseEscToCancelProps) => {
   const [lastEscPressTime, setLastEscPressTime] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && isStreaming) {
+      if (event.key === 'Escape' && isProcessing) {
         const currentTime = new Date().getTime();
         if (currentTime - lastEscPressTime < 1000) {
           // 1 second interval
@@ -29,7 +29,7 @@ const useEscToCancel = ({ isStreaming, onCancel }: UseEscToCancelProps) => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isStreaming, lastEscPressTime, onCancel]);
+  }, [isProcessing, lastEscPressTime, onCancel]);
 
   return { toastMessage, setToastMessage };
 };

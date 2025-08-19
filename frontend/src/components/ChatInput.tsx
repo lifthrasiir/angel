@@ -1,10 +1,10 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { FaPaperclip } from 'react-icons/fa';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import {
   inputMessageAtom,
-  isStreamingAtom,
+  processingStartTimeAtom,
   availableModelsAtom,
   selectedModelAtom,
   selectedFilesAtom,
@@ -29,7 +29,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 }) => {
   const [inputMessage] = useAtom(inputMessageAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
-  const [isStreaming] = useAtom(isStreamingAtom);
+  const processingStartTime = useAtomValue(processingStartTimeAtom); // Changed from isStreaming
   const [availableModels] = useAtom(availableModelsAtom);
   const [selectedModel] = useAtom(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
@@ -124,7 +124,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleSendOrRunCommand = () => {
-    if (isStreaming) {
+    if (processingStartTime !== null) {
       handleCancelStreaming();
       return;
     }
@@ -272,7 +272,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           ))}
         </select>
       </div>
-      {isStreaming ? (
+      {processingStartTime !== null ? (
         <button
           onClick={handleCancelStreaming}
           style={{

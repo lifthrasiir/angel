@@ -119,3 +119,15 @@ func removeCall(sessionId string) {
 
 	delete(activeCalls, sessionId)
 }
+
+// GetCallStartTime returns the start time of an active call for the given session ID.
+func GetCallStartTime(sessionId string) (time.Time, bool) {
+	callsMutex.Lock()
+	defer callsMutex.Unlock()
+
+	call, ok := activeCalls[sessionId]
+	if !ok {
+		return time.Time{}, false
+	}
+	return call.StartTime, true
+}

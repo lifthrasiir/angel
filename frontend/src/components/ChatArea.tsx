@@ -19,7 +19,9 @@ import {
   isSystemPromptEditingAtom,
   globalPromptsAtom,
   workspaceIdAtom,
+  processingStartTimeAtom,
 } from '../atoms/chatAtoms';
+import { ProcessingIndicator } from './ProcessingIndicator';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -47,6 +49,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [systemPrompt, setSystemPrompt] = useAtom(systemPromptAtom);
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
+  const processingStartTime = useAtomValue(processingStartTimeAtom);
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
 
   const isLoggedIn = !!userEmail;
@@ -83,11 +86,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     messages: ChatMessageType[],
     currentIndex: number,
     availableModels: Map<string, { maxTokens: number }>,
+    processingStartTime: number | null,
   ): { element: JSX.Element; messagesConsumed: number } => {
     // Find maxTokens for the current message's model
     const currentModelMaxTokens = currentMessage.model
       ? availableModels.get(currentMessage.model)?.maxTokens
       : undefined;
+
+    const isLastMessage = currentIndex === messages.length - 1;
 
     // Check for function_call followed by function_response
     if (
@@ -105,11 +111,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       const functionResponse = messages[currentIndex + 1].parts[0].functionResponse!;
       return {
         element: (
-          <FunctionPairMessage
-            key={`function-pair-${currentMessage.id}-${messages[currentIndex + 1].id}`}
-            functionCall={functionCall}
-            functionResponse={functionResponse}
-          />
+          <>
+            <FunctionPairMessage
+              key={`function-pair-${currentMessage.id}-${messages[currentIndex + 1].id}`}
+              functionCall={functionCall}
+              functionResponse={functionResponse}
+            />
+            {isLastMessage && processingStartTime !== null && (
+              <ProcessingIndicator
+                startTime={processingStartTime}
+                isLastThoughtGroup={false}
+                isLastModelMessage={false} // This case is not a model message
+              />
+            )}
+          </>
         ),
         messagesConsumed: 2,
       };
@@ -120,6 +135,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         thoughtGroup.push(messages[j]);
         j++;
       }
+
+      // Check if this thought group is the very last message(s)
+      const isLastThoughtGroup = j === messages.length;
+
       return {
         element: (
           <ThoughtGroup
@@ -127,18 +146,33 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             groupId={`thought-group-${currentIndex}`}
             isAutoDisplayMode={true}
             thoughts={thoughtGroup}
+            isLastThoughtGroup={isLastThoughtGroup}
+            processingStartTime={processingStartTime}
           />
         ),
         messagesConsumed: j - currentIndex,
       };
     } else {
+      const isLastModelMessage = isLastMessage && currentMessage.role === 'model';
       return {
         element: (
-          <ChatMessage
-            key={currentMessage.id}
-            message={currentMessage}
-            maxTokens={currentModelMaxTokens} // Pass maxTokens to ChatMessage
-          />
+          <>
+            <ChatMessage
+              key={currentMessage.id}
+              message={currentMessage}
+              maxTokens={currentModelMaxTokens}
+              isLastModelMessage={isLastModelMessage}
+              processingStartTime={processingStartTime}
+            />
+            {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
+              <ProcessingIndicator
+                startTime={processingStartTime!}
+                isLastThoughtGroup={false}
+                isLastModelMessage={false}
+              />
+            )}
+            {/* For model messages, the indicator is now rendered inside ChatMessage/ModelTextMessage */}
+          </>
         ),
         messagesConsumed: 1,
       };
@@ -151,12 +185,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     let i = 0;
     while (i < messages.length) {
       const currentMessage = messages[i];
-      const { element, messagesConsumed } = renderMessageOrGroup(currentMessage, messages, i, availableModels);
+      const { element, messagesConsumed } = renderMessageOrGroup(
+        currentMessage,
+        messages,
+        i,
+        availableModels,
+        processingStartTime,
+      ); // Pass processingStartTime
       renderedElements.push(element);
       i += messagesConsumed;
     }
     return renderedElements;
-  }, [messages, availableModels, globalPrompts, systemPrompt]);
+  }, [messages, availableModels, globalPrompts, systemPrompt, processingStartTime]);
 
   const currentSystemPromptLabel = useMemo(() => {
     const found = globalPrompts.find((p) => p.value === systemPrompt);

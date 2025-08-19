@@ -23,11 +23,11 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
-  const { handleFilesSelected, handleRemoveFile, handleSendMessage, cancelStreamingCall, isStreaming } =
+  const { handleFilesSelected, handleRemoveFile, handleSendMessage, cancelStreamingCall, isProcessing } =
     useChatSession();
 
   const { toastMessage, setToastMessage } = useEscToCancel({
-    isStreaming,
+    isProcessing,
     onCancel: cancelStreamingCall,
   });
 

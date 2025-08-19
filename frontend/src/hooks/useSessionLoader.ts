@@ -20,7 +20,7 @@ import {
   resetChatSessionStateAtom,
   chatSessionIdAtom,
   inputMessageAtom,
-  isStreamingAtom,
+  processingStartTimeAtom,
   isSystemPromptEditingAtom,
   messagesAtom,
   primaryBranchIdAtom,
@@ -32,11 +32,10 @@ import {
 
 interface UseSessionLoaderProps {
   chatSessionId: string | null;
-  isStreaming: boolean;
   primaryBranchId: string;
 }
 
-export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }: UseSessionLoaderProps) => {
+export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionLoaderProps) => {
   const navigate = useNavigate();
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
     sessionId?: string;
@@ -46,7 +45,7 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
 
   const setChatSessionId = useSetAtom(chatSessionIdAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
-  const setIsStreaming = useSetAtom(isStreamingAtom);
+  const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
   const setMessages = useSetAtom(messagesAtom);
   const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
@@ -89,8 +88,7 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
   }, [location.search, navigate]);
 
   useEffect(() => {
-    // 스트리밍 중이거나, 현재 URL 세션 ID가 이미 로드된 세션 ID와 같으면 아무것도 하지 않음
-    if (isStreaming || (urlSessionId && urlSessionId === chatSessionId)) {
+    if (urlSessionId && urlSessionId === chatSessionId) {
       return;
     }
 
@@ -118,7 +116,7 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
         closeEventSourceNormally();
         setChatSessionId(currentSessionId);
         setSelectedFiles([]);
-        setIsStreaming(false);
+        setProcessingStartTime(null);
         setMessages([]); // Clear messages from previous session
 
         try {
@@ -167,7 +165,11 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
                 setWorkspaceId(data.workspaceId);
                 setPrimaryBranchId(data.primaryBranchId);
 
-                setIsStreaming(eventType === EventInitialState);
+                if (eventType === EventInitialState && data.callElapsedTimeSeconds !== undefined) {
+                  setProcessingStartTime(performance.now() - data.callElapsedTimeSeconds * 1000);
+                } else {
+                  setProcessingStartTime(null);
+                }
                 if (eventType === EventInitialStateNoCall) {
                   closeEventSourceNormally();
                 }
@@ -208,12 +210,12 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
                 });
               } else if (eventType === EventError) {
                 console.error('SSE Error:', eventData);
-                setIsStreaming(false);
+                setProcessingStartTime(null);
                 closeEventSourceNormally();
                 addErrorMessage(eventData);
               } else if (eventType === EventComplete) {
                 isStreamEndedNormallyRef.current = true; // 정상 종료로 표시
-                setIsStreaming(false);
+                setProcessingStartTime(null);
                 closeEventSourceNormally();
               }
             },
@@ -226,7 +228,7 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
                   window.location.reload();
                 }
               }
-              setIsStreaming(false);
+              setProcessingStartTime(null);
             },
           );
         } catch (error) {
@@ -243,5 +245,5 @@ export const useSessionLoader = ({ chatSessionId, isStreaming, primaryBranchId }
     };
 
     loadChatSession();
-  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, isStreaming, chatSessionId, primaryBranchId]);
+  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, chatSessionId, primaryBranchId]);
 };

@@ -15,11 +15,12 @@ import (
 )
 
 type InitialState struct {
-	SessionId       string            `json:"sessionId"`
-	History         []FrontendMessage `json:"history"` // May or may not include thoughts
-	SystemPrompt    string            `json:"systemPrompt"`
-	WorkspaceID     string            `json:"workspaceId"`
-	PrimaryBranchID string            `json:"primaryBranchId"`
+	SessionId              string            `json:"sessionId"`
+	History                []FrontendMessage `json:"history"` // May or may not include thoughts
+	SystemPrompt           string            `json:"systemPrompt"`
+	WorkspaceID            string            `json:"workspaceId"`
+	PrimaryBranchID        string            `json:"primaryBranchId"`
+	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"` // New field
 }
 
 // New session and message handler
@@ -136,7 +137,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, true); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, true, time.Now()); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -280,7 +281,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		PrimaryBranchID: primaryBranchID, // Include primary branch ID
 	}
 
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false, time.Now()); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
@@ -351,20 +352,30 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		addSseWriter(sessionId, sseW)
 		defer removeSseWriter(sessionId, sseW)
 
-		initialStateJSON, err := json.Marshal(initialState)
-		if err != nil {
-			log.Printf("loadChatSession: Failed to marshal initial state: %v", err)
-			http.Error(w, "Failed to prepare initial state", http.StatusInternalServerError)
-			return
-		}
-
 		if hasActiveCall(sessionId) {
+			callStartTime, ok := GetCallStartTime(sessionId)
+			if ok {
+				initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
+			}
+			initialStateJSON, err := json.Marshal(initialState)
+			if err != nil {
+				log.Printf("loadChatSession: Failed to marshal initial state with elapsed time: %v", err)
+				http.Error(w, "Failed to prepare initial state", http.StatusInternalServerError)
+				return
+			}
 			sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
 			// Keep the connection open until client disconnects.
 			// sseW will get any broadcasted messages over the course.
 			<-r.Context().Done()
 		} else {
+			initialStateJSON, err := json.Marshal(initialState)
+			if err != nil {
+				log.Printf("loadChatSession: Failed to marshal initial state: %v", err)
+				http.Error(w, "Failed to prepare initial state", http.StatusInternalServerError)
+				return
+			}
+
 			// If no active call, close the SSE connection after sending initial state
 			sseW.sendServerEvent(EventInitialStateNoCall, string(initialStateJSON))
 			time.Sleep(10 * time.Millisecond) // Give some time for the event to be processed

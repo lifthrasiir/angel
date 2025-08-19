@@ -493,7 +493,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	defer dummySseW.Close()
 
 	// Call streamGeminiResponse to add thought and model messages for C
-	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false); err != nil {
+	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false, time.Now()); err != nil {
 		t.Fatalf("Error streaming Gemini response for C: %v", err)
 	}
 

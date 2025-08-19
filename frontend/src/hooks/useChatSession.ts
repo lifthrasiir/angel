@@ -10,7 +10,7 @@ import {
   inputMessageAtom,
   sessionsAtom,
   lastAutoDisplayedThoughtIdAtom,
-  isStreamingAtom,
+  processingStartTimeAtom,
   systemPromptAtom,
   isSystemPromptEditingAtom,
   selectedFilesAtom,
@@ -38,7 +38,7 @@ export const useChatSession = () => {
   }, [inputMessage]);
   const sessions = useAtomValue(sessionsAtom);
   const lastAutoDisplayedThoughtId = useAtomValue(lastAutoDisplayedThoughtIdAtom);
-  const isStreaming = useAtomValue(isStreamingAtom);
+  const processingStartTime = useAtomValue(processingStartTimeAtom);
   const systemPrompt = useAtomValue(systemPromptAtom);
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const selectedFiles = useAtomValue(selectedFilesAtom);
@@ -110,7 +110,6 @@ export const useChatSession = () => {
 
   useSessionLoader({
     chatSessionId,
-    isStreaming,
     primaryBranchId,
   });
 
@@ -134,7 +133,7 @@ export const useChatSession = () => {
     inputMessage,
     sessions,
     lastAutoDisplayedThoughtId,
-    isStreaming,
+    isProcessing: processingStartTime !== null,
     systemPrompt,
     isSystemPromptEditing,
     selectedFiles,

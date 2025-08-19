@@ -16,7 +16,7 @@ import (
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string, sendInitialState bool) error {
+func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string, sendInitialState bool, callStartTime time.Time) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var finalTotalTokenCount *int
@@ -38,6 +38,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 		return err
 	}
 	defer removeCall(initialState.SessionId) // Ensure call is removed from manager when function exits
+
+	// Calculate elapsed time since the call started
+	initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
 
 	if sendInitialState {
 		// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)

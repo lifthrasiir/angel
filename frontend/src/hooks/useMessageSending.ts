@@ -8,7 +8,7 @@ import {
   addMessageAtom,
   chatSessionIdAtom,
   inputMessageAtom,
-  isStreamingAtom,
+  processingStartTimeAtom,
   isSystemPromptEditingAtom,
   lastAutoDisplayedThoughtIdAtom,
   selectedFilesAtom,
@@ -44,7 +44,7 @@ export const useMessageSending = ({
 
   const setChatSessionId = useSetAtom(chatSessionIdAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
-  const setIsStreaming = useSetAtom(isStreamingAtom);
+  const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
   const setLastAutoDisplayedThoughtId = useSetAtom(lastAutoDisplayedThoughtIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
@@ -61,7 +61,7 @@ export const useMessageSending = ({
   const handleSendMessage = async () => {
     if (!inputMessage.trim() && selectedFiles.length === 0) return;
 
-    setIsStreaming(true);
+    setProcessingStartTime(performance.now());
 
     try {
       const attachments: FileAttachment[] = await convertFilesToAttachments(selectedFiles);
@@ -155,7 +155,7 @@ export const useMessageSending = ({
         },
         onEnd: () => {
           setLastAutoDisplayedThoughtId(null);
-          setIsStreaming(false);
+          setProcessingStartTime(null);
         },
         onError: (errorData: string) => {
           addErrorMessage(errorData);
@@ -178,7 +178,7 @@ export const useMessageSending = ({
       console.error('Error sending message or receiving stream:', error);
       addErrorMessage('Error sending message or receiving stream.');
     } finally {
-      setIsStreaming(false);
+      setProcessingStartTime(null);
     }
   };
 
@@ -191,7 +191,7 @@ export const useMessageSending = ({
       });
 
       if (response.ok) {
-        setIsStreaming(false);
+        setProcessingStartTime(null);
         addErrorMessage('Request cancelled by user.');
       } else {
         console.error(
