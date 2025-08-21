@@ -343,34 +343,37 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
   }, [systemPrompt, isEditing, promptType, adjustSystemPromptTextareaHeight, isReadOnly]);
 
   // Function to evaluate the template
-  const evaluateTemplate = async (template: string) => {
-    try {
-      const requestBody: { template: string; workspaceId?: string } = { template };
-      if (workspaceId) {
-        requestBody.workspaceId = workspaceId;
+  const evaluateTemplate = useCallback(
+    async (template: string) => {
+      try {
+        const requestBody: { template: string; workspaceId?: string } = { template };
+        if (workspaceId) {
+          requestBody.workspaceId = workspaceId;
+        }
+
+        const response = await apiFetch('/api/evaluatePrompt', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(errorData || 'Failed to evaluate template');
+        }
+
+        const data = await response.json();
+        setEvaluatedPrompt(data.evaluatedPrompt);
+        setEvaluationError(null);
+      } catch (error: any) {
+        setEvaluatedPrompt('');
+        setEvaluationError(error.message || 'Unknown error during template evaluation.');
       }
-
-      const response = await apiFetch('/api/evaluatePrompt', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || 'Failed to evaluate template');
-      }
-
-      const data = await response.json();
-      setEvaluatedPrompt(data.evaluatedPrompt);
-      setEvaluationError(null);
-    } catch (error: any) {
-      setEvaluatedPrompt('');
-      setEvaluationError(error.message || 'Unknown error during template evaluation.');
-    }
-  };
+    },
+    [workspaceId, setEvaluatedPrompt, setEvaluationError],
+  );
 
   useEffect(() => {
     if (isEditing) {
