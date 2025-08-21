@@ -137,11 +137,10 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, true, time.Now()); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, true, true, time.Now()); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
-
 }
 
 // Chat message handler
@@ -281,7 +280,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		PrimaryBranchID: primaryBranchID, // Include primary branch ID
 	}
 
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false, time.Now()); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false, false, time.Now()); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return

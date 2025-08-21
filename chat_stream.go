@@ -16,7 +16,7 @@ import (
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string, sendInitialState bool, callStartTime time.Time) error {
+func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string, sendInitialState bool, inferSessionName bool, callStartTime time.Time) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var finalTotalTokenCount *int
@@ -414,22 +414,33 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 
 	// Need to wait for inferAndSetSessionName so that the connection remains intact.
 	var inferWg sync.WaitGroup
-	inferWg.Add(1)
 
-	// Infer session name after streaming is complete
-	go func() {
-		addSseWriter(initialState.SessionId, sseW) // Increases the reference count and prevents it from being closed early
-		defer func() {
-			inferWg.Done()
-			removeSseWriter(initialState.SessionId, sseW)
-		}()
-
-		userMsg := ""
-		if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
-			userMsg = initialState.History[0].Parts[0].Text
+	// Only infer session name if inferSessionName is true and the name is still empty
+	if inferSessionName {
+		currentSession, err := GetSession(db, initialState.SessionId)
+		if err != nil {
+			log.Printf("streamGeminiResponse: Failed to get session %s for initial name check: %v", initialState.SessionId, err)
+			// If GetSession fails, assume name might be missing and attempt inference.
 		}
-		inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW, modelToUse)
-	}()
+
+		if currentSession.Name == "" { // Only infer if the session name is currently empty
+			inferWg.Add(1)
+			// Infer session name after streaming is complete
+			go func() {
+				addSseWriter(initialState.SessionId, sseW) // Increases the reference count and prevents it from being closed early
+				defer func() {
+					inferWg.Done()
+					removeSseWriter(initialState.SessionId, sseW)
+				}()
+
+				userMsg := ""
+				if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
+					userMsg = initialState.History[0].Parts[0].Text
+				}
+				inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW, modelToUse)
+			}()
+		}
+	}
 
 	if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
 		t := lastUsageMetadata.TotalTokenCount

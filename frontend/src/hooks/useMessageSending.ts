@@ -170,7 +170,7 @@ export const useMessageSending = ({
 
       const { qReceived, nReceived } = await processStreamResponse(response, handlers);
 
-      if (!qReceived || !nReceived) {
+      if (!qReceived) {
         console.error('Backend bug: Stream ended without receiving both Q and N events.', { qReceived, nReceived });
         addErrorMessage('An unexpected error occurred: Stream did not finalize correctly.');
       }
