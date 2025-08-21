@@ -36,7 +36,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, me
   };
 
   return (
-    <div className="chat-message-container user-message">
+    <div id={messageId} className="chat-message-container user-message">
       <div
         ref={messageRef}
         className={`chat-bubble user-message-bubble-content ${isExpanded ? 'expanded' : 'collapsed'}`}

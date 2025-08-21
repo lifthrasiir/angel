@@ -8,9 +8,10 @@ import { FunctionCall } from '../types/chat';
 interface FunctionCallMessageProps {
   functionCall: FunctionCall;
   messageInfo?: React.ReactNode;
+  messageId?: string; // Add messageId prop
 }
 
-const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall, messageInfo }) => {
+const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall, messageInfo, messageId }) => {
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
@@ -38,7 +39,7 @@ const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall,
     switch (mode) {
       case 'compact':
         return (
-          <div className="chat-message-container agent-message">
+          <div id={messageId} className="chat-message-container agent-message">
             <div
               className="chat-bubble agent-function-call function-message-bubble"
               style={{ cursor: 'pointer' }}
@@ -53,7 +54,7 @@ const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall,
         );
       case 'collapsed':
         return (
-          <div className="chat-message-container agent-message">
+          <div id={messageId} className="chat-message-container agent-message">
             <div
               className="chat-bubble agent-function-call function-message-bubble"
               style={{ cursor: 'pointer' }}
@@ -69,7 +70,7 @@ const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall,
         );
       case 'expanded':
         return (
-          <div className="chat-message-container agent-message">
+          <div id={messageId} className="chat-message-container agent-message">
             <div className="chat-bubble agent-function-call function-message-bubble">
               <div
                 className="function-title-bar function-call-title-bar"

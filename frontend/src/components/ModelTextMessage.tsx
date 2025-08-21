@@ -8,6 +8,7 @@ interface ModelTextMessageProps {
   messageInfo?: React.ReactNode;
   isLastModelMessage?: boolean;
   processingStartTime?: number | null;
+  messageId?: string; // Add messageId prop
 }
 
 const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
@@ -16,9 +17,10 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   messageInfo,
   isLastModelMessage,
   processingStartTime,
+  messageId,
 }) => {
   return (
-    <div className={`chat-message-container ${className || ''}`}>
+    <div id={messageId} className={`chat-message-container ${className || ''}`}>
       <div className="chat-bubble">
         <MarkdownRenderer content={text || ''} />
         {isLastModelMessage && processingStartTime !== null && (

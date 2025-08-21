@@ -5,9 +5,9 @@ import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
 import ModelTextMessage from './ModelTextMessage';
 import SystemMessage from './SystemMessage';
-// Import new message components
 import UserTextMessage from './UserTextMessage';
-import MessageInfo from './MessageInfo'; // Import MessageInfo
+import MessageInfo from './MessageInfo';
+import CompressionMessage from './CompressionMessage';
 
 interface ChatMessageProps {
   message: ChatMessage;
@@ -36,7 +36,13 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
 
     if (type === 'function_response') {
       if (functionResponse)
-        return <FunctionResponseMessage functionResponse={functionResponse} messageInfo={messageInfoComponent} />;
+        return (
+          <FunctionResponseMessage
+            functionResponse={functionResponse}
+            messageInfo={messageInfoComponent}
+            messageId={message.id}
+          />
+        );
     } else if (type === 'user') {
       return (
         <UserTextMessage
@@ -50,20 +56,36 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
     } else if (type === 'thought') {
       const [subject, description] = splitOnceByNewline(text || '');
       const thoughtText = `**Thought: ${subject}**\n${description || ''}`;
-      return <ModelTextMessage text={thoughtText} className="agent-thought" messageInfo={messageInfoComponent} />;
+      return (
+        <ModelTextMessage
+          text={thoughtText}
+          className="agent-thought"
+          messageInfo={messageInfoComponent}
+          messageId={message.id}
+        />
+      );
     } else if (type === 'function_call') {
-      if (functionCall) return <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} />;
+      if (functionCall)
+        return (
+          <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} messageId={message.id} />
+        );
     } else if (type === 'system') {
-      return <SystemMessage text={text} messageInfo={messageInfoComponent} />;
+      return <SystemMessage text={text} messageInfo={messageInfoComponent} messageId={message.id} />;
     } else if (type === 'system_prompt') {
-      return <SystemMessage text={text} messageInfo={messageInfoComponent} />;
+      return <SystemMessage text={text} messageInfo={messageInfoComponent} messageId={message.id} />;
     } else if (type === 'model_error') {
-      return <ModelTextMessage text={text} className="agent-error-message" messageInfo={messageInfoComponent} />;
+      return (
+        <ModelTextMessage
+          text={text}
+          className="agent-error-message"
+          messageInfo={messageInfoComponent}
+          messageId={message.id}
+        />
+      );
     } else if (type === 'compression') {
       return (
-        <SystemMessage
-          text={`Compression Snapshot:\n${text}`}
-          className="compression-message"
+        <CompressionMessage
+          message={message} // Pass the entire message object
           messageInfo={messageInfoComponent}
         />
       );
@@ -75,13 +97,14 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageInfo={messageInfoComponent}
           isLastModelMessage={isLastModelMessage}
           processingStartTime={processingStartTime}
+          messageId={message.id} // Add messageId here
         />
       );
     }
 
     // Fallback for unknown types or if type is not explicitly set
     return (
-      <div className="chat-message-container agent-message">
+      <div id={message.id} className="chat-message-container agent-message">
         <div className="chat-bubble">
           {text} {/* Render raw text as a fallback */}
         </div>

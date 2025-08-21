@@ -116,6 +116,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               key={`function-pair-${currentMessage.id}-${messages[currentIndex + 1].id}`}
               functionCall={functionCall}
               functionResponse={functionResponse}
+              callMessageId={currentMessage.id}
+              responseMessageId={messages[currentIndex + 1].id}
             />
             {isLastMessage && processingStartTime !== null && (
               <ProcessingIndicator

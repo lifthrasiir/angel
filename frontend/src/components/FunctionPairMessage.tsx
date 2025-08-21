@@ -6,14 +6,21 @@ import { FunctionCall, FunctionResponse } from '../types/chat';
 interface FunctionPairMessageProps {
   functionCall: FunctionCall;
   functionResponse: FunctionResponse;
+  callMessageId?: string;
+  responseMessageId?: string;
 }
 
-const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({ functionCall, functionResponse }) => {
+const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
+  functionCall,
+  functionResponse,
+  callMessageId,
+  responseMessageId,
+}) => {
   return (
     <div className="function-pair-container">
-      <FunctionCallMessage functionCall={functionCall} />
+      <FunctionCallMessage functionCall={functionCall} messageId={callMessageId} />
       <div className="function-pair-bar"></div>
-      <FunctionResponseMessage functionResponse={functionResponse} />
+      <FunctionResponseMessage functionResponse={functionResponse} messageId={responseMessageId} />
     </div>
   );
 };

@@ -53,6 +53,7 @@ export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(
           {thoughts.map((thought) => (
             <button
               key={thought.id}
+              id={thought.id}
               className={`thought-circle ${activeThoughtId === thought.id ? 'selected' : ''}`}
               onClick={() => handleCircleClick(thought)}
               title={getThoughtTitle(thought)}

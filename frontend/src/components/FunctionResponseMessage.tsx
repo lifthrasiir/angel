@@ -8,9 +8,14 @@ import { FunctionResponse } from '../types/chat';
 interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
   messageInfo?: React.ReactNode;
+  messageId?: string; // Add messageId prop
 }
 
-const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({ functionResponse, messageInfo }) => {
+const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
+  functionResponse,
+  messageInfo,
+  messageId,
+}) => {
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
@@ -62,7 +67,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({ funct
     switch (mode) {
       case 'compact':
         return (
-          <div className="chat-message-container user-message">
+          <div id={messageId} className="chat-message-container user-message">
             <div className="chat-bubble function-message-bubble" style={{ cursor: 'pointer' }} onClick={toggleMode}>
               <div className="function-title-bar function-response-title-bar">{responseSummary}</div>
             </div>
@@ -71,7 +76,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({ funct
         );
       case 'collapsed':
         return (
-          <div className="chat-message-container user-message">
+          <div id={messageId} className="chat-message-container user-message">
             <div className="chat-bubble function-message-bubble" style={{ cursor: 'pointer' }} onClick={toggleMode}>
               <div className="function-title-bar function-response-title-bar">
                 Function Response: {soleObjectKey && <code>{soleObjectKey}</code>}
@@ -85,7 +90,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({ funct
         );
       case 'expanded':
         return (
-          <div className="chat-message-container user-message">
+          <div id={messageId} className="chat-message-container user-message">
             <div className="chat-bubble function-message-bubble">
               <div
                 className="function-title-bar function-response-title-bar"
