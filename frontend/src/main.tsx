@@ -9,6 +9,7 @@ import { SessionPage } from './pages/SessionPage';
 import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
+import GlobalDialogOverlay from './components/GlobalDialogOverlay'; // Import the new component
 
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
@@ -93,6 +94,7 @@ const Root = () => {
         </WorkspaceProvider>
       </Provider>
       <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
+      <GlobalDialogOverlay /> {/* Render the new overlay component here */}
     </React.StrictMode>
   );
 };

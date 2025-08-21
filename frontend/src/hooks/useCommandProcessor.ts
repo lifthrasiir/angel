@@ -1,11 +1,13 @@
 import { useAtomValue, useSetAtom } from 'jotai';
-import { statusMessageAtom, workspaceIdAtom, sessionsAtom } from '../atoms/chatAtoms';
+import { statusMessageAtom, workspaceIdAtom, sessionsAtom, isPickingDirectoryAtom } from '../atoms/chatAtoms';
 import { fetchSessions } from '../utils/sessionManager';
+import { callNativeDirectoryPicker, ResultType, PickDirectoryAPIResponse } from '../utils/dialogHelpers';
 
 export const useCommandProcessor = (sessionId: string | null) => {
   const setStatusMessage = useSetAtom(statusMessageAtom);
   const workspaceId = useAtomValue(workspaceIdAtom);
   const setSessions = useSetAtom(sessionsAtom);
+  const setIsPickingDirectory = useSetAtom(isPickingDirectoryAtom); // isPickingDirectoryAtom setter
 
   const runCompress = async () => {
     setStatusMessage('Compressing chat history...');
@@ -40,23 +42,9 @@ export const useCommandProcessor = (sessionId: string | null) => {
     }
   };
 
-  const runExposeOrUnexpose = async (command: string, args: string) => {
+  const updateRoots = async (command: string, roots: string[]) => {
     setStatusMessage(`Updating exposed directories...`);
     try {
-      let roots: string[] = [];
-      if (args) {
-        roots = args
-          .split(',')
-          .map((path) => path.trim())
-          .filter((path) => path.length > 0);
-      } else {
-        // Placeholder for directory selection dialog
-        setStatusMessage(
-          `Please provide directories as arguments for /${command} (e.g., /${command} /path/to/dir1, /path/to/dir2)`,
-        );
-        return;
-      }
-
       const sessionResponse = await fetch(`/api/chat/${sessionId}`);
       if (!sessionResponse.ok) {
         const errorData = await sessionResponse.json();
@@ -96,8 +84,6 @@ export const useCommandProcessor = (sessionId: string | null) => {
       const result = await response.json();
       setStatusMessage(result.message || `Directories ${command}d successfully.`);
 
-      // TODO: Trigger loadChatSession somehow
-
       // Refresh the session list (to update roots displayed in UI if any)
       if (workspaceId) {
         try {
@@ -110,6 +96,50 @@ export const useCommandProcessor = (sessionId: string | null) => {
     } catch (error: any) {
       setStatusMessage(`${command} failed: ${error.message}`);
       console.error(`${command} failed:`, error);
+    }
+  };
+
+  const runExposeOrUnexpose = async (command: string, args: string) => {
+    if (!sessionId) {
+      setStatusMessage('Error: No active session to run commands.');
+      return;
+    }
+
+    if (command === 'expose' && !args) {
+      // If /expose is called without arguments, trigger native directory picker
+      const data: PickDirectoryAPIResponse = await callNativeDirectoryPicker(setIsPickingDirectory, setStatusMessage);
+
+      switch (data.result) {
+        case ResultType.Success:
+          if (data.selectedPath) {
+            await updateRoots(command, [data.selectedPath]);
+          } else {
+            setStatusMessage('Error: No path returned from directory picker.');
+          }
+          break;
+        case ResultType.Canceled:
+          setStatusMessage('Directory selection canceled.');
+          break;
+        case ResultType.AlreadyOpen:
+          setStatusMessage('Another directory picker is already open.');
+          break;
+        case ResultType.Error:
+          setStatusMessage(`Error selecting directory: ${data.error || 'Unknown error'}`);
+          break;
+      }
+    } else {
+      // Existing logic for expose/unexpose with arguments or unexpose without arguments
+      let roots: string[] = [];
+      if (args) {
+        roots = args
+          .split(',')
+          .map((path) => path.trim())
+          .filter((path) => path.length > 0);
+      } else if (command === 'unexpose') {
+        // unexpose without arguments means clear all roots
+        roots = [];
+      }
+      await updateRoots(command, roots);
     }
   };
 
@@ -128,7 +158,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
         break;
       case 'expose':
       case 'unexpose':
-        runExposeOrUnexpose(command, args);
+        await runExposeOrUnexpose(command, args);
         break;
       default:
         setStatusMessage(`Unknown command: ${fullCommand}`);

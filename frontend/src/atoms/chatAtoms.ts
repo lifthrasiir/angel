@@ -21,6 +21,7 @@ export const availableModelsAtom = atom<Map<string, ModelInfo>>(new Map());
 export const selectedModelAtom = atom<ModelInfo | null>(null);
 export const globalPromptsAtom = atom<PredefinedPrompt[]>([]);
 export const selectedGlobalPromptAtom = atom<string>('');
+export const isPickingDirectoryAtom = atom<boolean>(false);
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(
