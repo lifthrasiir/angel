@@ -6,14 +6,20 @@ const TokenCountMeter: React.FC = () => {
   const [messages] = useAtom(messagesAtom);
   const [selectedModel] = useAtom(selectedModelAtom);
 
-  const lastMessageTokenCount = messages.length > 0 ? messages[messages.length - 1].cumulTokenCount || 0 : 0;
+  let latestCumulTokenCount = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].cumulTokenCount) {
+      latestCumulTokenCount = messages[i].cumulTokenCount!;
+      break;
+    }
+  }
   const maxTokens = selectedModel?.maxTokens || 0;
 
   if (maxTokens === 0) {
     return null; // Prevent division by zero
   }
 
-  const usedPercentage = (lastMessageTokenCount / maxTokens) * 100;
+  const usedPercentage = (latestCumulTokenCount / maxTokens) * 100;
 
   return (
     <div
