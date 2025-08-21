@@ -180,7 +180,7 @@ func TestFindBestDriveLetter(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		used     int // Changed to int
+		used     int
 		expected []string
 		err      bool
 	}{

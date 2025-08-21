@@ -140,8 +140,6 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	return db, nil
 }
 
-// Keep global db for non-test usage, but tests will use their own instance
-
 // Session struct to hold session data
 type Session struct {
 	ID              string   `json:"id"`
@@ -149,7 +147,7 @@ type Session struct {
 	SystemPrompt    string   `json:"system_prompt"`
 	Name            string   `json:"name"`
 	WorkspaceID     string   `json:"workspace_id"`
-	PrimaryBranchID string   `json:"primary_branch_id"` // Changed to string
+	PrimaryBranchID string   `json:"primary_branch_id"`
 	Roots           []string `json:"roots"`
 }
 
@@ -173,27 +171,33 @@ type FileAttachment struct {
 // Message struct to hold message data for database interaction
 type Message struct {
 	ID                      int              `json:"id"`
-	SessionID               string           `json:"session_id"`        // Existing
-	BranchID                string           `json:"branch_id"`         // New field
-	ParentMessageID         *int             `json:"parent_message_id"` // New field, pointer for nullable
-	ChosenNextID            *int             `json:"chosen_next_id"`    // New field, pointer for nullable
+	SessionID               string           `json:"session_id"`
+	BranchID                string           `json:"branch_id"`
+	ParentMessageID         *int             `json:"parent_message_id"`
+	ChosenNextID            *int             `json:"chosen_next_id"`
 	Role                    string           `json:"role"`
 	Text                    string           `json:"text"`
 	Type                    string           `json:"type"`
 	Attachments             []FileAttachment `json:"attachments,omitempty"`
 	CumulTokenCount         *int             `json:"cumul_token_count,omitempty"`
 	CreatedAt               string           `json:"created_at"`
-	Model                   string           `json:"model,omitempty"`                       // New field for the model that generated the message
-	CompressedUpToMessageID *int             `json:"compressed_up_to_message_id,omitempty"` // New field for compression
+	Model                   string           `json:"model,omitempty"`
+	CompressedUpToMessageID *int             `json:"compressed_up_to_message_id,omitempty"`
 }
 
 const (
-	MessageTypeText             = "text"
-	MessageTypeFunctionCall     = "function_call"
-	MessageTypeFunctionResponse = "function_response"
-	MessageTypeThought          = "thought"
-	MessageTypeCompression      = "compression"
-	MessageTypeSystemPrompt     = "system_prompt"
+	RoleUser    = "user"
+	RoleModel   = "model"
+	RoleThought = "thought"
+
+	TypeText             = "text"
+	TypeFunctionCall     = "function_call"
+	TypeFunctionResponse = "function_response"
+	TypeThought          = "thought"
+	TypeCompression      = "compression"
+	TypeSystemPrompt     = "system_prompt"
+	TypeError            = "error"
+	TypeModelError       = "model_error"
 )
 
 // DbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
@@ -220,7 +224,7 @@ type FrontendMessage struct {
 	Type            string                `json:"type"`
 	Attachments     []FileAttachment      `json:"attachments,omitempty"`
 	CumulTokenCount *int                  `json:"cumul_token_count,omitempty"`
-	SessionID       string                `json:"sessionId,omitempty"` // Add SessionID to FrontendMessage
+	SessionID       string                `json:"sessionId,omitempty"`
 	BranchID        string                `json:"branchId,omitempty"`
 	ParentMessageID *string               `json:"parentMessageId,omitempty"`
 	ChosenNextID    *string               `json:"chosenNextId,omitempty"`
@@ -365,7 +369,8 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	// Get workspace information
 	var workspace Workspace
 	if workspaceID != "" {
-		err := db.QueryRow("SELECT id, name, default_system_prompt, created_at FROM workspaces WHERE id = ?", workspaceID).Scan(&workspace.ID, &workspace.Name, &workspace.DefaultSystemPrompt, &workspace.CreatedAt)
+		row := db.QueryRow("SELECT id, name, default_system_prompt, created_at FROM workspaces WHERE id = ?", workspaceID)
+		err := row.Scan(&workspace.ID, &workspace.Name, &workspace.DefaultSystemPrompt, &workspace.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get workspace: %w", err)
 		}
@@ -436,7 +441,13 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 		return 0, fmt.Errorf("failed to marshal attachments: %w", err)
 	}
 
-	result, err := db.Exec("INSERT INTO messages (session_id, branch_id, parent_message_id, chosen_next_id, role, text, type, attachments, cumul_token_count, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Role, msg.Text, msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model)
+	result, err := db.Exec(`
+		INSERT INTO messages (
+			session_id, branch_id, parent_message_id, chosen_next_id, role, text,
+			type, attachments, cumul_token_count, model)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Role, msg.Text,
+		msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model)
 	if err != nil {
 		log.Printf("AddMessageToSession: Failed to add message to session: %v", err)
 		return 0, fmt.Errorf("failed to add message to session: %w", err)
@@ -490,7 +501,9 @@ func GetMessagePossibleNextIDs(db *sql.DB, messageID int) ([]PossibleNextMessage
 }
 
 func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string) error {
-	_, err := db.Exec("INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id) VALUES (1, ?, ?, ?)", tokenJSON, userEmail, projectID)
+	_, err := db.Exec(
+		"INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id) VALUES (1, ?, ?, ?)",
+		tokenJSON, userEmail, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token: %w", err)
 	}
@@ -501,7 +514,8 @@ func LoadOAuthToken(db *sql.DB) (string, string, string, error) {
 	var tokenJSON string
 	var nullUserEmail sql.NullString
 	var nullProjectID sql.NullString
-	err := db.QueryRow("SELECT token_data, user_email, project_id FROM oauth_tokens WHERE id = 1").Scan(&tokenJSON, &nullUserEmail, &nullProjectID)
+	row := db.QueryRow("SELECT token_data, user_email, project_id FROM oauth_tokens WHERE id = 1")
+	err := row.Scan(&tokenJSON, &nullUserEmail, &nullProjectID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Println("LoadOAuthToken: No existing token found in DB.")
@@ -537,7 +551,8 @@ func SessionExists(db *sql.DB, sessionID string) (bool, error) {
 func GetSession(db *sql.DB, sessionID string) (Session, error) {
 	var s Session
 	var rootsJSON string
-	err := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, ''), COALESCE(roots, '[]') FROM sessions WHERE id = ?", sessionID).Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID, &rootsJSON)
+	row := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, ''), COALESCE(roots, '[]') FROM sessions WHERE id = ?", sessionID)
+	err := row.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID, &rootsJSON)
 	if err != nil {
 		return s, err
 	}
@@ -565,7 +580,8 @@ func UpdateSessionRoots(db *sql.DB, sessionID string, roots []string) error {
 
 func GetBranch(db *sql.DB, branchID string) (Branch, error) {
 	var b Branch
-	err := db.QueryRow("SELECT id, session_id, parent_branch_id, branch_from_message_id, created_at FROM branches WHERE id = ?", branchID).Scan(&b.ID, &b.SessionID, &b.ParentBranchID, &b.BranchFromMessageID, &b.CreatedAt)
+	row := db.QueryRow("SELECT id, session_id, parent_branch_id, branch_from_message_id, created_at FROM branches WHERE id = ?", branchID)
+	err := row.Scan(&b.ID, &b.SessionID, &b.ParentBranchID, &b.BranchFromMessageID, &b.CreatedAt)
 	if err != nil {
 		return b, fmt.Errorf("failed to get branch: %w", err)
 	}
@@ -573,7 +589,12 @@ func GetBranch(db *sql.DB, branchID string) (Branch, error) {
 }
 
 // createFrontendMessage converts a Message DB struct and related data into a FrontendMessage.
-func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNextIDsAndBranchesStr string, ignoreBeforeLastCompression bool) (FrontendMessage, *int, error) {
+func createFrontendMessage(
+	m Message,
+	attachmentsJSON sql.NullString,
+	possibleNextIDsAndBranchesStr string,
+	ignoreBeforeLastCompression bool,
+) (FrontendMessage, *int, error) {
 	if attachmentsJSON.Valid {
 		if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
 			log.Printf("Failed to unmarshal attachments for message %d: %v", m.ID, err)
@@ -613,7 +634,9 @@ func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNe
 					BranchID:  possibleNextIDsAndBranches[i+1],
 				})
 			} else {
-				log.Printf("Warning: Malformed possibleNextIDsAndBranchesStr for message %d: %s", m.ID, possibleNextIDsAndBranchesStr)
+				log.Printf(
+					"Warning: Malformed possibleNextIDsAndBranchesStr for message %d: %s",
+					m.ID, possibleNextIDsAndBranchesStr)
 			}
 		}
 	}
@@ -635,21 +658,21 @@ func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNe
 	}
 
 	switch m.Type {
-	case "function_call":
+	case TypeFunctionCall:
 		var fc FunctionCall
 		if err := json.Unmarshal([]byte(m.Text), &fc); err != nil {
 			log.Printf("Failed to unmarshal FunctionCall for message %d: %v", m.ID, err)
 		} else {
 			fm.Parts = []Part{{FunctionCall: &fc}}
 		}
-	case "function_response":
+	case TypeFunctionResponse:
 		var fr FunctionResponse
 		if err := json.Unmarshal([]byte(m.Text), &fr); err != nil {
 			log.Printf("Failed to unmarshal FunctionResponse for message %d: %v", m.ID, err)
 		} else {
 			fm.Parts = []Part{{FunctionResponse: &fr}}
 		}
-	case "compression":
+	case TypeCompression:
 		// For compression messages, the text is in the format "ID\nSummary"
 		textBefore, textAfter, found := strings.Cut(m.Text, "\n")
 		if found {
@@ -682,19 +705,28 @@ func createFrontendMessage(m Message, attachmentsJSON sql.NullString, possibleNe
 // getSessionHistoryInternal retrieves the chat history for a given session and its primary branch,
 // recursively fetching messages from parent branches. It allows for discarding thoughts
 // and ignoring messages before the last compression message.
-func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID string, discardThoughts bool, ignoreBeforeLastCompression bool) ([]FrontendMessage, error) {
+func getSessionHistoryInternal(
+	db DbOrTx,
+	sessionID string,
+	primaryBranchID string,
+	discardThoughts bool,
+	ignoreBeforeLastCompression bool,
+) ([]FrontendMessage, error) {
 	var history [][]FrontendMessage
 	messageIdLimit := math.MaxInt
 	branchID := primaryBranchID
 	keepGoing := true
 
 	var lastCompressionMessageID int = -1
-	var lastCompressedUpToMessageID *int // New variable to store the ID from the compression message
+	var lastCompressedUpToMessageID *int
 
 	if ignoreBeforeLastCompression {
 		// Find the ID of the last compression message in the current branch
 		var compressionText string
-		err := db.QueryRow("SELECT id, text FROM messages WHERE session_id = ? AND branch_id = ? AND type = 'compression' ORDER BY id DESC LIMIT 1", sessionID, primaryBranchID).Scan(&lastCompressionMessageID, &compressionText)
+		row := db.QueryRow(
+			"SELECT id, text FROM messages WHERE session_id = ? AND branch_id = ? AND type = 'compression' ORDER BY id DESC LIMIT 1",
+			sessionID, primaryBranchID)
+		err := row.Scan(&lastCompressionMessageID, &compressionText)
 		if err == nil && lastCompressionMessageID != -1 {
 			before, _, found := strings.Cut(compressionText, "\n")
 			if found {
@@ -702,10 +734,10 @@ func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID stri
 				if parseErr == nil {
 					lastCompressedUpToMessageID = &parsedID
 				} else {
-					log.Printf("Warning: Failed to parse CompressedUpToMessageId from compression message text '%s': %v", before, parseErr)
+					log.Printf("Warning: Failed to parse CompressedUpToMessageId from compression message text %q: %v", before, parseErr)
 				}
 			} else {
-				log.Printf("Warning: Malformed compression message text: '%s'", compressionText)
+				log.Printf("Warning: Malformed compression message text: %q", compressionText)
 			}
 		}
 		if err != nil && err != sql.ErrNoRows {
@@ -725,7 +757,8 @@ func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID stri
 					if err == nil {
 						lastCompressedUpToMessageID = &parsedID
 					} else {
-						log.Printf("Warning: Failed to parse CompressedUpToMessageId from last compression message %d: %v", lastCompressionMessageID, err)
+						log.Printf("Warning: Failed to parse CompressedUpToMessageId from last compression message %d: %v",
+							lastCompressionMessageID, err)
 						lastCompressedUpToMessageID = nil // Treat as if no valid ID was found
 					}
 				} else {
@@ -744,10 +777,10 @@ func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID stri
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
 					m.role, m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
 					coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
-			FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
-			GROUP BY m.id
-			HAVING m.branch_id = ? AND m.id <= ?
-			ORDER BY m.id ASC
+				FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
+				GROUP BY m.id
+				HAVING m.branch_id = ? AND m.id <= ?
+				ORDER BY m.id ASC
 			`, branchID, messageIdLimit)
 			if err != nil {
 				return fmt.Errorf("failed to query branch messages: %w", err)
@@ -769,11 +802,14 @@ func getSessionHistoryInternal(db DbOrTx, sessionID string, primaryBranchID stri
 				}
 
 				// If ignoring before last compression, and current message is older than or equal to the compressed ID
-				if ignoreBeforeLastCompression && lastCompressedUpToMessageID != nil && m.ID <= *lastCompressedUpToMessageID && m.ID != lastCompressionMessageID {
+				if ignoreBeforeLastCompression &&
+					lastCompressedUpToMessageID != nil &&
+					m.ID <= *lastCompressedUpToMessageID &&
+					m.ID != lastCompressionMessageID {
 					continue // Skip this message, unless it's the compression message itself
 				}
 
-				if discardThoughts && m.Role == "thought" {
+				if discardThoughts && m.Role == RoleThought {
 					continue // Skip thought messages
 				}
 
@@ -953,7 +989,8 @@ func GetMessageBranchID(db *sql.DB, messageID int) (string, error) {
 func GetLastMessageInBranch(db *sql.DB, sessionID string, branchID string) (int, string, error) {
 	var lastMessageID int
 	var lastMessageModel string
-	err := db.QueryRow("SELECT id, model FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionID, branchID).Scan(&lastMessageID, &lastMessageModel)
+	row := db.QueryRow("SELECT id, model FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionID, branchID)
+	err := row.Scan(&lastMessageID, &lastMessageModel)
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to get last message in branch: %w", err)
 	}
@@ -964,7 +1001,8 @@ func GetLastMessageInBranch(db *sql.DB, sessionID string, branchID string) (int,
 func GetMessageDetails(db *sql.DB, messageID int) (string, string, sql.NullInt64, string, error) {
 	var role, msgType, branchID string
 	var parentMessageID sql.NullInt64
-	err := db.QueryRow("SELECT role, type, parent_message_id, branch_id FROM messages WHERE id = ?", messageID).Scan(&role, &msgType, &parentMessageID, &branchID)
+	row := db.QueryRow("SELECT role, type, parent_message_id, branch_id FROM messages WHERE id = ?", messageID)
+	err := row.Scan(&role, &msgType, &parentMessageID, &branchID)
 	if err != nil {
 		return "", "", sql.NullInt64{}, "", fmt.Errorf("failed to get message details: %w", err)
 	}

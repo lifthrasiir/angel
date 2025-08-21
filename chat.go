@@ -21,7 +21,7 @@ type InitialState struct {
 	WorkspaceID            string            `json:"workspaceId"`
 	PrimaryBranchID        string            `json:"primaryBranchId"`
 	Roots                  []string          `json:"roots"`
-	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"` // New field
+	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"`
 }
 
 // New session and message handler
@@ -38,7 +38,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt string           `json:"systemPrompt"`
 		Attachments  []FileAttachment `json:"attachments"`
 		WorkspaceID  string           `json:"workspaceId"`
-		Model        string           `json:"model"` // New field for model
+		Model        string           `json:"model"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
@@ -89,9 +89,9 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		BranchID:        primaryBranchID,
 		ParentMessageID: nil,
 		ChosenNextID:    nil,
-		Role:            "user",
+		Role:            RoleUser,
 		Text:            userMessage,
-		Type:            "text",
+		Type:            TypeText,
 		Attachments:     requestBody.Attachments,
 		CumulTokenCount: nil,
 		Model:           modelToUse,
@@ -164,7 +164,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		Message     string           `json:"message"`
 		Attachments []FileAttachment `json:"attachments"`
-		Model       string           `json:"model"` // New field for model
+		Model       string           `json:"model"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
@@ -226,9 +226,9 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		BranchID:        primaryBranchID,
 		ParentMessageID: parentMessageID,
 		ChosenNextID:    nil,
-		Role:            "user",
+		Role:            RoleUser,
 		Text:            userMessage,
-		Type:            "text",
+		Type:            TypeText,
 		Attachments:     requestBody.Attachments,
 		CumulTokenCount: nil,
 		Model:           modelToUse,
@@ -241,7 +241,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Update the chosen_next_id of the last message in the primary branch
 	if lastMessageID != 0 {
-		if err := UpdateMessageChosenNextID(db, lastMessageID, &userMessageID); err != nil { // Changed userMessageID to &userMessageID
+		if err := UpdateMessageChosenNextID(db, lastMessageID, &userMessageID); err != nil {
 			log.Printf("chatMessage: Failed to update chosen_next_id for message %d: %v", lastMessageID, err)
 			// Non-fatal error, continue with response
 		}
@@ -266,7 +266,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
 
 	// Retrieve session history from DB for Gemini API
-	frontendHistory, err := GetSessionHistoryContext(db, sessionId, primaryBranchID) // Pass primaryBranchID
+	frontendHistory, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
 		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
@@ -447,7 +447,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate that the updated message is a user message of type 'text'
-	if updatedRole != "user" || updatedType != "text" {
+	if updatedRole != RoleUser || updatedType != TypeText {
 		http.Error(w, "Branching is only allowed from user messages of type 'text'.", http.StatusBadRequest)
 		return
 	}
@@ -477,9 +477,9 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		BranchID:        newBranchID,
 		ParentMessageID: &branchFromMessageID,
 		ChosenNextID:    nil,
-		Role:            "user",
+		Role:            RoleUser,
 		Text:            requestBody.NewMessageText,
-		Type:            "text",
+		Type:            TypeText,
 		Attachments:     nil,
 		CumulTokenCount: nil,
 		Model:           "", // Model will be inferred or set later
@@ -714,23 +714,26 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		}
 
 		// Handle function calls and responses (these should override text/attachments for their specific message types)
-		if fm.Type == MessageTypeFunctionCall && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
+		if fm.Type == TypeFunctionCall && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
 			parts = append(parts, Part{FunctionCall: fm.Parts[0].FunctionCall})
-		} else if fm.Type == MessageTypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
+		} else if fm.Type == TypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
 			parts = append(parts, Part{FunctionResponse: fm.Parts[0].FunctionResponse})
-		} else if fm.Type == MessageTypeSystemPrompt && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
+		} else if fm.Type == TypeSystemPrompt && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
 			// System_prompt should expand to *two* `Content`s
 			contents = append(contents,
 				Content{
-					Role: "model",
+					Role: RoleModel,
 					Parts: []Part{
 						{FunctionCall: &FunctionCall{Name: "new_system_prompt", Args: map[string]interface{}{}}},
 					},
 				},
 				Content{
-					Role: "user",
+					Role: RoleUser,
 					Parts: []Part{
-						{FunctionResponse: &FunctionResponse{Name: "new_system_prompt", Response: map[string]interface{}{"prompt": fm.Parts[0].Text}}},
+						{FunctionResponse: &FunctionResponse{
+							Name:     "new_system_prompt",
+							Response: map[string]interface{}{"prompt": fm.Parts[0].Text},
+						}},
 					},
 				},
 			)
@@ -758,13 +761,13 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 
 		// Rule 1: Remove consecutive user text messages
 		// If current is user text and next is user text (ignoring thoughts/errors in between)
-		if currentMsg.Role == "user" && currentMsg.Type == MessageTypeText {
+		if currentMsg.Role == RoleUser && currentMsg.Type == TypeText {
 			nextUserTextIndex := -1
 			for j := i + 1; j < len(messages); j++ {
-				if messages[j].Type == MessageTypeThought {
+				if messages[j].Type == TypeThought {
 					continue // Ignore thoughts and errors for continuity
 				}
-				if messages[j].Role == "user" && messages[j].Type == MessageTypeText {
+				if messages[j].Role == RoleUser && messages[j].Type == TypeText {
 					nextUserTextIndex = j
 					break
 				}
@@ -779,13 +782,13 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 
 		// Rule 2: Remove function_call if not followed by function_response
 		// If current is model function_call
-		if currentMsg.Role == "model" && currentMsg.Type == MessageTypeFunctionCall {
+		if currentMsg.Role == RoleModel && currentMsg.Type == TypeFunctionCall {
 			foundResponse := false
 			for j := i + 1; j < len(messages); j++ {
-				if messages[j].Type == MessageTypeThought {
+				if messages[j].Type == TypeThought {
 					continue // Ignore thoughts and errors for continuity
 				}
-				if messages[j].Role == "user" && messages[j].Type == MessageTypeFunctionResponse {
+				if messages[j].Role == RoleUser && messages[j].Type == TypeFunctionResponse {
 					foundResponse = true
 					break
 				}

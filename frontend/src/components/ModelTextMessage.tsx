@@ -5,9 +5,9 @@ import { ProcessingIndicator } from './ProcessingIndicator'; // Import the new c
 interface ModelTextMessageProps {
   text?: string;
   className?: string;
-  messageInfo?: React.ReactNode; // New prop for MessageInfo
-  isLastModelMessage?: boolean; // New prop
-  processingStartTime?: number | null; // New prop
+  messageInfo?: React.ReactNode;
+  isLastModelMessage?: boolean;
+  processingStartTime?: number | null;
 }
 
 const ModelTextMessage: React.FC<ModelTextMessageProps> = ({

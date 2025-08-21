@@ -167,7 +167,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 	contents := []Content{
 		{
-			Role:  "user",
+			Role:  RoleUser,
 			Parts: []Part{{Text: requestBody.Text}},
 		},
 	}
@@ -527,9 +527,9 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 		SessionID:       sessionId,
 		BranchID:        primaryBranchID,
 		ParentMessageID: parentMessageID,
-		Role:            "user", // System messages are typically from the "user" role in this context
+		Role:            RoleUser, // System messages are typically from the "user" role in this context
 		Text:            messageText,
-		Type:            MessageTypeSystemPrompt,
+		Type:            TypeSystemPrompt,
 	})
 	if err != nil {
 		log.Printf("updateSessionRootsHandler: Failed to add system prompt message: %v", err)

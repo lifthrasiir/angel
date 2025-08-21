@@ -29,14 +29,14 @@ export const sendMessage = async (
   systemPrompt: string,
   workspaceId?: string,
   primaryBranchId?: string,
-  model?: string, // New model parameter
+  model?: string,
 ) => {
   let apiUrl = '';
   let requestBody: any = {};
 
   if (chatSessionId) {
     apiUrl = `/api/chat/${chatSessionId}`;
-    requestBody = { message: inputMessage, attachments, model }; // Include model
+    requestBody = { message: inputMessage, attachments, model };
     if (primaryBranchId) {
       requestBody.primaryBranchId = primaryBranchId;
     }
@@ -47,7 +47,7 @@ export const sendMessage = async (
       systemPrompt: systemPrompt,
       name: '',
       attachments,
-      model, // Include model
+      model,
     };
     if (workspaceId) {
       requestBody.workspaceId = workspaceId;

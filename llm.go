@@ -16,9 +16,9 @@ type SessionParams struct {
 	Contents         []Content
 	ModelName        string
 	SystemPrompt     string
-	IncludeThoughts  bool                     // New field for direct control
-	GenerationParams *SessionGenerationParams // New field for generation parameters
-	ToolConfig       map[string]interface{}   // New field for tool-specific configurations
+	IncludeThoughts  bool
+	GenerationParams *SessionGenerationParams
+	ToolConfig       map[string]interface{}
 }
 
 // SessionGenerationParams holds common generation parameters for a session.
@@ -43,7 +43,7 @@ type LLMProvider interface {
 	CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
 	MaxTokens() int
 	RelativeDisplayOrder() int
-	DefaultGenerationParams() SessionGenerationParams // New method
+	DefaultGenerationParams() SessionGenerationParams
 }
 
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.

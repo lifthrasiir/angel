@@ -7,8 +7,8 @@ interface MessageInfoProps {
   parentMessageId?: string;
   chosenNextId?: string;
   possibleNextIds?: PossibleNextMessage[];
-  model?: string; // New prop for the model that generated the message
-  maxTokens?: number; // New prop for the maximum tokens of the model
+  model?: string;
+  maxTokens?: number;
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = ({

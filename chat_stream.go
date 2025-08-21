@@ -13,10 +13,19 @@ import (
 	"time"
 )
 
-var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`) // Moved from chat.go
+var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 
 // Helper function to stream Gemini API response
-func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter, lastUserMessageID int, modelToUse string, sendInitialState bool, inferSessionName bool, callStartTime time.Time) error {
+func streamGeminiResponse(
+	db *sql.DB,
+	initialState InitialState,
+	sseW *sseWriter,
+	lastUserMessageID int,
+	modelToUse string,
+	sendInitialState bool,
+	inferSessionName bool,
+	callStartTime time.Time,
+) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var finalTotalTokenCount *int
@@ -103,9 +112,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					BranchID:        initialState.PrimaryBranchID,
 					ParentMessageID: nil,
 					ChosenNextID:    nil,
-					Role:            "model",
+					Role:            RoleModel,
 					Text:            errorMessage,
-					Type:            "model_error",
+					Type:            TypeModelError,
 					Attachments:     nil,
 					CumulTokenCount: nil,
 					Model:           modelToUse,
@@ -131,7 +140,10 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					if err := UpdateMessageTokens(db, lastUserMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
 						log.Printf("Failed to update cumul_token_count for user message %d: %v", lastUserMessageID, err)
 					}
-					broadcastToSession(initialState.SessionId, EventCumulTokenCount, fmt.Sprintf("%d\n%d", lastUserMessageID, lastUsageMetadata.PromptTokenCount))
+					broadcastToSession(
+						initialState.SessionId,
+						EventCumulTokenCount,
+						fmt.Sprintf("%d\n%d", lastUserMessageID, lastUsageMetadata.PromptTokenCount))
 				}
 			}
 			select {
@@ -178,9 +190,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 						BranchID:        initialState.PrimaryBranchID,
 						ParentMessageID: parentMessageID,
 						ChosenNextID:    nil,
-						Role:            "model",
+						Role:            RoleModel,
 						Text:            string(fcJson),
-						Type:            "function_call",
+						Type:            TypeFunctionCall,
 						Attachments:     nil,
 						CumulTokenCount: nil,
 						Model:           modelToUse,
@@ -201,7 +213,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
 
 					// Add to current history and functionCalls for later execution
-					currentHistory = append(currentHistory, Content{Role: "model", Parts: []Part{{FunctionCall: &fc}}})
+					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}})
 					hasFunctionCall = true
 
 					functionResponseValue, err := CallToolFunction(ctx, fc, ToolHandlerParams{ModelName: modelToUse, SessionId: initialState.SessionId})
@@ -233,9 +245,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 						BranchID:        initialState.PrimaryBranchID,
 						ParentMessageID: parentMessageID,
 						ChosenNextID:    nil,
-						Role:            "user",
+						Role:            RoleUser,
 						Text:            string(frJson),
-						Type:            "function_response",
+						Type:            TypeFunctionResponse,
 						Attachments:     nil,
 						CumulTokenCount: promptTokens,
 						Model:           modelToUse,
@@ -253,7 +265,7 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 					lastAddedMessageID = messageID
 					formattedData = fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(responseJson))
 					broadcastToSession(initialState.SessionId, EventFunctionReply, formattedData)
-					currentHistory = append(currentHistory, Content{Role: "user", Parts: []Part{{FunctionResponse: &fr}}})
+					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: []Part{{FunctionResponse: &fr}}})
 
 					continue // Continue processing other parts in the same caResp
 				}
@@ -283,9 +295,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 						BranchID:        initialState.PrimaryBranchID,
 						ParentMessageID: parentMessageID,
 						ChosenNextID:    nil,
-						Role:            "thought",
+						Role:            RoleThought,
 						Text:            thoughtText,
-						Type:            "thought",
+						Type:            TypeThought,
 						Attachments:     nil,
 						CumulTokenCount: nil,
 						Model:           modelToUse,
@@ -318,9 +330,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 							BranchID:        initialState.PrimaryBranchID,
 							ParentMessageID: parentMessageID,
 							ChosenNextID:    nil,
-							Role:            "model",
+							Role:            RoleModel,
 							Text:            "",
-							Type:            "text",
+							Type:            TypeText,
 							Attachments:     nil,
 							CumulTokenCount: nil,
 							Model:           modelToUse,
@@ -369,9 +381,9 @@ func streamGeminiResponse(db *sql.DB, initialState InitialState, sseW *sseWriter
 				BranchID:        initialState.PrimaryBranchID,
 				ParentMessageID: &lastAddedMessageID,
 				ChosenNextID:    nil,
-				Role:            "model",
+				Role:            RoleModel,
 				Text:            "user canceled request",
-				Type:            "error",
+				Type:            TypeModelError,
 				Attachments:     nil,
 				CumulTokenCount: nil,
 				Model:           modelToUse,
@@ -530,7 +542,7 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	oneShotResult, err := provider.GenerateContentOneShot(ctx, SessionParams{
 		Contents: []Content{
 			{
-				Role:  "user",
+				Role:  RoleUser,
 				Parts: []Part{{Text: nameInputPrompt}},
 			},
 		},

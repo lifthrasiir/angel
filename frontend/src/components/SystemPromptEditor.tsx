@@ -12,12 +12,12 @@ export interface PredefinedPrompt {
 
 interface SystemPromptEditorProps {
   initialPrompt: string;
-  currentLabel: string; // New prop for the label
-  onPromptUpdate: (prompt: PredefinedPrompt) => void; // Changed prop
+  currentLabel: string;
+  onPromptUpdate: (prompt: PredefinedPrompt) => void;
   isEditing: boolean;
   predefinedPrompts?: PredefinedPrompt[];
-  isGlobalSettings?: boolean; // New prop to indicate if it's used in global settings
-  workspaceId?: string; // New prop for workspaceId
+  isGlobalSettings?: boolean;
+  workspaceId?: string;
 }
 
 interface EditablePromptViewProps {
@@ -266,12 +266,12 @@ const CUSTOM_PROMPT_SYMBOL = Symbol('custom');
 
 const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
   initialPrompt,
-  currentLabel, // Destructure new prop
-  onPromptUpdate, // Destructure changed prop
+  currentLabel,
+  onPromptUpdate,
   isEditing,
   predefinedPrompts = [],
   isGlobalSettings = false,
-  workspaceId, // Destructure new prop
+  workspaceId,
 }) => {
   const [systemPrompt, setSystemPromptInternal] = useState(initialPrompt);
   const [internalLabel, setInternalLabel] = useState(currentLabel); // Internal state for label

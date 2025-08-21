@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"regexp" // Added import
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -62,7 +62,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		// where it curates history before compression.
 		// We might need to refine this based on how gemini-cli's `getHistory(true)` works.
 		// For now, assuming simple text content.
-		if msg.Role == "user" || msg.Role == "model" {
+		if msg.Role == RoleUser || msg.Role == RoleModel {
 			curatedHistory = append(curatedHistory, Content{
 				Role:  msg.Role,
 				Parts: msg.Parts,
@@ -138,7 +138,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	systemPrompt, triggerPrompt := GetCompressionPrompt()
 	llmRequestContents := historyToCompress // Start with the history to compress
 	llmRequestContents = append(llmRequestContents, Content{
-		Role: "user",
+		Role: RoleUser,
 		Parts: []Part{
 			{Text: triggerPrompt},
 		},
@@ -175,7 +175,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	// For now, we'll store the raw XML in the message text.
 
 	// 8. Database Update:
-	//    a. Create a new "compression" type message.
+	//    a. Create a new MessageTypeCompression type message.
 	//    b. Store summary XML in the Text field of the new message.
 	//    c. Update parent_message_id and chosen_next_id to link messages correctly.
 
@@ -197,8 +197,8 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	compressionMsg := Message{
 		SessionID:       sessionID,
 		BranchID:        session.PrimaryBranchID,
-		Role:            "user",
-		Type:            "compression",
+		Role:            RoleUser,
+		Type:            TypeCompression,
 		Text:            fmt.Sprintf("%d\n%s", *compressedUpToMessageID, extractedSummary),
 		ParentMessageID: compressionMsgParentID,
 		Model:           modelName,
@@ -225,7 +225,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 
 	// Add compression message content
 	combinedContentForTokenCount = append(combinedContentForTokenCount, Content{
-		Role:  "user", // Compression message role is "user"
+		Role:  RoleUser, // Compression message role is "user"
 		Parts: []Part{{Text: extractedSummary}},
 	})
 
@@ -238,7 +238,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		}
 		// If the message is the compression message itself, and it's the first message in allMessages,
 		// then startIndex should be 0, and we should include all messages from allMessages.
-		if i == 0 && msg.Type == "compression" && strconv.Itoa(newCompressionMsgID) == msg.ID {
+		if i == 0 && msg.Type == TypeCompression && strconv.Itoa(newCompressionMsgID) == msg.ID {
 			startIndex = 0
 			break
 		}
@@ -252,7 +252,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 			var contentRole string = msg.Role // Default role
 
 			switch msg.Type {
-			case "function_call":
+			case TypeFunctionCall:
 				var fc FunctionCall
 				// Assuming FunctionCall is stored as JSON in msg.Parts[0].Text
 				if len(msg.Parts) > 0 && msg.Parts[0].Text != "" {
@@ -265,7 +265,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 					log.Printf("Warning: Malformed function_call message %s: no text part", msg.ID)
 					continue
 				}
-			case "function_response":
+			case TypeFunctionResponse:
 				var fr FunctionResponse
 				// Assuming FunctionResponse is stored as JSON in msg.Parts[0].Text
 				if len(msg.Parts) > 0 && msg.Parts[0].Text != "" {
@@ -278,13 +278,13 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 					log.Printf("Warning: Malformed function_response message %s: no text part", msg.ID)
 					continue
 				}
-			case "compression":
+			case TypeCompression:
 				// For compression messages, the text is in the format "<CompressedUpToMessageId>\n<XMLSummary>"
 				if len(msg.Parts) > 0 && msg.Parts[0].Text != "" {
 					_, textAfter, found := strings.Cut(msg.Parts[0].Text, "\n")
 					if found {
 						contentParts = []Part{{Text: textAfter}} // XMLSummary is the second part
-						contentRole = "user"                     // Role for compression message is "user"
+						contentRole = RoleUser                   // Role for compression message is "user"
 					} else {
 						log.Printf("Warning: Malformed compression message text for message %s: %s", msg.ID, msg.Parts[0].Text)
 						continue // Skip if malformed
@@ -293,7 +293,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 					log.Printf("Warning: Malformed compression message %s: no text part", msg.ID)
 					continue
 				}
-			case "thought", "model_error":
+			case TypeThought, TypeModelError:
 				continue // Ignore these types
 			default: // Handles "text" and other types
 				// Handle text parts from msg.Parts

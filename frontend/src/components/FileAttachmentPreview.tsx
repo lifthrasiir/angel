@@ -6,10 +6,10 @@ import type { FileAttachment } from '../types/chat';
 
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;
-  onRemove?: (file: File) => void; // Callback for removing uploaded files
-  messageId?: string; // New: message ID for FileAttachment downloads
-  sessionId?: string; // New: session ID for FileAttachment downloads
-  blobIndex?: number; // New: blob index for FileAttachment downloads
+  onRemove?: (file: File) => void;
+  messageId?: string;
+  sessionId?: string;
+  blobIndex?: number;
 }
 
 const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({

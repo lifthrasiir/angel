@@ -9,8 +9,8 @@ interface UserTextMessageProps {
   text?: string;
   attachments?: FileAttachment[];
   messageInfo?: React.ReactNode;
-  messageId?: string; // New: message ID from ChatMessage
-  sessionId?: string; // New: session ID from ChatMessage
+  messageId?: string;
+  sessionId?: string;
 }
 
 const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, messageInfo, messageId, sessionId }) => {

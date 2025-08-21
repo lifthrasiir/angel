@@ -190,7 +190,9 @@ func (c *CodeAssistClient) SendMessageStream(ctx context.Context, params Session
 
 	dec := json.NewDecoder(respBody)
 
-	// NOTE: This function is intentionally designed to parse a specific JSON stream format, not standard SSE. Do not modify without understanding its purpose.
+	// NOTE: This function is intentionally designed to parse a specific JSON stream format,
+	// not standard SSE. Do not modify without understanding its purpose.
+
 	// Read the opening bracket of the JSON array
 	_, err = dec.Token()
 	if err != nil {
