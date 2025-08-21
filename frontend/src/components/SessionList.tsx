@@ -1,4 +1,5 @@
 import type React from 'react';
+import { apiFetch } from '../api/apiClient';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import { useAtom } from 'jotai';
@@ -43,7 +44,7 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
                 onBlur={async () => {
                   if (session.id) {
                     try {
-                      await fetch(`/api/chat/${session.id}/name`, {
+                      await apiFetch(`/api/chat/${session.id}/name`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: session.name || '' }),

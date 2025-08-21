@@ -83,6 +83,11 @@ func createTables(db *sql.DB) error {
 		label TEXT NOT NULL UNIQUE,
 		value TEXT NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS app_configs (
+		key TEXT PRIMARY KEY,
+		value BLOB NOT NULL
+	);
 `
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
@@ -467,7 +472,6 @@ func UpdateSessionPrimaryBranchID(db *sql.DB, sessionID string, branchID string)
 
 // GetMessagePossibleNextIDs retrieves all possible next message IDs and their branch IDs for a given message ID.
 func GetMessagePossibleNextIDs(db *sql.DB, messageID int) ([]PossibleNextMessage, error) {
-
 	rows, err := db.Query("SELECT id, branch_id FROM messages WHERE parent_message_id = ?", messageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query possible next message IDs: %w", err)
@@ -1130,4 +1134,28 @@ func GetGlobalPrompts(db *sql.DB) ([]PredefinedPrompt, error) {
 		return []PredefinedPrompt{}, nil // Return empty slice instead of nil
 	}
 	return prompts, nil
+}
+
+const CSRFKeyName = "csrf_key"
+
+// GetAppConfig retrieves a configuration value from the app_configs table.
+func GetAppConfig(db *sql.DB, key string) ([]byte, error) {
+	var value []byte
+	err := db.QueryRow("SELECT value FROM app_configs WHERE key = ?", key).Scan(&value)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Key not found, not an error
+		}
+		return nil, fmt.Errorf("failed to get app config for key %s: %w", key, err)
+	}
+	return value, nil
+}
+
+// SetAppConfig saves a configuration value to the app_configs table.
+func SetAppConfig(db *sql.DB, key string, value []byte) error {
+	_, err := db.Exec("INSERT OR REPLACE INTO app_configs (key, value) VALUES (?, ?)", key, value)
+	if err != nil {
+		return fmt.Errorf("failed to set app config for key %s: %w", key, err)
+	}
+	return nil
 }

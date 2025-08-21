@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../api/apiClient';
 import { FaDownload, FaFile, FaTimes } from 'react-icons/fa';
 import type { FileAttachment } from '../types/chat';
 
@@ -41,7 +42,7 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
         // For FileAttachment objects (from messages), fetch from backend for image preview
         const blobUrl = `/api/chat/${sessionId}/blob/${messageId}.${blobIndex}`;
         try {
-          const response = await fetch(blobUrl);
+          const response = await apiFetch(blobUrl);
           if (response.ok) {
             const blob = await response.blob();
             objectUrl = URL.createObjectURL(blob);

@@ -1,4 +1,5 @@
 import type React from 'react';
+import { apiFetch } from '../api/apiClient';
 import { FaTrash } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
@@ -27,7 +28,7 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({
   const handleDeleteWorkspace = async (workspaceId: string) => {
     if (window.confirm('Are you sure you want to delete this workspace and all its sessions?')) {
       try {
-        const response = await fetch(`/api/workspaces/${workspaceId}`, {
+        const response = await apiFetch(`/api/workspaces/${workspaceId}`, {
           method: 'DELETE',
         });
         if (response.ok) {

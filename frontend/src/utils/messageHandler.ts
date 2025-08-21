@@ -1,4 +1,5 @@
 import type { FileAttachment } from '../types/chat';
+import { apiFetch } from '../api/apiClient';
 import { splitOnceByNewline } from './stringUtils';
 
 // SSE Event Types
@@ -53,7 +54,7 @@ export const sendMessage = async (
     }
   }
 
-  const response = await fetch(apiUrl, {
+  const response = await apiFetch(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),

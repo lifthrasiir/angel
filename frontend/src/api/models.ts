@@ -1,10 +1,12 @@
+import { apiFetch } from './apiClient';
+
 export interface ModelInfo {
   name: string;
   maxTokens: number;
 }
 
 export const getAvailableModels = async (): Promise<Map<string, ModelInfo>> => {
-  const response = await fetch('/api/models');
+  const response = await apiFetch('/api/models');
   if (!response.ok) {
     throw new Error(`Failed to fetch models: ${response.statusText}`);
   }

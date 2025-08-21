@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useState } from 'react';
+import { apiFetch } from '../api/apiClient';
 import { FaArrowLeft, FaCog, FaFolder, FaPlus } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import { useAtom } from 'jotai';
@@ -24,7 +25,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
-      await fetch(`/api/chat/${sessionId}`, {
+      await apiFetch(`/api/chat/${sessionId}`, {
         method: 'DELETE',
       });
       setSessions(sessions.filter((s) => s.id !== sessionId));

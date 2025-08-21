@@ -60,7 +60,6 @@ func getSessionFS(ctx context.Context, sessionId string) (*fsPkg.SessionFS, erro
 	}
 
 	entry.refCount++
-	log.Printf("SessionFS for %s: refCount incremented to %d", sessionId, entry.refCount)
 	return entry.sessionFS, nil
 }
 
@@ -77,10 +76,8 @@ func releaseSessionFS(sessionId string) {
 	}
 
 	entry.refCount--
-	log.Printf("SessionFS for %s: refCount decremented to %d", sessionId, entry.refCount)
 
 	if entry.refCount <= 0 {
-		log.Printf("Closing and removing SessionFS for session %s (refCount is %d)", sessionId, entry.refCount)
 		if err := entry.sessionFS.Close(); err != nil {
 			log.Printf("Error closing SessionFS for session %s: %v", sessionId, err)
 		}

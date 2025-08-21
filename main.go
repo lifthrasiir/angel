@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/csrf"
 	"github.com/gorilla/mux"
 )
 
@@ -27,6 +28,24 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
+	// Retrieve or generate CSRF key
+	csrfKey, err := GetAppConfig(db, CSRFKeyName)
+	if err != nil {
+		log.Fatalf("Failed to retrieve CSRF key from DB: %v", err)
+	}
+	if csrfKey == nil {
+		csrfKey = make([]byte, 32)
+		if _, err := rand.Read(csrfKey); err != nil {
+			log.Fatalf("Failed to generate CSRF key: %v", err)
+		}
+		if err := SetAppConfig(db, CSRFKeyName, csrfKey); err != nil {
+			log.Fatalf("Failed to save CSRF key to DB: %v", err)
+		}
+		log.Println("Generated and saved new CSRF key.")
+	} else {
+		log.Println("Loaded CSRF key from DB.")
+	}
 
 	InitMCPManager(db)
 
@@ -38,6 +57,19 @@ func main() {
 
 	router := mux.NewRouter()
 	router.Use(makeContextMiddleware(db, ga))
+
+	// Apply CSRF middleware.
+	// For production, ensure csrf.Secure(true) is used with HTTPS.
+	// csrf.SameSite(csrf.SameSiteStrictMode) is recommended for strong protection.
+	csrfMiddleware := csrf.Protect(
+		csrfKey,
+		csrf.Secure(false),
+		csrf.HttpOnly(true),
+		csrf.SameSite(csrf.SameSiteStrictMode),
+		csrf.FieldName("csrf_token"),
+		csrf.CookieName("_csrf"),
+	)
+	router.Use(csrfMiddleware)
 
 	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
 	if ga.GetCurrentProvider() == string(AuthTypeLoginWithGoogle) {
@@ -140,29 +172,43 @@ func serveSPAIndex(w http.ResponseWriter, r *http.Request) {
 	// Try to serve from filesystem first (for development)
 	fsPath := filepath.Join("frontend", "dist", "index.html")
 
-	if _, err := os.Stat(fsPath); err == nil {
-		http.ServeFile(w, r, fsPath)
-		return
+	var content []byte
+	var err error
+
+	if _, err = os.Stat(fsPath); err == nil {
+		content, err = os.ReadFile(fsPath)
+		if err != nil {
+			log.Printf("Error reading index.html from filesystem: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// If not found on filesystem, try to serve from embedded files
+		file, openErr := embeddedFiles.Open("frontend/dist/index.html")
+		if openErr != nil {
+			log.Printf("Error opening embedded index.html: %v", openErr)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		content, err = io.ReadAll(file)
+		if err != nil {
+			log.Printf("Error reading embedded index.html: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	// If not found on filesystem, try to serve from embedded files
-	file, err := embeddedFiles.Open("frontend/dist/index.html")
-	if err != nil {
-		log.Printf("Error opening embedded index.html: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(file)
-	if err != nil {
-		log.Printf("Error reading embedded index.html: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
+	// Inject CSRF token into the HTML
+	csrfToken := csrf.Token(r)
+	// Find the closing </head> tag and insert the meta tag before it
+	headEndTag := "</head>"
+	metaTag := fmt.Sprintf("<meta name=\"csrf-token\" content=\"%s\">", csrfToken)
+	modifiedContent := strings.Replace(string(content), headEndTag, metaTag+"\n"+headEndTag, 1)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
+	w.Write([]byte(modifiedContent))
 }
 
 // serveFile serves a specific file from frontend/dist (or embedded)
@@ -251,6 +297,7 @@ func makeContextMiddleware(db *sql.DB, auth Auth) func(next http.Handler) http.H
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r = r.WithContext(contextWithGlobals(r.Context(), db, auth))
+			r = csrf.PlaintextHTTPRequest(r)
 
 			next.ServeHTTP(w, r)
 		})

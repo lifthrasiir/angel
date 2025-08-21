@@ -1,3 +1,5 @@
+import { apiFetch } from '../api/apiClient';
+
 // Define ResultType from backend's handlers_ui.go
 export enum ResultType {
   Success = 'success',
@@ -24,7 +26,7 @@ export const callNativeDirectoryPicker = async (
   setStatusMessage('Opening directory picker...');
   setIsPickingDirectory(true); // Set state to true before opening dialog
   try {
-    const response = await fetch('/api/ui/directory', {
+    const response = await apiFetch('/api/ui/directory', {
       method: 'POST',
     });
     const data: PickDirectoryAPIResponse = await response.json();

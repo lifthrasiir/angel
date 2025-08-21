@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
 import { useAtom } from 'jotai';
 import MCPSettings from '../components/MCPSettings'; // Import the new component
@@ -23,7 +24,7 @@ const SettingsPage: React.FC = () => {
   const fetchGlobalPrompts = async () => {
     console.log('fetchGlobalPrompts: Fetching global prompts...');
     try {
-      const response = await fetch('/api/systemPrompts');
+      const response = await apiFetch('/api/systemPrompts');
       if (response.ok) {
         const data: PredefinedPrompt[] = await response.json();
         setGlobalPrompts(data);
@@ -41,7 +42,7 @@ const SettingsPage: React.FC = () => {
 
     const fetchUserInfo = async () => {
       try {
-        const response = await fetch('/api/userinfo');
+        const response = await apiFetch('/api/userinfo');
         if (response.ok) {
           const data = await response.json();
           setUserEmail(data.email);
@@ -63,7 +64,7 @@ const SettingsPage: React.FC = () => {
 
   const handleLogout = async () => {
     try {
-      const response = await fetch('/api/logout', { method: 'POST' });
+      const response = await apiFetch('/api/logout', { method: 'POST' });
       if (response.ok) {
         setUserEmail(null);
         // Optionally redirect to login page or home
@@ -86,7 +87,7 @@ const SettingsPage: React.FC = () => {
   const savePromptsToBackend = async (prompts: PredefinedPrompt[]) => {
     console.log('savePromptsToBackend: Saving prompts:', prompts);
     try {
-      const response = await fetch('/api/systemPrompts', {
+      const response = await apiFetch('/api/systemPrompts', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

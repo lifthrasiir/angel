@@ -16,6 +16,8 @@ require (
 require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/TheTitanrain/w32 v0.0.0-20180517000239-4f5cfb03fabf // indirect
+	github.com/gorilla/csrf v1.7.3 // indirect
+	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/sqweek/dialog v0.0.0-20240226140203-065105509627 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect

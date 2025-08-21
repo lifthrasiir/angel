@@ -1,5 +1,6 @@
 import type React from 'react';
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import { apiFetch } from '../api/apiClient';
 import type { Workspace } from '../types/chat';
 
 interface WorkspaceContextType {
@@ -20,7 +21,7 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
     setLoadingWorkspaces(true);
     setErrorWorkspaces(null);
     try {
-      const response = await fetch('/api/workspaces');
+      const response = await apiFetch('/api/workspaces');
       if (response.ok) {
         const data: Workspace[] = await response.json();
         setWorkspaces(data);

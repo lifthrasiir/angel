@@ -1,6 +1,8 @@
+import { apiFetch } from '../api/apiClient';
+
 export const fetchUserInfo = async () => {
   try {
-    const response = await fetch('/api/userinfo');
+    const response = await apiFetch('/api/userinfo');
     if (response.ok) {
       const data = await response.json();
       return { email: data.email, success: true };

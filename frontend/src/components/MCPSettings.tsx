@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../api/apiClient';
 
 interface MCPConfig {
   name: string;
@@ -24,7 +25,7 @@ const MCPSettings: React.FC = () => {
 
   const fetchConfigs = async () => {
     try {
-      const response = await fetch('/api/mcp/configs');
+      const response = await apiFetch('/api/mcp/configs');
       if (response.ok) {
         const data = await response.json();
         setConfigs(data || []); // Ensure data is not null
@@ -44,7 +45,7 @@ const MCPSettings: React.FC = () => {
     };
 
     try {
-      const response = await fetch('/api/mcp/configs', {
+      const response = await apiFetch('/api/mcp/configs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -67,7 +68,7 @@ const MCPSettings: React.FC = () => {
   const handleDelete = async (name: string) => {
     if (window.confirm(`Are you sure you want to delete the MCP config "${name}"?`)) {
       try {
-        const response = await fetch(`/api/mcp/configs/${name}`, {
+        const response = await apiFetch(`/api/mcp/configs/${name}`, {
           method: 'DELETE',
         });
         if (response.ok) {

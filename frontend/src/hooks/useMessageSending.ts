@@ -1,4 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
+import { apiFetch } from '../api/apiClient';
 import { useSetAtom } from 'jotai';
 import type { ChatMessage, FileAttachment } from '../types/chat';
 import { convertFilesToAttachments } from '../utils/fileHandler';
@@ -186,7 +187,7 @@ export const useMessageSending = ({
     if (!chatSessionId) return;
 
     try {
-      const response = await fetch(`/api/chat/${chatSessionId}/call`, {
+      const response = await apiFetch(`/api/chat/${chatSessionId}/call`, {
         method: 'DELETE',
       });
 

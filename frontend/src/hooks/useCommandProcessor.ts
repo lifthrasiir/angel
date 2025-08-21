@@ -1,4 +1,5 @@
 import { useAtomValue, useSetAtom } from 'jotai';
+import { apiFetch } from '../api/apiClient';
 import { statusMessageAtom, workspaceIdAtom, sessionsAtom, isPickingDirectoryAtom } from '../atoms/chatAtoms';
 import { fetchSessions } from '../utils/sessionManager';
 import { callNativeDirectoryPicker, ResultType, PickDirectoryAPIResponse } from '../utils/dialogHelpers';
@@ -12,7 +13,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const runCompress = async () => {
     setStatusMessage('Compressing chat history...');
     try {
-      const response = await fetch(`/api/chat/${sessionId}/compress`, {
+      const response = await apiFetch(`/api/chat/${sessionId}/compress`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -45,7 +46,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const updateRoots = async (command: string, roots: string[]) => {
     setStatusMessage(`Updating exposed directories...`);
     try {
-      const sessionResponse = await fetch(`/api/chat/${sessionId}`);
+      const sessionResponse = await apiFetch(`/api/chat/${sessionId}`);
       if (!sessionResponse.ok) {
         const errorData = await sessionResponse.json();
         throw new Error(errorData.message || 'Failed to fetch current session roots');
@@ -69,7 +70,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
         roots = Array.from(newRootsSet);
       }
 
-      const response = await fetch(`/api/chat/${sessionId}/roots`, {
+      const response = await apiFetch(`/api/chat/${sessionId}/roots`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

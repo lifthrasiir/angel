@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useState } from 'react';
+import { apiFetch } from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
 import { useWorkspaces } from '../hooks/WorkspaceContext';
 
@@ -11,7 +12,7 @@ const NewWorkspacePage: React.FC = () => {
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('/api/workspaces', {
+      const response = await apiFetch('/api/workspaces', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
+import { apiFetch } from '../api/apiClient';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { chatSessionIdAtom, globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/chatAtoms';
 import { PredefinedPrompt } from './SystemPromptEditor';
@@ -45,7 +46,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
 
     const fetchGlobalPrompts = async () => {
       try {
-        const response = await fetch('/api/systemPrompts');
+        const response = await apiFetch('/api/systemPrompts');
         if (response.ok) {
           const data: PredefinedPrompt[] = await response.json();
           setGlobalPrompts(data);

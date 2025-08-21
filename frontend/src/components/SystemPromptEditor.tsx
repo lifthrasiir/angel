@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiFetch } from '../api/apiClient';
 import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
 import { useAtom } from 'jotai';
 import { messagesAtom } from '../atoms/chatAtoms';
@@ -349,7 +350,7 @@ const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
         requestBody.workspaceId = workspaceId;
       }
 
-      const response = await fetch('/api/evaluatePrompt', {
+      const response = await apiFetch('/api/evaluatePrompt', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
