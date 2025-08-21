@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 
+	"github.com/lifthrasiir/angel/editor"
 	fsPkg "github.com/lifthrasiir/angel/fs"
 )
 
@@ -119,23 +121,39 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params Tool
 	if !ok {
 		return nil, fmt.Errorf("invalid file_path argument for write_file")
 	}
-	content, ok := args["content"].(string)
+	newContentStr, ok := args["content"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid content argument for write_file")
 	}
 
-	sf, err := getSessionFS(ctx, params.SessionId) // Modified call
+	sf, err := getSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SessionFS for write_file: %w", err)
 	}
 	defer releaseSessionFS(params.SessionId)
 
-	err = sf.WriteFile(filePath, []byte(content))
+	// 1. Read old content
+	oldContentStr := ""
+	oldContentBytes, err := sf.ReadFile(filePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to read old content of file %s: %w", filePath, err)
+		}
+		// File does not exist, oldContentStr remains empty
+	} else {
+		oldContentStr = string(oldContentBytes)
+	}
+
+	// 2. Write new content
+	err = sf.WriteFile(filePath, []byte(newContentStr))
 	if err != nil {
 		return nil, fmt.Errorf("failed to write file %s: %w", filePath, err)
 	}
 
-	return map[string]interface{}{"status": "success"}, nil
+	// 3. Calculate diff using the new editor package
+	unifiedDiff := editor.Diff([]byte(oldContentStr), []byte(newContentStr), filePath, 3)
+
+	return map[string]interface{}{"status": "success", "unified_diff": unifiedDiff}, nil
 }
 
 // ListDirectoryTool handles the list_directory tool call.

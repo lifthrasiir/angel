@@ -56,7 +56,7 @@ var availableTools = map[string]ToolDefinition{
 	},
 	"write_file": {
 		Name:        "write_file",
-		Description: "Writes content to a specified file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
+		Description: "Writes content to a specified file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md` to keep track of things. Any updates return a unified diff, which is crucial for verifying your edits and, more importantly, implicitly reveals any unexpected external modifications, allowing for swift detection and adaptation.",
 		Parameters: &Schema{
 			Type: TypeObject,
 			Properties: map[string]*Schema{

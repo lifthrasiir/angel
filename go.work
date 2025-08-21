@@ -1,4 +1,7 @@
 go 1.24.4
 
 use .
+
 use ./src/fs
+
+use ./src/editor
