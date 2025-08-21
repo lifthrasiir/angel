@@ -378,9 +378,9 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	var args []interface{}
 
 	if workspaceID == "" {
-		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id, roots FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
 	} else {
-		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id, roots FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
 		args = append(args, workspaceID)
 	}
 
@@ -393,8 +393,13 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.Name, &s.WorkspaceID); err != nil {
+		var rootsJSON string
+		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.Name, &s.WorkspaceID, &rootsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		if err := json.Unmarshal([]byte(rootsJSON), &s.Roots); err != nil {
+			log.Printf("Warning: Failed to unmarshal session roots for session %s: %v", s.ID, err)
+			s.Roots = []string{}
 		}
 		sessions = append(sessions, s)
 	}

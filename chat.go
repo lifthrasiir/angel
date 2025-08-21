@@ -20,6 +20,7 @@ type InitialState struct {
 	SystemPrompt           string            `json:"systemPrompt"`
 	WorkspaceID            string            `json:"workspaceId"`
 	PrimaryBranchID        string            `json:"primaryBranchId"`
+	Roots                  []string          `json:"roots"`
 	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"` // New field
 }
 
@@ -133,7 +134,8 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		History:         frontendHistory,
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     requestBody.WorkspaceID,
-		PrimaryBranchID: primaryBranchID, // Include primary branch ID
+		PrimaryBranchID: primaryBranchID,
+		Roots:           []string{},
 	}
 
 	// Handle streaming response from Gemini
@@ -277,7 +279,8 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		History:         frontendHistory,
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     session.WorkspaceID,
-		PrimaryBranchID: primaryBranchID, // Include primary branch ID
+		PrimaryBranchID: primaryBranchID,
+		Roots:           session.Roots,
 	}
 
 	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false, false, time.Now()); err != nil {
@@ -338,7 +341,8 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		History:         history,
 		SystemPrompt:    session.SystemPrompt,
 		WorkspaceID:     session.WorkspaceID,
-		PrimaryBranchID: session.PrimaryBranchID, // Include primary branch ID
+		PrimaryBranchID: session.PrimaryBranchID,
+		Roots:           session.Roots,
 	}
 
 	// Check if it's an SSE request

@@ -481,6 +481,7 @@ func TestBranchingMessageChain(t *testing.T) {
 		SystemPrompt:    "You are a helpful assistant.",
 		WorkspaceID:     "testWorkspace",
 		PrimaryBranchID: newBranchCID,
+		Roots:           []string{},
 	}
 
 	// Create a dummy SSE writer for streamGeminiResponse
