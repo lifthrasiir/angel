@@ -33,29 +33,33 @@ export const addMessageAtom = atom(
 );
 
 // Derived atom for updating agent messages
-export const updateAgentMessageAtom = atom(null, (_get, set, payload: { messageId: string; text: string }) => {
-  const { messageId, text: newMessageText } = payload;
-  const currentMessages = _get(messagesAtom);
-  const existingMessageIndex = currentMessages.findIndex((msg) => msg.id === messageId);
+export const updateAgentMessageAtom = atom(
+  null,
+  (_get, set, payload: { messageId: string; text: string; modelName?: string }) => {
+    const { messageId, text: newMessageText } = payload;
+    const currentMessages = _get(messagesAtom);
+    const existingMessageIndex = currentMessages.findIndex((msg) => msg.id === messageId);
 
-  if (existingMessageIndex !== -1) {
-    const newMessages = [...currentMessages];
-    const existingMessage = newMessages[existingMessageIndex];
-    newMessages[existingMessageIndex] = {
-      ...existingMessage,
-      parts: [{ text: (existingMessage.parts[0]?.text || '') + newMessageText }],
-    };
-    set(messagesAtom, newMessages);
-  } else {
-    const newMessage: ChatMessage = {
-      id: messageId,
-      role: 'model',
-      parts: [{ text: newMessageText }],
-      type: 'model',
-    };
-    set(messagesAtom, [...currentMessages, newMessage]);
-  }
-});
+    if (existingMessageIndex !== -1) {
+      const newMessages = [...currentMessages];
+      const existingMessage = newMessages[existingMessageIndex];
+      newMessages[existingMessageIndex] = {
+        ...existingMessage,
+        parts: [{ text: (existingMessage.parts[0]?.text || '') + newMessageText }],
+      };
+      set(messagesAtom, newMessages);
+    } else {
+      const newMessage: ChatMessage = {
+        id: messageId,
+        role: 'model',
+        parts: [{ text: newMessageText }],
+        type: 'model',
+        model: payload.modelName,
+      };
+      set(messagesAtom, [...currentMessages, newMessage]);
+    }
+  },
+);
 
 // Derived atom for adding error messages
 export const addErrorMessageAtom = atom(null, (_get, set, errorMessageText: string) => {

@@ -108,7 +108,7 @@ export const useMessageSending = ({
 
       const handlers: StreamEventHandlers = {
         onMessage: (messageId: string, text: string) => {
-          updateAgentMessage({ messageId, text });
+          updateAgentMessage({ messageId, text, modelName: selectedModel?.name });
           setLastAutoDisplayedThoughtId(null);
         },
         onThought: (messageId: string, thoughtText: string) => {
@@ -136,6 +136,7 @@ export const useMessageSending = ({
             role: 'user',
             parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
             type: 'function_response',
+            model: selectedModel?.name,
           };
           addMessage(message);
           setLastAutoDisplayedThoughtId(null);
