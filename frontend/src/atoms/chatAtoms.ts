@@ -22,6 +22,9 @@ export const selectedModelAtom = atom<ModelInfo | null>(null);
 export const globalPromptsAtom = atom<PredefinedPrompt[]>([]);
 export const selectedGlobalPromptAtom = atom<string>('');
 export const isPickingDirectoryAtom = atom<boolean>(false);
+export const isPriorSessionLoadingAtom = atom(false);
+export const hasMoreMessagesAtom = atom(true);
+export const isPriorSessionLoadCompleteAtom = atom(false);
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(

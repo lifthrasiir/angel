@@ -20,9 +20,14 @@ import {
   globalPromptsAtom,
   workspaceIdAtom,
   processingStartTimeAtom,
+  primaryBranchIdAtom,
+  isPriorSessionLoadingAtom,
+  hasMoreMessagesAtom,
+  isPriorSessionLoadCompleteAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
+import { useSessionLoader } from '../hooks/useSessionLoader';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -51,15 +56,73 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
   const processingStartTime = useAtomValue(processingStartTimeAtom);
+  const primaryBranchId = useAtomValue(primaryBranchIdAtom);
+  const { loadMoreMessages } = useSessionLoader({ chatSessionId, primaryBranchId, chatAreaRef });
+  const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
+  const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
+  const isPriorSessionLoadComplete = useAtomValue(isPriorSessionLoadCompleteAtom);
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
 
   const isLoggedIn = !!userEmail;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevMessagesLengthRef = useRef(messages.length);
+  const prevIsPriorSessionLoadingRef = useRef(isPriorSessionLoading); // New ref
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const wasLoadingPrior = prevIsPriorSessionLoadingRef.current; // Get previous state
+
+    // Only scroll to bottom if:
+    // 1. New messages are added to the end (messages.length increased)
+    // AND
+    // 2. We are NOT currently loading prior session messages (!isPriorSessionLoading)
+    // AND
+    // 3. We just finished loading prior session messages (wasLoadingPrior is true and isPriorSessionLoading is false)
+    //    OR we were never loading prior session messages (wasLoadingPrior is false)
+    // This complex condition aims to prevent scrolling to bottom when prior messages just finished loading.
+    if (
+      messages.length > prevMessagesLengthRef.current &&
+      !isPriorSessionLoading &&
+      !(wasLoadingPrior && !isPriorSessionLoading)
+    ) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    prevMessagesLengthRef.current = messages.length;
+    prevIsPriorSessionLoadingRef.current = isPriorSessionLoading; // Update ref
+  }, [messages, isPriorSessionLoading]);
+
+  useEffect(() => {
+    const chatAreaElement = chatAreaRef.current;
+    if (!chatAreaElement) {
+      return;
+    }
+
+    const handleScroll = () => {
+      if (chatAreaElement.scrollTop === 0 && !isPriorSessionLoading && hasMoreMessages && isPriorSessionLoadComplete) {
+        loadMoreMessages();
+      }
+    };
+
+    chatAreaElement.addEventListener('scroll', handleScroll);
+
+    return () => {
+      chatAreaElement.removeEventListener('scroll', handleScroll);
+    };
+  }, [chatAreaRef, isPriorSessionLoading, loadMoreMessages, isPriorSessionLoadComplete]);
+
+  useEffect(() => {
+    const chatAreaElement = chatAreaRef.current;
+    if (chatAreaElement && hasMoreMessages && !isPriorSessionLoading) {
+      // console.log(`Initial load check: scrollHeight: ${chatAreaElement.scrollHeight}, clientHeight: ${chatAreaElement.clientHeight}`);
+      // Check if the content height is less than the visible height (no scrollbar)
+      // This indicates that all available messages might not have been loaded yet,
+      // especially in short sessions where initial messages don't fill the viewport.
+      if (chatAreaElement.scrollHeight <= chatAreaElement.clientHeight) {
+        loadMoreMessages();
+      }
+    }
+  }, [chatAreaRef, hasMoreMessages, isPriorSessionLoading, loadMoreMessages]);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -215,7 +278,32 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   // Logic to group consecutive thought messages
   const renderedMessages = useMemo(() => {
     const renderedElements: JSX.Element[] = [];
-    let i = 0;
+    let i = 0; // This will become our startIndex
+
+    // Calculate the starting index, skipping incomplete groups at the beginning
+    while (i < messages.length) {
+      const currentMessage = messages[i];
+
+      // Case 1: Incomplete FunctionPairMessage (function_response without preceding function_call)
+      if (currentMessage.type === 'function_response') {
+        i++; // Skip this message
+        continue;
+      }
+
+      // Case 2: Incomplete ThoughtGroup (thought message that's a continuation of a group not fully loaded)
+      // If the first message is a thought, we assume it's incomplete and skip it.
+      if (currentMessage.type === 'thought') {
+        i++; // Skip this message
+        continue;
+      }
+
+      // If we reach here, the current message is either a complete group or a standalone message
+      // that can be rendered, or it's a thought message that's not at the very beginning (meaning it's part of a group that started within the current view).
+      // So, we break the loop and start rendering from this 'i'.
+      break;
+    }
+
+    // Now, render messages from the calculated startIndex
     while (i < messages.length) {
       const currentMessage = messages[i];
       const { element, messagesConsumed } = renderMessageOrGroup(
@@ -224,7 +312,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         i,
         availableModels,
         processingStartTime,
-      ); // Pass processingStartTime
+      );
       renderedElements.push(element);
       i += messagesConsumed;
     }
@@ -261,17 +349,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <>
           <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
             <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
-              <SystemPromptEditor
-                key={chatSessionId}
-                initialPrompt={systemPrompt}
-                currentLabel={currentSystemPromptLabel} // Pass the derived label
-                onPromptUpdate={(updatedPrompt) => {
-                  setSystemPrompt(updatedPrompt.value); // Only update the value of systemPrompt atom
-                }}
-                isEditing={isSystemPromptEditing}
-                predefinedPrompts={globalPrompts}
-                workspaceId={workspaceId} // Pass workspaceId
-              />
+              {!hasMoreMessages && (
+                <>
+                  <div style={{ textAlign: 'center', padding: '10px', color: '#888' }}>
+                    No more messages. This is the beginning of the session.
+                  </div>
+                  <SystemPromptEditor
+                    key={chatSessionId}
+                    initialPrompt={systemPrompt}
+                    currentLabel={currentSystemPromptLabel}
+                    onPromptUpdate={(updatedPrompt) => {
+                      setSystemPrompt(updatedPrompt.value);
+                    }}
+                    isEditing={isSystemPromptEditing}
+                    predefinedPrompts={globalPrompts}
+                    workspaceId={workspaceId}
+                  />
+                </>
+              )}
+
+              {isPriorSessionLoading && (
+                <div style={{ textAlign: 'center', padding: '10px' }}>Loading more messages...</div>
+              )}
               {renderedMessages}
               <div ref={messagesEndRef} />
             </div>

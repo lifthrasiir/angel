@@ -39,3 +39,24 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestOptions):
 
   return response;
 }
+
+export async function fetchSessionHistory(
+  sessionId: string,
+  primaryBranchId: string,
+  beforeMessageId?: string,
+  fetchLimit?: number,
+): Promise<any> {
+  let url = `/api/chat/${sessionId}?primaryBranchId=${primaryBranchId}`;
+  if (beforeMessageId) {
+    url += `&beforeMessageId=${beforeMessageId}`;
+  }
+  if (fetchLimit) {
+    url += `&fetchLimit=${fetchLimit}`;
+  }
+
+  const response = await apiFetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch session history: ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}

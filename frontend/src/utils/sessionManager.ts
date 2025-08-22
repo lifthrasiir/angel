@@ -20,12 +20,16 @@ export const fetchSessions = async (workspaceId?: string): Promise<WorkspaceWith
 export const loadSession = (
   sessionId: string,
   primaryBranchId: string,
+  fetchLimit: number,
   onMessage: (event: MessageEvent) => void,
   onError: (event: Event) => void,
 ): EventSource => {
-  const eventSource = new EventSource(`/api/chat/${sessionId}?primaryBranchId=${primaryBranchId}`, {
-    withCredentials: true,
-  });
+  const eventSource = new EventSource(
+    `/api/chat/${sessionId}?primaryBranchId=${primaryBranchId}&fetchLimit=${fetchLimit}`,
+    {
+      withCredentials: true,
+    },
+  );
 
   eventSource.onmessage = onMessage;
   eventSource.onerror = onError;

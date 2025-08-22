@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import type { ChatMessage, InitialState } from '../types/chat';
 import {
   EventComplete,
@@ -14,6 +14,7 @@ import {
 } from '../utils/messageHandler';
 import { loadSession } from '../utils/sessionManager';
 import { splitOnceByNewline } from '../utils/stringUtils';
+import { fetchSessionHistory } from '../api/apiClient';
 import {
   addErrorMessageAtom,
   addMessageAtom,
@@ -28,14 +29,21 @@ import {
   systemPromptAtom,
   workspaceIdAtom,
   updateAgentMessageAtom,
+  isPriorSessionLoadingAtom,
+  hasMoreMessagesAtom,
+  isPriorSessionLoadCompleteAtom,
 } from '../atoms/chatAtoms';
+import { useScrollAdjustment } from './useScrollAdjustment';
 
 interface UseSessionLoaderProps {
   chatSessionId: string | null;
   primaryBranchId: string;
+  chatAreaRef: React.RefObject<HTMLDivElement>;
 }
 
-export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionLoaderProps) => {
+const FETCH_LIMIT = 50;
+
+export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }: UseSessionLoaderProps) => {
   const navigate = useNavigate();
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
     sessionId?: string;
@@ -47,6 +55,8 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
   const setInputMessage = useSetAtom(inputMessageAtom);
   const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
+  const setIsPriorSessionLoading = useSetAtom(isPriorSessionLoadingAtom);
+  const setHasMoreMessages = useSetAtom(hasMoreMessagesAtom);
   const setMessages = useSetAtom(messagesAtom);
   const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
@@ -56,9 +66,18 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
   const updateAgentMessage = useSetAtom(updateAgentMessageAtom);
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
   const resetChatSessionState = useSetAtom(resetChatSessionStateAtom);
+  const setIsPriorSessionLoadComplete = useSetAtom(isPriorSessionLoadCompleteAtom);
+
+  const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
+  const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
+  const messages = useAtomValue(messagesAtom);
+  const processingStartTime = useAtomValue(processingStartTimeAtom);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const isStreamEndedNormallyRef = useRef(false);
+  const isLoadingMoreRef = useRef(false);
+
+  const { adjustScroll } = useScrollAdjustment({ chatAreaRef });
 
   const closeEventSourceNormally = () => {
     if (eventSourceRef.current) {
@@ -67,6 +86,100 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
       eventSourceRef.current = null;
     }
   };
+
+  const mapToChatMessages = useCallback((rawMessages: any[]): ChatMessage[] => {
+    return rawMessages.map((msg: any) => {
+      const chatMessage: ChatMessage = {
+        ...msg,
+        id: msg.id,
+        attachments: msg.attachments,
+        cumulTokenCount: msg.cumul_token_count,
+      };
+      if (msg.type === 'thought') {
+        chatMessage.type = 'thought';
+      } else if (msg.type === 'model_error') {
+        chatMessage.type = 'model_error';
+      } else if (msg.parts?.[0]?.functionCall) {
+        chatMessage.type = 'function_call';
+        chatMessage.parts[0] = {
+          functionCall: msg.parts[0].functionCall,
+        };
+      } else if (msg.parts?.[0]?.functionResponse) {
+        chatMessage.type = 'function_response';
+        chatMessage.parts[0] = {
+          functionResponse: msg.parts[0].functionResponse,
+        };
+      } else if (msg.type !== 'text') {
+        chatMessage.type = msg.type;
+      } else {
+        chatMessage.type = msg.role;
+      }
+      return chatMessage;
+    });
+  }, []);
+
+  const loadMoreMessages = useCallback(async () => {
+    // Prevent duplicate calls
+    if (isLoadingMoreRef.current) {
+      return;
+    }
+
+    // Use the values from the top-level
+    // Don't load more messages while streaming is in progress
+    if (messages.length === 0 || isPriorSessionLoading || !hasMoreMessages || processingStartTime !== null) {
+      return;
+    }
+
+    const firstMessageId = messages[0].id;
+    if (!firstMessageId) {
+      console.warn('First message ID not found, cannot load more messages.');
+      return;
+    }
+
+    isLoadingMoreRef.current = true;
+    setIsPriorSessionLoading(true);
+    try {
+      const data = await fetchSessionHistory(chatSessionId!, primaryBranchId, firstMessageId, FETCH_LIMIT);
+
+      // Check if it's the last page
+      setHasMoreMessages(data.history.length >= FETCH_LIMIT);
+
+      // Prepend new messages to the existing ones
+      const chatAreaElement = chatAreaRef.current;
+      if (chatAreaElement) {
+        const oldScrollHeight = chatAreaElement.scrollHeight;
+        const oldScrollTop = chatAreaElement.scrollTop;
+
+        setMessages((prevMessages) => [...mapToChatMessages(data.history || []), ...prevMessages]);
+
+        // Use the new scroll adjustment hook
+        adjustScroll(oldScrollHeight, oldScrollTop);
+      } else {
+        console.warn('loadMoreMessages: chatAreaElement is null. Cannot adjust scroll.');
+        setMessages((prevMessages) => [...mapToChatMessages(data.history || []), ...prevMessages]);
+      }
+    } catch (error) {
+      console.error('Failed to load more session history:', error);
+      addErrorMessage('Failed to load more session history.');
+    } finally {
+      isLoadingMoreRef.current = false;
+      setIsPriorSessionLoading(false);
+    }
+  }, [
+    chatSessionId,
+    primaryBranchId,
+    isPriorSessionLoading,
+    hasMoreMessages,
+    addErrorMessage,
+    setIsPriorSessionLoading,
+    setHasMoreMessages,
+    setMessages,
+    messages,
+    processingStartTime,
+    mapToChatMessages,
+    chatAreaRef,
+    adjustScroll,
+  ]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -88,10 +201,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
   }, [location.search, navigate]);
 
   useEffect(() => {
-    if (urlSessionId && urlSessionId === chatSessionId) {
-      return;
-    }
-
     const loadChatSession = async () => {
       const currentSessionId = urlSessionId;
       if (location.pathname.endsWith('/new') && !currentSessionId) {
@@ -109,6 +218,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
           eventSourceRef.current.close();
           eventSourceRef.current = null;
         }
+        setHasMoreMessages(true); // Always set to true when starting a new session
         return;
       }
 
@@ -118,11 +228,13 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
         setSelectedFiles([]);
         setProcessingStartTime(null);
         setMessages([]); // Clear messages from previous session
+        setHasMoreMessages(true); // Always set to true when loading a new session
 
         try {
           eventSourceRef.current = loadSession(
             currentSessionId,
             primaryBranchId,
+            FETCH_LIMIT,
             (event: MessageEvent) => {
               const [eventType, eventData] = splitOnceByNewline(event.data);
 
@@ -132,38 +244,19 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
                 setSystemPrompt(data.systemPrompt);
                 setIsSystemPromptEditing(false);
 
-                setMessages(
-                  (data.history || []).map((msg: any) => {
-                    const chatMessage: ChatMessage = {
-                      ...msg,
-                      id: msg.id,
-                      attachments: msg.attachments,
-                      cumulTokenCount: msg.cumul_token_count,
-                    };
-                    if (msg.type === 'thought') {
-                      chatMessage.type = 'thought';
-                    } else if (msg.type === 'model_error') {
-                      chatMessage.type = 'model_error';
-                    } else if (msg.parts?.[0]?.functionCall) {
-                      chatMessage.type = 'function_call';
-                      chatMessage.parts[0] = {
-                        functionCall: msg.parts[0].functionCall,
-                      };
-                    } else if (msg.parts?.[0]?.functionResponse) {
-                      chatMessage.type = 'function_response';
-                      chatMessage.parts[0] = {
-                        functionResponse: msg.parts[0].functionResponse,
-                      };
-                    } else if (msg.type !== 'text') {
-                      chatMessage.type = msg.type;
-                    } else {
-                      chatMessage.type = msg.role;
-                    }
-                    return chatMessage;
-                  }),
-                );
+                setMessages(mapToChatMessages(data.history || []));
                 setWorkspaceId(data.workspaceId);
                 setPrimaryBranchId(data.primaryBranchId);
+
+                setHasMoreMessages(data.history && data.history.length >= FETCH_LIMIT);
+
+                // Scroll to bottom after initial messages are loaded
+                requestAnimationFrame(() => {
+                  if (chatAreaRef.current) {
+                    chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+                  }
+                  setIsPriorSessionLoadComplete(true); // Set to true after initial load and scroll adjustment
+                });
 
                 if (eventType === EventInitialState && data.callElapsedTimeSeconds !== undefined) {
                   setProcessingStartTime(performance.now() - data.callElapsedTimeSeconds * 1000);
@@ -241,9 +334,12 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId }: UseSessionL
         };
       } else if (!currentSessionId) {
         resetChatSessionState();
+        setHasMoreMessages(true); // Also set to true when session ID is null
       }
     };
 
     loadChatSession();
-  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, chatSessionId, primaryBranchId]);
+  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, primaryBranchId]);
+
+  return { loadMoreMessages };
 };

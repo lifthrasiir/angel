@@ -705,15 +705,18 @@ func createFrontendMessage(
 // getSessionHistoryInternal retrieves the chat history for a given session and its primary branch,
 // recursively fetching messages from parent branches. It allows for discarding thoughts
 // and ignoring messages before the last compression message.
+//
+// If fetchLimit is > 0, cursor-based pagination using beforeMessageID and fetchLimit is done.
+// If beforeMessageID is 0, it fetches the latest messages.
 func getSessionHistoryInternal(
 	db DbOrTx,
 	sessionID string,
 	primaryBranchID string,
 	discardThoughts bool,
 	ignoreBeforeLastCompression bool,
+	beforeMessageID int, // Cursor: fetch messages with ID less than this
+	fetchLimit int, // Number of messages to fetch
 ) ([]FrontendMessage, error) {
-	var history [][]FrontendMessage
-	messageIdLimit := math.MaxInt
 	branchID := primaryBranchID
 	keepGoing := true
 
@@ -769,9 +772,18 @@ func getSessionHistoryInternal(
 		}
 	}
 
-	for keepGoing {
-		err := func() error {
+	// Determine the initial message ID limit for the query
+	messageIdLimit := math.MaxInt
+	if beforeMessageID != 0 {
+		messageIdLimit = beforeMessageID - 1
+	}
 
+	isFullHistoryFetch := (fetchLimit <= 0)
+
+	var history [][]FrontendMessage
+	var currentMessageCount int
+	for keepGoing && (isFullHistoryFetch || currentMessageCount < fetchLimit) { // Modified condition
+		err := func() error {
 			rows, err := db.Query(`
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
@@ -813,13 +825,13 @@ func getSessionHistoryInternal(
 					continue // Skip thought messages
 				}
 
-				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, ignoreBeforeLastCompression) // Pass ignoreBeforeLastCompression
+				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, ignoreBeforeLastCompression)
 				if err != nil {
 					return fmt.Errorf("failed to create frontend message: %w", err)
 				}
 
 				if len(messages) == 0 && fm.ParentMessageID != nil {
-					parentBranchMessageID = *m.ParentMessageID // Use m.ParentMessageID directly
+					parentBranchMessageID = *m.ParentMessageID
 				}
 				messages = append(messages, fm)
 			}
@@ -830,6 +842,7 @@ func getSessionHistoryInternal(
 			}
 
 			history = append(history, messages)
+			currentMessageCount += len(messages) // Update counter
 			if parentBranchMessageID < 0 {
 				keepGoing = false
 			} else {
@@ -846,23 +859,47 @@ func getSessionHistoryInternal(
 		}
 	}
 
-	var combinedHistory []FrontendMessage
-	for i := len(history) - 1; i >= 0; i-- {
-		combinedHistory = append(combinedHistory, history[i]...)
+	// Calculate the actual number of messages to return
+	numMessagesToReturn := currentMessageCount
+	if !isFullHistoryFetch && currentMessageCount > fetchLimit {
+		numMessagesToReturn = fetchLimit
 	}
+
+	// Iterate from the end of history backwards to get the latest messages
+	// until numMessagesToReturn is reached.
+	var combinedHistory []FrontendMessage
+	for i := 0; i < len(history) && len(combinedHistory) < numMessagesToReturn; i++ {
+		group := history[i]
+		// Messages are in the chronological order within group.
+		for j := len(group) - 1; j >= 0 && len(combinedHistory) < numMessagesToReturn; j-- {
+			combinedHistory = append(combinedHistory, group[j])
+		}
+	}
+
+	// Return in the chronological order.
+	for i, j := 0, len(combinedHistory)-1; i < j; i, j = i+1, j-1 {
+		combinedHistory[i], combinedHistory[j] = combinedHistory[j], combinedHistory[i]
+	}
+
 	return combinedHistory, nil
 }
 
 // GetSessionHistory retrieves the chat history for a given session and its primary branch.
 // It includes all messages, including thoughts.
 func GetSessionHistory(db DbOrTx, sessionID string, primaryBranchID string) ([]FrontendMessage, error) {
-	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false)
+	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, 0, 0)
 }
 
 // GetSessionHistoryContext retrieves the chat history for a given session and its primary branch,
 // discarding thoughts and ignoring messages before the last compression message.
 func GetSessionHistoryContext(db DbOrTx, sessionID string, primaryBranchID string) ([]FrontendMessage, error) {
-	return getSessionHistoryInternal(db, sessionID, primaryBranchID, true, true)
+	return getSessionHistoryInternal(db, sessionID, primaryBranchID, true, true, 0, 0)
+}
+
+// GetSessionHistoryPaginated retrieves a paginated chat history for a given session and branch.
+// It fetches messages with IDs less than beforeMessageID, up to fetchLimit.
+func GetSessionHistoryPaginated(db DbOrTx, sessionID string, primaryBranchID string, beforeMessageID int, fetchLimit int) ([]FrontendMessage, error) {
+	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, beforeMessageID, fetchLimit)
 }
 
 // DeleteSession deletes a session and all its associated messages.

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +41,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		Attachments  []FileAttachment `json:"attachments"`
 		WorkspaceID  string           `json:"workspaceId"`
 		Model        string           `json:"model"`
+		FetchLimit   int              `json:"fetchLimit"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
@@ -120,11 +123,19 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	addSseWriter(sessionId, sseW)
 	defer removeSseWriter(sessionId, sseW)
 
-	// Retrieve session history from DB for Gemini API
-	frontendHistory, err := GetSessionHistoryContext(db, sessionId, primaryBranchID) // Pass primaryBranchID
+	// Retrieve session history from DB for Gemini API (full context)
+	historyContext, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to retrieve session history: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
+		log.Printf("newSessionAndMessage: Failed to retrieve full session history for Gemini: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for Gemini: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Retrieve session history for frontend InitialState (paginated)
+	frontendHistory, err := GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
+	if err != nil {
+		log.Printf("newSessionAndMessage: Failed to retrieve paginated session history for frontend: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve paginated session history for frontend: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -139,7 +150,8 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle streaming response from Gemini
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, true, true, time.Now()); err != nil {
+	// Pass full history to streamGeminiResponse for Gemini API
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, true, true, time.Now(), historyContext); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -165,6 +177,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Message     string           `json:"message"`
 		Attachments []FileAttachment `json:"attachments"`
 		Model       string           `json:"model"`
+		FetchLimit  int              `json:"fetchLimit"` // Add FetchLimit
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
@@ -265,25 +278,33 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	// Send acknowledgement for user message ID to frontend
 	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
 
-	// Retrieve session history from DB for Gemini API
-	frontendHistory, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
+	// Retrieve session history from DB for Gemini API (full context)
+	fullFrontendHistoryForGemini, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		log.Printf("chatMessage: Failed to retrieve session history: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve session history: %v", err), http.StatusInternalServerError)
+		log.Printf("chatMessage: Failed to retrieve full session history for Gemini: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for Gemini: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Retrieve session history for frontend InitialState (paginated)
+	frontendHistoryForInitialState, err := GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
+	if err != nil {
+		log.Printf("chatMessage: Failed to retrieve paginated session history for frontend: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve paginated session history for frontend: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
 	initialState := InitialState{
 		SessionId:       sessionId,
-		History:         frontendHistory,
+		History:         frontendHistoryForInitialState, // Use paginated history for frontend
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     session.WorkspaceID,
 		PrimaryBranchID: primaryBranchID,
 		Roots:           session.Roots,
 	}
 
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false, false, time.Now()); err != nil {
+	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
@@ -323,8 +344,34 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use the primary_branch_id from the session to load history
-	history, err := GetSessionHistory(db, sessionId, session.PrimaryBranchID)
+	// Parse pagination parameters
+	beforeMessageIDStr := r.URL.Query().Get("beforeMessageId")
+	fetchLimitStr := r.URL.Query().Get("fetchLimit")
+
+	beforeMessageID := 0 // Default to 0, meaning fetch from the latest
+	if beforeMessageIDStr != "" {
+		parsedID, err := strconv.Atoi(beforeMessageIDStr)
+		if err != nil {
+			log.Printf("loadChatSession: Invalid beforeMessageId: %v", err)
+			http.Error(w, "Invalid beforeMessageId parameter", http.StatusBadRequest)
+			return
+		}
+		beforeMessageID = parsedID
+	}
+
+	fetchLimit := math.MaxInt // Default fetch limit
+	if fetchLimitStr != "" {
+		parsedLimit, err := strconv.Atoi(fetchLimitStr)
+		if err != nil {
+			log.Printf("loadChatSession: Invalid fetchLimit: %v", err)
+			http.Error(w, "Invalid fetchLimit parameter", http.StatusBadRequest)
+			return
+		}
+		fetchLimit = parsedLimit
+	}
+
+	// Use the primary_branch_id from the session to load history with pagination
+	history, err := GetSessionHistoryPaginated(db, sessionId, session.PrimaryBranchID, beforeMessageID, fetchLimit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
 		return

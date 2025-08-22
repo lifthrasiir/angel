@@ -494,7 +494,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	defer dummySseW.Close()
 
 	// Call streamGeminiResponse to add thought and model messages for C
-	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false, false, time.Now()); err != nil {
+	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false, false, time.Now(), []FrontendMessage{}); err != nil {
 		t.Fatalf("Error streaming Gemini response for C: %v", err)
 	}
 
@@ -1216,7 +1216,7 @@ func TestCancelDuringSync(t *testing.T) {
 				t.Errorf("Initial state after cancellation missing expected messages or error. History: %+v", initialState3.History)
 			}
 			// Ensure the last message is an error message
-			if len(initialState3.History) >= 6 && initialState3.History[5].Type != "error" {
+			if len(initialState3.History) >= 6 && initialState3.History[5].Type != "model_error" {
 				errorInInitialState = true
 			}
 		default:

@@ -25,11 +25,12 @@ func streamGeminiResponse(
 	sendInitialState bool,
 	inferSessionName bool,
 	callStartTime time.Time,
+	fullHistoryForGemini []FrontendMessage,
 ) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var finalTotalTokenCount *int
-	currentHistory := convertFrontendMessagesToContent(db, initialState.History)
+	currentHistory := convertFrontendMessagesToContent(db, fullHistoryForGemini) // Use fullHistoryForGemini here
 
 	// Track the ID of the last message added to the database
 	lastAddedMessageID := lastUserMessageID

@@ -22,7 +22,6 @@ import {
 } from '../atoms/chatAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
-import { useSessionLoader } from './useSessionLoader';
 import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
 import { getAvailableModels, ModelInfo } from '../api/models';
 
@@ -107,11 +106,6 @@ export const useChatSession = () => {
   useEffect(() => {
     setWorkspaceId(urlWorkspaceId);
   }, [urlWorkspaceId, setWorkspaceId]);
-
-  useSessionLoader({
-    chatSessionId,
-    primaryBranchId,
-  });
 
   const { handleSendMessage, cancelStreamingCall } = useMessageSending({
     inputMessage,
