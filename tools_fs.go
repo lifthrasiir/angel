@@ -148,7 +148,7 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params Tool
 	}
 
 	// 3. Calculate diff using the new editor package
-	unifiedDiff := editor.Diff([]byte(oldContentStr), []byte(newContentStr), filePath, 3)
+	unifiedDiff := editor.Diff([]byte(oldContentStr), []byte(newContentStr), 3)
 
 	return map[string]interface{}{"status": "success", "unified_diff": unifiedDiff}, nil
 }

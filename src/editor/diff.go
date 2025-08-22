@@ -9,8 +9,7 @@ import (
 )
 
 // Diff generates a unified diff between two byte slices.
-// path is used for the file names in the diff header (e.g., --- a/path, +++ b/path).
-func Diff(src, dest []byte, path string, contextLines int) string {
+func Diff(src, dest []byte, contextLines int) string {
 	// Empty files are assumed to have a trailing newline
 	srcHadTrailingNewline := len(src) == 0 || src[len(src)-1] == '\n'
 	destHadTrailingNewline := len(dest) == 0 || dest[len(dest)-1] == '\n'
@@ -31,21 +30,21 @@ func Diff(src, dest []byte, path string, contextLines int) string {
 	// Perform diff on runes
 	diffs := dmp.DiffMainRunes(a, b, false) // false for line-level diff
 
-	return generateUnifiedDiff(path, path, diffs, lineArray, contextLines)
+	return generateUnifiedDiff(diffs, lineArray, contextLines)
 }
 
 // generateUnifiedDiff creates a unified diff from diffmatchpatch.Diffs.
 // This implementation handles hunk headers and context lines.
 // Assumes that diffs don't have consecutive DiffEqual entries.
-func generateUnifiedDiff(oldPath, newPath string, diffs []diffmatchpatch.Diff, lineArray []string, contextLines int) string {
-	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintf("--- a/%s\n", oldPath))
-	buf.WriteString(fmt.Sprintf("+++ b/%s\n", newPath))
+func generateUnifiedDiff(diffs []diffmatchpatch.Diff, lineArray []string, contextLines int) string {
+	const noChanges = "No changes"
 
 	if len(diffs) == 0 {
 		// No differences without contents.
-		return buf.String()
+		return noChanges
 	}
+
+	var buf bytes.Buffer
 
 	// Temporary storage for context lines before a change
 	var pendingDiffs []diffmatchpatch.Diff
@@ -79,6 +78,8 @@ func generateUnifiedDiff(oldPath, newPath string, diffs []diffmatchpatch.Diff, l
 	if len(diffs) == 1 {
 		// No differences with contents. Handling this as an edge case simplifies the subsequent logic.
 		switch diffs[0].Type {
+		case diffmatchpatch.DiffEqual:
+			return noChanges
 		case diffmatchpatch.DiffDelete:
 			hunkNewStart = 0
 			hunkOldLines = utf8.RuneCountInString(diffs[0].Text)
