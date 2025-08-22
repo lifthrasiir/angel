@@ -26,8 +26,38 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 		return nil, nil, fmt.Errorf("no input provided for angel-eval")
 	}
 
+	// Calculate initial prompt token count (fixed)
+	initialPromptTokenCountResp, err := p.CountTokens(ctx, params.Contents, params.ModelName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to count tokens for angel-eval prompt: %w", err)
+	}
+	initialPromptTokenCount := initialPromptTokenCountResp.TotalTokens
+
+	// Initialize cumulative total token count with the prompt tokens
+	cumulativeTotalTokenCount := initialPromptTokenCount
+
 	return func(yield func(CaGenerateContentResponse) bool) {
-		err := parseAndExecute(ctx, input, yield)
+		err := parseAndExecute(ctx, input, func(resp CaGenerateContentResponse) bool {
+			// Calculate tokens for the current response part
+			currentResponsePartTokens := 0
+			if len(resp.Response.Candidates) > 0 && resp.Response.Candidates[0].Content.Parts != nil {
+				// Use the placeholder CountTokens for the current response part
+				partTokenResp, err := p.CountTokens(ctx, []Content{resp.Response.Candidates[0].Content}, params.ModelName)
+				if err == nil {
+					currentResponsePartTokens = partTokenResp.TotalTokens
+				}
+			}
+			cumulativeTotalTokenCount += currentResponsePartTokens
+
+			// Attach UsageMetadata to every response
+			if resp.Response.UsageMetadata == nil {
+				resp.Response.UsageMetadata = &UsageMetadata{}
+			}
+			resp.Response.UsageMetadata.PromptTokenCount = initialPromptTokenCount
+			resp.Response.UsageMetadata.TotalTokenCount = cumulativeTotalTokenCount
+
+			return yield(resp)
+		})
 		if err != nil {
 			yield(CaGenerateContentResponse{
 				Response: VertexGenerateContentResponse{
