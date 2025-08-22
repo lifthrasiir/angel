@@ -218,7 +218,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
           eventSourceRef.current.close();
           eventSourceRef.current = null;
         }
-        setHasMoreMessages(true); // Always set to true when starting a new session
+        setHasMoreMessages(false); // No more messages to load for a new session
         return;
       }
 

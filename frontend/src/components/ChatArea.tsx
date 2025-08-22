@@ -350,22 +350,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
             <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
               {!hasMoreMessages && (
-                <>
-                  <div style={{ textAlign: 'center', padding: '10px', color: '#888' }}>
-                    No more messages. This is the beginning of the session.
-                  </div>
-                  <SystemPromptEditor
-                    key={chatSessionId}
-                    initialPrompt={systemPrompt}
-                    currentLabel={currentSystemPromptLabel}
-                    onPromptUpdate={(updatedPrompt) => {
-                      setSystemPrompt(updatedPrompt.value);
-                    }}
-                    isEditing={isSystemPromptEditing}
-                    predefinedPrompts={globalPrompts}
-                    workspaceId={workspaceId}
-                  />
-                </>
+                <SystemPromptEditor
+                  key={chatSessionId}
+                  initialPrompt={systemPrompt}
+                  currentLabel={currentSystemPromptLabel}
+                  onPromptUpdate={(updatedPrompt) => {
+                    setSystemPrompt(updatedPrompt.value);
+                  }}
+                  isEditing={isSystemPromptEditing}
+                  predefinedPrompts={globalPrompts}
+                  workspaceId={workspaceId}
+                />
               )}
 
               {isPriorSessionLoading && (

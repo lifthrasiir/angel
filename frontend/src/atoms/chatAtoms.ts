@@ -23,7 +23,7 @@ export const globalPromptsAtom = atom<PredefinedPrompt[]>([]);
 export const selectedGlobalPromptAtom = atom<string>('');
 export const isPickingDirectoryAtom = atom<boolean>(false);
 export const isPriorSessionLoadingAtom = atom(false);
-export const hasMoreMessagesAtom = atom(true);
+export const hasMoreMessagesAtom = atom(false);
 export const isPriorSessionLoadCompleteAtom = atom(false);
 
 // Derived atom for adding messages

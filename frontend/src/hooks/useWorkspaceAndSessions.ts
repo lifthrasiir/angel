@@ -35,9 +35,16 @@ export const useWorkspaceAndSessions = (workspaceIdFromState: string | undefined
           setLoading(false);
         }
       } else {
-        setCurrentWorkspace(null);
-        setSessions([]);
-        setLoading(false);
+        try {
+          const globalSessions = await fetchSessions(); // Fetch global sessions
+          setCurrentWorkspace(null); // No specific workspace selected
+          setSessions(globalSessions.sessions);
+        } catch (err) {
+          console.error('Failed to fetch global sessions:', err);
+          setError('Failed to load global sessions.');
+        } finally {
+          setLoading(false);
+        }
       }
     };
 
