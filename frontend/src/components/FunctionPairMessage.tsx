@@ -8,6 +8,8 @@ interface FunctionPairMessageProps {
   functionResponse: FunctionResponse;
   callMessageId?: string;
   responseMessageId?: string;
+  callMessageInfo?: React.ReactNode;
+  responseMessageInfo?: React.ReactNode;
 }
 
 const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
@@ -15,12 +17,18 @@ const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
   functionResponse,
   callMessageId,
   responseMessageId,
+  callMessageInfo,
+  responseMessageInfo,
 }) => {
   return (
     <div className="function-pair-container">
-      <FunctionCallMessage functionCall={functionCall} messageId={callMessageId} />
+      <FunctionCallMessage functionCall={functionCall} messageId={callMessageId} messageInfo={callMessageInfo} />
       <div className="function-pair-bar"></div>
-      <FunctionResponseMessage functionResponse={functionResponse} messageId={responseMessageId} />
+      <FunctionResponseMessage
+        functionResponse={functionResponse}
+        messageId={responseMessageId}
+        messageInfo={responseMessageInfo}
+      />
     </div>
   );
 };

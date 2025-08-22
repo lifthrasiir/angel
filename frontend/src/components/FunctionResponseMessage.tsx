@@ -37,9 +37,6 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
     responseText = JSON.stringify(responseData, null, 2);
   }
   const codeContent = responseText;
-  const responseSummary = functionResponse.response
-    ? JSON.stringify(functionResponse.response).substring(0, 50) + '...'
-    : '(empty)';
 
   let soleObjectKey: string | undefined;
   if (typeof responseData === 'object') {
@@ -69,7 +66,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
         return (
           <div id={messageId} className="chat-message-container user-message">
             <div className="chat-bubble function-message-bubble" style={{ cursor: 'pointer' }} onClick={toggleMode}>
-              <div className="function-title-bar function-response-title-bar">{responseSummary}</div>
+              <div className="function-title-bar function-response-title-bar">{codeContent}</div>
             </div>
             {messageInfo}
           </div>

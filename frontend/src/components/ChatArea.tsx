@@ -22,6 +22,7 @@ import {
   processingStartTimeAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
+import MessageInfo from './MessageInfo';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -109,6 +110,34 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     ) {
       const functionCall = currentMessage.parts[0].functionCall!;
       const functionResponse = messages[currentIndex + 1].parts[0].functionResponse!;
+
+      // Create messageInfo for the function call message
+      const callMessageInfoComponent = (
+        <MessageInfo
+          cumulTokenCount={currentMessage.cumulTokenCount}
+          branchId={currentMessage.branchId}
+          parentMessageId={currentMessage.parentMessageId}
+          chosenNextId={currentMessage.chosenNextId}
+          possibleNextIds={currentMessage.possibleNextIds}
+          model={currentMessage.model}
+          maxTokens={availableModels.get(currentMessage.model || '')?.maxTokens}
+        />
+      );
+
+      // Create messageInfo for the function response message
+      const responseMessage = messages[currentIndex + 1];
+      const responseMessageInfoComponent = (
+        <MessageInfo
+          cumulTokenCount={responseMessage.cumulTokenCount}
+          branchId={responseMessage.branchId}
+          parentMessageId={responseMessage.parentMessageId}
+          chosenNextId={responseMessage.chosenNextId}
+          possibleNextIds={responseMessage.possibleNextIds}
+          model={responseMessage.model}
+          maxTokens={availableModels.get(responseMessage.model || '')?.maxTokens}
+        />
+      );
+
       return {
         element: (
           <>
@@ -118,6 +147,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               functionResponse={functionResponse}
               callMessageId={currentMessage.id}
               responseMessageId={messages[currentIndex + 1].id}
+              callMessageInfo={callMessageInfoComponent}
+              responseMessageInfo={responseMessageInfoComponent}
             />
             {isLastMessage && processingStartTime !== null && (
               <ProcessingIndicator

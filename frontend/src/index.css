@@ -151,7 +151,11 @@ textarea {
   border-top-right-radius: 15px;
   font-weight: bold; /* Keep bold for title */
   color: #333; /* Default text color for title */
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .function-title-bar:last-child {
