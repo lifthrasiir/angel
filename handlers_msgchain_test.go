@@ -97,6 +97,13 @@ func (mc *mockCloser) Close() error {
 	return nil
 }
 
+func nilIntStr(i *int) string {
+	if i == nil {
+		return "nil"
+	}
+	return fmt.Sprintf("%d", *i)
+}
+
 func printMessages(t *testing.T, db *sql.DB, testName string) {
 	t.Logf("--- Messages in DB after %s ---", testName)
 	rows, err := db.Query("SELECT id, role, parent_message_id, chosen_next_id, text FROM messages ORDER BY id ASC")
@@ -221,20 +228,20 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		t.Errorf("Expected first user message parent_message_id to be nil, got %d", *msg.ParentMessageID)
 	}
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != thoughtMessageID {
-		t.Errorf("Expected first user message chosen_next_id to be %d, got %v", thoughtMessageID, msg.ChosenNextID)
+		t.Errorf("Expected first user message chosen_next_id to be %d, got %v", thoughtMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{thoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != firstUserMessageID {
-		t.Errorf("Expected thought message parent_message_id to be %d, got %v", firstUserMessageID, msg.ParentMessageID)
+		t.Errorf("Expected thought message parent_message_id to be %d, got %v", firstUserMessageID, nilIntStr(msg.ParentMessageID))
 	}
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != modelMessageID {
-		t.Errorf("Expected thought message chosen_next_id to be %d, got %v", modelMessageID, msg.ChosenNextID)
+		t.Errorf("Expected thought message chosen_next_id to be %d, got %v", modelMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != thoughtMessageID {
-		t.Errorf("Expected model message parent_message_id to be %d, got %v", thoughtMessageID, msg.ParentMessageID)
+		t.Errorf("Expected model message parent_message_id to be %d, got %v", thoughtMessageID, nilIntStr(msg.ParentMessageID))
 	}
 	if msg.ChosenNextID != nil { // Should be nil as it's the end of the stream
 		t.Errorf("Expected model message chosen_next_id to be nil, got %d", *msg.ChosenNextID)
@@ -278,24 +285,24 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	// Model (modelMessageID) -> User (secondUserMessageID) -> Thought (secondThoughtMessageID)
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != secondUserMessageID {
-		t.Errorf("Expected model message chosen_next_id to be %d, got %v", secondUserMessageID, msg.ChosenNextID)
+		t.Errorf("Expected model message chosen_next_id to be %d, got %v", secondUserMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{secondUserMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != modelMessageID {
-		t.Errorf("Expected second user message parent_message_id to be %d, got %v", modelMessageID, msg.ParentMessageID)
+		t.Errorf("Expected second user message parent_message_id to be %d, got %v", modelMessageID, nilIntStr(msg.ParentMessageID))
 	}
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != secondThoughtMessageID {
-		t.Errorf("Expected second user message chosen_next_id to be %d, got %v", secondThoughtMessageID, msg.ChosenNextID)
+		t.Errorf("Expected second user message chosen_next_id to be %d, got %v", secondThoughtMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
 	// Verify the second thought message
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{secondThoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != secondUserMessageID {
-		t.Errorf("Expected second thought message parent_message_id to be %d, got %v", secondUserMessageID, msg.ParentMessageID)
+		t.Errorf("Expected second thought message parent_message_id to be %d, got %v", secondUserMessageID, nilIntStr(msg.ParentMessageID))
 	}
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != secondModelMessageID {
-		t.Errorf("Expected second thought message chosen_next_id to be %d, got %v", secondModelMessageID, msg.ChosenNextID)
+		t.Errorf("Expected second thought message chosen_next_id to be %d, got %v", secondModelMessageID, nilIntStr(msg.ChosenNextID))
 	}
 }
 
@@ -405,27 +412,27 @@ func TestBranchingMessageChain(t *testing.T) {
 		t.Errorf("Expected first user message parent_message_id to be nil, got %d", *msg.ParentMessageID)
 	}
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA2ID {
-		t.Errorf("Expected first user message chosen_next_id to be %d, got %v", msg.ChosenNextID, msgA2ID)
+		t.Errorf("Expected first user message chosen_next_id to be %v, got %d", nilIntStr(msg.ChosenNextID), msgA2ID)
 	}
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA3ID {
-		t.Errorf("Expected A2's chosen_next_id to be A3 (model). Got %v, want %d", msg.ChosenNextID, msgA3ID)
+		t.Errorf("Expected A2's chosen_next_id to be A3 (model). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgA3ID)
 	}
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB1ID {
-		t.Errorf("Expected A3's chosen_next_id to be B1 (user). Got %v, want %d", msg.ChosenNextID, msgB1ID)
+		t.Errorf("Expected A3's chosen_next_id to be B1 (user). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgB1ID)
 	}
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB1ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB2ID {
-		t.Errorf("Expected B1's chosen_next_id to be B2 (thought). Got %v, want %d", msg.ChosenNextID, msgB2ID)
+		t.Errorf("Expected B1's chosen_next_id to be B2 (thought). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgB2ID)
 	}
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB3ID {
-		t.Errorf("Expected B2's chosen_next_id to be B3 (model). Got %v, want %d", msg.ChosenNextID, msgB3ID)
+		t.Errorf("Expected B2's chosen_next_id to be B3 (model). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgB3ID)
 	}
 	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID != nil {
-		t.Errorf("Expected B3's chosen_next_id to be nil. Got %v", msg.ChosenNextID)
+		t.Errorf("Expected B3's chosen_next_id to be nil. Got %v", nilIntStr(msg.ChosenNextID))
 	}
 
 	// ii) Create a new branch C1-C2-C3 after A3 (Model A)
@@ -484,7 +491,7 @@ func TestBranchingMessageChain(t *testing.T) {
 		Roots:           []string{},
 	}
 
-	// Create a dummy SSE writer for streamGeminiResponse
+	// Create a dummy SSE writer for streamLLMResponse
 	rrDummy := httptest.NewRecorder()
 	reqDummy := httptest.NewRequest("GET", "/", nil)
 	dummySseW := newSseWriter(sessionId, rrDummy, reqDummy)
@@ -493,9 +500,9 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 	defer dummySseW.Close()
 
-	// Call streamGeminiResponse to add thought and model messages for C
-	if err := streamGeminiResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false, false, time.Now(), []FrontendMessage{}); err != nil {
-		t.Fatalf("Error streaming Gemini response for C: %v", err)
+	// Call streamLLMResponse to add thought and model messages for C
+	if err := streamLLMResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false, false, time.Now(), []FrontendMessage{}); err != nil {
+		t.Fatalf("Error streaming LLM response for C: %v", err)
 	}
 
 	// Verify that EventInitialState was NOT sent
@@ -552,7 +559,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	// Verify A3's chosen_next_id is C1 (user C)
 	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgC1ID {
-		t.Errorf("A3's chosen_next_id is not C1 (user C). Got %v, want %d", msg.ChosenNextID, msgC1ID)
+		t.Errorf("A3's chosen_next_id is not C1 (user C). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgC1ID)
 	}
 
 	// Verify A3's parent (A3) has both B1 and C1 as possible next messages (by checking branches table)

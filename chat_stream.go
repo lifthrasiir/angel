@@ -15,8 +15,8 @@ import (
 
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 
-// Helper function to stream Gemini API response
-func streamGeminiResponse(
+// Helper function to stream LLM response
+func streamLLMResponse(
 	db *sql.DB,
 	initialState InitialState,
 	sseW *sseWriter,
@@ -25,25 +25,23 @@ func streamGeminiResponse(
 	sendInitialState bool,
 	inferSessionName bool,
 	callStartTime time.Time,
-	fullHistoryForGemini []FrontendMessage,
+	fullHistoryForLLM []FrontendMessage,
 ) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
-	var finalTotalTokenCount *int
-	currentHistory := convertFrontendMessagesToContent(db, fullHistoryForGemini) // Use fullHistoryForGemini here
+	currentHistory := convertFrontendMessagesToContent(db, fullHistoryForLLM)
 
 	// Track the ID of the last message added to the database
 	lastAddedMessageID := lastUserMessageID
-	var parentMessageID *int // Declare parentMessageID here
 
-	// Create a cancellable context for the Gemini API call
+	// Create a cancellable context for the LLM call
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()                          // Ensure context is cancelled when function exits
 	ctx = context.WithValue(ctx, dbKey, db) // Required by tools
 
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {
-		log.Printf("streamGeminiResponse: Failed to start call for session %s: %v", initialState.SessionId, err)
+		log.Printf("streamLLMResponse: Failed to start call for session %s: %v", initialState.SessionId, err)
 		broadcastToSession(initialState.SessionId, EventError, err.Error())
 		return err
 	}
@@ -54,9 +52,9 @@ func streamGeminiResponse(
 
 	if sendInitialState {
 		// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
-		initialStateJSON, err := json.Marshal(initialState) // initialState struct를 JSON으로 마샬링
+		initialStateJSON, err := json.Marshal(initialState)
 		if err != nil {
-			log.Printf("streamGeminiResponse: Failed to marshal initial state: %v", err)
+			log.Printf("streamLLMResponse: Failed to marshal initial state: %v", err)
 			return err
 		}
 		sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
@@ -71,22 +69,36 @@ func streamGeminiResponse(
 	}
 
 	for {
-		select {
-		case <-ctx.Done():
-			// API call was cancelled (either by client disconnect or explicit cancel)
-			// Mark the call as cancelled in the manager
-			failCall(initialState.SessionId, ctx.Err())
-			// Update the message in DB with current accumulated text as-is
-			if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created and has content
-				if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
-					log.Printf("Failed to update model message: %v", err)
-				}
+		addMessageToCurrentSession := func(role, messageType, text string, cumulTokenCount *int) (messageID int, err error) {
+			var parentMessageID *int
+			if lastAddedMessageID != 0 {
+				parentMessageID = &lastAddedMessageID
 			}
-			// Send error to frontend
-			broadcastToSession(initialState.SessionId, EventError, "user canceled request")
-			return ctx.Err() // Return the context error
-		default:
-			// Continue with the Gemini API call
+			messageID, err = AddMessageToSession(ctx, db, Message{
+				SessionID:       initialState.SessionId,
+				BranchID:        initialState.PrimaryBranchID,
+				ParentMessageID: parentMessageID,
+				ChosenNextID:    nil,
+				Role:            role,
+				Text:            text,
+				Type:            messageType,
+				Attachments:     nil,
+				CumulTokenCount: cumulTokenCount,
+				Model:           modelToUse,
+			})
+			if err == nil {
+				if parentMessageID != nil {
+					if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
+						log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+					}
+				}
+				lastAddedMessageID = messageID
+			}
+			return
+		}
+
+		if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, func() {}); err != nil {
+			return err
 		}
 
 		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{
@@ -98,7 +110,7 @@ func streamGeminiResponse(
 		if err != nil {
 			failCall(initialState.SessionId, err) // Mark the call as failed
 			// Save a model_error message to the database
-			errorMessage := fmt.Sprintf("Gemini API call failed: %v", err)
+			errorMessage := fmt.Sprintf("LLM call failed: %v", err)
 			if errors.Is(err, context.Canceled) {
 				errorMessage = "user canceled request"
 			}
@@ -108,18 +120,7 @@ func streamGeminiResponse(
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
-				if _, err := AddMessageToSession(ctx, db, Message{
-					SessionID:       initialState.SessionId,
-					BranchID:        initialState.PrimaryBranchID,
-					ParentMessageID: nil,
-					ChosenNextID:    nil,
-					Role:            RoleModel,
-					Text:            errorMessage,
-					Type:            TypeModelError,
-					Attachments:     nil,
-					CumulTokenCount: nil,
-					Model:           modelToUse,
-				}); err != nil {
+				if _, err := addMessageToCurrentSession(RoleModel, TypeModelError, errorMessage, nil); err != nil {
 					log.Printf("Failed to add model error message to DB: %v", err)
 				}
 			}
@@ -147,19 +148,11 @@ func streamGeminiResponse(
 						fmt.Sprintf("%d\n%d", lastUserMessageID, lastUsageMetadata.PromptTokenCount))
 				}
 			}
-			select {
-			case <-ctx.Done():
-				// Context was canceled, send a message to the frontend
-				broadcastToSession(initialState.SessionId, EventError, "Request canceled by user")
-				if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created
-					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
-						log.Printf("Failed to update model message with cancelled status: %v", err)
-					}
-				}
-				return ctx.Err() // Return the context error
-			default:
-				// Continue processing the response
+
+			if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, func() {}); err != nil {
+				return err
 			}
+
 			if len(caResp.Response.Candidates) == 0 {
 				continue
 			}
@@ -181,34 +174,11 @@ func streamGeminiResponse(
 					// Immediately broadcast function call
 					fc := *part.FunctionCall
 					fcJson, _ := json.Marshal(fc)
-					if lastAddedMessageID != 0 {
-						parentMessageID = &lastAddedMessageID
-					} else {
-						parentMessageID = nil
-					}
-					messageID, err := AddMessageToSession(ctx, db, Message{
-						SessionID:       initialState.SessionId,
-						BranchID:        initialState.PrimaryBranchID,
-						ParentMessageID: parentMessageID,
-						ChosenNextID:    nil,
-						Role:            RoleModel,
-						Text:            string(fcJson),
-						Type:            TypeFunctionCall,
-						Attachments:     nil,
-						CumulTokenCount: nil,
-						Model:           modelToUse,
-					})
+					messageID, err := addMessageToCurrentSession(RoleModel, TypeFunctionCall, string(fcJson), nil)
 					if err != nil {
 						log.Printf("Failed to save function call message: %v", err)
 						return fmt.Errorf("failed to save function call message: %w", err)
 					}
-					// Update chosen_next_id of the parent message
-					if parentMessageID != nil {
-						if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
-							log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-						}
-					}
-					lastAddedMessageID = messageID
 					argsJson, _ := json.Marshal(fc.Args)
 					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsJson))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
@@ -236,34 +206,11 @@ func streamGeminiResponse(
 						t := lastUsageMetadata.PromptTokenCount
 						promptTokens = &t
 					}
-					if lastAddedMessageID != 0 {
-						parentMessageID = &lastAddedMessageID
-					} else {
-						parentMessageID = nil
-					}
-					messageID, err = AddMessageToSession(ctx, db, Message{
-						SessionID:       initialState.SessionId,
-						BranchID:        initialState.PrimaryBranchID,
-						ParentMessageID: parentMessageID,
-						ChosenNextID:    nil,
-						Role:            RoleUser,
-						Text:            string(frJson),
-						Type:            TypeFunctionResponse,
-						Attachments:     nil,
-						CumulTokenCount: promptTokens,
-						Model:           modelToUse,
-					})
+					messageID, err = addMessageToCurrentSession(RoleUser, TypeFunctionResponse, string(frJson), promptTokens)
 					if err != nil {
 						log.Printf("Failed to save function response message: %v", err)
 						return fmt.Errorf("failed to save function response message: %w", err)
 					}
-					// Update chosen_next_id of the parent message
-					if parentMessageID != nil {
-						if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
-							log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-						}
-					}
-					lastAddedMessageID = messageID
 					formattedData = fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(responseJson))
 					broadcastToSession(initialState.SessionId, EventFunctionReply, formattedData)
 					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: []Part{{FunctionResponse: &fr}}})
@@ -285,68 +232,21 @@ func streamGeminiResponse(
 						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
 					}
 
-					// Save thought message to DB
-					if lastAddedMessageID != 0 {
-						parentMessageID = &lastAddedMessageID
-					} else {
-						parentMessageID = nil
-					}
-					messageID, err := AddMessageToSession(ctx, db, Message{
-						SessionID:       initialState.SessionId,
-						BranchID:        initialState.PrimaryBranchID,
-						ParentMessageID: parentMessageID,
-						ChosenNextID:    nil,
-						Role:            RoleThought,
-						Text:            thoughtText,
-						Type:            TypeThought,
-						Attachments:     nil,
-						CumulTokenCount: nil,
-						Model:           modelToUse,
-					})
+					messageID, err := addMessageToCurrentSession(RoleThought, TypeThought, thoughtText, nil)
 					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
-					// Update chosen_next_id of the parent message
-					if parentMessageID != nil {
-						if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
-							log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-						}
-					}
-					lastAddedMessageID = messageID
 					// Broadcast thought immediately
 					broadcastToSession(initialState.SessionId, EventThought, fmt.Sprintf("%d\n%s", messageID, thoughtText))
 				} else {
 					if modelMessageID < 0 {
 						// Initialize agentResponseText for the new model message
-						agentResponseText = "" // Initialize to empty string
-						// Set parentMessageID for the new model message
-						if lastAddedMessageID != 0 {
-							parentMessageID = &lastAddedMessageID
-						} else {
-							parentMessageID = nil
-						}
+						agentResponseText = ""
 						// Add the initial model message to DB with empty text
-						modelMessageID, err = AddMessageToSession(ctx, db, Message{
-							SessionID:       initialState.SessionId,
-							BranchID:        initialState.PrimaryBranchID,
-							ParentMessageID: parentMessageID,
-							ChosenNextID:    nil,
-							Role:            RoleModel,
-							Text:            "",
-							Type:            TypeText,
-							Attachments:     nil,
-							CumulTokenCount: nil,
-							Model:           modelToUse,
-						})
+						modelMessageID, err = addMessageToCurrentSession(RoleModel, TypeText, "", nil)
 						if err != nil {
 							log.Printf("Failed to add new model message to DB: %v", err)
 							return fmt.Errorf("failed to add new model message to DB: %w", err)
-						}
-						// Update chosen_next_id of the parent message (if any)
-						if parentMessageID != nil {
-							if err := UpdateMessageChosenNextID(db, *parentMessageID, &modelMessageID); err != nil {
-								log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-							}
 						}
 					}
 
@@ -356,7 +256,6 @@ func streamGeminiResponse(
 					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
 						log.Printf("Failed to update model message content: %v", err)
 					}
-					lastAddedMessageID = modelMessageID // Update lastAddedMessageID for every part
 
 					// Send only the current text chunk to the frontend
 					broadcastToSession(initialState.SessionId, EventModelMessage, fmt.Sprintf("%d\n%s", modelMessageID, part.Text))
@@ -364,46 +263,16 @@ func streamGeminiResponse(
 			}
 		}
 
-		// Check if context was cancelled after stream ended
-		select {
-		case <-ctx.Done():
-			// Stream was cancelled, send error and return
-			failCall(initialState.SessionId, ctx.Err())
-			// Finalize the current model message as-is without adding cancellation text
-			if modelMessageID >= 0 && agentResponseText != "" {
-				if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
-					log.Printf("Failed to update final model message: %v", err)
-				}
-			}
-
+		addCancelErrorMessage := func() {
 			// Add a separate error message to the database
-			errorMessageID, err := AddMessageToSession(ctx, db, Message{
-				SessionID:       initialState.SessionId,
-				BranchID:        initialState.PrimaryBranchID,
-				ParentMessageID: &lastAddedMessageID,
-				ChosenNextID:    nil,
-				Role:            RoleModel,
-				Text:            "user canceled request",
-				Type:            TypeModelError,
-				Attachments:     nil,
-				CumulTokenCount: nil,
-				Model:           modelToUse,
-			})
-			if err != nil {
+			if _, err := addMessageToCurrentSession(RoleModel, TypeModelError, "user canceled request", nil); err != nil {
 				log.Printf("Failed to add error message to DB: %v", err)
-			} else {
-				// Update chosen_next_id of the parent message to point to the error message
-				if lastAddedMessageID != 0 {
-					if err := UpdateMessageChosenNextID(db, lastAddedMessageID, &errorMessageID); err != nil {
-						log.Printf("Failed to update chosen_next_id for cancelled message %d: %v", lastAddedMessageID, err)
-					}
-				}
 			}
+		}
 
-			broadcastToSession(initialState.SessionId, EventError, "user canceled request")
-			return ctx.Err()
-		default:
-			// Continue with normal processing
+		// Check if context was cancelled after stream ended
+		if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, addCancelErrorMessage); err != nil {
+			return err
 		}
 
 		// Model has generated all messages and nothing to ask
@@ -432,7 +301,7 @@ func streamGeminiResponse(
 	if inferSessionName {
 		currentSession, err := GetSession(db, initialState.SessionId)
 		if err != nil {
-			log.Printf("streamGeminiResponse: Failed to get session %s for initial name check: %v", initialState.SessionId, err)
+			log.Printf("streamLLMResponse: Failed to get session %s for initial name check: %v", initialState.SessionId, err)
 			// If GetSession fails, assume name might be missing and attempt inference.
 		}
 
@@ -455,6 +324,7 @@ func streamGeminiResponse(
 		}
 	}
 
+	var finalTotalTokenCount *int
 	if lastUsageMetadata != nil && lastUsageMetadata.TotalTokenCount > 0 {
 		t := lastUsageMetadata.TotalTokenCount
 		finalTotalTokenCount = &t
@@ -472,6 +342,37 @@ func streamGeminiResponse(
 	completeCall(initialState.SessionId) // Mark the call as completed
 	inferWg.Wait()
 	return nil
+}
+
+func checkStreamCancellation(
+	ctx context.Context,
+	initialState InitialState,
+	db *sql.DB,
+	modelMessageID int,
+	agentResponseText string,
+	cancelCallback func(),
+) error {
+	select {
+	case <-ctx.Done():
+		// API call was cancelled (either by client disconnect or explicit cancel)
+		// Mark the call as cancelled in the manager
+		failCall(initialState.SessionId, ctx.Err())
+		// Update the message in DB with current accumulated text as-is
+		if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created and has content
+			if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+				log.Printf("Failed to update model message: %v", err)
+			}
+		}
+
+		cancelCallback()
+
+		// Send error to frontend
+		broadcastToSession(initialState.SessionId, EventError, "user canceled request")
+		return ctx.Err()
+	default:
+		// Continue with the LLM call
+		return nil
+	}
 }
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.

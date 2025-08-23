@@ -149,10 +149,10 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		Roots:           []string{},
 	}
 
-	// Handle streaming response from Gemini
-	// Pass full history to streamGeminiResponse for Gemini API
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, true, true, time.Now(), historyContext); err != nil {
-		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
+	// Handle streaming response from LLM
+	// Pass full history to streamLLMResponse for LLM
+	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, true, true, time.Now(), historyContext); err != nil {
+		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
 		return
 	}
 }
@@ -304,7 +304,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Roots:           session.Roots,
 	}
 
-	if err := streamGeminiResponse(db, initialState, sseW, userMessageID, modelToUse, false, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, false, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
