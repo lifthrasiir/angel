@@ -1,0 +1,1 @@
+First, reason in your scratchpad. Then, generate the <state_snapshot>.

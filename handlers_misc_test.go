@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -72,8 +73,9 @@ func TestHandleEvaluatePrompt(t *testing.T) {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}
 
-		if response["evaluatedPrompt"] != (PromptData{}).GetDefaultSystemPromptForCoding() {
-			t.Errorf("expected %q, got %q", (PromptData{}).GetDefaultSystemPromptForCoding(), response["evaluatedPrompt"])
+		const expectedPrefix = "You are an interactive agent specializing in software engineering tasks."
+		if !strings.HasPrefix(response["evaluatedPrompt"], expectedPrefix) {
+			t.Errorf("expected prefix %q, got %q", expectedPrefix, response["evaluatedPrompt"])
 		}
 	})
 

@@ -107,7 +107,10 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 		textContent = textContent[:MAX_CONTENT_LENGTH]
 	}
 
-	fallbackPrompt := GetWebFetchFallbackPrompt(prompt, textContent)
+	fallbackPrompt := executePromptTemplate("web-fetch-fallback.md", map[string]any{
+		"Prompt":      prompt,
+		"TextContent": textContent,
+	})
 
 	sessionParams := SessionParams{
 		ModelName: modelName,

@@ -135,7 +135,8 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	// 5. Construct LLM request with historyToCompress and getCompressionPrompt().
-	systemPrompt, triggerPrompt := GetCompressionPrompt()
+	systemPrompt := executePromptTemplate("compression.md", nil)
+	triggerPrompt := executePromptTemplate("compression-trigger.md", nil)
 	llmRequestContents := historyToCompress // Start with the history to compress
 	llmRequestContents = append(llmRequestContents, Content{
 		Role: RoleUser,

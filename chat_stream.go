@@ -423,7 +423,11 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	}
 
 	// Existing LLM inference logic (only for non-angel-eval models)
-	nameSystemPrompt, nameInputPrompt := GetSessionNameInferencePrompts(userMessage, "")
+	nameSystemPrompt := executePromptTemplate("session-name-prompt.md", nil)
+	nameInputPrompt := executePromptTemplate("session-name-input.md", map[string]any{
+		"UserMessage":  userMessage,
+		"AgentMessage": "",
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

@@ -2,9 +2,31 @@ package main
 
 import (
 	"bytes"
+	"embed"
 	"fmt"
+	"log"
+	"runtime"
+	"strings"
 	"text/template"
+	"time"
 )
+
+//go:embed prompts/*.md
+var promptsDir embed.FS
+
+func TodayInPrompt() string {
+	return time.Now().Format("January 2, 2006")
+}
+
+func PlatformInPrompt() string {
+	platform, _, _ := strings.Cut(runtime.GOOS, "/")
+	switch platform {
+	case "darwin":
+		return "macos"
+	default:
+		return platform
+	}
+}
 
 // PromptData holds data that can be passed to the prompt templates.
 type PromptData struct {
@@ -22,8 +44,8 @@ func (PromptData) String() string {
 }
 
 func (d PromptData) Builtin() BuiltinPrompts    { return BuiltinPrompts{data: d} }
-func (PromptData) Today() string                { return TodayInPrompt() }
-func (PromptData) Platform() string             { return PlatformInPrompt() }
+func (d PromptData) Today() string              { return TodayInPrompt() }
+func (d PromptData) Platform() string           { return PlatformInPrompt() }
 func (d PromptData) Workspace() PromptWorkspace { return PromptWorkspace{data: d} }
 
 // BuiltinPrompts holds references to the default system prompts.
@@ -38,14 +60,22 @@ func (BuiltinPrompts) String() string {
 `
 }
 
+func (p BuiltinPrompts) systemPromptArgs() map[string]any {
+	return map[string]any{
+		"Today":         TodayInPrompt(),
+		"Platform":      PlatformInPrompt(),
+		"WorkspaceName": p.data.workspaceName,
+	}
+}
+
 func (p BuiltinPrompts) SystemPrompt() string {
-	return p.data.GetMinimalSystemPrompt()
+	return executePromptTemplate("system-prompt-minimal.md", p.systemPromptArgs())
 }
 func (p BuiltinPrompts) SystemPromptForCoding() string {
-	return p.data.GetDefaultSystemPromptForCoding()
+	return executePromptTemplate("system-prompt-coding.md", p.systemPromptArgs())
 }
 func (p BuiltinPrompts) DynamicPromptTool() string {
-	return GetDynamicPromptToolPrompt()
+	return executePromptTemplate("tool-dynamic-prompt.md", nil)
 }
 
 // PromptWorkspace holds the current workspace information.
@@ -74,4 +104,25 @@ func (d PromptData) EvaluatePrompt(promptContent string) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+func executePromptTemplate(filename string, data map[string]any) string {
+	tmpl, err := template.New("").ParseFS(promptsDir, "prompts/*.md")
+	if err != nil {
+		log.Printf("Error parsing template files: %v", err)
+		return ""
+	}
+
+	tmpl = tmpl.Lookup(filename)
+	if tmpl == nil {
+		log.Printf("Error: template %s not found after parsing all files", filename)
+		return ""
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		log.Printf("Error executing template %s: %v", filename, err)
+		return ""
+	}
+	return buf.String()
 }
