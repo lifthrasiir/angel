@@ -10,8 +10,9 @@ import (
 
 // ToolHandlerParams contains parameters passed to a tool's handler function.
 type ToolHandlerParams struct {
-	ModelName string
-	SessionId string
+	ModelName            string
+	SessionId            string
+	ConfirmationReceived bool
 }
 
 // ToolDefinition represents a tool with its schema and handler function.

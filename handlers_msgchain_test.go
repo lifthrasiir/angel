@@ -501,7 +501,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	defer dummySseW.Close()
 
 	// Call streamLLMResponse to add thought and model messages for C
-	if err := streamLLMResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false, false, time.Now(), []FrontendMessage{}); err != nil {
+	if err := streamLLMResponse(db, initialStateCStream, dummySseW, msgC1ID, DefaultGeminiModel, false, time.Now(), []FrontendMessage{}); err != nil {
 		t.Fatalf("Error streaming LLM response for C: %v", err)
 	}
 

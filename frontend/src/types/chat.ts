@@ -51,6 +51,7 @@ export interface InitialState {
   workspaceId: string;
   primaryBranchId: string;
   callElapsedTimeSeconds?: number;
+  pendingConfirmation?: string;
 }
 
 export interface Session {

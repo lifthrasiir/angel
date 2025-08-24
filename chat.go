@@ -24,6 +24,7 @@ type InitialState struct {
 	PrimaryBranchID        string            `json:"primaryBranchId"`
 	Roots                  []string          `json:"roots"`
 	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"`
+	PendingConfirmation    string            `json:"pendingConfirmation,omitempty"`
 }
 
 // New session and message handler
@@ -149,9 +150,18 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		Roots:           []string{},
 	}
 
+	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
+	initialStateJSON, err := json.Marshal(initialState)
+	if err != nil {
+		log.Printf("newSessionAndMessage: Failed to marshal initial state: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to prepare initial state: %v", err), http.StatusInternalServerError)
+		return
+	}
+	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
+
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, true, true, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, true, time.Now(), historyContext); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -304,7 +314,16 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Roots:           session.Roots,
 	}
 
-	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, false, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
+	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
+	initialStateJSON, err := json.Marshal(initialState)
+	if err != nil {
+		log.Printf("chatMessage: Failed to marshal initial state: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to prepare initial state: %v", err), http.StatusInternalServerError)
+		return
+	}
+	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
+
+	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
 		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
 		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
 		return
@@ -390,6 +409,17 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:     session.WorkspaceID,
 		PrimaryBranchID: session.PrimaryBranchID,
 		Roots:           session.Roots,
+	}
+
+	branch, err := GetBranch(db, session.PrimaryBranchID)
+	if err != nil {
+		log.Printf("loadChatSession: Failed to get branch %s: %v", session.PrimaryBranchID, err)
+		http.Error(w, fmt.Sprintf("Failed to get branch: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if branch.PendingConfirmation != nil {
+		initialState.PendingConfirmation = *branch.PendingConfirmation
 	}
 
 	// Check if it's an SSE request
@@ -798,6 +828,254 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		})
 	}
 	return contents
+}
+
+// confirmBranchHandler handles the confirmation of a pending action on a branch.
+func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	auth := getAuth(w, r)
+
+	if !auth.Validate("confirmBranchHandler", w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	branchId := vars["branchId"]
+	if sessionId == "" || branchId == "" {
+		http.Error(w, "Session ID and Branch ID are required", http.StatusBadRequest)
+		return
+	}
+
+	var requestBody struct {
+		Approved     bool                   `json:"approved"`
+		ModifiedData map[string]interface{} `json:"modifiedData"` // Optional: tool arguments if modified
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "confirmBranchHandler") {
+		return
+	}
+
+	// Clear pending_confirmation for the branch regardless of approval/denial
+	if err := UpdateBranchPendingConfirmation(db, branchId, ""); err != nil { // Set to empty string to clear
+		log.Printf("confirmBranchHandler: Failed to clear pending_confirmation for branch %s: %v", branchId, err)
+		http.Error(w, fmt.Sprintf("Failed to clear confirmation status: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get session and branch details
+	session, err := GetSession(db, sessionId)
+	if err != nil {
+		log.Printf("confirmBranchHandler: Failed to get session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to get session: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// If the confirmed branch is not the primary branch, switch to it
+	if session.PrimaryBranchID != branchId {
+		if err := UpdateSessionPrimaryBranchID(db, sessionId, branchId); err != nil {
+			log.Printf("confirmBranchHandler: Failed to switch primary branch to %s: %v", branchId, err)
+			http.Error(w, fmt.Sprintf("Failed to switch primary branch: %v", err), http.StatusInternalServerError)
+			return
+		}
+		handleOldPrimaryBranchChosenNextID(db, sessionId, session.PrimaryBranchID, branchId)
+		handleNewPrimaryBranchChosenNextID(db, branchId)
+	}
+
+	// Find the last message in the current primary branch (which should be the function_call that triggered confirmation)
+	lastMessageIDFromDB, lastMessageModelFromDB, err := GetLastMessageInBranch(db, sessionId, branchId)
+	if err != nil {
+		log.Printf("confirmBranchHandler: Failed to get last message ID for session %s and branch %s: %v", sessionId, branchId, err)
+		http.Error(w, fmt.Sprintf("Failed to get last message: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the full message details for the last message (the function call)
+	lastMessage, err := GetMessageByID(db, lastMessageIDFromDB)
+	if err != nil {
+		log.Printf("confirmBranchHandler: Failed to get last message details for ID %d: %v", lastMessageIDFromDB, err)
+		http.Error(w, fmt.Sprintf("Failed to get last message details: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if !requestBody.Approved {
+		// User denied the confirmation
+		log.Printf("confirmBranchHandler: User denied confirmation for session %s, branch %s", sessionId, branchId)
+
+		// Construct the function response for denial
+		functionName, _, _ := strings.Cut(lastMessage.Text, "\n")
+		denialResponseMap := map[string]interface{}{"error": "User denied tool execution"}
+		fr := FunctionResponse{Name: functionName, Response: denialResponseMap}
+		frJson, err := json.Marshal(fr)
+		if err != nil {
+			log.Printf("confirmBranchHandler: Failed to marshal denial function response: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to process denial: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Add the function response message to the session
+		denialResponseID, err := AddMessageToSession(r.Context(), db, Message{
+			SessionID:       sessionId,
+			BranchID:        branchId,
+			ParentMessageID: &lastMessageIDFromDB,
+			ChosenNextID:    nil,
+			Role:            RoleUser, // Function responses are from the user's perspective
+			Text:            string(frJson),
+			Type:            TypeFunctionResponse,
+			Attachments:     nil,
+			CumulTokenCount: nil,
+			Model:           lastMessageModelFromDB,
+		})
+		if err != nil {
+			log.Printf("confirmBranchHandler: Failed to save denial function response message: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to save denial response: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Update the chosen_next_id of the function call message to point to the denial response
+		if err := UpdateMessageChosenNextID(db, lastMessageIDFromDB, &denialResponseID); err != nil {
+			log.Printf("confirmBranchHandler: Failed to update chosen_next_id for function call message %d after denial: %v", lastMessageIDFromDB, err)
+			// Non-fatal, but log it
+		}
+
+		// Send EventFunctionReply to frontend
+		sseW := newSseWriter(sessionId, w, r)
+		if sseW == nil {
+			return
+		}
+		addSseWriter(sessionId, sseW)
+		defer removeSseWriter(sessionId, sseW)
+
+		denialResponseMapJson, err := json.Marshal(denialResponseMap)
+		if err != nil {
+			log.Printf("confirmBranchHandler: Failed to marshal denial response map for SSE: %v", err)
+			denialResponseMapJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+		}
+		formattedData := fmt.Sprintf("%d\n%s\n%s", denialResponseID, functionName, string(denialResponseMapJson))
+		sseW.sendServerEvent(EventFunctionReply, formattedData)
+
+		// Send EventComplete to signal the end of the pending state
+		broadcastToSession(sessionId, EventComplete, "") // Signal completion
+		sendJSONResponse(w, map[string]string{"status": "denied", "message": "Confirmation denied by user"})
+		return
+	}
+
+	// User approved the confirmation
+	// Extract the original function call from the last message
+	var fc FunctionCall
+	if lastMessage.Type == TypeFunctionCall {
+		if err := json.Unmarshal([]byte(lastMessage.Text), &fc); err != nil {
+			log.Printf("confirmBranchHandler: Failed to unmarshal function call from message %d: %v", lastMessageIDFromDB, err)
+			http.Error(w, fmt.Sprintf("Failed to parse function call: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		log.Printf("confirmBranchHandler: Last message %d is not a function call (type: %s)", lastMessageIDFromDB, lastMessage.Type)
+		http.Error(w, "Last message is not a function call, cannot confirm", http.StatusBadRequest)
+		return
+	}
+
+	// If modifiedData is provided, update the function call arguments
+	if requestBody.ModifiedData != nil {
+		for k, v := range requestBody.ModifiedData {
+			fc.Args[k] = v
+		}
+	}
+
+	// Re-execute the tool function with confirmationReceived = true
+	functionResponseValue, err := CallToolFunction(r.Context(), fc, ToolHandlerParams{ModelName: lastMessageModelFromDB, SessionId: sessionId, ConfirmationReceived: true})
+	if err != nil {
+		log.Printf("confirmBranchHandler: Error re-executing function %s after confirmation: %v", fc.Name, err)
+		// If re-execution fails, send an error event and stop streaming
+		sseW := newSseWriter(sessionId, w, r)
+		if sseW == nil {
+			return
+		}
+		addSseWriter(sessionId, sseW)
+		defer removeSseWriter(sessionId, sseW)
+		broadcastToSession(sessionId, EventError, fmt.Sprintf("Tool re-execution failed: %v", err))
+		sendJSONResponse(w, map[string]string{"status": "error", "message": fmt.Sprintf("Tool re-execution failed: %v", err)})
+		return
+	}
+
+	// Save the function response message
+	fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
+	frJson, err := json.Marshal(fr)
+	if err != nil { // Check error from json.Marshal(fr)
+		log.Printf("confirmBranchHandler: Failed to marshal function response for frontend: %v", err)
+		// If marshaling fails, create a basic error JSON
+		frJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+	}
+
+	// Add the function response message to the session
+	// Note: cumulTokenCount is not updated here, as it's handled by streamLLMResponse
+	functionResponseID, err := AddMessageToSession(r.Context(), db, Message{
+		SessionID:       sessionId,
+		BranchID:        branchId,
+		ParentMessageID: &lastMessageIDFromDB,
+		ChosenNextID:    nil,
+		Role:            RoleUser, // Function responses are from the user's perspective
+		Text:            string(frJson),
+		Type:            TypeFunctionResponse,
+		Attachments:     nil,
+		CumulTokenCount: nil,
+		Model:           lastMessageModelFromDB,
+	})
+	if err != nil {
+		log.Printf("confirmBranchHandler: Failed to save function response message after confirmation: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to save function response: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Update the chosen_next_id of the function call message to point to the response
+	if err := UpdateMessageChosenNextID(db, lastMessageIDFromDB, &functionResponseID); err != nil {
+		log.Printf("confirmBranchHandler: Failed to update chosen_next_id for function call message %d: %v", lastMessageIDFromDB, err)
+		// Non-fatal, but log it
+	}
+
+	// Send EventFunctionReply to frontend
+	sseW := newSseWriter(sessionId, w, r)
+	if sseW == nil {
+		return
+	}
+	addSseWriter(sessionId, sseW)
+	defer removeSseWriter(sessionId, sseW)
+
+	functionResponseValueJson, err := json.Marshal(functionResponseValue)
+	if err != nil {
+		log.Printf("confirmBranchHandler: Failed to marshal function response value for SSE: %v", err)
+		functionResponseValueJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+	}
+	formattedData := fmt.Sprintf("%d\n%s\n%s", functionResponseID, fc.Name, string(functionResponseValueJson))
+	sseW.sendServerEvent(EventFunctionReply, formattedData)
+
+	// Retrieve session history from DB for Gemini API (full context)
+	fullFrontendHistoryForGemini, err := GetSessionHistoryContext(db, sessionId, branchId)
+	if err != nil {
+		log.Printf("confirmBranchHandler: Failed to retrieve full session history for Gemini after confirmation: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for Gemini: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Prepare initial state for streaming (only for passing session details, not for sending EventInitialState)
+	initialState := InitialState{
+		SessionId:           sessionId,
+		History:             []FrontendMessage{}, // History will be streamed
+		SystemPrompt:        session.SystemPrompt,
+		WorkspaceID:         session.WorkspaceID,
+		PrimaryBranchID:     branchId,
+		Roots:               session.Roots,
+		PendingConfirmation: "", // Clear pending confirmation in initial state
+	}
+
+	// Resume streaming from the point after the function response
+	if err := streamLLMResponse(db, initialState, sseW, functionResponseID, lastMessageModelFromDB, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
+		log.Printf("confirmBranchHandler: Error streaming Gemini response after confirmation: %v", err)
+		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"status": "approved", "message": "Confirmation approved and streaming resumed"})
 }
 
 // applyCurationRules applies the specified curation rules to a slice of FrontendMessage.

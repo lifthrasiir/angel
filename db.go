@@ -29,12 +29,13 @@ func createTables(db *sql.DB) error {
 		roots TEXT DEFAULT '[]' -- New column for exposed roots, defaults to empty JSON array
 	);
 
-	CREATE TABLE IF NOT EXISTS branches (
+		CREATE TABLE IF NOT EXISTS branches (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
 		parent_branch_id TEXT,
 		branch_from_message_id INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		pending_confirmation TEXT,
 		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 	);
 
@@ -103,6 +104,11 @@ func migrateDB(db *sql.DB) error {
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("failed to add roots column to sessions table: %w", err)
 	}
+	// Add 'pending_confirmation' column to 'branches' table if it doesn't exist
+	_, err = db.Exec(`ALTER TABLE branches ADD COLUMN pending_confirmation TEXT`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("failed to add pending_confirmation column to branches table: %w", err)
+	}
 	return nil
 }
 
@@ -158,6 +164,7 @@ type Branch struct {
 	ParentBranchID      *string `json:"parent_branch_id"`       // Pointer for nullable
 	BranchFromMessageID *int    `json:"branch_from_message_id"` // Pointer for nullable
 	CreatedAt           string  `json:"created_at"`
+	PendingConfirmation *string `json:"pending_confirmation"`
 }
 
 // FileAttachment struct to hold file attachment data
@@ -483,6 +490,7 @@ func UpdateSessionPrimaryBranchID(db *sql.DB, sessionID string, branchID string)
 
 // GetMessagePossibleNextIDs retrieves all possible next message IDs and their branch IDs for a given message ID.
 func GetMessagePossibleNextIDs(db *sql.DB, messageID int) ([]PossibleNextMessage, error) {
+
 	rows, err := db.Query("SELECT id, branch_id FROM messages WHERE parent_message_id = ?", messageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query possible next message IDs: %w", err)
@@ -580,12 +588,21 @@ func UpdateSessionRoots(db *sql.DB, sessionID string, roots []string) error {
 
 func GetBranch(db *sql.DB, branchID string) (Branch, error) {
 	var b Branch
-	row := db.QueryRow("SELECT id, session_id, parent_branch_id, branch_from_message_id, created_at FROM branches WHERE id = ?", branchID)
-	err := row.Scan(&b.ID, &b.SessionID, &b.ParentBranchID, &b.BranchFromMessageID, &b.CreatedAt)
+	row := db.QueryRow("SELECT id, session_id, parent_branch_id, branch_from_message_id, created_at, pending_confirmation FROM branches WHERE id = ?", branchID)
+	err := row.Scan(&b.ID, &b.SessionID, &b.ParentBranchID, &b.BranchFromMessageID, &b.CreatedAt, &b.PendingConfirmation)
 	if err != nil {
 		return b, fmt.Errorf("failed to get branch: %w", err)
 	}
 	return b, nil
+}
+
+// UpdateBranchPendingConfirmation updates the pending_confirmation for a branch.
+func UpdateBranchPendingConfirmation(db *sql.DB, branchID string, confirmationData string) error {
+	_, err := db.Exec("UPDATE branches SET pending_confirmation = ? WHERE id = ?", confirmationData, branchID)
+	if err != nil {
+		return fmt.Errorf("failed to update branch pending_confirmation: %w", err)
+	}
+	return nil
 }
 
 // createFrontendMessage converts a Message DB struct and related data into a FrontendMessage.
@@ -784,6 +801,7 @@ func getSessionHistoryInternal(
 	var currentMessageCount int
 	for keepGoing && (isFullHistoryFetch || currentMessageCount < fetchLimit) { // Modified condition
 		err := func() error {
+
 			rows, err := db.Query(`
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,

@@ -22,7 +22,6 @@ func streamLLMResponse(
 	sseW *sseWriter,
 	lastUserMessageID int,
 	modelToUse string,
-	sendInitialState bool,
 	inferSessionName bool,
 	callStartTime time.Time,
 	fullHistoryForLLM []FrontendMessage,
@@ -49,16 +48,6 @@ func streamLLMResponse(
 
 	// Calculate elapsed time since the call started
 	initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
-
-	if sendInitialState {
-		// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
-		initialStateJSON, err := json.Marshal(initialState)
-		if err != nil {
-			log.Printf("streamLLMResponse: Failed to marshal initial state: %v", err)
-			return err
-		}
-		sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
-	}
 
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
@@ -190,6 +179,32 @@ func streamLLMResponse(
 					functionResponseValue, err := CallToolFunction(ctx, fc, ToolHandlerParams{ModelName: modelToUse, SessionId: initialState.SessionId})
 					if err != nil {
 						log.Printf("Error executing function %s: %v", fc.Name, err)
+
+						var pendingConfirmation *PendingConfirmation
+						if errors.As(err, &pendingConfirmation) {
+							// Handle PendingConfirmation error
+							confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
+							if marshalErr != nil {
+								log.Printf("Failed to marshal pending confirmation data: %v", marshalErr)
+								broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
+								return fmt.Errorf("failed to process confirmation: %w", marshalErr)
+							}
+							confirmationData := string(confirmationDataBytes)
+
+							// Update branch pending_confirmation
+							if err := UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
+								log.Printf("Failed to update branch pending_confirmation: %v", err)
+								broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
+								return fmt.Errorf("failed to update confirmation status: %w", err)
+							}
+
+							// Send P event to frontend
+							broadcastToSession(initialState.SessionId, EventPendingConfirmation, confirmationData)
+
+							// Stop streaming
+							return fmt.Errorf("user confirmation pending")
+						}
+
 						functionResponseValue = map[string]interface{}{"error": err.Error()}
 					}
 

@@ -20,6 +20,7 @@ import {
   updateAgentMessageAtom,
   updateUserMessageIdAtom,
   updateMessageTokenCountAtom,
+  pendingConfirmationAtom,
 } from '../atoms/chatAtoms';
 import { ModelInfo } from '../api/models';
 
@@ -58,6 +59,73 @@ export const useMessageSending = ({
   const updateUserMessageId = useSetAtom(updateUserMessageIdAtom);
   const updateMessageTokenCount = useSetAtom(updateMessageTokenCountAtom);
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
+  const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
+
+  const commonHandlers = {
+    onMessage: (messageId: string, text: string) => {
+      updateAgentMessage({ messageId, text, modelName: selectedModel?.name });
+      setLastAutoDisplayedThoughtId(null);
+    },
+    onThought: (messageId: string, thoughtText: string) => {
+      addMessage({
+        id: messageId,
+        role: 'model',
+        parts: [{ text: thoughtText }],
+        type: 'thought',
+      } as ChatMessage);
+      setLastAutoDisplayedThoughtId(null);
+    },
+    onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => {
+      const message: ChatMessage = {
+        id: messageId,
+        role: 'model',
+        parts: [{ functionCall: { name: functionName, args: functionArgs } }],
+        type: 'function_call',
+      };
+      addMessage(message);
+      setLastAutoDisplayedThoughtId(null);
+    },
+    onFunctionResponse: (messageId: string, functionName: string, functionResponse: any) => {
+      const message: ChatMessage = {
+        id: messageId,
+        role: 'user',
+        parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
+        type: 'function_response',
+        model: selectedModel?.name,
+      };
+      addMessage(message);
+      setLastAutoDisplayedThoughtId(null);
+    },
+    onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => {
+      setChatSessionId(sessionId);
+      setSystemPrompt(systemPrompt);
+      setPrimaryBranchId(primaryBranchId);
+      setSessions((prevSessions) => [
+        { id: sessionId, name: '', isEditing: false, last_updated_at: new Date().toISOString() },
+        ...prevSessions,
+      ]);
+      navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
+    },
+    onSessionNameUpdate: (sessionId: string, newName: string) => {
+      setSessionName({ sessionId, name: newName });
+    },
+    onEnd: () => {
+      setLastAutoDisplayedThoughtId(null);
+      setProcessingStartTime(null);
+    },
+    onError: (errorData: string) => {
+      addErrorMessage(errorData);
+    },
+    // onAcknowledge is handled separately as it depends on userMessage.id
+    onAcknowledge: () => {},
+    onTokenCount: (messageId: string, cumulTokenCount: number) => {
+      updateMessageTokenCount({ messageId, cumulTokenCount });
+    },
+    onPendingConfirmation: (data: string) => {
+      setPendingConfirmation(data);
+      setProcessingStartTime(null);
+    },
+  };
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() && selectedFiles.length === 0) return;
@@ -107,75 +175,13 @@ export const useMessageSending = ({
       }
 
       const handlers: StreamEventHandlers = {
-        onMessage: (messageId: string, text: string) => {
-          updateAgentMessage({ messageId, text, modelName: selectedModel?.name });
-          setLastAutoDisplayedThoughtId(null);
-        },
-        onThought: (messageId: string, thoughtText: string) => {
-          addMessage({
-            id: messageId,
-            role: 'model',
-            parts: [{ text: thoughtText }],
-            type: 'thought',
-          } as ChatMessage);
-          setLastAutoDisplayedThoughtId(messageId);
-        },
-        onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => {
-          const message: ChatMessage = {
-            id: messageId,
-            role: 'model',
-            parts: [{ functionCall: { name: functionName, args: functionArgs } }],
-            type: 'function_call',
-          };
-          addMessage(message);
-          setLastAutoDisplayedThoughtId(null);
-        },
-        onFunctionResponse: (messageId: string, functionName: string, functionResponse: any) => {
-          const message: ChatMessage = {
-            id: messageId,
-            role: 'user',
-            parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
-            type: 'function_response',
-            model: selectedModel?.name,
-          };
-          addMessage(message);
-          setLastAutoDisplayedThoughtId(null);
-        },
-        onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => {
-          setChatSessionId(sessionId);
-          setSystemPrompt(systemPrompt);
-          setPrimaryBranchId(primaryBranchId);
-          // Add the new session to the sessionsAtom with a temporary name
-          setSessions((prevSessions) => [
-            { id: sessionId, name: '', isEditing: false, last_updated_at: new Date().toISOString() },
-            ...prevSessions,
-          ]);
-          navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
-        },
-        onSessionNameUpdate: (sessionId: string, newName: string) => {
-          setSessionName({ sessionId, name: newName });
-        },
-        onEnd: () => {
-          setLastAutoDisplayedThoughtId(null);
-          setProcessingStartTime(null);
-        },
-        onError: (errorData: string) => {
-          addErrorMessage(errorData);
-        },
+        ...commonHandlers,
         onAcknowledge: (messageId: string) => {
           updateUserMessageId({ temporaryId: userMessage.id, newId: messageId });
         },
-        onTokenCount: (messageId: string, cumulTokenCount: number) => {
-          updateMessageTokenCount({ messageId, cumulTokenCount });
-        },
       };
 
-      const { qReceived, nReceived } = await processStreamResponse(response, handlers);
-
-      if (!qReceived) {
-        console.error('Backend bug: Stream ended without receiving both Q and N events.', { qReceived, nReceived });
-        addErrorMessage('An unexpected error occurred: Stream did not finalize correctly.');
-      }
+      await processStreamResponse(response, handlers);
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
       addErrorMessage('Error sending message or receiving stream.');
@@ -208,5 +214,53 @@ export const useMessageSending = ({
     }
   };
 
-  return { handleSendMessage, cancelStreamingCall };
+  const sendConfirmation = async (
+    approved: boolean,
+    sessionId: string,
+    branchId: string,
+    modifiedData?: Record<string, any>,
+  ) => {
+    setProcessingStartTime(performance.now());
+    setPendingConfirmation(null); // Clear pending confirmation immediately
+
+    try {
+      const requestBody: { approved: boolean; modifiedData?: Record<string, any> } = { approved };
+      if (modifiedData) {
+        requestBody.modifiedData = modifiedData;
+      }
+
+      const response = await apiFetch(`/api/chat/${sessionId}/branch/${branchId}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.status === 401) {
+        window.location.reload();
+        return;
+      }
+
+      if (!response.ok) {
+        const errorMessage = `Failed to send confirmation: ${response.status} ${response.statusText}`;
+        addErrorMessage(errorMessage);
+        return;
+      }
+
+      const handlers: StreamEventHandlers = {
+        ...commonHandlers,
+        onAcknowledge: () => {
+          // No user message to acknowledge for confirmation flow
+        },
+      };
+
+      await processStreamResponse(response, handlers);
+    } catch (error) {
+      console.error('Error sending confirmation:', error);
+      addErrorMessage('Error sending confirmation.');
+    } finally {
+      setProcessingStartTime(null);
+    }
+  };
+
+  return { handleSendMessage, cancelStreamingCall, sendConfirmation };
 };

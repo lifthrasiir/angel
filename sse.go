@@ -17,17 +17,18 @@ const (
 	// Sending initial messages: A -> 0 -> any number of T/M/F/R -> (Q -> N) or E
 	// Sending subsequent messages: A -> any number of T/M/F/R -> Q or E
 	// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R -> Q/E)
-	EventInitialState       EventType = '0' // Initial state with history (for active call)
-	EventInitialStateNoCall EventType = '1' // Initial state with history (for load session when no active call)
-	EventAcknowledge        EventType = 'A' // Acknowledge message ID
-	EventThought            EventType = 'T' // Thought process
-	EventModelMessage       EventType = 'M' // Model message (text)
-	EventFunctionCall       EventType = 'F' // Function call
-	EventFunctionReply      EventType = 'R' // Function response
-	EventComplete           EventType = 'Q' // Query complete
-	EventSessionName        EventType = 'N' // Session name inferred/updated
-	EventCumulTokenCount    EventType = 'C' // Cumulative token count update
-	EventError              EventType = 'E' // Error message
+	EventInitialState        EventType = '0' // Initial state with history (for active call)
+	EventInitialStateNoCall  EventType = '1' // Initial state with history (for load session when no active call)
+	EventAcknowledge         EventType = 'A' // Acknowledge message ID
+	EventThought             EventType = 'T' // Thought process
+	EventModelMessage        EventType = 'M' // Model message (text)
+	EventFunctionCall        EventType = 'F' // Function call
+	EventFunctionReply       EventType = 'R' // Function response
+	EventComplete            EventType = 'Q' // Query complete
+	EventSessionName         EventType = 'N' // Session name inferred/updated
+	EventCumulTokenCount     EventType = 'C' // Cumulative token count update
+	EventPendingConfirmation EventType = 'P' // Pending confirmation exists for the last message which is EventFunctionCall
+	EventError               EventType = 'E' // Error message
 )
 
 // sseWriter wraps http.ResponseWriter and http.Flusher to handle client disconnections gracefully.

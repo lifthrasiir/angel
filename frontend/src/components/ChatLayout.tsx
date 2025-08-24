@@ -10,7 +10,6 @@ import { useWorkspaces } from '../hooks/WorkspaceContext';
 import ChatArea from './ChatArea';
 import Sidebar from './Sidebar';
 import ToastMessage from './ToastMessage';
-
 interface ChatLayoutProps {
   children?: React.ReactNode;
 }
@@ -24,8 +23,14 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
-  const { handleFilesSelected, handleRemoveFile, handleSendMessage, cancelStreamingCall, isProcessing } =
-    useChatSession();
+  const {
+    handleFilesSelected,
+    handleRemoveFile,
+    handleSendMessage,
+    cancelStreamingCall,
+    sendConfirmation,
+    isProcessing,
+  } = useChatSession();
 
   const { toastMessage, setToastMessage } = useEscToCancel({
     isProcessing,
@@ -87,6 +92,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
             handleCancelStreaming={cancelStreamingCall}
             chatInputRef={chatInputRef}
             chatAreaRef={chatAreaRef}
+            sendConfirmation={sendConfirmation}
           />
         )}
         <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />

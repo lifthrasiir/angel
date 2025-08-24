@@ -11,6 +11,7 @@ import {
   EventInitialStateNoCall,
   EventModelMessage,
   EventThought,
+  EventPendingConfirmation,
 } from '../utils/messageHandler';
 import { loadSession } from '../utils/sessionManager';
 import { splitOnceByNewline } from '../utils/stringUtils';
@@ -32,6 +33,7 @@ import {
   isPriorSessionLoadingAtom,
   hasMoreMessagesAtom,
   isPriorSessionLoadCompleteAtom,
+  pendingConfirmationAtom,
 } from '../atoms/chatAtoms';
 import { useScrollAdjustment } from './useScrollAdjustment';
 
@@ -67,6 +69,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
   const resetChatSessionState = useSetAtom(resetChatSessionStateAtom);
   const setIsPriorSessionLoadComplete = useSetAtom(isPriorSessionLoadCompleteAtom);
+  const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
 
   const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
   const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
@@ -247,6 +250,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 setMessages(mapToChatMessages(data.history || []));
                 setWorkspaceId(data.workspaceId);
                 setPrimaryBranchId(data.primaryBranchId);
+                setPendingConfirmation(data.pendingConfirmation || null);
 
                 setHasMoreMessages(data.history && data.history.length >= FETCH_LIMIT);
 
@@ -310,6 +314,8 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 isStreamEndedNormallyRef.current = true; // 정상 종료로 표시
                 setProcessingStartTime(null);
                 closeEventSourceNormally();
+              } else if (eventType === EventPendingConfirmation) {
+                setPendingConfirmation(eventData);
               }
             },
             (errorEvent: Event) => {

@@ -5,11 +5,21 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/lifthrasiir/angel/editor"
 	fsPkg "github.com/lifthrasiir/angel/fs"
 )
+
+// PendingConfirmation is a special error type used to signal that user confirmation is required.
+type PendingConfirmation struct {
+	Data any
+}
+
+func (e *PendingConfirmation) Error() string {
+	return "user confirmation required"
+}
 
 // sessionFSEntry holds a SessionFS instance and its reference count.
 type sessionFSEntry struct {
@@ -121,6 +131,19 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params Tool
 	newContentStr, ok := args["content"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid content argument for write_file")
+	}
+
+	// Check if the path is absolute
+	if !params.ConfirmationReceived && filepath.IsAbs(filePath) {
+		// If it's an absolute path, signal for user confirmation
+		// We don't perform the write here, it will be done after confirmation
+		return nil, &PendingConfirmation{
+			Data: map[string]interface{}{
+				"tool":      "write_file",
+				"file_path": filePath,
+				"content":   newContentStr,
+			},
+		}
 	}
 
 	sf, err := getSessionFS(ctx, params.SessionId)

@@ -25,6 +25,7 @@ export const isPickingDirectoryAtom = atom<boolean>(false);
 export const isPriorSessionLoadingAtom = atom(false);
 export const hasMoreMessagesAtom = atom(false);
 export const isPriorSessionLoadCompleteAtom = atom(false);
+export const pendingConfirmationAtom = atom<string | null>(null);
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(
@@ -92,7 +93,8 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(isSystemPromptEditingAtom, true);
   set(selectedFilesAtom, []);
   set(primaryBranchIdAtom, '');
-  set(selectedModelAtom, null); // Add this line
+  set(selectedModelAtom, null);
+  set(pendingConfirmationAtom, null);
 });
 
 // Derived atom for setting session name

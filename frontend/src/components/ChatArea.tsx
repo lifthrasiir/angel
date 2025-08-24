@@ -9,6 +9,7 @@ import FileAttachmentPreview from './FileAttachmentPreview';
 import SystemPromptEditor from './SystemPromptEditor';
 import { ThoughtGroup } from './ThoughtGroup';
 import FunctionPairMessage from './FunctionPairMessage';
+import ConfirmationDialog from './ConfirmationDialog';
 import {
   messagesAtom,
   chatSessionIdAtom,
@@ -24,6 +25,7 @@ import {
   isPriorSessionLoadingAtom,
   hasMoreMessagesAtom,
   isPriorSessionLoadCompleteAtom,
+  pendingConfirmationAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
@@ -36,6 +38,12 @@ interface ChatAreaProps {
   handleCancelStreaming: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef: React.RefObject<HTMLDivElement>;
+  sendConfirmation: (
+    approved: boolean,
+    sessionId: string,
+    branchId: string,
+    modifiedData?: Record<string, any>,
+  ) => Promise<void>;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -45,6 +53,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleCancelStreaming,
   chatInputRef,
   chatAreaRef,
+  sendConfirmation,
 }) => {
   const [workspaceId] = useAtom(workspaceIdAtom);
   const [messages] = useAtom(messagesAtom);
@@ -62,6 +71,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
   const isPriorSessionLoadComplete = useAtomValue(isPriorSessionLoadCompleteAtom);
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
+  const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
 
   const isLoggedIn = !!userEmail;
 
@@ -387,13 +397,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           )}
           <TokenCountMeter />
-          <ChatInput
-            handleSendMessage={handleSendMessage}
-            onFilesSelected={onFilesSelected}
-            handleCancelStreaming={handleCancelStreaming}
-            inputRef={chatInputRef}
-            sessionId={chatSessionId}
-          />
+          {pendingConfirmation ? (
+            <ConfirmationDialog
+              onConfirm={(modifiedData) => sendConfirmation(true, chatSessionId!, primaryBranchId!, modifiedData)}
+              onDeny={() => sendConfirmation(false, chatSessionId!, primaryBranchId!)}
+              confirmationData={JSON.parse(pendingConfirmation)}
+            />
+          ) : (
+            <ChatInput
+              handleSendMessage={handleSendMessage}
+              onFilesSelected={onFilesSelected}
+              handleCancelStreaming={handleCancelStreaming}
+              inputRef={chatInputRef}
+              sessionId={chatSessionId}
+            />
+          )}
         </>
       )}
     </div>

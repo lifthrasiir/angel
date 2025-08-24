@@ -19,6 +19,7 @@ import {
   primaryBranchIdAtom,
   availableModelsAtom,
   selectedModelAtom,
+  pendingConfirmationAtom,
 } from '../atoms/chatAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
@@ -29,8 +30,8 @@ export const useChatSession = () => {
   const userEmail = useAtomValue(userEmailAtom);
   const chatSessionId = useAtomValue(chatSessionIdAtom);
   const messages = useAtomValue(messagesAtom);
+  const inputMessageRef = useRef('');
   const inputMessage = useAtomValue(inputMessageAtom);
-  const inputMessageRef = useRef(inputMessage);
 
   useEffect(() => {
     inputMessageRef.current = inputMessage;
@@ -51,6 +52,7 @@ export const useChatSession = () => {
   const setAvailableModels = useSetAtom(availableModelsAtom);
   const selectedModel = useAtomValue(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
+  const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
 
   const { workspaceId: urlWorkspaceId } = useParams<{ workspaceId?: string }>();
 
@@ -107,7 +109,7 @@ export const useChatSession = () => {
     setWorkspaceId(urlWorkspaceId);
   }, [urlWorkspaceId, setWorkspaceId]);
 
-  const { handleSendMessage, cancelStreamingCall } = useMessageSending({
+  const { handleSendMessage, cancelStreamingCall, sendConfirmation } = useMessageSending({
     inputMessage,
     selectedFiles,
     chatSessionId,
@@ -136,10 +138,12 @@ export const useChatSession = () => {
     primaryBranchId,
     availableModels,
     selectedModel,
+    pendingConfirmation,
     handleFilesSelected: handleFilesSelectedWrapper,
     handleRemoveFile: handleRemoveFileWrapper,
     handleSendMessage,
     cancelStreamingCall,
     handleSetSelectedModel,
+    sendConfirmation,
   };
 };
