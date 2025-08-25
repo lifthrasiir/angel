@@ -208,3 +208,55 @@ func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params 
 
 	return map[string]interface{}{"files": fileNames}, nil
 }
+
+var (
+	listDirectoryToolDefinition = ToolDefinition{
+		Name:        "list_directory",
+		Description: "Lists a directory. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"path": {
+					Type:        TypeString,
+					Description: "The path to the directory to list. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
+				},
+			},
+			Required: []string{"path"},
+		},
+		Handler: ListDirectoryTool,
+	}
+	readFileToolDefinition = ToolDefinition{
+		Name:        "read_file",
+		Description: "Reads a file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"file_path": {
+					Type:        TypeString,
+					Description: "The path to the file to read. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
+				},
+			},
+			Required: []string{"file_path"},
+		},
+		Handler: ReadFileTool,
+	}
+	writeFileToolDefinition = ToolDefinition{
+		Name:        "write_file",
+		Description: "Writes content to a specified file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md` to keep track of things. Any updates return a unified diff, which is crucial for verifying your edits and, more importantly, implicitly reveals any unexpected external modifications, allowing for swift detection and adaptation.",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"file_path": {
+					Type:        TypeString,
+					Description: "The path to the file to write to. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
+				},
+				"content": {
+					Type:        TypeString,
+					Description: "The content to write to the file.",
+				},
+			},
+			Required: []string{"file_path", "content"},
+		},
+		Handler: WriteFileTool,
+	}
+)

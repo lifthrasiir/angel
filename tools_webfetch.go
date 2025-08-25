@@ -208,3 +208,19 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolH
 
 	return executeWebFetch(ctx, prompt, params.ModelName, llmProvider)
 }
+
+var webFetchToolDefinition = ToolDefinition{
+	Name:        "web_fetch",
+	Description: "Processes content from URL(s). Your prompt and instructions are forwarded to an internal AI agent that fetches and interprets the content. While not a direct search engine, it can retrieve content from HTML-only search result pages (e.g., `https://html.duckduckgo.com/html?q=query`). Without explicit instructions, the agent may summarize or extract key data for efficient information retrieval. Clear directives are required to obtain the original or full content.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"prompt": {
+				Type:        TypeString,
+				Description: "A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content (e.g., \"Summarize https://example.com/article and extract key points from https://another.com/data\"). To retrieve the full, unsummarized content, you must include explicit instructions such as 'return full content', 'do not summarize', or 'provide original text'. Must contain at least one URL starting with http:// or https://.",
+			},
+		},
+		Required: []string{"prompt"},
+	},
+	Handler: WebFetchTool,
+}

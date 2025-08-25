@@ -25,104 +25,21 @@ type ToolDefinition struct {
 
 // Define all available tools here
 var availableTools = map[string]ToolDefinition{
-	"list_directory": {
-		Name:        "list_directory",
-		Description: "Lists a directory. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"path": {
-					Type:        TypeString,
-					Description: "The path to the directory to list. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
-				},
-			},
-			Required: []string{"path"},
-		},
-		Handler: ListDirectoryTool,
-	},
-	"read_file": {
-		Name:        "read_file",
-		Description: "Reads a file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"file_path": {
-					Type:        TypeString,
-					Description: "The path to the file to read. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
-				},
-			},
-			Required: []string{"file_path"},
-		},
-		Handler: ReadFileTool,
-	},
-	"write_file": {
-		Name:        "write_file",
-		Description: "Writes content to a specified file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md` to keep track of things. Any updates return a unified diff, which is crucial for verifying your edits and, more importantly, implicitly reveals any unexpected external modifications, allowing for swift detection and adaptation.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"file_path": {
-					Type:        TypeString,
-					Description: "The path to the file to write to. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
-				},
-				"content": {
-					Type:        TypeString,
-					Description: "The content to write to the file.",
-				},
-			},
-			Required: []string{"file_path", "content"},
-		},
-		Handler: WriteFileTool,
-	},
-	"web_fetch": {
-		Name:        "web_fetch",
-		Description: "Processes content from URL(s). Your prompt and instructions are forwarded to an internal AI agent that fetches and interprets the content. While not a direct search engine, it can retrieve content from HTML-only search result pages (e.g., `https://html.duckduckgo.com/html?q=query`). Without explicit instructions, the agent may summarize or extract key data for efficient information retrieval. Clear directives are required to obtain the original or full content.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"prompt": {
-					Type:        TypeString,
-					Description: "A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content (e.g., \"Summarize https://example.com/article and extract key points from https://another.com/data\"). To retrieve the full, unsummarized content, you must include explicit instructions such as 'return full content', 'do not summarize', or 'provide original text'. Must contain at least one URL starting with http:// or https://.",
-				},
-			},
-			Required: []string{"prompt"},
-		},
-		Handler: WebFetchTool,
-	},
-	"write_todo": {
-		Name:        "write_todo",
-		Description: "Manages the TODO list (available as `" + todoFilePath + "` at the anonymous working directory). Can add new TODOs, update status, priority, content, delete TODOs, or list all TODOs.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"action": {
-					Type:        TypeString,
-					Description: "Action to perform: \"add\", \"update\", \"delete\", or \"list\".",
-					Enum:        []string{"add", "update", "delete", "list"},
-				},
-				"id": {
-					Type:        TypeString,
-					Description: "ID of the TODO item. Required for 'update' and 'delete' actions.",
-				},
-				"content": {
-					Type:        TypeString,
-					Description: "Content of the TODO item. Required for 'add' action.",
-				},
-				"status": {
-					Type:        TypeString,
-					Description: "Status of the TODO item: 'pending', 'in_progress', or 'completed'.",
-					Enum:        []string{"pending", "in_progress", "completed"},
-				},
-				"priority": {
-					Type:        TypeString,
-					Description: "Priority of the TODO item: 'low', 'medium', or 'high'.",
-					Enum:        []string{"low", "medium", "high"},
-				},
-			},
-			Required: []string{"action"},
-		},
-		Handler: WriteTodoTool,
-	},
+	// tools_fs.go
+	"list_directory": listDirectoryToolDefinition,
+	"read_file":      readFileToolDefinition,
+	"write_file":     writeFileToolDefinition,
+
+	// tools_webfetch.go
+	"web_fetch": webFetchToolDefinition,
+
+	// tools_todo.go
+	"write_todo": writeTodoToolDefinition,
+
+	// tools_shell.go
+	"run_shell_command":  runShellCommandToolDefinition,
+	"poll_shell_command": pollShellCommandToolDefinition,
+	"kill_shell_command": killShellCommandToolDefinition,
 }
 
 func GetBuiltinToolNames() map[string]bool {

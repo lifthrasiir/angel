@@ -102,7 +102,7 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 
 	switch action {
 	case "add":
-		if err := EnsureKnownKeys("write_todo(add)", args, "content", "priority", "status"); err != nil {
+		if err := EnsureKnownKeys("write_todo(add)", args, "action", "content", "priority", "status"); err != nil {
 			return nil, err
 		}
 		content, ok := args["content"].(string)
@@ -142,7 +142,7 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 		return map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO added with ID: %s", newID), "todo": newTodo}, nil
 
 	case "update":
-		if err := EnsureKnownKeys("write_todo(update)", args, "id", "content", "priority", "status"); err != nil {
+		if err := EnsureKnownKeys("write_todo(update)", args, "action", "id", "content", "priority", "status"); err != nil {
 			return nil, err
 		}
 		id, ok := args["id"].(string)
@@ -187,7 +187,7 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 		return map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO with ID %s updated.", id)}, nil
 
 	case "delete":
-		if err := EnsureKnownKeys("write_todo(delete)", args, "id"); err != nil {
+		if err := EnsureKnownKeys("write_todo(delete)", args, "action", "id"); err != nil {
 			return nil, err
 		}
 		id, ok := args["id"].(string)
@@ -220,4 +220,39 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 		return map[string]interface{}{"error": fmt.Sprintf("Invalid action: %s", action)},
 			fmt.Errorf("invalid action: %s", action)
 	}
+}
+
+var writeTodoToolDefinition = ToolDefinition{
+	Name:        "write_todo",
+	Description: "Manages the TODO list (available as `" + todoFilePath + "` at the anonymous working directory). Can add new TODOs, update status, priority, content, delete TODOs, or list all TODOs.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"action": {
+				Type:        TypeString,
+				Description: "Action to perform: \"add\", \"update\", \"delete\", or \"list\".",
+				Enum:        []string{"add", "update", "delete", "list"},
+			},
+			"id": {
+				Type:        TypeString,
+				Description: "ID of the TODO item. Required for 'update' and 'delete' actions.",
+			},
+			"content": {
+				Type:        TypeString,
+				Description: "Content of the TODO item. Required for 'add' action.",
+			},
+			"status": {
+				Type:        TypeString,
+				Description: "Status of the TODO item: 'pending', 'in_progress', or 'completed'.",
+				Enum:        []string{"pending", "in_progress", "completed"},
+			},
+			"priority": {
+				Type:        TypeString,
+				Description: "Priority of the TODO item: 'low', 'medium', or 'high'.",
+				Enum:        []string{"low", "medium", "high"},
+			},
+		},
+		Required: []string{"action"},
+	},
+	Handler: WriteTodoTool,
 }
