@@ -63,11 +63,11 @@ func main() {
 	// csrf.SameSite(csrf.SameSiteStrictMode) is recommended for strong protection.
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
-		csrf.Secure(false),
+		csrf.Secure(false), // Required because we are typically working on localhost
 		csrf.HttpOnly(true),
 		csrf.SameSite(csrf.SameSiteStrictMode),
-		csrf.FieldName("csrf_token"),
 		csrf.CookieName("_csrf"),
+		csrf.Path("/"),
 	)
 	router.Use(csrfMiddleware)
 
@@ -298,7 +298,7 @@ func makeContextMiddleware(db *sql.DB, auth Auth) func(next http.Handler) http.H
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r = r.WithContext(contextWithGlobals(r.Context(), db, auth))
-			r = csrf.PlaintextHTTPRequest(r)
+			r = csrf.PlaintextHTTPRequest(r) // Required because we are typically working on localhost
 
 			next.ServeHTTP(w, r)
 		})

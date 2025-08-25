@@ -4,12 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "biome format --write && tsc && vite build --logLevel warn",
     "build-frontend": "npm run build",
     "postbuild": "node ../scripts/clean-katex-fonts.js",
-    "lint": "biome check --write",
-    "preview": "vite preview"
+    "lint": "biome check --write"
   },
   "dependencies": {
     "@types/mdast": "^4.0.4",
