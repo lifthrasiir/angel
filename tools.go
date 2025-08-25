@@ -12,6 +12,7 @@ import (
 type ToolHandlerParams struct {
 	ModelName            string
 	SessionId            string
+	BranchId             string
 	ConfirmationReceived bool
 }
 

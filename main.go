@@ -29,6 +29,9 @@ func main() {
 	}
 	defer db.Close()
 
+	// Start the shell command manager
+	StartShellCommandManager(db) // Pass the database connection
+
 	// Retrieve or generate CSRF key
 	csrfKey, err := GetAppConfig(db, CSRFKeyName)
 	if err != nil {

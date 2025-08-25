@@ -983,7 +983,12 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-execute the tool function with confirmationReceived = true
-	functionResponseValue, err := CallToolFunction(r.Context(), fc, ToolHandlerParams{ModelName: lastMessageModelFromDB, SessionId: sessionId, ConfirmationReceived: true})
+	functionResponseValue, err := CallToolFunction(r.Context(), fc, ToolHandlerParams{
+		ModelName:            lastMessageModelFromDB,
+		SessionId:            sessionId,
+		BranchId:             branchId,
+		ConfirmationReceived: true,
+	})
 	if err != nil {
 		log.Printf("confirmBranchHandler: Error re-executing function %s after confirmation: %v", fc.Name, err)
 		// If re-execution fails, send an error event and stop streaming

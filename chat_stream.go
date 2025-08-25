@@ -176,7 +176,11 @@ func streamLLMResponse(
 					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}})
 					hasFunctionCall = true
 
-					functionResponseValue, err := CallToolFunction(ctx, fc, ToolHandlerParams{ModelName: modelToUse, SessionId: initialState.SessionId})
+					functionResponseValue, err := CallToolFunction(ctx, fc, ToolHandlerParams{
+						ModelName: modelToUse,
+						SessionId: initialState.SessionId,
+						BranchId:  initialState.PrimaryBranchID,
+					})
 					if err != nil {
 						log.Printf("Error executing function %s: %v", fc.Name, err)
 

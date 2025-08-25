@@ -29,7 +29,7 @@ func createTables(db *sql.DB) error {
 		roots TEXT DEFAULT '[]' -- New column for exposed roots, defaults to empty JSON array
 	);
 
-		CREATE TABLE IF NOT EXISTS branches (
+	CREATE TABLE IF NOT EXISTS branches (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
 		parent_branch_id TEXT,
@@ -89,7 +89,25 @@ func createTables(db *sql.DB) error {
 		key TEXT PRIMARY KEY,
 		value BLOB NOT NULL
 	);
-`
+
+	CREATE TABLE IF NOT EXISTS shell_commands (
+		id TEXT PRIMARY KEY,
+		branch_id TEXT NOT NULL,
+		command TEXT NOT NULL,
+		status TEXT NOT NULL,
+		start_time INTEGER NOT NULL,
+		end_time INTEGER,
+		stdout BLOB,
+		stderr BLOB,
+		exit_code INTEGER,
+		error_message TEXT,
+		last_polled_at INTEGER NOT NULL,
+		next_poll_delay INTEGER NOT NULL,
+		stdout_offset INTEGER NOT NULL DEFAULT 0,
+		stderr_offset INTEGER NOT NULL DEFAULT 0,
+		FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+	);
+	`
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
 		return fmt.Errorf("failed to create tables: %w", err)
@@ -306,6 +324,12 @@ func DeleteWorkspace(db *sql.DB, workspaceID string) error {
 	_, err = tx.Exec("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to delete messages for workspace %s: %w", workspaceID, err)
+	}
+
+	// Delete shell commands associated with the sessions in the workspace
+	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?))", workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to delete shell commands for workspace %s: %w", workspaceID, err)
 	}
 
 	// Delete sessions associated with the workspace
@@ -935,6 +959,12 @@ func DeleteSession(db *sql.DB, sessionID string) error {
 		return fmt.Errorf("failed to delete messages for session %s: %w", sessionID, err)
 	}
 
+	// Delete shell commands associated with the session
+	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id = ?)", sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete shell commands for session %s: %w", sessionID, err)
+	}
+
 	// Delete the session itself
 	_, err = tx.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
 	if err != nil {
@@ -1249,6 +1279,105 @@ func SetAppConfig(db *sql.DB, key string, value []byte) error {
 	_, err := db.Exec("INSERT OR REPLACE INTO app_configs (key, value) VALUES (?, ?)", key, value)
 	if err != nil {
 		return fmt.Errorf("failed to set app config for key %s: %w", key, err)
+	}
+	return nil
+}
+
+// ShellCommand struct to hold shell command data
+type ShellCommand struct {
+	ID            string
+	BranchID      string
+	Command       string
+	Status        string
+	StartTime     int64         // Unix timestamp
+	EndTime       sql.NullInt64 // Unix timestamp, nullable
+	Stdout        []byte
+	Stderr        []byte
+	ExitCode      sql.NullInt64  // Nullable
+	ErrorMessage  sql.NullString // Nullable
+	LastPolledAt  int64          // Unix timestamp
+	NextPollDelay int64          // Seconds
+	StdoutOffset  int64          // New: Last read offset for stdout
+	StderrOffset  int64          // New: Last read offset for stderr
+}
+
+// InsertShellCommand inserts a new shell command into the database.
+func InsertShellCommand(db DbOrTx, cmd ShellCommand) error {
+	_, err := db.Exec(`
+		INSERT INTO shell_commands (
+			id, branch_id, command, status, start_time, last_polled_at, next_poll_delay, stdout_offset, stderr_offset
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		cmd.ID, cmd.BranchID, cmd.Command, cmd.Status, cmd.StartTime, cmd.LastPolledAt, cmd.NextPollDelay, cmd.StdoutOffset, cmd.StderrOffset)
+	if err != nil {
+		return fmt.Errorf("failed to insert shell command: %w", err)
+	}
+	return nil
+}
+
+// UpdateShellCommand updates the status and results of a shell command in the database.
+func UpdateShellCommand(db DbOrTx, cmd ShellCommand) error {
+	_, err := db.Exec(`
+		UPDATE shell_commands SET
+			status = ?, end_time = ?, stdout = ?, stderr = ?, exit_code = ?, error_message = ?, last_polled_at = ?, next_poll_delay = ?, stdout_offset = ?, stderr_offset = ?
+		WHERE id = ?`,
+		cmd.Status, cmd.EndTime, cmd.Stdout, cmd.Stderr, cmd.ExitCode, cmd.ErrorMessage, cmd.LastPolledAt, cmd.NextPollDelay, cmd.StdoutOffset, cmd.StderrOffset, cmd.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update shell command: %w", err)
+	}
+	return nil
+}
+
+// GetShellCommandByID retrieves a shell command by its ID.
+func GetShellCommandByID(db DbOrTx, id string) (*ShellCommand, error) {
+	var cmd ShellCommand
+	row := db.QueryRow(`
+		SELECT id, branch_id, command, status, start_time, end_time, stdout, stderr,
+			exit_code, error_message, last_polled_at, next_poll_delay, stdout_offset, stderr_offset
+		FROM shell_commands WHERE id = ?`, id)
+	err := row.Scan(
+		&cmd.ID, &cmd.BranchID, &cmd.Command, &cmd.Status, &cmd.StartTime, &cmd.EndTime,
+		&cmd.Stdout, &cmd.Stderr, &cmd.ExitCode, &cmd.ErrorMessage, &cmd.LastPolledAt,
+		&cmd.NextPollDelay, &cmd.StdoutOffset, &cmd.StderrOffset)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("shell command with ID %s not found", id)
+		}
+		return nil, fmt.Errorf("failed to get shell command by ID %s: %w", id, err)
+	}
+	return &cmd, nil
+}
+
+// GetAllRunningShellCommands retrieves all shell commands that are currently running.
+func GetAllRunningShellCommands(db DbOrTx) ([]ShellCommand, error) {
+	rows, err := db.Query(`
+		SELECT id, branch_id, command, status, start_time, end_time, stdout, stderr,
+			exit_code, error_message, last_polled_at, next_poll_delay, stdout_offset, stderr_offset
+		FROM shell_commands WHERE status = 'running'
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all running shell commands: %w", err)
+	}
+	defer rows.Close()
+
+	var commands []ShellCommand
+	for rows.Next() {
+		var cmd ShellCommand
+		if err := rows.Scan(
+			&cmd.ID, &cmd.BranchID, &cmd.Command, &cmd.Status, &cmd.StartTime, &cmd.EndTime,
+			&cmd.Stdout, &cmd.Stderr, &cmd.ExitCode, &cmd.ErrorMessage, &cmd.LastPolledAt,
+			&cmd.NextPollDelay, &cmd.StdoutOffset, &cmd.StderrOffset); err != nil {
+			return nil, fmt.Errorf("failed to scan shell command: %w", err)
+		}
+		commands = append(commands, cmd)
+	}
+	return commands, nil
+}
+
+// DeleteShellCommand deletes a shell command by its ID.
+func DeleteShellCommand(db DbOrTx, id string) error {
+	_, err := db.Exec("DELETE FROM shell_commands WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete shell command with ID %s: %w", id, err)
 	}
 	return nil
 }
