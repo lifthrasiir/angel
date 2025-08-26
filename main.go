@@ -20,10 +20,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/mux"
+
+	fsPkg "github.com/lifthrasiir/angel/fs"
 )
 
+const dbPath = "angel.db"
+
 func main() {
-	db, err := InitDB("angel.db")
+	checkNetworkFilesystem(dbPath)
+
+	db, err := InitDB(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -85,6 +91,23 @@ func main() {
 
 	fmt.Println("Server started at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
+func checkNetworkFilesystem(dbPath string) {
+	absDBPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to get absolute path for angel.db: %v", err)
+	}
+
+	isNetwork, fsType, err := fsPkg.IsNetworkFilesystem(absDBPath)
+	if err != nil {
+		log.Printf("Warning: Could not determine if angel.db is on a network filesystem: %v", err)
+	} else if isNetwork {
+		if fsType != "" {
+			fsType = fmt.Sprintf(" (%s)", fsType)
+		}
+		log.Fatalf("ERROR: angel.db is located on a network filesystem%s. This is not supported due to potential performance and data corruption issues. Please move angel.db to a local drive.", fsType)
+	}
 }
 
 func InitRouter(router *mux.Router) {
