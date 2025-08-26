@@ -126,3 +126,59 @@ func executePromptTemplate(filename string, data map[string]any) string {
 	}
 	return buf.String()
 }
+
+// GetEnvChangeContext formats EnvChanged into a plain text string.
+func GetEnvChangeContext(envChanged EnvChanged) string {
+	var builder strings.Builder
+
+	if envChanged.Roots != nil {
+		builder.WriteString("Working environment has changed to include following directories.\n\n")
+
+		if len(envChanged.Roots.Added) > 0 {
+			for _, added := range envChanged.Roots.Added {
+				builder.WriteString(fmt.Sprintf("# %s\n", added.Path))
+				formatRootContents(&builder, added.Contents, "") // No initial indent for root contents
+				builder.WriteString("\n")
+			}
+		}
+
+		if len(envChanged.Roots.Removed) > 0 {
+			builder.WriteString("# Paths no longer available:\n")
+			for _, removed := range envChanged.Roots.Removed {
+				builder.WriteString(fmt.Sprintf("- %s\n", removed.Path))
+			}
+			builder.WriteString("\n")
+		}
+
+		builder.WriteString("---\n\n")
+		builder.WriteString("You are given the following per-directory directives.\n")
+		if len(envChanged.Roots.Removed) > 0 {
+			builder.WriteString("Forget all prior per-directory directives in advance.\n\n")
+		}
+
+		for _, prompt := range envChanged.Roots.Prompts {
+			builder.WriteString(fmt.Sprintf("# %s\n", prompt.Path))
+			builder.WriteString(fmt.Sprintf("%s\n", prompt.Prompt))
+			builder.WriteString("\n")
+		}
+	}
+
+	return builder.String()
+}
+
+// formatRootContents recursively formats RootContents for display.
+func formatRootContents(builder *strings.Builder, contents []RootContents, indent string) {
+	for _, content := range contents {
+		builder.WriteString(fmt.Sprintf("%s%s", indent, content.Path))
+		if content.IsDir {
+			builder.WriteString("/")
+		}
+		if content.HasMore {
+			builder.WriteString(" ...")
+		}
+		builder.WriteString("\n")
+		if len(content.Children) > 0 {
+			formatRootContents(builder, content.Children, indent+"  ")
+		}
+	}
+}

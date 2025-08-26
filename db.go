@@ -23,8 +23,7 @@ func createTables(db *sql.DB) error {
 		system_prompt TEXT,
 		name TEXT DEFAULT '',
 		workspace_id TEXT DEFAULT '',
-		primary_branch_id TEXT, -- New column for primary branch
-		roots TEXT DEFAULT '[]' -- New column for exposed roots, defaults to empty JSON array
+		primary_branch_id TEXT -- New column for primary branch
 	);
 
 	CREATE TABLE IF NOT EXISTS branches (
@@ -40,16 +39,17 @@ func createTables(db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS messages (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id TEXT NOT NULL, -- Keep session_id to link to session
-		branch_id TEXT NOT NULL, -- New column for branch
-		parent_message_id INTEGER, -- New column for branching
-		chosen_next_id INTEGER, -- New column for chosen next message
+		branch_id TEXT NOT NULL,
+		parent_message_id INTEGER,
+		chosen_next_id INTEGER,
 		role TEXT NOT NULL,
 		text TEXT NOT NULL,
 		type TEXT NOT NULL DEFAULT 'text',
 		attachments TEXT, -- This will store JSON array of blob hashes
 		cumul_token_count INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		model TEXT NOT NULL
+		model TEXT NOT NULL,
+		generation INTEGER DEFAULT 0
 	);
 
 	CREATE TABLE IF NOT EXISTS oauth_tokens (
@@ -105,6 +105,16 @@ func createTables(db *sql.DB) error {
 		stderr_offset INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS session_envs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id TEXT NOT NULL,
+		generation INTEGER NOT NULL,
+		roots TEXT NOT NULL, -- JSON array of strings
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(session_id, generation),
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	);
 	`
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
@@ -115,15 +125,24 @@ func createTables(db *sql.DB) error {
 
 // migrateDB handles database schema migrations.
 func migrateDB(db *sql.DB) error {
-	// Add 'roots' column to 'sessions' table if it doesn't exist
-	_, err := db.Exec(`ALTER TABLE sessions ADD COLUMN roots TEXT DEFAULT '[]'`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		return fmt.Errorf("failed to add roots column to sessions table: %w", err)
+	// Add new columns for generation tracking if they don't exist
+	// SQLite's ALTER TABLE ADD COLUMN does not support IF NOT EXISTS directly.
+	// We will attempt to add and log if it fails, assuming it's due to column existence.
+	alterTableStmts := []string{
+		`ALTER TABLE messages ADD COLUMN generation INTEGER DEFAULT 0;`,
 	}
-	// Add 'pending_confirmation' column to 'branches' table if it doesn't exist
-	_, err = db.Exec(`ALTER TABLE branches ADD COLUMN pending_confirmation TEXT`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		return fmt.Errorf("failed to add pending_confirmation column to branches table: %w", err)
+
+	for _, stmt := range alterTableStmts {
+		_, err := db.Exec(stmt)
+		if err != nil {
+			// Check if the error is "duplicate column name" or similar
+			// For SQLite, this typically means the column already exists.
+			if !strings.Contains(err.Error(), "duplicate column name") && !strings.Contains(err.Error(), "already exists") {
+				return fmt.Errorf("failed to alter table with statement '%s': %w", stmt, err)
+			} else {
+				log.Printf("Column might already exist, skipping alter table: %s", stmt)
+			}
+		}
 	}
 	return nil
 }
@@ -164,13 +183,12 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 
 // Session struct to hold session data
 type Session struct {
-	ID              string   `json:"id"`
-	LastUpdated     string   `json:"last_updated_at"`
-	SystemPrompt    string   `json:"system_prompt"`
-	Name            string   `json:"name"`
-	WorkspaceID     string   `json:"workspace_id"`
-	PrimaryBranchID string   `json:"primary_branch_id"`
-	Roots           []string `json:"roots"`
+	ID              string `json:"id"`
+	LastUpdated     string `json:"last_updated_at"`
+	SystemPrompt    string `json:"system_prompt"`
+	Name            string `json:"name"`
+	WorkspaceID     string `json:"workspace_id"`
+	PrimaryBranchID string `json:"primary_branch_id"`
 }
 
 type Workspace struct {
@@ -246,6 +264,12 @@ func DeleteWorkspace(db *sql.DB, workspaceID string) error {
 	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?))", workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to delete shell commands for workspace %s: %w", workspaceID, err)
+	}
+
+	// Delete session environments associated with the sessions in the workspace
+	_, err = tx.Exec("DELETE FROM session_envs WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to delete session environments for workspace %s: %w", workspaceID, err)
 	}
 
 	// Delete sessions associated with the workspace
@@ -326,9 +350,9 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	var args []interface{}
 
 	if workspaceID == "" {
-		query = "SELECT id, last_updated_at, name, workspace_id, roots FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
 	} else {
-		query = "SELECT id, last_updated_at, name, workspace_id, roots FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
 		args = append(args, workspaceID)
 	}
 
@@ -341,13 +365,8 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		var rootsJSON string
-		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.Name, &s.WorkspaceID, &rootsJSON); err != nil {
+		if err := rows.Scan(&s.ID, &s.LastUpdated, &s.Name, &s.WorkspaceID); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
-		}
-		if err := json.Unmarshal([]byte(rootsJSON), &s.Roots); err != nil {
-			log.Printf("Warning: Failed to unmarshal session roots for session %s: %v", s.ID, err)
-			s.Roots = []string{}
 		}
 		sessions = append(sessions, s)
 	}
@@ -410,35 +429,78 @@ func SessionExists(db *sql.DB, sessionID string) (bool, error) {
 
 func GetSession(db *sql.DB, sessionID string) (Session, error) {
 	var s Session
-	var rootsJSON string
-	row := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, ''), COALESCE(roots, '[]') FROM sessions WHERE id = ?", sessionID)
-	err := row.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID, &rootsJSON)
+	row := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, '') FROM sessions WHERE id = ?", sessionID)
+	err := row.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID)
 	if err != nil {
 		return s, err
 	}
-
-	if err := json.Unmarshal([]byte(rootsJSON), &s.Roots); err != nil {
-		return s, fmt.Errorf("failed to unmarshal session roots: %w", err)
-	}
-
 	return s, nil
 }
 
-// UpdateSessionRoots updates the roots for a session.
-func UpdateSessionRoots(db *sql.DB, sessionID string, roots []string) error {
+// AddSessionEnv adds a new session environment entry.
+// It automatically determines the next generation number for the session.
+func AddSessionEnv(db DbOrTx, sessionID string, roots []string) (int, error) {
 	rootsJSON, err := json.Marshal(roots)
 	if err != nil {
-		return fmt.Errorf("failed to marshal roots: %w", err)
+		return 0, fmt.Errorf("failed to marshal roots: %w", err)
 	}
 
-	_, err = db.Exec("UPDATE sessions SET roots = ? WHERE id = ?", string(rootsJSON), sessionID)
+	// Get the latest generation for this session
+	_, latestGeneration, err := GetLatestSessionEnv(db, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to update session roots: %w", err)
+		return 0, fmt.Errorf("failed to get latest session environment for generation calculation: %w", err)
 	}
-	return nil
+
+	newGeneration := latestGeneration + 1
+
+	_, err = db.Exec("INSERT INTO session_envs (session_id, generation, roots) VALUES (?, ?, ?)", sessionID, newGeneration, string(rootsJSON))
+	if err != nil {
+		return 0, fmt.Errorf("failed to add session environment: %w", err)
+	}
+	return newGeneration, nil
 }
 
-// DeleteSession deletes a session and all its associated messages.
+// GetSessionEnv retrieves a session environment by session ID and generation.
+func GetSessionEnv(db DbOrTx, sessionID string, generation int) ([]string, error) {
+	if generation <= 0 {
+		// The initial environment.
+		return []string{}, nil
+	}
+
+	var rootsJSON string
+	err := db.QueryRow("SELECT roots FROM session_envs WHERE session_id = ? AND generation = ?", sessionID, generation).Scan(&rootsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("session environment not found for session %s and generation %d", sessionID, generation)
+		}
+		return nil, fmt.Errorf("failed to get session environment: %w", err)
+	}
+	var roots []string
+	if err := json.Unmarshal([]byte(rootsJSON), &roots); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session roots: %w", err)
+	}
+	return roots, nil
+}
+
+// GetLatestSessionEnv retrieves the latest session environment for a given session ID.
+func GetLatestSessionEnv(db DbOrTx, sessionID string) ([]string, int, error) {
+	var rootsJSON string
+	var generation int
+	err := db.QueryRow("SELECT roots, generation FROM session_envs WHERE session_id = ? ORDER BY generation DESC LIMIT 1", sessionID).Scan(&rootsJSON, &generation)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []string{}, 0, nil // No environment found, return empty roots and generation 0
+		}
+		return nil, 0, fmt.Errorf("failed to get latest session environment: %w", err)
+	}
+	var roots []string
+	if err := json.Unmarshal([]byte(rootsJSON), &roots); err != nil {
+		return nil, 0, fmt.Errorf("failed to unmarshal latest session roots: %w", err)
+	}
+	return roots, generation, nil
+}
+
+// DeleteSession deletes a session and all its associated messages, branches, shell commands, and session environments.
 func DeleteSession(db *sql.DB, sessionID string) error {
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
@@ -457,6 +519,18 @@ func DeleteSession(db *sql.DB, sessionID string) error {
 	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id = ?)", sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to delete shell commands for session %s: %w", sessionID, err)
+	}
+
+	// Delete session environments associated with the session
+	_, err = tx.Exec("DELETE FROM session_envs WHERE session_id = ?", sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete session environments for session %s: %w", sessionID, err)
+	}
+
+	// Delete branches associated with the session
+	_, err = tx.Exec("DELETE FROM branches WHERE session_id = ?", sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete branches for session %s: %w", sessionID, err)
 	}
 
 	// Delete the session itself

@@ -19,6 +19,7 @@ export const EventComplete = 'Q';
 export const EventSessionName = 'N';
 export const EventCumulTokenCount = 'C';
 export const EventPendingConfirmation = 'P';
+export const EventGenerationChanged = 'G';
 export const EventError = 'E';
 
 export const sendMessage = async (
@@ -74,6 +75,7 @@ export interface StreamEventHandlers {
   onAcknowledge: (messageId: string) => void;
   onTokenCount: (messageId: string, cumulTokenCount: number) => void;
   onPendingConfirmation: (data: string) => void;
+  onEnvChanged: (messageId: string, envChangedJson: string) => void;
 }
 
 export const processStreamResponse = async (
@@ -151,6 +153,9 @@ export const processStreamResponse = async (
         // We should not expect EventComplete or other events until confirmation is sent.
         // So, we can break the loop here.
         break;
+      } else if (type === EventGenerationChanged) {
+        const [messageId, envChangedJson] = splitOnceByNewline(data);
+        handlers.onEnvChanged(messageId, envChangedJson);
       } else {
         console.warn('Unknown protocol:', data);
       }

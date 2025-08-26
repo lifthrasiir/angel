@@ -22,6 +22,7 @@ func streamLLMResponse(
 	sseW *sseWriter,
 	lastUserMessageID int,
 	modelToUse string,
+	generation int,
 	inferSessionName bool,
 	callStartTime time.Time,
 	fullHistoryForLLM []FrontendMessage,
@@ -74,6 +75,7 @@ func streamLLMResponse(
 				Attachments:     nil,
 				CumulTokenCount: cumulTokenCount,
 				Model:           modelToUse,
+				Generation:      generation,
 			})
 			if err == nil {
 				if parentMessageID != nil {

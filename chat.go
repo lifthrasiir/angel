@@ -9,6 +9,8 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,42 @@ type InitialState struct {
 	Roots                  []string          `json:"roots"`
 	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"`
 	PendingConfirmation    string            `json:"pendingConfirmation,omitempty"`
+	EnvChanged             *EnvChanged       `json:"envChanged,omitempty"` // Added EnvChanged field
+}
+
+// EnvChanged represents the structure for environment change messages.
+type EnvChanged struct {
+	Roots *RootsChanged `json:"roots,omitempty"`
+}
+
+// RootsChanged details the changes in session roots.
+type RootsChanged struct {
+	Value   []string      `json:"value"`
+	Added   []RootAdded   `json:"added,omitempty"`
+	Removed []RootRemoved `json:"removed,omitempty"`
+	Prompts []RootPrompt  `json:"prompts,omitempty"`
+}
+
+type RootAdded struct {
+	Path     string         `json:"path"`
+	Contents []RootContents `json:"contents"`
+}
+
+type RootRemoved struct {
+	Path string `json:"path"`
+}
+
+// RootContents represents a file or directory within a root.
+type RootContents struct {
+	Path     string         `json:"path"`
+	IsDir    bool           `json:"isDir"`
+	Children []RootContents `json:"children,omitempty"`
+	HasMore  bool           `json:"hasMore,omitempty"`
+}
+
+type RootPrompt struct {
+	Path   string `json:"path"`
+	Prompt string `json:"prompt"`
 }
 
 // New session and message handler
@@ -99,6 +137,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		Attachments:     requestBody.Attachments,
 		CumulTokenCount: nil,
 		Model:           modelToUse,
+		Generation:      0, // New session starts with generation 0
 	})
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
@@ -124,11 +163,11 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	addSseWriter(sessionId, sseW)
 	defer removeSseWriter(sessionId, sseW)
 
-	// Retrieve session history from DB for Gemini API (full context)
+	// Retrieve session history from DB for LLM (full context)
 	historyContext, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to retrieve full session history for Gemini: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for Gemini: %v", err), http.StatusInternalServerError)
+		log.Printf("newSessionAndMessage: Failed to retrieve full session history for LLM: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for LLM: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -141,13 +180,20 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
+	currentRoots, _, err := GetLatestSessionEnv(db, sessionId) // Generation is guaranteed to be 0
+	if err != nil {
+		log.Printf("newSessionAndMessage: Failed to get latest session environment: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	initialState := InitialState{
 		SessionId:       sessionId,
 		History:         frontendHistory,
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     requestBody.WorkspaceID,
 		PrimaryBranchID: primaryBranchID,
-		Roots:           []string{},
+		Roots:           currentRoots,
 	}
 
 	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
@@ -161,7 +207,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, true, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, 0, true, time.Now(), historyContext); err != nil {
 		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -211,14 +257,16 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Find the last message in the current primary branch to update its chosen_next_id
 	var lastMessageID int
-	var parentMessageID *int // Declare as pointer to int
-	var modelToUse string    // Declare modelToUse here
+	var parentMessageID *int
+	var modelToUse string
+	var envChangedEventPayload string
 
-	lastMessageIDFromDB, lastMessageModelFromDB, err := GetLastMessageInBranch(db, sessionId, primaryBranchID)
+	lastMessageIDFromDB, lastMessageModelFromDB, lastMessageGenerationFromDB, err := GetLastMessageInBranch(db, sessionId, primaryBranchID) // Get generation
 	if err != nil {
 		if err == sql.ErrNoRows {
 			parentMessageID = nil
 			lastMessageID = 0
+			lastMessageGenerationFromDB = 0
 			modelToUse = requestBody.Model // Use request body model for new branch
 			if modelToUse == "" {
 				modelToUse = DefaultGeminiModel // Fallback to default
@@ -243,6 +291,74 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	userMessage := requestBody.Message
 
+	_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
+	if err != nil {
+		log.Printf("chatMessage: Failed to get latest session environment for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Check for environment changes and insert system message if needed
+	if currentGeneration > lastMessageGenerationFromDB {
+		// Get old roots from the previous generation
+		oldRoots, err := GetSessionEnv(db, sessionId, lastMessageGenerationFromDB)
+		if err != nil {
+			log.Printf("chatMessage: Failed to get old session environment for session %s, generation %d: %v", sessionId, lastMessageGenerationFromDB, err)
+			// Non-fatal, continue with user message
+		}
+
+		// Get new roots from the current generation
+		newRoots, err := GetSessionEnv(db, sessionId, currentGeneration)
+		if err != nil {
+			log.Printf("chatMessage: Failed to get new session environment for session %s, generation %d: %v", sessionId, currentGeneration, err)
+			// Non-fatal, continue with user message
+		}
+
+		rootsChanged, err := calculateRootsChanged(oldRoots, newRoots)
+		if err != nil {
+			log.Printf("chatMessage: Failed to calculate roots changed: %v", err)
+			// Non-fatal, continue with user message
+		}
+
+		envChanged := EnvChanged{Roots: &rootsChanged}
+
+		// Marshal envChanged into JSON
+		envChangedJSON, err := json.Marshal(envChanged)
+		if err != nil {
+			log.Printf("chatMessage: Failed to marshal envChanged for system message: %v", err)
+			// Non-fatal, continue with user message
+		}
+
+		systemMsg := Message{
+			SessionID:       sessionId,
+			BranchID:        primaryBranchID,
+			ParentMessageID: parentMessageID, // Insert before user message
+			ChosenNextID:    nil,
+			Role:            RoleUser,
+			Text:            string(envChangedJSON),
+			Type:            TypeEnvChanged,
+			Attachments:     nil,
+			CumulTokenCount: nil,
+			Model:           "",
+			Generation:      currentGeneration,
+		}
+		systemMessageID, err := AddMessageToSession(r.Context(), db, systemMsg)
+		if err != nil {
+			log.Printf("chatMessage: Failed to add roots changed system message: %v", err)
+			// Non-fatal, continue with user message
+		} else if parentMessageID != nil {
+			err = UpdateMessageChosenNextID(db, *parentMessageID, &systemMessageID)
+			if err != nil {
+				log.Printf("chatMessage: Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+				// Non-fatal, continue with user message
+			}
+		}
+		parentMessageID = &systemMessageID
+
+		// Send SSE event to frontend
+		envChangedEventPayload = fmt.Sprintf("%d\n%s", systemMessageID, string(envChangedJSON))
+	}
+
 	// Add new message to the primary branch
 	userMessageID, err := AddMessageToSession(r.Context(), db, Message{
 		SessionID:       sessionId,
@@ -255,6 +371,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Attachments:     requestBody.Attachments,
 		CumulTokenCount: nil,
 		Model:           modelToUse,
+		Generation:      currentGeneration, // User message reflects current generation
 	})
 	if err != nil {
 		log.Printf("chatMessage: Failed to save user message: %v", err)
@@ -263,8 +380,8 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update the chosen_next_id of the last message in the primary branch
-	if lastMessageID != 0 {
-		if err := UpdateMessageChosenNextID(db, lastMessageID, &userMessageID); err != nil {
+	if parentMessageID != nil {
+		if err := UpdateMessageChosenNextID(db, *parentMessageID, &userMessageID); err != nil {
 			log.Printf("chatMessage: Failed to update chosen_next_id for message %d: %v", lastMessageID, err)
 			// Non-fatal error, continue with response
 		}
@@ -285,14 +402,18 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	addSseWriter(sessionId, sseW)
 	defer removeSseWriter(sessionId, sseW)
 
+	if envChangedEventPayload != "" {
+		sseW.sendServerEvent(EventGenerationChanged, envChangedEventPayload)
+	}
+
 	// Send acknowledgement for user message ID to frontend
 	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
 
-	// Retrieve session history from DB for Gemini API (full context)
-	fullFrontendHistoryForGemini, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
+	// Retrieve session history from DB for LLM (full context)
+	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		log.Printf("chatMessage: Failed to retrieve full session history for Gemini: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for Gemini: %v", err), http.StatusInternalServerError)
+		log.Printf("chatMessage: Failed to retrieve full session history for LLM: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for LLM: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -304,6 +425,13 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	roots, generation, err := GetLatestSessionEnv(db, sessionId)
+	if err != nil {
+		log.Printf("chatMessage: Failed to get latest session environment for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	// Prepare initial state for streaming (similar to loadChatSession)
 	initialState := InitialState{
 		SessionId:       sessionId,
@@ -311,7 +439,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     session.WorkspaceID,
 		PrimaryBranchID: primaryBranchID,
-		Roots:           session.Roots,
+		Roots:           roots,
 	}
 
 	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
@@ -323,9 +451,9 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
-	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
-		log.Printf("chatMessage: Error streaming Gemini response: %v", err)
-		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
+	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+		log.Printf("chatMessage: Error streaming LLM response: %v", err)
+		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
 		return
 	}
 }
@@ -401,6 +529,48 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		history = []FrontendMessage{}
 	}
 
+	currentRoots, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
+	if err != nil {
+		log.Printf("loadChatSession: Failed to get latest session environment for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the generation of the last message in the history being loaded
+	// If history is empty, assume generation 0.
+	lastMessageGenerationInHistory := 0
+	if len(history) > 0 {
+		// Get the actual Message from DB using the ID of the last FrontendMessage
+		lastFrontendMessageID, err := strconv.Atoi(history[len(history)-1].ID)
+		if err != nil {
+			log.Printf("loadChatSession: Failed to parse last message ID: %v", err)
+			// Non-fatal, continue with generation 0
+		} else {
+			lastMessage, err := GetMessageByID(db, lastFrontendMessageID)
+			if err != nil {
+				log.Printf("loadChatSession: Failed to get last message by ID %d: %v", lastFrontendMessageID, err)
+				// Non-fatal, continue with generation 0
+			} else {
+				lastMessageGenerationInHistory = lastMessage.Generation
+			}
+		}
+	}
+
+	var initialStateEnvChanged *EnvChanged
+	if currentGeneration > lastMessageGenerationInHistory {
+		oldRoots, err := GetSessionEnv(db, sessionId, lastMessageGenerationInHistory)
+		if err != nil {
+			log.Printf("loadChatSession: Failed to get old session environment for generation %d: %v", lastMessageGenerationInHistory, err)
+			// Non-fatal, continue
+		}
+		rootsChanged, err := calculateRootsChanged(oldRoots, currentRoots)
+		if err != nil {
+			log.Printf("loadChatSession: Failed to calculate roots changed for initial state: %v", err)
+			// Non-fatal, continue
+		}
+		initialStateEnvChanged = &EnvChanged{Roots: &rootsChanged}
+	}
+
 	// Prepare initial state as a single JSON object
 	initialState := InitialState{
 		SessionId:       sessionId,
@@ -408,7 +578,8 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt:    session.SystemPrompt,
 		WorkspaceID:     session.WorkspaceID,
 		PrimaryBranchID: session.PrimaryBranchID,
-		Roots:           session.Roots,
+		Roots:           currentRoots,
+		EnvChanged:      initialStateEnvChanged,
 	}
 
 	branch, err := GetBranch(db, session.PrimaryBranchID)
@@ -549,6 +720,14 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the new message in the new branch, with updatedMessageID as its parent
+	_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
+	if err != nil {
+		log.Printf("createBranchHandler: Failed to get latest session environment for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create the new message in the new branch, with updatedMessageID as its parent
 	newMessageID, err := AddMessageToSession(r.Context(), db, Message{
 		SessionID:       sessionId,
 		BranchID:        newBranchID,
@@ -560,6 +739,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		Attachments:     nil,
 		CumulTokenCount: nil,
 		Model:           "", // Model will be inferred or set later
+		Generation:      currentGeneration,
 	})
 	if err != nil {
 		log.Printf("createBranchHandler: Failed to add new message to new branch: %v", err)
@@ -668,7 +848,7 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 			}
 		} else {
 			// This was the initial branch. Its last message's chosen_next_id needs to revert to its original next message.
-			lastMessageID, _, err := GetLastMessageInBranch(db, sessionId, oldPrimaryBranchID)
+			lastMessageID, _, _, err := GetLastMessageInBranch(db, sessionId, oldPrimaryBranchID)
 			if err != nil && err != sql.ErrNoRows {
 				log.Printf("switchBranchHandler: Failed to get last message ID for old primary branch %s: %v", oldPrimaryBranchID, err)
 				// Non-fatal, continue
@@ -758,7 +938,7 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "Session deleted successfully"})
 }
 
-// Helper function to convert FrontendMessage to Content for Gemini API
+// Helper function to convert FrontendMessage to Content for LLM
 func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMessage) []Content {
 	var contents []Content
 	// Apply curation rules before converting to Content
@@ -795,8 +975,18 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 			parts = append(parts, Part{FunctionCall: fm.Parts[0].FunctionCall})
 		} else if fm.Type == TypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
 			parts = append(parts, Part{FunctionResponse: fm.Parts[0].FunctionResponse})
-		} else if fm.Type == TypeSystemPrompt && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
+		} else if (fm.Type == TypeSystemPrompt || fm.Type == TypeEnvChanged) && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
 			// System_prompt should expand to *two* `Content`s
+			prompt := fm.Parts[0].Text
+			if fm.Type == TypeEnvChanged {
+				var envChanged EnvChanged
+				err := json.Unmarshal([]byte(prompt), &envChanged)
+				if err != nil {
+					log.Printf("Error unmarshalling envChanged JSON: %v", err)
+				} else {
+					prompt = GetEnvChangeContext(envChanged)
+				}
+			}
 			contents = append(contents,
 				Content{
 					Role: RoleModel,
@@ -809,7 +999,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 					Parts: []Part{
 						{FunctionResponse: &FunctionResponse{
 							Name:     "new_system_prompt",
-							Response: map[string]interface{}{"prompt": fm.Parts[0].Text},
+							Response: map[string]interface{}{"prompt": prompt},
 						}},
 					},
 				},
@@ -883,7 +1073,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Find the last message in the current primary branch (which should be the function_call that triggered confirmation)
-	lastMessageIDFromDB, lastMessageModelFromDB, err := GetLastMessageInBranch(db, sessionId, branchId)
+	lastMessageIDFromDB, lastMessageModelFromDB, lastMessageGenerationFromDB, err := GetLastMessageInBranch(db, sessionId, branchId)
 	if err != nil {
 		log.Printf("confirmBranchHandler: Failed to get last message ID for session %s and branch %s: %v", sessionId, branchId, err)
 		http.Error(w, fmt.Sprintf("Failed to get last message: %v", err), http.StatusInternalServerError)
@@ -914,6 +1104,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Add the function response message to the session
+
 		denialResponseID, err := AddMessageToSession(r.Context(), db, Message{
 			SessionID:       sessionId,
 			BranchID:        branchId,
@@ -925,6 +1116,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 			Attachments:     nil,
 			CumulTokenCount: nil,
 			Model:           lastMessageModelFromDB,
+			Generation:      lastMessageGenerationFromDB,
 		})
 		if err != nil {
 			log.Printf("confirmBranchHandler: Failed to save denial function response message: %v", err)
@@ -1025,6 +1217,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		Attachments:     nil,
 		CumulTokenCount: nil,
 		Model:           lastMessageModelFromDB,
+		Generation:      lastMessageGenerationFromDB,
 	})
 	if err != nil {
 		log.Printf("confirmBranchHandler: Failed to save function response message after confirmation: %v", err)
@@ -1054,11 +1247,18 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	formattedData := fmt.Sprintf("%d\n%s\n%s", functionResponseID, fc.Name, string(functionResponseValueJson))
 	sseW.sendServerEvent(EventFunctionReply, formattedData)
 
-	// Retrieve session history from DB for Gemini API (full context)
-	fullFrontendHistoryForGemini, err := GetSessionHistoryContext(db, sessionId, branchId)
+	// Retrieve session history from DB for LLM (full context)
+	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, branchId)
 	if err != nil {
-		log.Printf("confirmBranchHandler: Failed to retrieve full session history for Gemini after confirmation: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for Gemini: %v", err), http.StatusInternalServerError)
+		log.Printf("confirmBranchHandler: Failed to retrieve full session history for LLM after confirmation: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for LLM: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	roots, generation, err := GetLatestSessionEnv(db, sessionId)
+	if err != nil {
+		log.Printf("confirmBranchHandler: Failed to get latest session environment for session %s: %v", sessionId, err)
+		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -1069,14 +1269,14 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt:        session.SystemPrompt,
 		WorkspaceID:         session.WorkspaceID,
 		PrimaryBranchID:     branchId,
-		Roots:               session.Roots,
+		Roots:               roots,
 		PendingConfirmation: "", // Clear pending confirmation in initial state
 	}
 
 	// Resume streaming from the point after the function response
-	if err := streamLLMResponse(db, initialState, sseW, functionResponseID, lastMessageModelFromDB, false, time.Now(), fullFrontendHistoryForGemini); err != nil {
-		log.Printf("confirmBranchHandler: Error streaming Gemini response after confirmation: %v", err)
-		http.Error(w, fmt.Sprintf("Error streaming Gemini response: %v", err), http.StatusInternalServerError)
+	if err := streamLLMResponse(db, initialState, sseW, functionResponseID, lastMessageModelFromDB, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+		log.Printf("confirmBranchHandler: Error streaming LLM response after confirmation: %v", err)
+		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -1134,4 +1334,134 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 		curated = append(curated, currentMsg)
 	}
 	return curated
+}
+
+// calculateRootsChanged compares old and new roots and generates RootsChanged data.
+func calculateRootsChanged(oldRoots, newRoots []string) (RootsChanged, error) {
+	rootsChanged := RootsChanged{
+		Value: newRoots,
+	}
+
+	oldMap := make(map[string]bool)
+	for _, r := range oldRoots {
+		oldMap[r] = true
+	}
+
+	newMap := make(map[string]bool)
+	for _, r := range newRoots {
+		newMap[r] = true
+	}
+
+	// Determine added roots
+	for _, newRoot := range newRoots {
+		if !oldMap[newRoot] {
+			contents, err := getRootContents(newRoot, 200) // Limit entries to 200
+			if err != nil {
+				log.Printf("calculateRootsChanged: Failed to get contents for added root %s: %v", newRoot, err)
+				// Continue even if there's an error, don't block the whole process
+			}
+			rootsChanged.Added = append(rootsChanged.Added, RootAdded{Path: newRoot, Contents: contents})
+		}
+	}
+
+	// Determine removed roots
+	for _, oldRoot := range oldRoots {
+		if !newMap[oldRoot] {
+			rootsChanged.Removed = append(rootsChanged.Removed, RootRemoved{Path: oldRoot})
+		}
+	}
+
+	// Determine prompts
+	// If there are removed roots, search all current roots for prompts.
+	// Otherwise, only search added roots for prompts.
+	rootsToSearchForPrompts := newRoots
+	if len(rootsChanged.Removed) == 0 {
+		rootsToSearchForPrompts = []string{}
+		for _, added := range rootsChanged.Added {
+			rootsToSearchForPrompts = append(rootsToSearchForPrompts, added.Path)
+		}
+	}
+
+	for _, rootPath := range rootsToSearchForPrompts {
+		// Search for GEMINI.md within each rootPath
+		geminiMDPath := filepath.Join(rootPath, "GEMINI.md")
+		content, err := os.ReadFile(geminiMDPath)
+		if err == nil {
+			rootsChanged.Prompts = append(rootsChanged.Prompts, RootPrompt{Path: geminiMDPath, Prompt: string(content)})
+		} else if !os.IsNotExist(err) {
+			log.Printf("calculateRootsChanged: Failed to read GEMINI.md from %s: %v", geminiMDPath, err)
+		}
+	}
+
+	return rootsChanged, nil
+}
+
+// getRootContents gets the contents of a directory using BFS, up to a certain limit.
+func getRootContents(rootPath string, maxEntries int) ([]RootContents, error) {
+	var result []RootContents
+	queue := []struct {
+		Path   string
+		Parent *RootContents // Pointer to the parent's RootContents in the result slice
+	}{
+		{Path: rootPath, Parent: nil},
+	}
+
+	// Map to store RootContents by their full path for easy lookup and child appending
+	pathMap := make(map[string]*RootContents)
+
+	entryCount := 0
+	hasMore := false
+
+	for len(queue) > 0 && entryCount < maxEntries {
+		current := queue[0]
+		queue = queue[1:]
+
+		entries, err := os.ReadDir(current.Path)
+		if err != nil {
+			log.Printf("getRootContents: Failed to read directory %s: %v", current.Path, err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entryCount >= maxEntries {
+				hasMore = true
+				break
+			}
+
+			fullPath := filepath.Join(current.Path, entry.Name())
+
+			rc := RootContents{
+				Path:  fullPath,
+				IsDir: entry.IsDir(),
+			}
+
+			if current.Parent == nil { // Top-level entry
+				result = append(result, rc)
+				pathMap[fullPath] = &result[len(result)-1]
+			} else { // Child entry
+				current.Parent.Children = append(current.Parent.Children, rc)
+				pathMap[fullPath] = &current.Parent.Children[len(current.Parent.Children)-1]
+			}
+			entryCount++
+
+			if entry.IsDir() {
+				queue = append(queue, struct {
+					Path   string
+					Parent *RootContents
+				}{Path: fullPath, Parent: pathMap[fullPath]})
+			}
+		}
+	}
+
+	// Set HasMore flag on the top-level RootContents if applicable
+	if hasMore {
+		// This logic needs to be careful. If the root itself has more,
+		// or if any of its direct children have more, we need to reflect that.
+		// For now, we'll just set it on the root if we exceeded the limit.
+		if len(result) > 0 {
+			result[0].HasMore = true // Assuming result[0] is the root itself or its first child
+		}
+	}
+
+	return result, nil
 }

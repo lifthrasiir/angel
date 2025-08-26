@@ -44,6 +44,7 @@ type Message struct {
 	CreatedAt               string           `json:"created_at"`
 	Model                   string           `json:"model,omitempty"`
 	CompressedUpToMessageID *int             `json:"compressed_up_to_message_id,omitempty"`
+	Generation              int              `json:"generation"`
 }
 
 const (
@@ -57,6 +58,7 @@ const (
 	TypeThought          = "thought"
 	TypeCompression      = "compression"
 	TypeSystemPrompt     = "system_prompt"
+	TypeEnvChanged       = "env_changed"
 	TypeError            = "error"
 	TypeModelError       = "model_error"
 )
@@ -124,10 +126,10 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 	result, err := db.Exec(`
 		INSERT INTO messages (
 			session_id, branch_id, parent_message_id, chosen_next_id, role, text,
-			type, attachments, cumul_token_count, model)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			type, attachments, cumul_token_count, model, generation)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Role, msg.Text,
-		msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model)
+		msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model, msg.Generation)
 	if err != nil {
 		log.Printf("AddMessageToSession: Failed to add message to session: %v", err)
 		return 0, fmt.Errorf("failed to add message to session: %w", err)
@@ -222,9 +224,9 @@ func createFrontendMessage(
 
 	var compressedUpToMessageID *int
 
-	var fmParentMessageID *string = nil               // Initialize to nil
-	var fmChosenNextID *string = nil                  // Initialize to nil
-	var fmPossibleNextIDs []PossibleNextMessage = nil // Initialize to nil
+	var fmParentMessageID *string = nil
+	var fmChosenNextID *string = nil
+	var fmPossibleNextIDs []PossibleNextMessage = nil
 
 	if m.ParentMessageID != nil {
 		s := fmt.Sprintf("%d", *m.ParentMessageID)
@@ -395,7 +397,6 @@ func getSessionHistoryInternal(
 	var currentMessageCount int
 	for keepGoing && (isFullHistoryFetch || currentMessageCount < fetchLimit) { // Modified condition
 		err := func() error {
-
 			rows, err := db.Query(`
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
@@ -549,15 +550,14 @@ func GetMessageBranchID(db *sql.DB, messageID int) (string, error) {
 }
 
 // GetLastMessageInBranch retrieves the ID and model of the last message in a given session and branch.
-func GetLastMessageInBranch(db *sql.DB, sessionID string, branchID string) (int, string, error) {
-	var lastMessageID int
-	var lastMessageModel string
-	row := db.QueryRow("SELECT id, model FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionID, branchID)
-	err := row.Scan(&lastMessageID, &lastMessageModel)
+func GetLastMessageInBranch(db *sql.DB, sessionID string, branchID string) (lastMessageID int, lastMessageModel string, lastMessageGeneration int, err error) {
+	row := db.QueryRow("SELECT id, model, generation FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionID, branchID)
+	err = row.Scan(&lastMessageID, &lastMessageModel, &lastMessageGeneration)
 	if err != nil {
-		return 0, "", fmt.Errorf("failed to get last message in branch: %w", err)
+		err = fmt.Errorf("failed to get last message in branch: %w", err)
+		return
 	}
-	return lastMessageID, lastMessageModel, nil
+	return
 }
 
 // GetMessageDetails retrieves the role, type, parent_message_id, and branch_id for a given message ID.
@@ -608,12 +608,12 @@ func GetMessageByID(db *sql.DB, messageID int) (*Message, error) {
 	err := db.QueryRow(`
 		SELECT
 			id, session_id, branch_id, parent_message_id, chosen_next_id,
-			role, text, type, attachments, cumul_token_count, created_at, model
+			role, text, type, attachments, cumul_token_count, created_at, model, generation
 		FROM messages
 		WHERE id = ?
 	`, messageID).Scan(
 		&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
-		&m.Role, &m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model,
+		&m.Role, &m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model, &m.Generation,
 	)
 
 	if err != nil {

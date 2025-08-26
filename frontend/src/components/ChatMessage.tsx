@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage, EnvChanged } from '../types/chat'; // EnvChanged 임포트 추가
 import { splitOnceByNewline } from '../utils/stringUtils';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
@@ -8,6 +8,7 @@ import SystemMessage from './SystemMessage';
 import UserTextMessage from './UserTextMessage';
 import MessageInfo from './MessageInfo';
 import CompressionMessage from './CompressionMessage';
+import EnvChangedMessage from './EnvChangedMessage'; // EnvChangedMessage 임포트 추가
 
 interface ChatMessageProps {
   message: ChatMessage;
@@ -89,6 +90,20 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageInfo={messageInfoComponent}
         />
       );
+    } else if (type === 'env_changed') {
+      try {
+        const envChangedData: EnvChanged = JSON.parse(text || '{}');
+        return <EnvChangedMessage envChanged={envChangedData} messageId={message.id} />;
+      } catch (e) {
+        console.error('Failed to parse env_changed message:', e);
+        return (
+          <SystemMessage
+            text={`Error displaying environment change: ${text}`}
+            messageInfo={messageInfoComponent}
+            messageId={message.id}
+          />
+        );
+      }
     } else if (type === 'model') {
       return (
         <ModelTextMessage

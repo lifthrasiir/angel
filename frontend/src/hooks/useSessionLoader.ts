@@ -34,6 +34,7 @@ import {
   hasMoreMessagesAtom,
   isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
+  temporaryEnvChangeMessageAtom,
 } from '../atoms/chatAtoms';
 import { useScrollAdjustment } from './useScrollAdjustment';
 
@@ -70,6 +71,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
   const resetChatSessionState = useSetAtom(resetChatSessionStateAtom);
   const setIsPriorSessionLoadComplete = useSetAtom(isPriorSessionLoadCompleteAtom);
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
+  const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
 
   const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
   const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
@@ -253,6 +255,20 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 setPendingConfirmation(data.pendingConfirmation || null);
 
                 setHasMoreMessages(data.history && data.history.length >= FETCH_LIMIT);
+
+                // Handle initial envChanged message
+                if (data.envChanged) {
+                  const envChangedJsonString = JSON.stringify(data.envChanged);
+                  const envChangedMessage: ChatMessage = {
+                    id: crypto.randomUUID(),
+                    role: 'system',
+                    type: 'env_changed',
+                    parts: [{ text: envChangedJsonString }],
+                    sessionId: data.sessionId,
+                    branchId: data.primaryBranchId,
+                  };
+                  setTemporaryEnvChangeMessage(envChangedMessage);
+                }
 
                 // Scroll to bottom after initial messages are loaded
                 requestAnimationFrame(() => {

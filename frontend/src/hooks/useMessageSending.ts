@@ -21,6 +21,7 @@ import {
   updateUserMessageIdAtom,
   updateMessageTokenCountAtom,
   pendingConfirmationAtom,
+  temporaryEnvChangeMessageAtom,
 } from '../atoms/chatAtoms';
 import { ModelInfo } from '../api/models';
 
@@ -60,6 +61,7 @@ export const useMessageSending = ({
   const updateMessageTokenCount = useSetAtom(updateMessageTokenCountAtom);
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
+  const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
 
   const commonHandlers = {
     onMessage: (messageId: string, text: string) => {
@@ -124,6 +126,15 @@ export const useMessageSending = ({
     onPendingConfirmation: (data: string) => {
       setPendingConfirmation(data);
       setProcessingStartTime(null);
+    },
+    onEnvChanged: (messageId: string, envChanged: string) => {
+      addMessage({
+        id: messageId,
+        role: 'system',
+        parts: [{ text: envChanged }],
+        type: 'env_changed',
+      } as ChatMessage);
+      setTemporaryEnvChangeMessage(null);
     },
   };
 

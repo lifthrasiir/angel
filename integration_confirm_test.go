@@ -92,7 +92,7 @@ func TestConfirmationDenial(t *testing.T) {
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
-	err = UpdateSessionRoots(db, sessionId, []string{tempDir})
+	_, err = AddSessionEnv(db, sessionId, []string{tempDir})
 	if err != nil {
 		t.Fatalf("Failed to update session roots: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestConfirmationApproval(t *testing.T) {
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
-	err = UpdateSessionRoots(db, sessionId, []string{tempDir})
+	_, err = AddSessionEnv(db, sessionId, []string{tempDir})
 	if err != nil {
 		t.Fatalf("Failed to update session roots: %v", err)
 	}

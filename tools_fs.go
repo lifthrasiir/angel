@@ -50,15 +50,15 @@ func getSessionFS(ctx context.Context, sessionId string) (*fsPkg.SessionFS, erro
 			return nil, fmt.Errorf("failed to get DB from context in getSessionFS: %w", err)
 		}
 
-		// Get the session to retrieve roots
-		session, err := GetSession(db, sessionId)
+		// Get the session environment to retrieve roots
+		roots, _, err := GetLatestSessionEnv(db, sessionId)
 		if err != nil {
 			log.Printf("getSessionFS: Failed to get session %s to retrieve roots: %v", sessionId, err)
 			return nil, fmt.Errorf("failed to get session roots for session %s: %w", sessionId, err)
 		}
 
 		// Set the roots for the new SessionFS instance
-		if err := sf.SetRoots(session.Roots); err != nil {
+		if err := sf.SetRoots(roots); err != nil {
 			return nil, fmt.Errorf("failed to set roots for SessionFS for session %s: %w", sessionId, err)
 		}
 

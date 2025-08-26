@@ -28,6 +28,7 @@ const (
 	EventSessionName         EventType = 'N' // Session name inferred/updated
 	EventCumulTokenCount     EventType = 'C' // Cumulative token count update
 	EventPendingConfirmation EventType = 'P' // Pending confirmation exists for the last message which is EventFunctionCall
+	EventGenerationChanged   EventType = 'G' // Generation changed event
 	EventError               EventType = 'E' // Error message
 )
 

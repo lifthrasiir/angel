@@ -33,7 +33,8 @@ export interface ChatMessage {
     | 'function_call'
     | 'function_response'
     | 'model_error'
-    | 'compression';
+    | 'compression'
+    | 'env_changed';
   attachments?: FileAttachment[];
   cumulTokenCount?: number | null;
   branchId?: string;
@@ -52,6 +53,7 @@ export interface InitialState {
   primaryBranchId: string;
   callElapsedTimeSeconds?: number;
   pendingConfirmation?: string;
+  envChanged?: EnvChanged;
 }
 
 export interface Session {
@@ -72,4 +74,36 @@ export interface Workspace {
 export interface WorkspaceWithSessions {
   workspace: Workspace;
   sessions: Session[];
+}
+
+export interface EnvChanged {
+  roots?: RootsChanged;
+}
+
+export interface RootsChanged {
+  value: string[];
+  added?: RootAdded[];
+  removed?: RootRemoved[];
+  prompts?: RootPrompt[];
+}
+
+export interface RootAdded {
+  path: string;
+  contents: RootContents[];
+}
+
+export interface RootRemoved {
+  path: string;
+}
+
+export interface RootContents {
+  path: string;
+  isDir: boolean;
+  children?: RootContents[];
+  hasMore?: boolean;
+}
+
+export interface RootPrompt {
+  path: string;
+  prompt: string;
 }

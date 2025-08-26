@@ -26,6 +26,7 @@ import {
   hasMoreMessagesAtom,
   isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
+  temporaryEnvChangeMessageAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
@@ -72,6 +73,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const isPriorSessionLoadComplete = useAtomValue(isPriorSessionLoadCompleteAtom);
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
+  const temporaryEnvChangeMessage = useAtomValue(temporaryEnvChangeMessageAtom);
 
   const isLoggedIn = !!userEmail;
 
@@ -326,8 +328,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       renderedElements.push(element);
       i += messagesConsumed;
     }
+
+    // Add temporary environment change message if it exists
+    if (temporaryEnvChangeMessage) {
+      renderedElements.push(
+        <ChatMessage
+          key={temporaryEnvChangeMessage.id}
+          message={temporaryEnvChangeMessage}
+          maxTokens={undefined} // Temporary messages don't have token limits
+          isLastModelMessage={false}
+          processingStartTime={null}
+        />,
+      );
+    }
+
     return renderedElements;
-  }, [messages, availableModels, globalPrompts, systemPrompt, processingStartTime]);
+  }, [messages, availableModels, globalPrompts, systemPrompt, processingStartTime, temporaryEnvChangeMessage]); // temporaryEnvChangeMessage 추가
 
   const currentSystemPromptLabel = useMemo(() => {
     const found = globalPrompts.find((p) => p.value === systemPrompt);
