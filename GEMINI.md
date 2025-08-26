@@ -13,13 +13,13 @@
 - **Automatic Session Name Inference**: The LLM can infer and update session names based on conversation content. This process is handled by `inferAndSetSessionName`, which uses specific prompts (`GetSessionNameInferencePrompts`) to guide the LLM.
 - **Thought Display**: The LLM's internal thought processes are streamed as "thought" messages to the user interface. These thoughts are grouped and can be expanded/collapsed for detailed viewing. The `Part` struct includes a `Thought` field, and these messages are broadcast via the `EventThought` SSE event.
 - **File Upload and Attachment**: Users can attach files to their messages. Files are Base64 encoded during transmission, but stored as raw binary data with the message, and support preview and download functionalities via the `handleDownloadBlob` API endpoint.
-- **Tool Usage**: The LLM can invoke both built-in tools (e.g., `list_directory`, `read_file`, `web_fetch`) and external tools via the Model Context Protocol (MCP). The `web_fetch` tool can extract URLs, check for private IPs, convert GitHub blob URLs to raw URLs, and includes a fallback mechanism for direct fetching.
+- **Tool Usage**: The LLM can invoke both built-in tools (e.g., `list_directory`, `read_file`, `write_file`, `run_shell_command`, `write_todo`, `web_fetch`) and external tools via the Model Context Protocol (MCP). The `web_fetch` tool can extract URLs, check for private IPs, convert GitHub blob URLs to raw URLs, and includes a fallback mechanism for direct fetching. The `write_file` tool returns a unified diff for verification. Directories can be exposed or unexposed via /(un)expose commands, and their contents and per-directory directives (GEMINI.md etc.) are given as dynamic system prompts.
 - **Chat History Compression**: The chat history can be compressed into a concise, structured XML snapshot by the user explicitly running the `/compress` command. This process is handled by the `CompressSession` function, which uses token thresholds to determine when to summarize and updates the message chain with the compressed content.
 
 ## Go Backend
 
 - **Authentication (`auth.go`, `main.go`, `gemini.go`)**: Handles user authentication via Google OAuth, storing tokens in an SQLite database. The `tokenSaverSource` in `gemini.go` ensures tokens are saved upon acquisition or refresh. `main.go` sets up OAuth2 handlers.
-- **Database (`db.go`)**: Uses SQLite (`angel.db`) for persistent storage of sessions, messages, and other configurations. The `messages` table utilizes `parent_message_id`, `chosen_next_id`, and `branch_id` to manage conversation threads and branching. Functions like `AddMessageToSession` and `UpdateMessageContent` are crucial for message management.
+- **Database (`db.go`, `db_chat.go`)**: Uses SQLite (`angel.db`) for persistent storage of sessions, messages, and other configurations. `db_chat.go` specifically handles chat-related database operations. The `messages` table utilizes `parent_message_id`, `chosen_next_id`, and `branch_id` to manage conversation threads and branching. Functions like `AddMessageToSession` and `UpdateMessageContent` are crucial for message management.
 - **Gemini API Interaction (`gemini.go`, `gemini_types.go`, `llm.go`)**:
   - Defines the `LLMProvider` interface in `llm.go` for abstracting interactions with various Large Language Models, including methods like `SendMessageStream` (for streaming responses), `GenerateContentOneShot` (for single-shot responses), `CountTokens`, `MaxTokens`, `RelativeDisplayOrder`, and `DefaultGenerationParams`.
   - `SessionParams` in `llm.go` holds all parameters for an LLM chat session, including `Contents`, `ModelName`, `SystemPrompt`, `IncludeThoughts`, `GenerationParams` (e.g., Temperature, TopK, TopP), and `ToolConfig`.
@@ -41,7 +41,7 @@
   - **`types/chat.ts`**: Contains TypeScript interface definitions for chat-related data structures, such as messages, sessions, and attachments.
   - **`utils/`**: This directory contains various utility functions, including `fileHandler.ts` (for file attachments), `measurementUtils.ts` (for UI element measurements), `messageHandler.ts` (for message processing), `sessionManager.ts` (for session-related operations), `stringUtils.ts` (for string manipulations), and `userManager.ts` (for user-related data).
 - **UI Components**:
-  - **`ChatArea.tsx`**: The central component for the chat interface, managing message display, system prompt editing, file attachment previews, and the chat input field.
+  - **`ChatArea.tsx`**: The central component for the chat interface, managing message display, system prompt editing, file attachment previews, and the chat input field. Supports infinite scrolling.
   - **`ChatInput.tsx`**: Integrated within `ChatArea.tsx`, handles user message input and sending.
   - **`ChatLayout.tsx`**: Defines the overall application layout, handling authentication rendering, integrating the sidebar and chat area, and displaying toast messages.
   - **`SystemPromptEditor.tsx`**: Provides the UI for editing and previewing system prompts. It supports selecting prompt types, custom editing, evaluating Go templates via the backend API (`/api/evaluatePrompt`), expanding/collapsing content, and a read-only mode for existing sessions.
@@ -59,7 +59,7 @@
     - **Cancellation**: Sends a DELETE request to `/api/chat/{sessionId}/call` to cancel ongoing streaming, which is handled by the `cancelCall` function in `call_manager.go` on the backend.
   - **`useSessionLoader.ts`**: Encapsulates the logic for loading existing chat sessions and possibly streaming the ongoing call.
     - **Backend Connection**: Establishes an SSE connection to the `/api/chat/{sessionId}` endpoint via the `loadSession` function to receive session history and real-time updates.
-    - **Authentication**: Fetches user information from the `/api/userinfo` endpoint via `fetchUserInfo` to verify login status.
+    **Authentication**: Fetches user information from the `/api/userinfo` endpoint via `fetchUserInfo` to verify login status.
   - **`useWorkspaceAndSessions.ts`**: Encapsulates the logic for fetching workspace and session data.
     - **Backend Connection**: Fetches workspace and session lists from the `/api/chat` (sessions list) endpoint via the `fetchSessions` function.
   - **`useCommandProcessor.ts`**: Handles processing of user commands (e.g., `/compress`).
@@ -86,6 +86,78 @@
   - **Caution for Agents**: When providing string literals containing newlines to `replace` or `write_file` tools, ensure that newlines are *double-escaped* (e.g., `\n` becomes `\\n`, `\r\n` becomes `\\r\\n`). This is to prevent issues during JSON serialization of the tool arguments.
 - **Responsiveness:** Always prioritize and act on the user's *latest* input. If a new instruction arrives during an ongoing task, you *must* immediately halt the current task and address the new instruction; do not assume continuation.
 - **ID Generation**: All workspace and session IDs generated by `generateID()` should contain at least one capital letter (CamelCase recommended for testing) to avoid collision with certain predefined routes.
+- **Security**: While assumed to be used as a localhost application, CSRF protection is in place.
+
+## Core Data Structures and Interaction Flow (Concise)
+
+### Conversation Branching (`parent_message_id`, `chosen_next_id`, `branch_id`, `primary_branch_id`)
+Branching allows users to explore alternative conversation paths without losing the original context. It's implemented via the `messages`, `sessions`, and `branches` tables.
+
+- **`messages` table fields**:
+  - **`parent_message_id`**: Links a message to its direct predecessor, establishing a hierarchical conversation thread.
+  - **`chosen_next_id`**: Points to the `id` of the **currently selected** next message in a branch. While a parent message can have multiple divergent child messages, `chosen_next_id` explicitly designates the path that forms the active conversation flow visible to the user.
+- **`branches` table**:
+  - **`branch_id`**: A unique identifier for each conversation branch, used to group related messages that belong to a specific divergent path.
+  - **`branch_from_message_id`**: Records the `id` of the original message from which a new branch diverged, allowing the system to understand the branching point.
+- **`sessions` table**:
+  - **`primary_branch_id`**: This field indicates the currently active and primary conversation flow within a given session.
+
+**Flow**: Creating a new branch from an existing message involves generating a new message (with a `new_branch_id`) whose `parent_message_id` points back to the original message. Concurrently, the original message's `chosen_next_id` is updated to point to this new message, directing the main flow. When a user switches to a different branch, the session's `primary_branch_id` is updated, making that branch the new active one. Importantly, the `chosen_next_id` of messages in the previously active branch remains unchanged, preserving its integrity.
+
+### Tool Execution Confirmation (`PendingConfirmation`)
+This mechanism is triggered when the LLM proposes a tool call that explicitly requires user approval before execution.
+
+- **`pending_confirmation` (in `branches` table & `InitialState`)**: This flag is set on the current branch when a tool call proposal is made by the LLM. Its state is then communicated to the frontend via the `InitialState` object.
+- **Frontend**: Detects this flag and displays a clear confirmation dialog to the user, outlining the proposed tool action.
+- **Confirmation Process**: User approval or denial sends a request to the backend.
+  - **Backend**: The `confirmBranchHandler` endpoint (`/api/chat/{sessionId}/branch/{branchId}/confirm` POST) processes this request. It clears the `pending_confirmation` flag. If the user approves, the LLM-proposed tool (details captured within a `FunctionCall` message) is re-executed. The tool's execution result is then stored as a `FunctionResponse` message in the database, and the `chosen_next_id` of the original `FunctionCall` message is updated to point to this new `FunctionResponse`. The LLM's subsequent response streaming then resumes. If denied, a `FunctionResponse` indicating the user's rejection is added to the conversation, and the pending state terminates.
+  - **Frontend**: Upon receiving the tool execution result via SSE (e.g., `EventFunctionReply`), the UI updates accordingly, and any subsequent LLM response streams are processed.
+
+### Environment Change Notifications (`env_changed` message type)
+This mechanism informs the LLM and the user about changes to the file system "roots" accessible to the LLM, typically triggered by `/expose` or `/unexpose` commands. It ensures the LLM has an accurate operational context.
+
+- **`session_envs` table**: Stores a historical record of "root" directories accessible to the LLM and a `generation` number for each environment. A new entry is added on each `/expose`/`/unexpose` command execution.
+- **`EnvChanged` struct (in `InitialState`)**: This structure, part of the `InitialState` object sent to the frontend, details specific changes in the environment.
+  - **`RootsChanged`**: Contains the full list of current roots (`value`), lists of `added` and `removed` roots, and `prompts` extracted from files like `GEMINI.md` found within new roots.
+- **Operation & Display**:
+  1. Executing `/expose` or `/unexpose` updates the `session_envs` table, recording a new environment `generation`.
+  2. Initially, no `TypeEnvChanged` message is immediately stored in the database. Instead, the frontend receives the `EnvChanged` information via the `InitialState` object and immediately displays these changes in the UI as a **virtual message**. This virtual message is a dynamic UI element reflecting the current environment, not a persistent database entry.
+  3. Only when the user **sends a new message** after an environment change, and if a difference in environment `generation` is detected, a `TypeEnvChanged` system message detailing these changes is **inserted into the database before the user's message**. This message then becomes a permanent part of the chat history.
+  4. Once this `TypeEnvChanged` message is saved in the database, an `EventGenerationChanged` SSE event is sent to the frontend, signaling that a permanent record of the environment change has been created.
+
+### Message Transmission and Streaming Endpoint Flow
+Angel utilizes Server-Sent Events (SSE) for real-time, interactive conversations with the LLM.
+
+- **SSE Backend (`sse.go`)**: The `sseWriter` manages SSE connections, sends specific events (`sendServerEvent`), and broadcasts events to all active connections for a given session (`broadcastToSession`).
+- **Frontend Hooks**: `useSessionLoader.ts` and `useMessageSending.ts` are crucial custom hooks that manage SSE connections on the client side and process incoming events to update the UI in real time.
+
+**Key Scenario Flows**:
+
+1. **User views a session with an ongoing request (`/api/chat/{sessionId}` GET)**:
+  - **Frontend (`useSessionLoader.ts`)**: When the user navigates to an existing session's URL or selects an active session from the sidebar, `useSessionLoader.ts` initiates an SSE connection to `/api/chat/{sessionId}`.
+  - **Backend**: Retrieves session data and checks for any active LLM calls. If an active call is found, it sends an `EventInitialState` (including session history, current status like elapsed time, and any virtual `env_changed` data). The SSE connection remains open to continue broadcasting the LLM response stream as it progresses. If no active call, it sends `EventInitialStateNoCall` and then closes the connection.
+
+2. **New session is created and first message is added (`/api/chat` POST)**:
+  - **Frontend (`useMessageSending.ts`)**: When a user starts a new chat and sends their initial message, `useMessageSending.ts` sends a POST request to `/api/chat`.
+  - **Backend**: Creates a new session, saves the user's message to the database, establishes an SSE connection, sends `EventInitialState` to inform the frontend of the initial session state, and immediately begins LLM response streaming.
+  - **Frontend**: Upon receiving `EventInitialState` and the subsequent LLM response stream via its SSE connection, the UI displays the conversation content.
+
+3. **Message is added to an existing session (`/api/chat/{sessionId}` POST)**:
+  - **Frontend (`useMessageSending.ts`)**: When a user inputs and sends a message in an existing chat, `useMessageSending.ts` sends a POST request to `/api/chat/{sessionId}`.
+  - **Backend**: Adds the user's message to the database. If previous `/expose` commands resulted in environment changes, a `TypeEnvChanged` message detailing these changes is inserted into the database *before* the user's message. The backend then sends an `EventInitialState` (potentially including `EventGenerationChanged` if a `TypeEnvChanged` message was added) to the frontend via SSE, updating the session's overall state. The LLM response streaming then continues from the last point.
+  - **Frontend**: Upon receiving the `EventInitialState` (and `EventGenerationChanged` if applicable) and the ongoing LLM response stream via SSE, the UI updates the conversation.
+
+4. **User approves tool usage (`/api/chat/{sessionId}/branch/{branchId}/confirm` POST)**:
+  - **Frontend (`useMessageSending.ts` / `useChatSession.ts` logic)**: When the user approves a tool in the confirmation dialog, relevant frontend logic (often within `useMessageSending.ts` or `useChatSession.ts`) sends a POST request to `/api/chat/{sessionId}/branch/{branchId}/confirm`.
+  - **Backend**: Executes the tool, saves its output as a `FunctionResponse` message to the conversation. An `EventFunctionReply` event is sent to the frontend via SSE, followed by the resumption of LLM response streaming.
+  - **Frontend**: Upon receiving `EventFunctionReply` and the subsequent LLM response stream via SSE, the UI updates to reflect the tool's execution and the LLM's continued response.
+
+### Other Key Data Structures
+- **`Session`**: Contains session-wide metadata (ID, `last_updated_at`, `system_prompt`, `name`, `workspace_id`, `primary_branch_id`).
+- **`Workspace`**: Defines workspace details (ID, `name`, `default_system_prompt`). `WorkspaceWithSessions` combines `Workspace` with its list of `Session`s.
+- **`FileAttachment`**: Describes files attached to user messages (file name, MIME type, `hash`, Base64-encoded `data`). Backend uses Blob storage, referencing files by `hash`.
+- **`Message` (`FrontendMessage` / `ChatMessage`)**: The fundamental unit of conversation. Includes ID, `role` (user, model), `parts` (content), `type` (`text`, `function_call`, `function_response`, `thought`, `env_changed`), `attachments`, `cumulTokenCount`, `branch_id`, `parent_message_id`, `chosen_next_id`, `possibleNextIds`, `model`, `sessionId`. `FrontendMessage` is the Go backend's representation; `ChatMessage` is the TypeScript frontend's interface.
+- **`FunctionCall` and `FunctionResponse`**: Types of `Part` used when the LLM invokes a tool or receives its response. They encapsulate the tool's `name` and `args`/`response`.
 
 # Specific instructions
 
@@ -99,3 +171,4 @@
   - **Complex Changes:** For complex modifications prone to `replace` errors, prefer `write_file` (read file, modify in memory, then overwrite).
 - **Go Error Handling:** When an error occurs, prefer re-declaring the variable using `:=` instead of `var` followed by `=` to avoid "declared and not used" errors and ensure proper variable scoping.
 - **Addressing User Doubts:** If a user expresses doubt or questions a proposed solution, immediately pause the current task. Prioritize understanding the user's perspective and the reasoning behind their concerns. Engage in a dialogue to clarify their thoughts, address their points, and collaboratively arrive at a solution that aligns with their understanding and expectations. The goal is to ensure the user feels heard and confident in the approach.
+
