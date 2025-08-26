@@ -123,7 +123,6 @@ export const useCommandProcessor = (sessionId: string | null) => {
     // Create a temporary message to show "Applying changes..."
     const tempMessage: ChatMessage = {
       id: crypto.randomUUID(),
-      role: 'system',
       parts: [{ text: `Applying ${command} changes...` }],
       type: 'system',
       sessionId: sessionId,
@@ -180,7 +179,6 @@ export const useCommandProcessor = (sessionId: string | null) => {
       // Create the actual EnvChanged message
       const newTemporaryEnvChangedMessage: ChatMessage = {
         id: crypto.randomUUID(),
-        role: 'system',
         type: 'env_changed',
         parts: [{ text: envChangedJsonString }],
         sessionId: sessionId,

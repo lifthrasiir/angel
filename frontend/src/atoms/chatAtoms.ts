@@ -56,7 +56,6 @@ export const updateAgentMessageAtom = atom(
     } else {
       const newMessage: ChatMessage = {
         id: messageId,
-        role: 'model',
         parts: [{ text: newMessageText }],
         type: 'model',
         model: payload.modelName,
@@ -78,7 +77,6 @@ export const addErrorMessageAtom = atom(null, (_get, set, errorMessageText: stri
 
   const errorMessage: ChatMessage = {
     id: crypto.randomUUID(),
-    role: 'model',
     parts: [{ text: errorMessageText }],
     type: 'model_error',
   };

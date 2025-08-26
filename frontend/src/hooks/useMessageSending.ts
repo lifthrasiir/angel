@@ -71,7 +71,6 @@ export const useMessageSending = ({
     onThought: (messageId: string, thoughtText: string) => {
       addMessage({
         id: messageId,
-        role: 'model',
         parts: [{ text: thoughtText }],
         type: 'thought',
       } as ChatMessage);
@@ -80,7 +79,6 @@ export const useMessageSending = ({
     onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => {
       const message: ChatMessage = {
         id: messageId,
-        role: 'model',
         parts: [{ functionCall: { name: functionName, args: functionArgs } }],
         type: 'function_call',
       };
@@ -90,7 +88,6 @@ export const useMessageSending = ({
     onFunctionResponse: (messageId: string, functionName: string, functionResponse: any) => {
       const message: ChatMessage = {
         id: messageId,
-        role: 'user',
         parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
         type: 'function_response',
         model: selectedModel?.name,
@@ -130,7 +127,6 @@ export const useMessageSending = ({
     onEnvChanged: (messageId: string, envChanged: string) => {
       addMessage({
         id: messageId,
-        role: 'system',
         parts: [{ text: envChanged }],
         type: 'env_changed',
       } as ChatMessage);
@@ -149,7 +145,6 @@ export const useMessageSending = ({
       const temporaryUserMessageId = crypto.randomUUID();
       const userMessage: ChatMessage = {
         id: temporaryUserMessageId,
-        role: 'user',
         parts: [{ text: inputMessage }],
         type: 'user',
         attachments: attachments,

@@ -36,9 +36,8 @@ type Message struct {
 	BranchID                string           `json:"branch_id"`
 	ParentMessageID         *int             `json:"parent_message_id"`
 	ChosenNextID            *int             `json:"chosen_next_id"`
-	Role                    string           `json:"role"`
 	Text                    string           `json:"text"`
-	Type                    string           `json:"type"`
+	Type                    MessageType      `json:"type"`
 	Attachments             []FileAttachment `json:"attachments,omitempty"`
 	CumulTokenCount         *int             `json:"cumul_token_count,omitempty"`
 	CreatedAt               string           `json:"created_at"`
@@ -46,22 +45,6 @@ type Message struct {
 	CompressedUpToMessageID *int             `json:"compressed_up_to_message_id,omitempty"`
 	Generation              int              `json:"generation"`
 }
-
-const (
-	RoleUser    = "user"
-	RoleModel   = "model"
-	RoleThought = "thought"
-
-	TypeText             = "text"
-	TypeFunctionCall     = "function_call"
-	TypeFunctionResponse = "function_response"
-	TypeThought          = "thought"
-	TypeCompression      = "compression"
-	TypeSystemPrompt     = "system_prompt"
-	TypeEnvChanged       = "env_changed"
-	TypeError            = "error"
-	TypeModelError       = "model_error"
-)
 
 // DbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
 type DbOrTx interface {
@@ -82,9 +65,8 @@ type PossibleNextMessage struct {
 // FrontendMessage struct to match the frontend's ChatMessage interface
 type FrontendMessage struct {
 	ID              string                `json:"id"`
-	Role            string                `json:"role"`
 	Parts           []Part                `json:"parts"`
-	Type            string                `json:"type"`
+	Type            MessageType           `json:"type"`
 	Attachments     []FileAttachment      `json:"attachments,omitempty"`
 	CumulTokenCount *int                  `json:"cumul_token_count,omitempty"`
 	SessionID       string                `json:"sessionId,omitempty"`
@@ -125,10 +107,10 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 
 	result, err := db.Exec(`
 		INSERT INTO messages (
-			session_id, branch_id, parent_message_id, chosen_next_id, role, text,
+			session_id, branch_id, parent_message_id, chosen_next_id, text,
 			type, attachments, cumul_token_count, model, generation)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Role, msg.Text,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Text,
 		msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model, msg.Generation)
 	if err != nil {
 		log.Printf("AddMessageToSession: Failed to add message to session: %v", err)
@@ -257,7 +239,6 @@ func createFrontendMessage(
 	// Define fm here, before the switch statement
 	fm := FrontendMessage{
 		ID:              fmt.Sprintf("%d", m.ID),
-		Role:            m.Role,
 		Parts:           parts,
 		Type:            m.Type,
 		Attachments:     m.Attachments,
@@ -340,8 +321,8 @@ func getSessionHistoryInternal(
 		// Find the ID of the last compression message in the current branch
 		var compressionText string
 		row := db.QueryRow(
-			"SELECT id, text FROM messages WHERE session_id = ? AND branch_id = ? AND type = 'compression' ORDER BY id DESC LIMIT 1",
-			sessionID, primaryBranchID)
+			"SELECT id, text FROM messages WHERE session_id = ? AND branch_id = ? AND type = ? ORDER BY id DESC LIMIT 1",
+			sessionID, primaryBranchID, TypeCompression)
 		err := row.Scan(&lastCompressionMessageID, &compressionText)
 		if err == nil && lastCompressionMessageID != -1 {
 			before, _, found := strings.Cut(compressionText, "\n")
@@ -400,7 +381,7 @@ func getSessionHistoryInternal(
 			rows, err := db.Query(`
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
-					m.role, m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
+					m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
 					coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
 				FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
 				GROUP BY m.id
@@ -420,7 +401,7 @@ func getSessionHistoryInternal(
 				var possibleNextIDsAndBranchesStr string
 				if err := rows.Scan(
 					&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
-					&m.Role, &m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model,
+					&m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model,
 					&possibleNextIDsAndBranchesStr,
 				); err != nil {
 					return fmt.Errorf("failed to scan message: %w", err)
@@ -434,7 +415,7 @@ func getSessionHistoryInternal(
 					continue // Skip this message, unless it's the compression message itself
 				}
 
-				if discardThoughts && m.Role == RoleThought {
+				if discardThoughts && m.Type == TypeThought {
 					continue // Skip thought messages
 				}
 
@@ -560,16 +541,16 @@ func GetLastMessageInBranch(db *sql.DB, sessionID string, branchID string) (last
 	return
 }
 
-// GetMessageDetails retrieves the role, type, parent_message_id, and branch_id for a given message ID.
-func GetMessageDetails(db *sql.DB, messageID int) (string, string, sql.NullInt64, string, error) {
-	var role, msgType, branchID string
+// GetMessageDetails retrieves the type, parent_message_id, and branch_id for a given message ID.
+func GetMessageDetails(db *sql.DB, messageID int) (MessageType, sql.NullInt64, string, error) {
+	var msgType, branchID string
 	var parentMessageID sql.NullInt64
-	row := db.QueryRow("SELECT role, type, parent_message_id, branch_id FROM messages WHERE id = ?", messageID)
-	err := row.Scan(&role, &msgType, &parentMessageID, &branchID)
+	row := db.QueryRow("SELECT type, parent_message_id, branch_id FROM messages WHERE id = ?", messageID)
+	err := row.Scan(&msgType, &parentMessageID, &branchID)
 	if err != nil {
-		return "", "", sql.NullInt64{}, "", fmt.Errorf("failed to get message details: %w", err)
+		return MessageType(""), sql.NullInt64{}, "", fmt.Errorf("failed to get message details: %w", err)
 	}
-	return role, msgType, parentMessageID, branchID, nil
+	return MessageType(msgType), parentMessageID, branchID, nil
 }
 
 // GetOriginalNextMessageID retrieves the ID of the message that originally followed a given message in its branch.
@@ -608,12 +589,12 @@ func GetMessageByID(db *sql.DB, messageID int) (*Message, error) {
 	err := db.QueryRow(`
 		SELECT
 			id, session_id, branch_id, parent_message_id, chosen_next_id,
-			role, text, type, attachments, cumul_token_count, created_at, model, generation
+			text, type, attachments, cumul_token_count, created_at, model, generation
 		FROM messages
 		WHERE id = ?
 	`, messageID).Scan(
 		&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
-		&m.Role, &m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model, &m.Generation,
+		&m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model, &m.Generation,
 	)
 
 	if err != nil {

@@ -98,7 +98,7 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	msg := Message{SessionID: sessionID, BranchID: primaryBranchID, Role: "user", Text: "Hello", Type: "text"}
+	msg := Message{SessionID: sessionID, BranchID: primaryBranchID, Text: "Hello", Type: "user"}
 	_, err = AddMessageToSession(context.Background(), testDB, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
@@ -187,7 +187,7 @@ func TestNewSessionAndMessage(t *testing.T) {
 		querySingleRow(t, testDB, "SELECT id FROM sessions WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1", []interface{}{"testWsNewSession"}, &actualSessionID)
 
 		querySingleRow(t, testDB, "SELECT id FROM sessions WHERE id = ?", []interface{}{actualSessionID}, &sessionIDFromDB)
-		querySingleRow(t, testDB, "SELECT text FROM messages WHERE session_id = ? AND role = 'user' ORDER BY id ASC LIMIT 1", []interface{}{actualSessionID}, &text)
+		querySingleRow(t, testDB, "SELECT text FROM messages WHERE session_id = ? AND type = 'user' ORDER BY id ASC LIMIT 1", []interface{}{actualSessionID}, &text)
 		if text != "Hello, world!" {
 			t.Errorf("message text in DB mismatch: got %v want %v", text, "Hello, world!")
 		}
@@ -219,7 +219,7 @@ func TestChatMessage(t *testing.T) {
 			t.Fatalf("Failed to get session: %v", err)
 		}
 		// Add an initial message to the session
-		msg := Message{SessionID: sessionId, BranchID: sessionData.PrimaryBranchID, Role: "user", Text: "Initial message", Type: "text", Model: DefaultGeminiModel}
+		msg := Message{SessionID: sessionId, BranchID: sessionData.PrimaryBranchID, Text: "Initial message", Type: "user", Model: DefaultGeminiModel}
 		_, err = AddMessageToSession(context.Background(), testDB, msg)
 		if err != nil {
 			t.Fatalf("Failed to add initial message: %v", err)
@@ -260,12 +260,12 @@ func TestLoadChatSession(t *testing.T) {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
-	msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "User message 1", Type: "text", Model: DefaultGeminiModel}
+	msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "User message 1", Type: "user", Model: DefaultGeminiModel}
 	msg1ID, err := AddMessageToSession(context.Background(), testDB, msg1)
 	if err != nil {
 		t.Fatalf("Failed to add message 1: %v", err)
 	}
-	msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "model", Text: "Model response 1", Type: "text", Model: DefaultGeminiModel}
+	msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "Model response 1", Type: "model", Model: DefaultGeminiModel}
 	msg2ID, err := AddMessageToSession(context.Background(), testDB, msg2)
 	if err != nil {
 		t.Fatalf("Failed to add message 2: %v", err)
@@ -375,7 +375,7 @@ func TestDeleteSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	msg := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "Message to be deleted", Type: "text"}
+	msg := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "Message to be deleted", Type: "user"}
 	_, err = AddMessageToSession(context.Background(), testDB, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)

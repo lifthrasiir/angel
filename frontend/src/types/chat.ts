@@ -22,7 +22,6 @@ export interface FunctionResponse {
 
 export interface ChatMessage {
   id: string;
-  role: string;
   parts: { text?: string; functionCall?: FunctionCall; functionResponse?: FunctionResponse }[];
   type?:
     | 'model'

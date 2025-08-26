@@ -106,7 +106,7 @@ func nilIntStr(i *int) string {
 
 func printMessages(t *testing.T, db *sql.DB, testName string) {
 	t.Logf("--- Messages in DB after %s ---", testName)
-	rows, err := db.Query("SELECT id, role, parent_message_id, chosen_next_id, text FROM messages ORDER BY id ASC")
+	rows, err := db.Query("SELECT id, type, parent_message_id, chosen_next_id, text FROM messages ORDER BY id ASC")
 	if err != nil {
 		t.Fatalf("Failed to query messages: %v", err)
 	}
@@ -114,11 +114,11 @@ func printMessages(t *testing.T, db *sql.DB, testName string) {
 
 	for rows.Next() {
 		var id int
-		var role string
+		var msgType string
 		var parentMessageID sql.NullInt64
 		var chosenNextID sql.NullInt64
 		var text string
-		if err := rows.Scan(&id, &role, &parentMessageID, &chosenNextID, &text); err != nil {
+		if err := rows.Scan(&id, &msgType, &parentMessageID, &chosenNextID, &text); err != nil {
 			t.Fatalf("Failed to scan message: %v", err)
 		}
 		parent := "nil"
@@ -129,7 +129,7 @@ func printMessages(t *testing.T, db *sql.DB, testName string) {
 		if chosenNextID.Valid {
 			chosen = fmt.Sprintf("%d", chosenNextID.Int64)
 		}
-		t.Logf("ID: %d, Role: %s, Parent: %s, ChosenNext: %s, Text: %s", id, role, parent, chosen, text)
+		t.Logf("ID: %d, Type: %s, Parent: %s, ChosenNext: %s, Text: %s", id, msgType, parent, chosen, text)
 	}
 	t.Log("------------------------------------")
 }
@@ -1249,96 +1249,96 @@ func TestApplyCurationRules(t *testing.T) {
 		{
 			name: "Basic scenario: User -> Model -> User -> Model",
 			input: []FrontendMessage{
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 1"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 2"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 2"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 1"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 2"}}},
 			},
 			expected: []FrontendMessage{
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 1"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 2"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 2"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 1"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 2"}}},
 			},
 		},
 		{
 			name: "Consecutive user input: User -> User -> Model (first user removed)",
 			input: []FrontendMessage{
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 1 (to be removed)"}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 2"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 1 (to be removed)"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 2"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 		},
 		{
 			name: "Function call without response: Model(FC) -> Model (FC removed)",
 			input: []FrontendMessage{
-				{Role: "model", Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 		},
 		{
 			name: "Function call with response: Model(FC) -> User(FR) -> Model (all kept)",
 			input: []FrontendMessage{
-				{Role: "model", Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
-				{Role: "user", Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: "tool"}}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
+				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: "tool"}}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
-				{Role: "model", Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
-				{Role: "user", Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: "tool"}}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
+				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: "tool"}}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 		},
 		{
 			name: "Consecutive user input with thought in between: User -> Thought -> User -> Model (first user removed)",
 			input: []FrontendMessage{
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 1 (to be removed)"}}},
-				{Role: "thought", Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 2"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 1 (to be removed)"}}},
+				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
-				{Role: "thought", Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User 2"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 		},
 		{
 			name: "Function call without response with thought in between: Model(FC) -> Thought -> Model (FC removed)",
 			input: []FrontendMessage{
-				{Role: "model", Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
-				{Role: "thought", Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
+				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
-				{Role: "thought", Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model 1"}}},
+				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 		},
 		{
 			name: "Mixed scenario: User -> Model -> User(removed) -> User -> Model(FC) -> Thought -> Model(removed) -> Model",
 			input: []FrontendMessage{
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User A"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model A"}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User B (removed)"}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User C"}}},
-				{Role: "model", Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
-				{Role: "thought", Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model D"}}}, // This is not a function response
+				{Type: TypeUserText, Parts: []Part{{Text: "User A"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model A"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User B (removed)"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User C"}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: "tool"}}}},
+				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model D"}}}, // This is not a function response
 			},
 			expected: []FrontendMessage{
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User A"}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model A"}}},
-				{Role: "user", Type: TypeText, Parts: []Part{{Text: "User C"}}},
-				{Role: "thought", Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
-				{Role: "model", Type: TypeText, Parts: []Part{{Text: "Model D"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User A"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model A"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User C"}}},
+				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model D"}}},
 			},
 		},
 	}
@@ -1353,8 +1353,7 @@ func TestApplyCurationRules(t *testing.T) {
 
 			for i := range curated {
 				// Compare relevant fields for FrontendMessage
-				if curated[i].Role != tt.expected[i].Role ||
-					curated[i].Type != tt.expected[i].Type ||
+				if curated[i].Type != tt.expected[i].Type ||
 					(len(curated[i].Parts) > 0 && len(tt.expected[i].Parts) > 0 && curated[i].Parts[0].Text != tt.expected[i].Parts[0].Text) ||
 					(len(curated[i].Parts) > 0 && len(tt.expected[i].Parts) > 0 && curated[i].Parts[0].FunctionCall != nil && tt.expected[i].Parts[0].FunctionCall != nil && curated[i].Parts[0].FunctionCall.Name != tt.expected[i].Parts[0].FunctionCall.Name) ||
 					(len(curated[i].Parts) > 0 && len(tt.expected[i].Parts) > 0 && curated[i].Parts[0].FunctionResponse != nil && tt.expected[i].Parts[0].FunctionResponse != nil && curated[i].Parts[0].FunctionResponse.Name != tt.expected[i].Parts[0].FunctionResponse.Name) {

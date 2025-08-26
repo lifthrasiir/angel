@@ -114,10 +114,8 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
         chatMessage.parts[0] = {
           functionResponse: msg.parts[0].functionResponse,
         };
-      } else if (msg.type !== 'text') {
-        chatMessage.type = msg.type;
       } else {
-        chatMessage.type = msg.role;
+        chatMessage.type = msg.type;
       }
       return chatMessage;
     });
@@ -261,7 +259,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                   const envChangedJsonString = JSON.stringify(data.envChanged);
                   const envChangedMessage: ChatMessage = {
                     id: crypto.randomUUID(),
-                    role: 'system',
                     type: 'env_changed',
                     parts: [{ text: envChangedJsonString }],
                     sessionId: data.sessionId,
@@ -294,7 +291,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 const [functionName, argsJson] = splitOnceByNewline(rest);
                 addMessage({
                   id: messageId,
-                  role: 'model',
                   parts: [
                     {
                       functionCall: {
@@ -309,7 +305,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 const [messageId, functionResponseJson] = splitOnceByNewline(eventData);
                 addMessage({
                   id: messageId,
-                  role: 'user',
                   parts: [{ functionResponse: JSON.parse(functionResponseJson) }],
                   type: 'function_response',
                 });
@@ -317,7 +312,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 const [messageId, thoughtText] = splitOnceByNewline(eventData);
                 addMessage({
                   id: messageId,
-                  role: 'thought',
                   parts: [{ text: thoughtText }],
                   type: 'thought',
                 });

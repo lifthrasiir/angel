@@ -22,14 +22,14 @@ func TestBranchingLogic(t *testing.T) {
 		}
 
 		// Message 1
-		msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "Message 1", Type: "text"}
+		msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "Message 1", Type: "user"}
 		msg1ID, err := AddMessageToSession(context.Background(), testDB, msg1)
 		if err != nil {
 			t.Fatalf("Failed to add message 1: %v", err)
 		}
 
 		// Message 2
-		msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg1ID, Role: "model", Text: "Message 2", Type: "text"}
+		msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg1ID, Text: "Message 2", Type: "model"}
 		msg2ID, err := AddMessageToSession(context.Background(), testDB, msg2)
 		if err != nil {
 			t.Fatalf("Failed to add message 2: %v", err)
@@ -40,7 +40,7 @@ func TestBranchingLogic(t *testing.T) {
 		}
 
 		// Message 3
-		msg3 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg2ID, Role: "user", Text: "Message 3", Type: "text"}
+		msg3 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg2ID, Text: "Message 3", Type: "user"}
 		msg3ID, err := AddMessageToSession(context.Background(), testDB, msg3)
 		if err != nil {
 			t.Fatalf("Failed to add message 3: %v", err)
@@ -81,12 +81,12 @@ func TestBranchingLogic(t *testing.T) {
 		}
 
 		// Add messages to the original session
-		firstMsg := Message{SessionID: originalSessionId, BranchID: originalPrimaryBranchID, Role: "user", Text: "First message", Type: "text"}
+		firstMsg := Message{SessionID: originalSessionId, BranchID: originalPrimaryBranchID, Text: "First message", Type: "user"}
 		firstMsgID, err := AddMessageToSession(context.Background(), testDB, firstMsg)
 		if err != nil {
 			t.Fatalf("Failed to add first message: %v", err)
 		}
-		msgToBranchFrom := Message{SessionID: originalSessionId, BranchID: originalPrimaryBranchID, ParentMessageID: &firstMsgID, Role: "user", Text: "Message to branch from", Type: "text"}
+		msgToBranchFrom := Message{SessionID: originalSessionId, BranchID: originalPrimaryBranchID, ParentMessageID: &firstMsgID, Text: "Message to branch from", Type: "user"}
 		msgIDToBranchFrom, err := AddMessageToSession(context.Background(), testDB, msgToBranchFrom)
 		if err != nil {
 			t.Fatalf("Failed to add message to branch from: %v", err)
@@ -167,7 +167,7 @@ func TestBranchingLogic(t *testing.T) {
 		}
 
 		// Create a new branch
-		msgToBranchFrom := Message{SessionID: sessionId, BranchID: originalPrimaryBranchID, Role: "user", Text: "Message to branch from for primary branch test", Type: "text"}
+		msgToBranchFrom := Message{SessionID: sessionId, BranchID: originalPrimaryBranchID, Text: "Message to branch from for primary branch test", Type: "user"}
 		msgIDToBranchFrom, err := AddMessageToSession(context.Background(), testDB, msgToBranchFrom)
 		if err != nil {
 			t.Fatalf("Failed to add message to branch from for primary branch test: %v", err)
@@ -213,14 +213,14 @@ func TestBranchingLogic(t *testing.T) {
 
 		// 1. Create linear message flow
 		// Message 1 (user)
-		msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "User message 1", Type: "text"}
+		msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "User message 1", Type: "user"}
 		msg1ID, err := AddMessageToSession(context.Background(), testDB, msg1)
 		if err != nil {
 			t.Fatalf("Failed to add msg1: %v", err)
 		}
 
 		// Message 2 (model)
-		msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg1ID, Role: "model", Text: "Model message 2", Type: "text"}
+		msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg1ID, Text: "Model message 2", Type: "model"}
 		msg2ID, err := AddMessageToSession(context.Background(), testDB, msg2)
 		if err != nil {
 			t.Fatalf("Failed to add msg2: %v", err)
@@ -228,7 +228,7 @@ func TestBranchingLogic(t *testing.T) {
 		UpdateMessageChosenNextID(testDB, msg1ID, &msg2ID)
 
 		// Message 3 (thought) - should be discarded by GetSessionHistoryContext
-		msg3 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg2ID, Role: "thought", Text: "Thought message 3", Type: "text"}
+		msg3 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg2ID, Text: "Thought message 3", Type: "thought"}
 		msg3ID, err := AddMessageToSession(context.Background(), testDB, msg3)
 		if err != nil {
 			t.Fatalf("Failed to add msg3: %v", err)
@@ -236,7 +236,7 @@ func TestBranchingLogic(t *testing.T) {
 		UpdateMessageChosenNextID(testDB, msg2ID, &msg3ID)
 
 		// Message 4 (user)
-		msg4 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg3ID, Role: "user", Text: "User message 4", Type: "text"}
+		msg4 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg3ID, Text: "User message 4", Type: "user"}
 		msg4ID, err := AddMessageToSession(context.Background(), testDB, msg4)
 		if err != nil {
 			t.Fatalf("Failed to add msg4: %v", err)
@@ -245,7 +245,7 @@ func TestBranchingLogic(t *testing.T) {
 
 		// Message 5 (compression) - should affect GetSessionHistoryContext
 		compressionText := fmt.Sprintf("%d\nSummary of messages up to msg4", msg4ID)
-		msg5 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg4ID, Role: "model", Text: compressionText, Type: "compression"}
+		msg5 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg4ID, Text: compressionText, Type: "compression"}
 		msg5ID, err := AddMessageToSession(context.Background(), testDB, msg5)
 		if err != nil {
 			t.Fatalf("Failed to add msg5: %v", err)
@@ -253,7 +253,7 @@ func TestBranchingLogic(t *testing.T) {
 		UpdateMessageChosenNextID(testDB, msg4ID, &msg5ID)
 
 		// Message 6 (model) - after compression
-		msg6 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg5ID, Role: "model", Text: "Model message 6 (after compression)", Type: "text"}
+		msg6 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg5ID, Text: "Model message 6 (after compression)", Type: "model"}
 		msg6ID, err := AddMessageToSession(context.Background(), testDB, msg6)
 		if err != nil {
 			t.Fatalf("Failed to add msg6: %v", err)
@@ -261,7 +261,7 @@ func TestBranchingLogic(t *testing.T) {
 		UpdateMessageChosenNextID(testDB, msg5ID, &msg6ID)
 
 		// Message 7 (user)
-		msg7 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg6ID, Role: "user", Text: "User message 7", Type: "text"}
+		msg7 := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &msg6ID, Text: "User message 7", Type: "user"}
 		msg7ID, err := AddMessageToSession(context.Background(), testDB, msg7)
 		if err != nil {
 			t.Fatalf("Failed to add msg7: %v", err)
@@ -278,7 +278,7 @@ func TestBranchingLogic(t *testing.T) {
 		// For this test, we'll manually add messages to the new branch.
 
 		// Message A (new branch, user) - parent is msg4
-		msgA := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msg4ID, Role: "user", Text: "User message A (new branch)", Type: "text"}
+		msgA := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msg4ID, Text: "User message A (new branch)", Type: "user"}
 		msgAID, err := AddMessageToSession(context.Background(), testDB, msgA)
 		if err != nil {
 			t.Fatalf("Failed to add msgA: %v", err)
@@ -287,7 +287,7 @@ func TestBranchingLogic(t *testing.T) {
 		UpdateMessageChosenNextID(testDB, msg4ID, &msgAID)
 
 		// Message B (new branch, model)
-		msgB := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgAID, Role: "model", Text: "Model message B (new branch)", Type: "text"}
+		msgB := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgAID, Text: "Model message B (new branch)", Type: "model"}
 		msgBID, err := AddMessageToSession(context.Background(), testDB, msgB)
 		if err != nil {
 			t.Fatalf("Failed to add msgB: %v", err)
@@ -295,7 +295,7 @@ func TestBranchingLogic(t *testing.T) {
 		UpdateMessageChosenNextID(testDB, msgAID, &msgBID)
 
 		// Message C (new branch, thought) - should be discarded by GetSessionHistoryContext
-		msgC := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgBID, Role: "thought", Text: "Thought message C (new branch)", Type: "text"}
+		msgC := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgBID, Text: "Thought message C (new branch)", Type: "thought"}
 		msgCID, err := AddMessageToSession(context.Background(), testDB, msgC)
 		if err != nil {
 			t.Fatalf("Failed to add msgC: %v", err)
@@ -303,7 +303,7 @@ func TestBranchingLogic(t *testing.T) {
 		UpdateMessageChosenNextID(testDB, msgBID, &msgCID)
 
 		// Message D (new branch, user)
-		msgD := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgCID, Role: "user", Text: "User message D (new branch)", Type: "text"}
+		msgD := Message{SessionID: sessionId, BranchID: newBranchID, ParentMessageID: &msgCID, Text: "User message D (new branch)", Type: "user"}
 		msgDID, err := AddMessageToSession(context.Background(), testDB, msgD)
 		if err != nil {
 			t.Fatalf("Failed to add msgD: %v", err)
@@ -453,12 +453,12 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create initial session: %v", err)
 		}
-		firstMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, Role: "user", Text: "First message for branching test", Type: "text"}
+		firstMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "First message for branching test", Type: "user"}
 		firstMessageID, err := AddMessageToSession(context.Background(), testDB, firstMessage)
 		if err != nil {
 			t.Fatalf("Failed to add first message: %v", err)
 		}
-		parentMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &firstMessageID, Role: "user", Text: "Message to branch from", Type: "text"}
+		parentMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &firstMessageID, Text: "Message to branch from", Type: "user"}
 		parentMessageID, err := AddMessageToSession(context.Background(), testDB, parentMessage)
 		if err != nil {
 			t.Fatalf("Failed to add parent message: %v", err)

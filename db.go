@@ -42,9 +42,8 @@ func createTables(db *sql.DB) error {
 		branch_id TEXT NOT NULL,
 		parent_message_id INTEGER,
 		chosen_next_id INTEGER,
-		role TEXT NOT NULL,
 		text TEXT NOT NULL,
-		type TEXT NOT NULL DEFAULT 'text',
+		type TEXT NOT NULL,
 		attachments TEXT, -- This will store JSON array of blob hashes
 		cumul_token_count INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

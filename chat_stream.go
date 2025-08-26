@@ -59,7 +59,7 @@ func streamLLMResponse(
 	}
 
 	for {
-		addMessageToCurrentSession := func(role, messageType, text string, cumulTokenCount *int) (messageID int, err error) {
+		addMessageToCurrentSession := func(messageType MessageType, text string, cumulTokenCount *int) (messageID int, err error) {
 			var parentMessageID *int
 			if lastAddedMessageID != 0 {
 				parentMessageID = &lastAddedMessageID
@@ -69,7 +69,6 @@ func streamLLMResponse(
 				BranchID:        initialState.PrimaryBranchID,
 				ParentMessageID: parentMessageID,
 				ChosenNextID:    nil,
-				Role:            role,
 				Text:            text,
 				Type:            messageType,
 				Attachments:     nil,
@@ -111,7 +110,7 @@ func streamLLMResponse(
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
-				if _, err := addMessageToCurrentSession(RoleModel, TypeModelError, errorMessage, nil); err != nil {
+				if _, err := addMessageToCurrentSession(TypeModelError, errorMessage, nil); err != nil {
 					log.Printf("Failed to add model error message to DB: %v", err)
 				}
 			}
@@ -165,7 +164,7 @@ func streamLLMResponse(
 					// Immediately broadcast function call
 					fc := *part.FunctionCall
 					fcJson, _ := json.Marshal(fc)
-					messageID, err := addMessageToCurrentSession(RoleModel, TypeFunctionCall, string(fcJson), nil)
+					messageID, err := addMessageToCurrentSession(TypeFunctionCall, string(fcJson), nil)
 					if err != nil {
 						log.Printf("Failed to save function call message: %v", err)
 						return fmt.Errorf("failed to save function call message: %w", err)
@@ -227,7 +226,7 @@ func streamLLMResponse(
 						t := lastUsageMetadata.PromptTokenCount
 						promptTokens = &t
 					}
-					messageID, err = addMessageToCurrentSession(RoleUser, TypeFunctionResponse, string(frJson), promptTokens)
+					messageID, err = addMessageToCurrentSession(TypeFunctionResponse, string(frJson), promptTokens)
 					if err != nil {
 						log.Printf("Failed to save function response message: %v", err)
 						return fmt.Errorf("failed to save function response message: %w", err)
@@ -253,7 +252,7 @@ func streamLLMResponse(
 						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
 					}
 
-					messageID, err := addMessageToCurrentSession(RoleThought, TypeThought, thoughtText, nil)
+					messageID, err := addMessageToCurrentSession(TypeThought, thoughtText, nil)
 					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
@@ -264,7 +263,7 @@ func streamLLMResponse(
 						// Initialize agentResponseText for the new model message
 						agentResponseText = ""
 						// Add the initial model message to DB with empty text
-						modelMessageID, err = addMessageToCurrentSession(RoleModel, TypeText, "", nil)
+						modelMessageID, err = addMessageToCurrentSession(TypeModelText, "", nil)
 						if err != nil {
 							log.Printf("Failed to add new model message to DB: %v", err)
 							return fmt.Errorf("failed to add new model message to DB: %w", err)
@@ -286,7 +285,7 @@ func streamLLMResponse(
 
 		addCancelErrorMessage := func() {
 			// Add a separate error message to the database
-			if _, err := addMessageToCurrentSession(RoleModel, TypeModelError, "user canceled request", nil); err != nil {
+			if _, err := addMessageToCurrentSession(TypeModelError, "user canceled request", nil); err != nil {
 				log.Printf("Failed to add error message to DB: %v", err)
 			}
 		}

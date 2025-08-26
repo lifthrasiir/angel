@@ -62,9 +62,9 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		// where it curates history before compression.
 		// We might need to refine this based on how gemini-cli's `getHistory(true)` works.
 		// For now, assuming simple text content.
-		if msg.Role == RoleUser || msg.Role == RoleModel {
+		if msg.Type.Curated() {
 			curatedHistory = append(curatedHistory, Content{
-				Role:  msg.Role,
+				Role:  msg.Type.Role(),
 				Parts: msg.Parts,
 			})
 		}
@@ -198,7 +198,6 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	compressionMsg := Message{
 		SessionID:       sessionID,
 		BranchID:        session.PrimaryBranchID,
-		Role:            RoleUser,
 		Type:            TypeCompression,
 		Text:            fmt.Sprintf("%d\n%s", *compressedUpToMessageID, extractedSummary),
 		ParentMessageID: compressionMsgParentID,
@@ -250,7 +249,6 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 			msg := allMessages[i]
 
 			var contentParts []Part
-			var contentRole string = msg.Role // Default role
 
 			switch msg.Type {
 			case TypeFunctionCall:
@@ -285,7 +283,6 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 					_, textAfter, found := strings.Cut(msg.Parts[0].Text, "\n")
 					if found {
 						contentParts = []Part{{Text: textAfter}} // XMLSummary is the second part
-						contentRole = RoleUser                   // Role for compression message is "user"
 					} else {
 						log.Printf("Warning: Malformed compression message text for message %s: %s", msg.ID, msg.Parts[0].Text)
 						continue // Skip if malformed
@@ -296,7 +293,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 				}
 			case TypeThought, TypeModelError:
 				continue // Ignore these types
-			default: // Handles "text" and other types
+			default: // Handles "user", "model" and other types
 				// Handle text parts from msg.Parts
 				if len(msg.Parts) > 0 {
 					for _, part := range msg.Parts {
@@ -321,7 +318,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 
 			if len(contentParts) > 0 {
 				combinedContentForTokenCount = append(combinedContentForTokenCount, Content{
-					Role:  contentRole,
+					Role:  msg.Type.Role(),
 					Parts: contentParts,
 				})
 			}

@@ -261,7 +261,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         messagesConsumed: j - currentIndex,
       };
     } else {
-      const isLastModelMessage = isLastMessage && currentMessage.role === 'model';
+      const isLastModelMessage =
+        isLastMessage &&
+        (['model', 'model_error', 'error', 'function_call'] as (string | undefined)[]).includes(currentMessage.type);
       return {
         element: (
           <>

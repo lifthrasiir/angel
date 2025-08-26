@@ -131,9 +131,8 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		BranchID:        primaryBranchID,
 		ParentMessageID: nil,
 		ChosenNextID:    nil,
-		Role:            RoleUser,
 		Text:            userMessage,
-		Type:            TypeText,
+		Type:            TypeUserText,
 		Attachments:     requestBody.Attachments,
 		CumulTokenCount: nil,
 		Model:           modelToUse,
@@ -334,7 +333,6 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 			BranchID:        primaryBranchID,
 			ParentMessageID: parentMessageID, // Insert before user message
 			ChosenNextID:    nil,
-			Role:            RoleUser,
 			Text:            string(envChangedJSON),
 			Type:            TypeEnvChanged,
 			Attachments:     nil,
@@ -365,9 +363,8 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		BranchID:        primaryBranchID,
 		ParentMessageID: parentMessageID,
 		ChosenNextID:    nil,
-		Role:            RoleUser,
 		Text:            userMessage,
-		Type:            TypeText,
+		Type:            TypeUserText,
 		Attachments:     requestBody.Attachments,
 		CumulTokenCount: nil,
 		Model:           modelToUse,
@@ -683,7 +680,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the updated message's role, type, parent_message_id, and branch_id to validate branching and create new branch
-	updatedRole, updatedType, updatedParentMessageID, updatedBranchID, err := GetMessageDetails(db, requestBody.UpdatedMessageID)
+	updatedType, updatedParentMessageID, updatedBranchID, err := GetMessageDetails(db, requestBody.UpdatedMessageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "Updated message not found", http.StatusNotFound)
@@ -695,7 +692,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate that the updated message is a user message of type 'text'
-	if updatedRole != RoleUser || updatedType != TypeText {
+	if updatedType != TypeUserText {
 		http.Error(w, "Branching is only allowed from user messages of type 'text'.", http.StatusBadRequest)
 		return
 	}
@@ -733,9 +730,8 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		BranchID:        newBranchID,
 		ParentMessageID: &branchFromMessageID,
 		ChosenNextID:    nil,
-		Role:            RoleUser,
 		Text:            requestBody.NewMessageText,
-		Type:            TypeText,
+		Type:            TypeUserText,
 		Attachments:     nil,
 		CumulTokenCount: nil,
 		Model:           "", // Model will be inferred or set later
@@ -1013,7 +1009,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		}
 
 		contents = append(contents, Content{
-			Role:  fm.Role,
+			Role:  fm.Type.Role(),
 			Parts: parts,
 		})
 	}
@@ -1110,7 +1106,6 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 			BranchID:        branchId,
 			ParentMessageID: &lastMessageIDFromDB,
 			ChosenNextID:    nil,
-			Role:            RoleUser, // Function responses are from the user's perspective
 			Text:            string(frJson),
 			Type:            TypeFunctionResponse,
 			Attachments:     nil,
@@ -1211,7 +1206,6 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		BranchID:        branchId,
 		ParentMessageID: &lastMessageIDFromDB,
 		ChosenNextID:    nil,
-		Role:            RoleUser, // Function responses are from the user's perspective
 		Text:            string(frJson),
 		Type:            TypeFunctionResponse,
 		Attachments:     nil,
@@ -1291,13 +1285,13 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 
 		// Rule 1: Remove consecutive user text messages
 		// If current is user text and next is user text (ignoring thoughts/errors in between)
-		if currentMsg.Role == RoleUser && currentMsg.Type == TypeText {
+		if currentMsg.Type == TypeUserText {
 			nextUserTextIndex := -1
 			for j := i + 1; j < len(messages); j++ {
 				if messages[j].Type == TypeThought {
 					continue // Ignore thoughts and errors for continuity
 				}
-				if messages[j].Role == RoleUser && messages[j].Type == TypeText {
+				if messages[j].Type == TypeUserText {
 					nextUserTextIndex = j
 					break
 				}
@@ -1312,13 +1306,13 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 
 		// Rule 2: Remove function_call if not followed by function_response
 		// If current is model function_call
-		if currentMsg.Role == RoleModel && currentMsg.Type == TypeFunctionCall {
+		if currentMsg.Type == TypeFunctionCall {
 			foundResponse := false
 			for j := i + 1; j < len(messages); j++ {
 				if messages[j].Type == TypeThought {
 					continue // Ignore thoughts and errors for continuity
 				}
-				if messages[j].Role == RoleUser && messages[j].Type == TypeFunctionResponse {
+				if messages[j].Type == TypeFunctionResponse {
 					foundResponse = true
 					break
 				}
