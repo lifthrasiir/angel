@@ -81,6 +81,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID  string           `json:"workspaceId"`
 		Model        string           `json:"model"`
 		FetchLimit   int              `json:"fetchLimit"`
+		InitialRoots []string         `json:"initialRoots"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
@@ -115,7 +116,29 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		modelToUse = DefaultGeminiModel // Default model for new sessions
 	}
 
-	// Create session with primary_branch_id
+	// Handle InitialRoots if provided
+	if len(requestBody.InitialRoots) > 0 {
+		// Set initial roots as generation 0 environment
+		err := SetInitialSessionEnv(db, sessionId, requestBody.InitialRoots)
+		if err != nil {
+			log.Printf("newSessionAndMessage: Failed to set initial session environment: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to set initial session environment: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Calculate EnvChanged from empty to initial roots
+		rootsChanged, err := calculateRootsChanged([]string{}, requestBody.InitialRoots)
+		if err != nil {
+			log.Printf("newSessionAndMessage: Failed to calculate roots changed for initial roots: %v", err)
+			// Non-fatal, continue without adding env change to prompt
+		} else {
+			envChanged := EnvChanged{Roots: &rootsChanged}
+			envChangeContext := GetEnvChangeContext(envChanged)
+			systemPrompt = systemPrompt + "\n" + envChangeContext // Append to system prompt
+		}
+	}
+
+	// Create session with primary_branch_id (moved after InitialRoots handling)
 	primaryBranchID, err := CreateSession(db, sessionId, systemPrompt, requestBody.WorkspaceID)
 	if err != nil {
 		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
@@ -652,6 +675,39 @@ func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, wsWithSessions)
+}
+
+// calculateNewSessionEnvChangedHandler calculates EnvChanged for a new session.
+// It expects newRoots as a JSON string in the query parameter.
+func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request) {
+	// No authentication needed for this endpoint as it's for pre-session calculation
+	// and doesn't modify any session state.
+
+	newRootsJSON := r.URL.Query().Get("newRoots")
+	if newRootsJSON == "" {
+		http.Error(w, "newRoots query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	var newRoots []string
+	if err := json.Unmarshal([]byte(newRootsJSON), &newRoots); err != nil {
+		log.Printf("calculateNewSessionEnvChangedHandler: Failed to unmarshal newRoots: %v", err)
+		http.Error(w, "Invalid newRoots JSON", http.StatusBadRequest)
+		return
+	}
+
+	// oldRoots is always empty for a new session's initial environment calculation
+	oldRoots := []string{}
+
+	rootsChanged, err := calculateRootsChanged(oldRoots, newRoots)
+	if err != nil {
+		log.Printf("calculateNewSessionEnvChangedHandler: Failed to calculate roots changed: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to calculate environment changes: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	envChanged := EnvChanged{Roots: &rootsChanged}
+	sendJSONResponse(w, envChanged)
 }
 
 // createBranchHandler creates a new branch from a given parent message.

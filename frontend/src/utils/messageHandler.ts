@@ -30,6 +30,7 @@ export const sendMessage = async (
   workspaceId?: string,
   primaryBranchId?: string,
   model?: string,
+  initialRoots?: string[],
 ) => {
   let apiUrl = '';
   let requestBody: any = {};
@@ -51,6 +52,9 @@ export const sendMessage = async (
     };
     if (workspaceId) {
       requestBody.workspaceId = workspaceId;
+    }
+    if (initialRoots) {
+      requestBody.initialRoots = initialRoots;
     }
   }
 

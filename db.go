@@ -461,15 +461,15 @@ func AddSessionEnv(db DbOrTx, sessionID string, roots []string) (int, error) {
 
 // GetSessionEnv retrieves a session environment by session ID and generation.
 func GetSessionEnv(db DbOrTx, sessionID string, generation int) ([]string, error) {
-	if generation <= 0 {
-		// The initial environment.
-		return []string{}, nil
-	}
-
 	var rootsJSON string
 	err := db.QueryRow("SELECT roots FROM session_envs WHERE session_id = ? AND generation = ?", sessionID, generation).Scan(&rootsJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			// If generation 0 is requested and not found, it means no initial environment was set.
+			// In this specific case, we return empty roots as per the original intent for "empty env".
+			if generation == 0 {
+				return []string{}, nil
+			}
 			return nil, fmt.Errorf("session environment not found for session %s and generation %d", sessionID, generation)
 		}
 		return nil, fmt.Errorf("failed to get session environment: %w", err)
@@ -825,6 +825,31 @@ func DeleteShellCommand(db DbOrTx, id string) error {
 	_, err := db.Exec("DELETE FROM shell_commands WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete shell command with ID %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetInitialSessionEnv sets the initial session environment (generation 0).
+// This should only be called once for a new session.
+func SetInitialSessionEnv(db DbOrTx, sessionID string, roots []string) error {
+	rootsJSON, err := json.Marshal(roots)
+	if err != nil {
+		return fmt.Errorf("failed to marshal roots for initial environment: %w", err)
+	}
+
+	// Check if generation 0 already exists
+	var existingRootsJSON string
+	err = db.QueryRow("SELECT roots FROM session_envs WHERE session_id = ? AND generation = 0", sessionID).Scan(&existingRootsJSON)
+	if err == nil {
+		return fmt.Errorf("initial session environment (generation 0) already exists for session %s", sessionID)
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("failed to check for existing initial session environment: %w", err)
+	}
+
+	_, err = db.Exec("INSERT INTO session_envs (session_id, generation, roots) VALUES (?, 0, ?)", sessionID, string(rootsJSON))
+	if err != nil {
+		return fmt.Errorf("failed to set initial session environment: %w", err)
 	}
 	return nil
 }

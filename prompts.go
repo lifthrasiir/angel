@@ -132,34 +132,37 @@ func GetEnvChangeContext(envChanged EnvChanged) string {
 	var builder strings.Builder
 
 	if envChanged.Roots != nil {
-		builder.WriteString("Working environment has changed to include following directories.\n\n")
-
 		if len(envChanged.Roots.Added) > 0 {
+			builder.WriteString("The following directories are now available from your working environment. You are also given the contents of each directory, which is current as of the following user message.\n\n")
 			for _, added := range envChanged.Roots.Added {
-				builder.WriteString(fmt.Sprintf("# %s\n", added.Path))
+				builder.WriteString(fmt.Sprintf("## New directory `%s`\n", added.Path))
 				formatRootContents(&builder, added.Contents, "") // No initial indent for root contents
 				builder.WriteString("\n")
 			}
 		}
 
 		if len(envChanged.Roots.Removed) > 0 {
-			builder.WriteString("# Paths no longer available:\n")
+			builder.WriteString("## Paths no longer available:\n")
+			builder.WriteString("The following directories are now unavailable from your working environment. You can no longer access these directories.\n\n")
 			for _, removed := range envChanged.Roots.Removed {
 				builder.WriteString(fmt.Sprintf("- %s\n", removed.Path))
 			}
 			builder.WriteString("\n")
 		}
 
-		builder.WriteString("---\n\n")
-		builder.WriteString("You are given the following per-directory directives.\n")
-		if len(envChanged.Roots.Removed) > 0 {
-			builder.WriteString("Forget all prior per-directory directives in advance.\n\n")
-		}
-
-		for _, prompt := range envChanged.Roots.Prompts {
-			builder.WriteString(fmt.Sprintf("# %s\n", prompt.Path))
-			builder.WriteString(fmt.Sprintf("%s\n", prompt.Prompt))
+		if len(envChanged.Roots.Prompts) > 0 {
+			builder.WriteString("---\n\n")
+			builder.WriteString("You are also given the following per-directory directives.\n")
+			if len(envChanged.Roots.Removed) > 0 {
+				builder.WriteString("Forget all prior per-directory directives in advance.\n")
+			}
 			builder.WriteString("\n")
+
+			for _, prompt := range envChanged.Roots.Prompts {
+				builder.WriteString(fmt.Sprintf("## Directives from `%s`\n", prompt.Path))
+				builder.WriteString(fmt.Sprintf("%s\n", prompt.Prompt))
+				builder.WriteString("\n")
+			}
 		}
 	}
 

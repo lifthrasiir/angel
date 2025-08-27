@@ -27,6 +27,7 @@ export const hasMoreMessagesAtom = atom(false);
 export const isPriorSessionLoadCompleteAtom = atom(false);
 export const pendingConfirmationAtom = atom<string | null>(null);
 export const temporaryEnvChangeMessageAtom = atom<ChatMessage | null>(null);
+export const pendingRootsAtom = atom<string[]>([]);
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(
@@ -95,6 +96,7 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(selectedModelAtom, null);
   set(pendingConfirmationAtom, null);
   set(temporaryEnvChangeMessageAtom, null);
+  set(pendingRootsAtom, []);
 });
 
 // Derived atom for setting session name

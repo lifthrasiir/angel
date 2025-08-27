@@ -7,8 +7,9 @@ import {
   isPickingDirectoryAtom,
   temporaryEnvChangeMessageAtom,
   primaryBranchIdAtom,
+  pendingRootsAtom, // Add this import
 } from '../atoms/chatAtoms';
-import type { ChatMessage, RootsChanged } from '../types/chat';
+import type { ChatMessage, RootsChanged, EnvChanged } from '../types/chat'; // Added EnvChanged
 import { fetchSessions } from '../utils/sessionManager';
 import { callNativeDirectoryPicker, ResultType, PickDirectoryAPIResponse } from '../utils/dialogHelpers';
 
@@ -19,6 +20,8 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const setIsPickingDirectory = useSetAtom(isPickingDirectoryAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
+  const setPendingRoots = useSetAtom(pendingRootsAtom); // Add this line
+  const currentPendingRoots = useAtomValue(pendingRootsAtom); // Get current value for calculations
 
   const runCompress = async () => {
     setStatusMessage('Compressing chat history...');
@@ -53,84 +56,132 @@ export const useCommandProcessor = (sessionId: string | null) => {
     }
   };
 
-  const updateRoots = async (command: string, roots: string[]): Promise<RootsChanged | undefined> => {
+  // updateRoots function - MODIFIED
+  const updateRoots = async (command: string, rootsToProcess: string[]): Promise<RootsChanged | undefined> => {
     setStatusMessage(`Updating exposed directories...`);
-    try {
-      const sessionResponse = await apiFetch(`/api/chat/${sessionId}`);
-      if (!sessionResponse.ok) {
-        const errorData = await sessionResponse.json();
-        throw new Error(errorData.message || 'Failed to fetch current session roots');
-      }
-      const sessionData = await sessionResponse.json();
-      let currentRoots: string[] = sessionData.roots || [];
+
+    // Determine if we are in a new session context (sessionId is null)
+    const isNewSessionContext = !sessionId;
+
+    let targetRoots: string[] = [];
+    if (isNewSessionContext) {
+      // For new session context, update pendingRootsAtom
+      let newPendingRoots: string[] = [...currentPendingRoots];
 
       if (command === 'unexpose') {
-        if (roots.length === 0) {
-          // If no arguments for unexpose, clear all roots
-          roots = [];
+        if (rootsToProcess.length === 0) {
+          newPendingRoots = [];
         } else {
-          // Remove specified roots from current roots
-          const rootsToRemove = new Set(roots);
-          roots = currentRoots.filter((root) => !rootsToRemove.has(root));
+          const rootsToRemove = new Set(rootsToProcess);
+          newPendingRoots = newPendingRoots.filter((root) => !rootsToRemove.has(root));
         }
       } else {
         // command === 'expose'
-        // Add new roots to current roots, avoiding duplicates
-        const newRootsSet = new Set([...currentRoots, ...roots]);
-        roots = Array.from(newRootsSet);
+        const newRootsSet = new Set([...newPendingRoots, ...rootsToProcess]);
+        newPendingRoots = Array.from(newRootsSet);
       }
+      setPendingRoots(newPendingRoots);
+      targetRoots = newPendingRoots; // Use newPendingRoots for calculation
 
-      const response = await apiFetch(`/api/chat/${sessionId}/roots`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ roots }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || `Failed to ${command} directories`);
-      }
-      const rootsChanged: RootsChanged = await response.json();
-      setStatusMessage(
-        rootsChanged.value.length === 0 ? 'No directories are exposed.' : `Directories ${command}d successfully.`,
-      );
-
-      // Refresh the session list (to update roots displayed in UI if any)
-      if (workspaceId) {
-        try {
-          const workspaceWithSessions = await fetchSessions(workspaceId);
-          setSessions(workspaceWithSessions.sessions);
-        } catch (refreshError) {
-          console.error('Failed to refresh sessions after roots update:', refreshError);
+      // Call backend to get EnvChanged object for new session context
+      try {
+        const response = await apiFetch(
+          `/api/chat/new/envChanged?newRoots=${encodeURIComponent(JSON.stringify(targetRoots))}`,
+        );
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to calculate environment changes');
         }
+        const envChanged: EnvChanged = await response.json();
+
+        // Create the actual EnvChanged message
+        const newTemporaryEnvChangedMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          type: 'env_changed',
+          parts: [{ text: JSON.stringify(envChanged) }], // Store the EnvChanged object as JSON string
+          sessionId: sessionId || 'new', // Use 'new' for temporary message if no session ID
+          branchId: primaryBranchId,
+        };
+        setTemporaryEnvChangeMessage(newTemporaryEnvChangedMessage);
+        return envChanged.roots; // Return rootsChanged part for consistency
+      } catch (error: any) {
+        setStatusMessage(`Failed to calculate environment changes: ${error.message}`);
+        console.error('Failed to calculate environment changes:', error);
+        setTemporaryEnvChangeMessage(null);
+        return undefined;
       }
-      return rootsChanged;
-    } catch (error: any) {
-      setStatusMessage(`${command} failed: ${error.message}`);
-      console.error(`${command} failed:`, error);
-      return undefined;
+    } else {
+      // For existing session context, use current session roots
+      // Fetch current roots from backend for accurate calculation
+      try {
+        const sessionResponse = await apiFetch(`/api/chat/${sessionId}`);
+        if (!sessionResponse.ok) {
+          const errorData = await sessionResponse.json();
+          throw new Error(errorData.message || 'Failed to fetch current session roots');
+        }
+        const sessionData = await sessionResponse.json();
+        let currentSessionRoots: string[] = sessionData.roots || [];
+
+        if (command === 'unexpose') {
+          if (rootsToProcess.length === 0) {
+            targetRoots = [];
+          } else {
+            const rootsToRemove = new Set(rootsToProcess);
+            targetRoots = currentSessionRoots.filter((root) => !rootsToRemove.has(root));
+          }
+        } else {
+          // command === 'expose'
+          const newRootsSet = new Set([...currentSessionRoots, ...rootsToProcess]);
+          targetRoots = Array.from(newRootsSet);
+        }
+
+        const response = await apiFetch(`/api/chat/${sessionId}/roots`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ roots: targetRoots }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || `Failed to ${command} directories`);
+        }
+        const rootsChanged: RootsChanged = await response.json();
+        setStatusMessage(
+          rootsChanged.value.length === 0 ? 'No directories are exposed.' : `Directories ${command}d successfully.`,
+        );
+
+        // Refresh the session list (to update roots displayed in UI if any)
+        if (workspaceId) {
+          try {
+            const workspaceWithSessions = await fetchSessions(workspaceId);
+            setSessions(workspaceWithSessions.sessions);
+          } catch (refreshError) {
+            console.error('Failed to refresh sessions after roots update:', refreshError);
+          }
+        }
+        return rootsChanged;
+      } catch (error: any) {
+        setStatusMessage(`${command} failed: ${error.message}`);
+        console.error(`${command} failed:`, error);
+        return undefined;
+      }
     }
   };
 
   const runExposeOrUnexpose = async (command: string, args: string) => {
-    if (!sessionId) {
-      setStatusMessage('Error: No active session to run commands.');
-      return;
-    }
-
     // Create a temporary message to show "Applying changes..."
     const tempMessage: ChatMessage = {
       id: crypto.randomUUID(),
       parts: [{ text: `Applying ${command} changes...` }],
       type: 'system',
-      sessionId: sessionId,
+      sessionId: sessionId || 'new', // Use 'new' for temporary message if no session ID
       branchId: primaryBranchId,
     };
     setTemporaryEnvChangeMessage(tempMessage);
 
-    let rootsToUpdate: string[] = [];
+    let rootsToProcess: string[] = [];
     if (command === 'expose' && !args) {
       // If /expose is called without arguments, trigger native directory picker
       const data: PickDirectoryAPIResponse = await callNativeDirectoryPicker(setIsPickingDirectory, setStatusMessage);
@@ -138,7 +189,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
       switch (data.result) {
         case ResultType.Success:
           if (data.selectedPath) {
-            rootsToUpdate = [data.selectedPath];
+            rootsToProcess = [data.selectedPath];
           } else {
             setStatusMessage('Error: No path returned from directory picker.');
             setTemporaryEnvChangeMessage(null);
@@ -161,46 +212,31 @@ export const useCommandProcessor = (sessionId: string | null) => {
     } else {
       // Existing logic for expose/unexpose with arguments or unexpose without arguments
       if (args) {
-        rootsToUpdate = args
+        rootsToProcess = args
           .split(',')
           .map((path) => path.trim())
           .filter((path) => path.length > 0);
       } else if (command === 'unexpose') {
         // unexpose without arguments means clear all roots
-        rootsToUpdate = [];
+        rootsToProcess = [];
       }
     }
 
-    const rootsChanged = await updateRoots(command, rootsToUpdate);
-    if (rootsChanged) {
-      // Convert EnvChanged object to JSON string for storage in message.parts[0].text
-      const envChangedJsonString = JSON.stringify({ roots: rootsChanged });
-
-      // Create the actual EnvChanged message
-      const newTemporaryEnvChangedMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        type: 'env_changed',
-        parts: [{ text: envChangedJsonString }],
-        sessionId: sessionId,
-        branchId: primaryBranchId,
-      };
-      setTemporaryEnvChangeMessage(newTemporaryEnvChangedMessage);
-    } else {
-      setTemporaryEnvChangeMessage(null);
-    }
+    // Call the unified updateRoots function
+    await updateRoots(command, rootsToProcess);
   };
 
   const runCommand = async (command: string, args: string) => {
     setStatusMessage(null); // Clear previous status messages
     const fullCommand = `/${command}${args ? ` ${args}` : ''}`;
 
-    if (!sessionId) {
-      setStatusMessage('Error: No active session to run commands.');
-      return;
-    }
-
     switch (command) {
       case 'compress':
+        if (!sessionId) {
+          // compress requires an active session
+          setStatusMessage('Error: No active session to run /compress.');
+          return;
+        }
         runCompress();
         break;
       case 'expose':

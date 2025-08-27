@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai'; // Added useAtomValue
 import type { ChatMessage, FileAttachment } from '../types/chat';
 import { convertFilesToAttachments } from '../utils/fileHandler';
 import { processStreamResponse, type StreamEventHandlers, sendMessage } from '../utils/messageHandler';
@@ -22,6 +22,7 @@ import {
   updateMessageTokenCountAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
+  pendingRootsAtom, // Add this import
 } from '../atoms/chatAtoms';
 import { ModelInfo } from '../api/models';
 
@@ -62,6 +63,8 @@ export const useMessageSending = ({
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
+  const pendingRoots = useAtomValue(pendingRootsAtom); // Add this line
+  const setPendingRoots = useSetAtom(pendingRootsAtom); // Add this line for setter
 
   const commonHandlers = {
     onMessage: (messageId: string, text: string) => {
@@ -116,7 +119,7 @@ export const useMessageSending = ({
       addErrorMessage(errorData);
     },
     // onAcknowledge is handled separately as it depends on userMessage.id
-    onAcknowledge: () => {},
+    onAcknowledge: () => { },
     onTokenCount: (messageId: string, cumulTokenCount: number) => {
       updateMessageTokenCount({ messageId, cumulTokenCount });
     },
@@ -166,6 +169,7 @@ export const useMessageSending = ({
         workspaceId,
         primaryBranchId,
         selectedModel?.name,
+        chatSessionId === null ? pendingRoots : undefined,
       );
 
       if (response.status === 401) {
@@ -193,6 +197,7 @@ export const useMessageSending = ({
       addErrorMessage('Error sending message or receiving stream.');
     } finally {
       setProcessingStartTime(null);
+      setPendingRoots([]);
     }
   };
 

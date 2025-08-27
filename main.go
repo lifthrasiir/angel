@@ -140,6 +140,7 @@ func InitRouter(router *mux.Router) {
 
 	router.HandleFunc("/api/chat", listSessionsByWorkspaceHandler).Methods("GET")
 	router.HandleFunc("/api/chat", newSessionAndMessage).Methods("POST")
+	router.HandleFunc("/api/chat/new/envChanged", calculateNewSessionEnvChangedHandler).Methods("GET")
 	router.HandleFunc("/api/chat/{sessionId}", chatMessage).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}", loadChatSession).Methods("GET")
 	router.HandleFunc("/api/chat/{sessionId}/name", updateSessionNameHandler).Methods("POST")
