@@ -10,14 +10,12 @@ import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
 import GlobalDialogOverlay from './components/GlobalDialogOverlay';
-import { registerAllToolComponents } from './utils/registerToolComponents';
+
+import './components/tools/index.ts';
 
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
-
-// Register all tool components at application startup
-registerAllToolComponents();
 
 const router = createBrowserRouter([
   {

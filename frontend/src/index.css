@@ -8,6 +8,9 @@
   --color-system-light: #ffe0b2;
   --color-system-dark: #ff9800;
   --color-system-verydark: #cc7a00;
+  --color-combined-light: #e6e6fa;
+  --color-combined-dark: #d8bfd8;
+  --color-combined-verydark: #800080;
 }
 
 html,
@@ -23,7 +26,8 @@ body {
   overflow: hidden; /* Prevent scrollbars */
 }
 
-.chat-message-container {
+.chat-message-container,
+.function-pair-combined-container {
   display: flex;
   flex-direction: column;
   margin-bottom: 10px;
@@ -61,6 +65,10 @@ body {
 .agent-error-message,
 .agent-thought {
   align-items: flex-start;
+}
+
+.function-pair-combined-container {
+  align-items: center;
 }
 
 .chat-bubble {
@@ -143,19 +151,22 @@ textarea {
   border-radius: 0;
 }
 
-/* New styles for function call/response title bar */
 .function-title-bar {
-  padding: 5px 15px; /* Padding inside the title bar */
-  margin: -10px -15px 10px -15px !important; /* Negative top margin to pull it up, negative side margins to extend to bubble edges, and margin-bottom for spacing */
+  padding: 5px 15px 10px 15px !important; /* padding-bottom 추가 */
+  margin: -10px -15px 10px -15px !important;
   border-top-left-radius: 15px;
   border-top-right-radius: 15px;
-  font-weight: bold; /* Keep bold for title */
-  color: #333; /* Default text color for title */
+  font-weight: bold;
+  color: #333;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.function-title-bar.expanded {
+  padding-bottom: 0 !important;
 }
 
 .function-title-bar:last-child {
@@ -173,6 +184,11 @@ textarea {
 
 .function-response-title-bar {
   background-color: var(--color-user-dark); /* Darker green for function response title */
+}
+
+.function-combined-title-bar {
+  background-color: var(--color-combined-dark);
+  cursor: pointer;
 }
 
 /* Override for function messages where the title bar handles the top spacing */
@@ -255,6 +271,12 @@ textarea {
   border: 2px solid var(--color-agent-dark);
   font-style: italic;
   color: #555;
+}
+
+.function-pair-combined-container .chat-bubble {
+  background-color: var(--color-combined-light);
+  color: #333;
+  border: 2px solid var(--color-combined-dark);
 }
 
 .thought-circle {
@@ -613,7 +635,7 @@ textarea {
 .function-pair-bar {
   flex: 1;
   height: 5px;
-  background-color: lightgray;
+  background-color: var(--color-combined-dark);
   margin: calc(0.7em + 5px) auto auto auto;
 }
 

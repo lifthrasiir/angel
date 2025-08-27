@@ -1,15 +1,19 @@
 import React from 'react';
-import { FunctionCall, FunctionResponse } from '../../types/chat';
 import { validateExactKeys } from '../../utils/functionMessageValidation';
+import {
+  registerFunctionCallComponent,
+  registerFunctionResponseComponent,
+  registerFunctionPairComponent,
+  FunctionCallMessageProps,
+  FunctionResponseMessageProps,
+  FunctionPairComponentProps,
+} from '../../utils/functionMessageRegistry';
 
-interface WriteFileCallProps {
-  functionCall: FunctionCall;
-  messageId?: string;
-}
+const argsKeys = { file_path: 'string', content: 'string' } as const;
 
-export const WriteFileCall: React.FC<WriteFileCallProps> = ({ functionCall }) => {
+const WriteFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall }) => {
   const args = functionCall.args;
-  if (!validateExactKeys(args, { file_path: 'string', content: 'string' } as const)) {
+  if (!validateExactKeys(args, argsKeys)) {
     return null;
   }
 
@@ -23,14 +27,11 @@ export const WriteFileCall: React.FC<WriteFileCallProps> = ({ functionCall }) =>
   );
 };
 
-interface WriteFileResponseProps {
-  functionResponse: FunctionResponse;
-  messageId?: string;
-}
+const responseKeys = { status: 'string', unified_diff: 'string' } as const;
 
-export const WriteFileResponse: React.FC<WriteFileResponseProps> = ({ functionResponse }) => {
+const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({ functionResponse }) => {
   const response = functionResponse.response;
-  if (!validateExactKeys(response, { status: 'string', unified_diff: 'string' } as const)) {
+  if (!validateExactKeys(response, responseKeys)) {
     return null;
   }
   if (response.status !== 'success') {
@@ -44,3 +45,28 @@ export const WriteFileResponse: React.FC<WriteFileResponseProps> = ({ functionRe
     </>
   );
 };
+
+const WriteFilePair: React.FC<FunctionPairComponentProps> = ({ functionCall, functionResponse, onToggleView }) => {
+  const args = functionCall.args;
+  const response = functionResponse.response;
+
+  if (!validateExactKeys(args, argsKeys) || !validateExactKeys(response, responseKeys)) {
+    return null;
+  }
+  if (response.status != 'success') return null;
+
+  return (
+    <div className="function-pair-combined-container">
+      <div className="chat-bubble">
+        <div className="function-title-bar function-combined-title-bar" onClick={onToggleView}>
+          write_file: <code>{args.file_path}</code>
+        </div>
+        {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
+      </div>
+    </div>
+  );
+};
+
+registerFunctionCallComponent('write_file', WriteFileCall);
+registerFunctionResponseComponent('write_file', WriteFileResponse);
+registerFunctionPairComponent('write_file', WriteFilePair);

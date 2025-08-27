@@ -1,27 +1,38 @@
 import React from 'react';
 import { FunctionCall, FunctionResponse } from '../types/chat';
 
-interface FunctionCallMessageProps {
+export interface FunctionCallMessageProps {
   functionCall: FunctionCall;
   messageId?: string;
 }
 
-interface FunctionResponseMessageProps {
+export interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
   messageId?: string;
 }
 
+export interface FunctionPairComponentProps {
+  functionCall: FunctionCall;
+  functionResponse: FunctionResponse;
+  callMessageId?: string;
+  responseMessageId?: string;
+  onToggleView: () => void;
+}
+
 type FunctionCallComponent = React.ComponentType<FunctionCallMessageProps>;
 type FunctionResponseComponent = React.ComponentType<FunctionResponseMessageProps>;
+type FunctionPairComponent = React.ComponentType<FunctionPairComponentProps>;
 
 interface FunctionMessageRegistry {
   callComponents: Map<string, FunctionCallComponent>;
   responseComponents: Map<string, FunctionResponseComponent>;
+  pairComponents: Map<string, FunctionPairComponent>;
 }
 
 const registry: FunctionMessageRegistry = {
   callComponents: new Map(),
   responseComponents: new Map(),
+  pairComponents: new Map(),
 };
 
 export const registerFunctionCallComponent = (functionName: string, component: FunctionCallComponent) => {
@@ -32,10 +43,18 @@ export const registerFunctionResponseComponent = (functionName: string, componen
   registry.responseComponents.set(functionName, component);
 };
 
+export const registerFunctionPairComponent = (functionName: string, component: FunctionPairComponent) => {
+  registry.pairComponents.set(functionName, component);
+};
+
 export const getFunctionCallComponent = (functionName: string) => {
   return registry.callComponents.get(functionName);
 };
 
 export const getFunctionResponseComponent = (functionName: string) => {
   return registry.responseComponents.get(functionName);
+};
+
+export const getFunctionPairComponent = (functionName: string) => {
+  return registry.pairComponents.get(functionName);
 };
