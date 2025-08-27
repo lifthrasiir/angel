@@ -48,7 +48,9 @@ func createTables(db *sql.DB) error {
 		cumul_token_count INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		model TEXT NOT NULL,
-		generation INTEGER DEFAULT 0
+		generation INTEGER DEFAULT 0,
+		state TEXT NOT NULL DEFAULT '', -- Opaque state that has to be relayed to the LLM provider
+		aux TEXT NOT NULL DEFAULT ''    -- Angel-internal metadata that doesn't go to the LLM provider
 	);
 
 	CREATE TABLE IF NOT EXISTS oauth_tokens (
@@ -129,6 +131,8 @@ func migrateDB(db *sql.DB) error {
 	// We will attempt to add and log if it fails, assuming it's due to column existence.
 	alterTableStmts := []string{
 		`ALTER TABLE messages ADD COLUMN generation INTEGER DEFAULT 0;`,
+		`ALTER TABLE messages ADD COLUMN state TEXT;`,
+		`ALTER TABLE messages ADD COLUMN aux TEXT;`,
 	}
 
 	for _, stmt := range alterTableStmts {

@@ -44,6 +44,8 @@ type Message struct {
 	Model                   string           `json:"model,omitempty"`
 	CompressedUpToMessageID *int             `json:"compressed_up_to_message_id,omitempty"`
 	Generation              int              `json:"generation"`
+	State                   string           `json:"state,omitempty"`
+	Aux                     string           `json:"aux,omitempty"`
 }
 
 // DbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
@@ -108,10 +110,10 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 	result, err := db.Exec(`
 		INSERT INTO messages (
 			session_id, branch_id, parent_message_id, chosen_next_id, text,
-			type, attachments, cumul_token_count, model, generation)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			type, attachments, cumul_token_count, model, generation, state, aux)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Text,
-		msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model, msg.Generation)
+		msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model, msg.Generation, msg.State, msg.Aux)
 	if err != nil {
 		log.Printf("AddMessageToSession: Failed to add message to session: %v", err)
 		return 0, fmt.Errorf("failed to add message to session: %w", err)
@@ -189,6 +191,7 @@ func createFrontendMessage(
 	attachmentsJSON sql.NullString,
 	possibleNextIDsAndBranchesStr string,
 	ignoreBeforeLastCompression bool,
+	includeState bool,
 ) (FrontendMessage, *int, error) {
 	if attachmentsJSON.Valid {
 		if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
@@ -251,20 +254,25 @@ func createFrontendMessage(
 		Model:           m.Model,
 	}
 
+	thoughtSignature := m.State
+	if !includeState {
+		thoughtSignature = ""
+	}
+
 	switch m.Type {
 	case TypeFunctionCall:
 		var fc FunctionCall
 		if err := json.Unmarshal([]byte(m.Text), &fc); err != nil {
 			log.Printf("Failed to unmarshal FunctionCall for message %d: %v", m.ID, err)
 		} else {
-			fm.Parts = []Part{{FunctionCall: &fc}}
+			fm.Parts = []Part{{FunctionCall: &fc, ThoughtSignature: thoughtSignature}}
 		}
 	case TypeFunctionResponse:
 		var fr FunctionResponse
 		if err := json.Unmarshal([]byte(m.Text), &fr); err != nil {
 			log.Printf("Failed to unmarshal FunctionResponse for message %d: %v", m.ID, err)
 		} else {
-			fm.Parts = []Part{{FunctionResponse: &fr}}
+			fm.Parts = []Part{{FunctionResponse: &fr, ThoughtSignature: thoughtSignature}}
 		}
 	case TypeCompression:
 		// For compression messages, the text is in the format "ID\nSummary"
@@ -279,17 +287,17 @@ func createFrontendMessage(
 			// If ignoreBeforeLastCompression is true, only show the summary part.
 			// Otherwise, show the full text (ID\nSummary).
 			if ignoreBeforeLastCompression {
-				fm.Parts = []Part{{Text: textAfter}}
+				fm.Parts = []Part{{Text: textAfter, ThoughtSignature: thoughtSignature}}
 			} else {
-				fm.Parts = []Part{{Text: m.Text}}
+				fm.Parts = []Part{{Text: m.Text, ThoughtSignature: thoughtSignature}}
 			}
 		} else {
 			log.Printf("Warning: Malformed compression message text for message %d: %s", m.ID, m.Text)
-			fm.Parts = []Part{{Text: m.Text}} // Fallback to raw text
+			fm.Parts = []Part{{Text: m.Text, ThoughtSignature: thoughtSignature}} // Fallback to raw text
 		}
 	default:
 		if m.Text != "" {
-			parts = append(parts, Part{Text: m.Text})
+			parts = append(parts, Part{Text: m.Text, ThoughtSignature: thoughtSignature})
 		}
 		fm.Parts = parts // Assign the accumulated parts to fm.Parts
 	}
@@ -382,7 +390,7 @@ func getSessionHistoryInternal(
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
 					m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
-					coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
+					m.state, coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
 				FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
 				GROUP BY m.id
 				HAVING m.branch_id = ? AND m.id <= ?
@@ -402,7 +410,7 @@ func getSessionHistoryInternal(
 				if err := rows.Scan(
 					&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
 					&m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model,
-					&possibleNextIDsAndBranchesStr,
+					&m.State, &possibleNextIDsAndBranchesStr,
 				); err != nil {
 					return fmt.Errorf("failed to scan message: %w", err)
 				}
@@ -419,7 +427,8 @@ func getSessionHistoryInternal(
 					continue // Skip thought messages
 				}
 
-				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, ignoreBeforeLastCompression)
+				// discardThought implies includeState because state summarizes prior thoughts.
+				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, ignoreBeforeLastCompression, discardThoughts)
 				if err != nil {
 					return fmt.Errorf("failed to create frontend message: %w", err)
 				}

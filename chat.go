@@ -963,7 +963,10 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		var parts []Part
 		// Add text part if present
 		if len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
-			parts = append(parts, Part{Text: fm.Parts[0].Text})
+			parts = append(parts, Part{
+				Text:             fm.Parts[0].Text,
+				ThoughtSignature: fm.Parts[0].ThoughtSignature,
+			})
 		}
 
 		// Add attachments as InlineData
@@ -987,9 +990,15 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 
 		// Handle function calls and responses (these should override text/attachments for their specific message types)
 		if fm.Type == TypeFunctionCall && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
-			parts = append(parts, Part{FunctionCall: fm.Parts[0].FunctionCall})
+			parts = append(parts, Part{
+				FunctionCall:     fm.Parts[0].FunctionCall,
+				ThoughtSignature: fm.Parts[0].ThoughtSignature,
+			})
 		} else if fm.Type == TypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
-			parts = append(parts, Part{FunctionResponse: fm.Parts[0].FunctionResponse})
+			parts = append(parts, Part{
+				FunctionResponse: fm.Parts[0].FunctionResponse,
+				ThoughtSignature: fm.Parts[0].ThoughtSignature,
+			})
 		} else if (fm.Type == TypeSystemPrompt || fm.Type == TypeEnvChanged) && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
 			// System_prompt should expand to *two* `Content`s
 			prompt := fm.Parts[0].Text
@@ -1005,18 +1014,22 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 			contents = append(contents,
 				Content{
 					Role: RoleModel,
-					Parts: []Part{
-						{FunctionCall: &FunctionCall{Name: "new_system_prompt", Args: map[string]interface{}{}}},
-					},
+					Parts: []Part{{
+						FunctionCall: &FunctionCall{
+							Name: "new_system_prompt",
+							Args: map[string]interface{}{},
+						},
+						ThoughtSignature: fm.Parts[0].ThoughtSignature,
+					}},
 				},
 				Content{
 					Role: RoleUser,
-					Parts: []Part{
-						{FunctionResponse: &FunctionResponse{
+					Parts: []Part{{
+						FunctionResponse: &FunctionResponse{
 							Name:     "new_system_prompt",
 							Response: map[string]interface{}{"prompt": prompt},
-						}},
-					},
+						},
+					}},
 				},
 			)
 			continue
