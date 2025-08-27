@@ -28,8 +28,6 @@ type InitialState struct {
 	EnvChanged             *EnvChanged       `json:"envChanged,omitempty"` // Added EnvChanged field
 }
 
-// EnvChanged represents the structure for environment change messages.
-
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
@@ -1121,7 +1119,6 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Add the function response message to the session
-
 		denialResponseID, err := AddMessageToSession(r.Context(), db, Message{
 			SessionID:       sessionId,
 			BranchID:        branchId,
@@ -1154,10 +1151,10 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		addSseWriter(sessionId, sseW)
 		defer removeSseWriter(sessionId, sseW)
 
-		denialResponseMapJson, err := json.Marshal(denialResponseMap)
+		denialResponseMapJson, err := json.Marshal(FunctionReplyPayload{Response: denialResponseMap})
 		if err != nil {
 			log.Printf("confirmBranchHandler: Failed to marshal denial response map for SSE: %v", err)
-			denialResponseMapJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+			denialResponseMapJson = fmt.Appendf(nil, `{"response": {"error": "%v"}}`, err)
 		}
 		formattedData := fmt.Sprintf("%d\n%s\n%s", denialResponseID, functionName, string(denialResponseMapJson))
 		sseW.sendServerEvent(EventFunctionReply, formattedData)
@@ -1254,10 +1251,13 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	addSseWriter(sessionId, sseW)
 	defer removeSseWriter(sessionId, sseW)
 
-	functionResponseValueJson, err := json.Marshal(functionResponseValue)
+	functionResponseValueJson, err := json.Marshal(FunctionReplyPayload{
+		Response:    functionResponseValue.Value,
+		Attachments: functionResponseValue.Attachments,
+	})
 	if err != nil {
 		log.Printf("confirmBranchHandler: Failed to marshal function response value for SSE: %v", err)
-		functionResponseValueJson = []byte(fmt.Sprintf(`{"error": "%v"}`, err))
+		functionResponseValueJson = fmt.Appendf(nil, `{"response": {"error": "%v"}}`, err)
 	}
 	formattedData := fmt.Sprintf("%d\n%s\n%s", functionResponseID, fc.Name, string(functionResponseValueJson))
 	sseW.sendServerEvent(EventFunctionReply, formattedData)

@@ -88,12 +88,18 @@ export const useMessageSending = ({
       addMessage(message);
       setLastAutoDisplayedThoughtId(null);
     },
-    onFunctionResponse: (messageId: string, functionName: string, functionResponse: any) => {
+    onFunctionResponse: (
+      messageId: string,
+      functionName: string,
+      functionResponse: any,
+      attachments: FileAttachment[],
+    ) => {
       const message: ChatMessage = {
         id: messageId,
         parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
         type: 'function_response',
         model: selectedModel?.name,
+        attachments: attachments,
       };
       addMessage(message);
       setLastAutoDisplayedThoughtId(null);

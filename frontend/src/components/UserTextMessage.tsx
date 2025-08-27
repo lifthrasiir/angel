@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import type { FileAttachment } from '../types/chat';
 import { measureContentHeight } from '../utils/measurementUtils';
-import FileAttachmentPreview from './FileAttachmentPreview';
+import FileAttachmentList from './FileAttachmentList'; // Import AttachmentList
 
 interface UserTextMessageProps {
   text?: string;
@@ -43,21 +43,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({ text, attachments, me
         style={showToggle && !isExpanded ? { maxHeight: '30vh', overflowY: 'auto' } : {}}
       >
         {text}
-        {attachments && attachments.length > 0 && (
-          <div className="user-message-attachments-container">
-            <div className="user-message-attachments-list">
-              {attachments.map((file, index) => (
-                <FileAttachmentPreview
-                  key={index}
-                  file={file}
-                  messageId={messageId}
-                  sessionId={sessionId}
-                  blobIndex={index}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
         {showToggle && (
           <div className="user-message-toggle-button" onClick={toggleExpand}>
             {isExpanded ? <FaChevronCircleUp /> : <FaChevronCircleDown />}

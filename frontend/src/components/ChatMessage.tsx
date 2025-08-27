@@ -42,6 +42,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
             functionResponse={functionResponse}
             messageInfo={messageInfoComponent}
             messageId={message.id}
+            attachments={attachments}
           />
         );
     } else if (type === 'user') {

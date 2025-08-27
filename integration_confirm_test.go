@@ -225,13 +225,13 @@ func TestConfirmationApproval(t *testing.T) {
 	}
 
 	// Verify the content of the function reply (should reflect the modified data)
-	var replyMap map[string]interface{}
-	err = json.Unmarshal([]byte(functionReplyContent), &replyMap)
+	var reply FunctionReplyPayload
+	err = json.Unmarshal([]byte(functionReplyContent), &reply)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal function reply content: %v", err)
 	}
 
-	if status, ok := replyMap["status"]; !ok || status != "success" {
+	if status, ok := reply.Response["status"]; !ok || status != "success" {
 		t.Errorf("Expected function reply status 'success', got %v", status)
 	}
 

@@ -16,12 +16,18 @@ type ToolHandlerParams struct {
 	ConfirmationReceived bool
 }
 
+// ToolHandlerResults contains the result of a tool's handler function, including its value and any attachments.
+type ToolHandlerResults struct {
+	Value       map[string]interface{}
+	Attachments []FileAttachment
+}
+
 // ToolDefinition represents a tool with its schema and handler function.
 type ToolDefinition struct {
 	Name        string
 	Description string
 	Parameters  *Schema
-	Handler     func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error)
+	Handler     func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error)
 }
 
 // Define all available tools here
@@ -151,7 +157,7 @@ func convertJSONSchemaToGeminiSchema(jsonSchema *jsonschema.Schema) *Schema {
 }
 
 // CallToolFunction executes the handler for the given function call.
-func CallToolFunction(ctx context.Context, fc FunctionCall, params ToolHandlerParams) (map[string]interface{}, error) {
+func CallToolFunction(ctx context.Context, fc FunctionCall, params ToolHandlerParams) (ToolHandlerResults, error) {
 	// Check if it's a local tool first
 	if toolDef, ok := availableTools[fc.Name]; ok {
 		return toolDef.Handler(ctx, fc.Args, params)
@@ -173,14 +179,15 @@ func CallToolFunction(ctx context.Context, fc FunctionCall, params ToolHandlerPa
 					}
 					if tool.Name == originalToolName {
 						log.Printf("Dispatching tool call '%s' (originally '%s') to MCP server '%s'", fc.Name, originalToolName, mcpName)
-						return mcpManager.DispatchToolCall(context.Background(), mcpName, originalToolName, fc.Args)
+						val, err := mcpManager.DispatchToolCall(context.Background(), mcpName, originalToolName, fc.Args)
+						return ToolHandlerResults{Value: val}, err
 					}
 				}
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("unknown tool: %s", fc.Name)
+	return ToolHandlerResults{}, fmt.Errorf("unknown tool: %s", fc.Name)
 }
 
 // EnsureKnownKeys checks if all keys in 'args' are present in 'keys'.

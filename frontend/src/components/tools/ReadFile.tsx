@@ -9,6 +9,7 @@ import {
   FunctionPairComponentProps,
 } from '../../utils/functionMessageRegistry';
 import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
+import FileAttachmentList from '../FileAttachmentList';
 
 const argsKeys = { file_path: 'string' } as const;
 
@@ -25,23 +26,38 @@ const ReadFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall }) => {
   );
 };
 
-const responseKeys = { content: 'string' } as const;
+const responseKeys = { content: 'string', note: 'string?' } as const;
 
-const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({ functionResponse }) => {
+const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
+  functionResponse,
+  messageId,
+  attachments,
+  sessionId,
+}) => {
   const response = functionResponse.response;
   if (!validateExactKeys(response, responseKeys)) {
     return null;
   }
 
   return (
-    <>
-      <div className="function-title-bar function-response-title-bar">File contents</div>
-      <pre>{response.content}</pre>
-    </>
+    <div className="read-file-response">
+      <pre className="function-code-block">{response.content}</pre>
+      {response.note && <p>{response.note}</p>}
+      {attachments && attachments.length > 0 && (
+        <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+      )}
+    </div>
   );
 };
 
-const ReadFilePair: React.FC<FunctionPairComponentProps> = ({ functionCall, functionResponse, onToggleView }) => {
+const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
+  functionCall,
+  functionResponse,
+  onToggleView,
+  attachments,
+  sessionId,
+  responseMessageId,
+}) => {
   const args = functionCall.args;
   const response = functionResponse.response;
   const [isExpanded, setIsExpanded] = useState(false);
@@ -78,7 +94,15 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({ functionCall, func
             {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
           </span>
         </div>
-        {isExpanded && <pre>{response.content}</pre>}
+        {isExpanded && (
+          <div className="function-pair-expanded-content">
+            <pre className="function-code-block">{response.content}</pre>
+            {response.note && <p>{response.note}</p>}
+            {attachments && attachments.length > 0 && (
+              <FileAttachmentList attachments={attachments} messageId={responseMessageId} sessionId={sessionId} />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

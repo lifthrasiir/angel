@@ -32,6 +32,12 @@ const (
 	EventError               EventType = 'E' // Error message
 )
 
+// FunctionReplyPayload defines the structure for the EventFunctionReply payload
+type FunctionReplyPayload struct {
+	Response    map[string]interface{} `json:"response"`
+	Attachments []FileAttachment       `json:"attachments,omitempty"`
+}
+
 // sseWriter wraps http.ResponseWriter and http.Flusher to handle client disconnections gracefully.
 //
 // Connection cleanup sequence analysis from Go stdlib net/http/server.go:

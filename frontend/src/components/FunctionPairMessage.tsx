@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
-import { FunctionCall, FunctionResponse } from '../types/chat';
+import { FileAttachment, FunctionCall, FunctionResponse } from '../types/chat';
 import { getFunctionPairComponent } from '../utils/functionMessageRegistry';
 
 interface FunctionPairMessageProps {
@@ -11,6 +11,8 @@ interface FunctionPairMessageProps {
   responseMessageId?: string;
   callMessageInfo?: React.ReactNode;
   responseMessageInfo?: React.ReactNode;
+  responseAttachments?: FileAttachment[];
+  sessionId?: string;
 }
 
 const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
@@ -20,6 +22,8 @@ const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
   responseMessageId,
   callMessageInfo,
   responseMessageInfo,
+  responseAttachments,
+  sessionId,
 }) => {
   const CombinedComponent = getFunctionPairComponent(functionCall.name);
   const [showCombinedView, setShowCombinedView] = useState(!!CombinedComponent);
@@ -35,6 +39,8 @@ const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
         functionResponse={functionResponse}
         callMessageId={callMessageId}
         responseMessageId={responseMessageId}
+        attachments={responseAttachments}
+        sessionId={sessionId}
         onToggleView={handleToggleView}
       />
     );
@@ -54,6 +60,8 @@ const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
         functionResponse={functionResponse}
         messageId={responseMessageId}
         messageInfo={responseMessageInfo}
+        attachments={responseAttachments}
+        sessionId={sessionId}
       />
     </div>
   );

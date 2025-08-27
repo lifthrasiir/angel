@@ -1,5 +1,5 @@
 import React from 'react';
-import { FunctionCall, FunctionResponse } from '../types/chat';
+import { FunctionCall, FunctionResponse, FileAttachment } from '../types/chat';
 
 export interface FunctionCallMessageProps {
   functionCall: FunctionCall;
@@ -9,6 +9,8 @@ export interface FunctionCallMessageProps {
 export interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
   messageId?: string;
+  attachments?: FileAttachment[];
+  sessionId?: string;
 }
 
 export interface FunctionPairComponentProps {
@@ -17,6 +19,8 @@ export interface FunctionPairComponentProps {
   callMessageId?: string;
   responseMessageId?: string;
   onToggleView: () => void;
+  attachments?: FileAttachment[];
+  sessionId?: string;
 }
 
 type FunctionCallComponent = React.ComponentType<FunctionCallMessageProps>;

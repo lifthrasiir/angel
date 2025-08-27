@@ -224,6 +224,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               responseMessageId={messages[currentIndex + 1].id}
               callMessageInfo={callMessageInfoComponent}
               responseMessageInfo={responseMessageInfoComponent}
+              responseAttachments={messages[currentIndex + 1].attachments}
+              sessionId={currentMessage.sessionId}
             />
             {isLastMessage && processingStartTime !== null && (
               <ProcessingIndicator

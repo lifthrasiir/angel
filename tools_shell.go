@@ -146,23 +146,23 @@ func updateCmdStateFromProcessState(db DbOrTx, cmdID string, execCmd *exec.Cmd) 
 }
 
 // RunShellCommandTool handles the run_shell_command tool call.
-func RunShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
+func RunShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
 	db, err := getDbFromContext(ctx) // Get DB from context
 	if err != nil {
-		return nil, fmt.Errorf("failed to get DB from context: %w", err)
+		return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context: %w", err)
 	}
 
 	if err := EnsureKnownKeys("run_shell_command", args, "command"); err != nil {
-		return nil, err
+		return ToolHandlerResults{}, err
 	}
 	commandStr, ok := args["command"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid command argument for run_shell_command")
+		return ToolHandlerResults{}, fmt.Errorf("invalid command argument for run_shell_command")
 	}
 
 	if !params.ConfirmationReceived {
 		// If not confirmed, return a confirmation request
-		return nil, &PendingConfirmation{
+		return ToolHandlerResults{}, &PendingConfirmation{
 			Data: map[string]interface{}{
 				"tool":    "run_shell_command",
 				"command": commandStr,
@@ -210,7 +210,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 	// Insert into DB immediately to ensure the record exists for updateCmdStateFromProcessState
 	if err := InsertShellCommand(db, cmdDB); err != nil {
 		cancel() // Cancel the command context on DB error
-		return nil, fmt.Errorf("failed to insert shell command into DB: %w", err)
+		return ToolHandlerResults{}, fmt.Errorf("failed to insert shell command into DB: %w", err)
 	}
 
 	// Use a channel to signal when the command goroutine finishes
@@ -250,14 +250,14 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		if finalCmd.ErrorMessage.Valid {
 			result["error_message"] = finalCmd.ErrorMessage.String
 		}
-		return result, nil
+		return ToolHandlerResults{Value: result}, nil
 	case <-time.After(InitialPollDelayInSeconds * time.Second):
 		// Command is still running after the initial delay, proceed with normal tracking
-		return map[string]interface{}{
+		return ToolHandlerResults{Value: map[string]interface{}{
 			"command_id":      cmdID,
 			"status":          "running",
 			"elapsed_seconds": InitialPollDelayInSeconds, // After initial wait
-		}, nil
+		}}, nil
 	}
 }
 
@@ -274,23 +274,23 @@ func getBranchShellLock(branchID string) *sync.Mutex {
 }
 
 // PollShellCommandTool handles the poll_shell_command tool call.
-func PollShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
+func PollShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
 	db, err := getDbFromContext(ctx) // Get DB from context
 	if err != nil {
-		return nil, fmt.Errorf("failed to get DB from context: %w", err)
+		return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context: %w", err)
 	}
 
 	if err := EnsureKnownKeys("poll_shell_command", args, "command_id"); err != nil {
-		return nil, err
+		return ToolHandlerResults{}, err
 	}
 	cmdID, ok := args["command_id"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid command_id argument for poll_shell_command")
+		return ToolHandlerResults{}, fmt.Errorf("invalid command_id argument for poll_shell_command")
 	}
 
 	cmdDB, err := GetShellCommandByID(db, cmdID)
 	if err != nil {
-		return nil, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
+		return ToolHandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
 	}
 
 	// If the command is still running, wait for the NextPollDelay
@@ -415,35 +415,35 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		}
 		result["elapsed_seconds"] = cmdDB.EndTime.Int64 - cmdDB.StartTime
 	}
-	return result, nil
+	return ToolHandlerResults{Value: result}, nil
 }
 
 // KillShellCommandTool handles the kill_shell_command tool call.
-func KillShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
+func KillShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
 	db, err := getDbFromContext(ctx) // Get DB from context
 	if err != nil {
-		return nil, fmt.Errorf("failed to get DB from context: %w", err)
+		return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context: %w", err)
 	}
 
 	if err := EnsureKnownKeys("kill_shell_command", args, "command_id"); err != nil {
-		return nil, err
+		return ToolHandlerResults{}, err
 	}
 	cmdID, ok := args["command_id"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid command_id argument for kill_shell_command")
+		return ToolHandlerResults{}, fmt.Errorf("invalid command_id argument for kill_shell_command")
 	}
 
 	cmdDB, err := GetShellCommandByID(db, cmdID)
 	if err != nil {
-		return nil, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
+		return ToolHandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
 	}
 
 	if cmdDB.Status != "running" {
-		return map[string]interface{}{
+		return ToolHandlerResults{Value: map[string]interface{}{
 			"command_id": cmdID,
 			"status":     cmdDB.Status,
 			"message":    fmt.Sprintf("Command %s is not running (status: %s). No action taken.", cmdID, cmdDB.Status),
-		}, nil
+		}}, nil
 	}
 
 	runningProcessesMutex.Lock()
@@ -461,11 +461,11 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		if err := UpdateShellCommand(db, *cmdDB); err != nil {
 			log.Printf("Error updating DB for missing command on kill attempt %s: %v", cmdID, err)
 		}
-		return map[string]interface{}{
+		return ToolHandlerResults{Value: map[string]interface{}{
 			"command_id": cmdID,
 			"status":     "failed",
 			"message":    "Command process not found in memory, status updated in DB.",
-		}, fmt.Errorf("command %s not found in memory", cmdID)
+		}}, fmt.Errorf("command %s not found in memory", cmdID)
 	}
 
 	// Attempt to kill the process
@@ -477,7 +477,7 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		if err := UpdateShellCommand(db, *cmdDB); err != nil {
 			log.Printf("Error updating DB for kill failure %s: %v", cmdID, err)
 		}
-		return nil, fmt.Errorf("failed to kill command %s: %w", cmdID, err)
+		return ToolHandlerResults{}, fmt.Errorf("failed to kill command %s: %w", cmdID, err)
 	}
 
 	// Update DB status to killed
@@ -502,10 +502,10 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 
 	log.Printf("Command ID %s (PID: %d) killed successfully.", cmdID, execCmd.Process.Pid)
 
-	return map[string]interface{}{
+	return ToolHandlerResults{Value: map[string]interface{}{
 		"command_id": cmdID,
 		"status":     "killed",
-	}, nil
+	}}, nil
 }
 
 var (

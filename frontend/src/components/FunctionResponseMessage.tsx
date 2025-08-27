@@ -3,19 +3,24 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import { measureContentHeight } from '../utils/measurementUtils';
 import PrettyJSON from './PrettyJSON';
-import { FunctionResponse } from '../types/chat';
+import { FunctionResponse, FileAttachment } from '../types/chat';
 import { getFunctionResponseComponent } from '../utils/functionMessageRegistry';
+import FileAttachmentList from './FileAttachmentList';
 
 interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
   messageInfo?: React.ReactNode;
   messageId?: string;
+  attachments?: FileAttachment[];
+  sessionId?: string;
 }
 
 const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
   functionResponse,
   messageInfo,
   messageId,
+  attachments,
+  sessionId,
 }) => {
   const CustomComponent = getFunctionResponseComponent(functionResponse.name);
 
@@ -24,7 +29,12 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
     return (
       <div id={messageId} className="chat-message-container user-message">
         <div className="chat-bubble function-message-bubble">
-          <CustomComponent functionResponse={functionResponse} messageId={messageId} />
+          <CustomComponent
+            functionResponse={functionResponse}
+            messageId={messageId}
+            attachments={attachments}
+            sessionId={sessionId}
+          />
         </div>
         {messageInfo}
       </div>
@@ -76,34 +86,35 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
   };
 
   const renderContent = () => {
-    switch (mode) {
-      case 'compact':
-        return (
-          <div id={messageId} className="chat-message-container user-message">
-            <div className="chat-bubble function-message-bubble" style={{ cursor: 'pointer' }} onClick={toggleMode}>
-              <div className="function-title-bar function-response-title-bar">{codeContent}</div>
+    return (
+      <div id={messageId} className="chat-message-container user-message">
+        <div className="chat-bubble function-message-bubble">
+          {/* Original function response rendering */}
+          {mode === 'compact' && (
+            <div
+              className="function-title-bar function-response-title-bar"
+              style={{ cursor: 'pointer' }}
+              onClick={toggleMode}
+            >
+              {codeContent}
             </div>
-            {messageInfo}
-          </div>
-        );
-      case 'collapsed':
-        return (
-          <div id={messageId} className="chat-message-container user-message">
-            <div className="chat-bubble function-message-bubble" style={{ cursor: 'pointer' }} onClick={toggleMode}>
-              <div className="function-title-bar function-response-title-bar">
+          )}
+          {mode === 'collapsed' && (
+            <>
+              <div
+                className="function-title-bar function-response-title-bar"
+                style={{ cursor: 'pointer' }}
+                onClick={toggleMode}
+              >
                 Function Response: {soleObjectKey && <code>{soleObjectKey}</code>}
               </div>
               <div ref={messageRef} className="function-message-content">
                 <PrettyJSON data={soleObjectKey ? responseData[soleObjectKey] : responseData} />
               </div>
-            </div>
-            {messageInfo}
-          </div>
-        );
-      case 'expanded':
-        return (
-          <div id={messageId} className="chat-message-container user-message">
-            <div className="chat-bubble function-message-bubble">
+            </>
+          )}
+          {mode === 'expanded' && (
+            <>
               <div
                 className="function-title-bar function-response-title-bar"
                 style={{ cursor: 'pointer' }}
@@ -123,13 +134,14 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
                   {mode === 'expanded' ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
                 </div>
               )}
-            </div>
-            {messageInfo}
-          </div>
-        );
-      default:
-        return null;
-    }
+            </>
+          )}
+
+          <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+        </div>
+        {messageInfo}
+      </div>
+    );
   };
 
   return <>{renderContent()}</>;

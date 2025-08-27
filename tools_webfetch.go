@@ -84,10 +84,10 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 }
 
 // executeWebFetchFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
-func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (map[string]interface{}, error) {
+func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
-		return nil, fmt.Errorf("no URL found in the prompt for fallback")
+		return ToolHandlerResults{}, fmt.Errorf("no URL found in the prompt for fallback")
 	}
 	urlToFetch := urls[0]
 
@@ -99,7 +99,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 
 	htmlContent, err := fetchWithTimeout(ctx, urlToFetch, URL_FETCH_TIMEOUT_MS*time.Millisecond)
 	if err != nil {
-		return nil, fmt.Errorf("Error during fallback fetch for %s: %v", urlToFetch, err)
+		return ToolHandlerResults{}, fmt.Errorf("Error during fallback fetch for %s: %v", urlToFetch, err)
 	}
 
 	textContent := html2text.HTML2Text(htmlContent)
@@ -119,21 +119,21 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 
 	oneShotResult, err := llmProvider.GenerateContentOneShot(ctx, sessionParams)
 	if err != nil {
-		return nil, fmt.Errorf("Error during LLM processing of fallback content: %v", err)
+		return ToolHandlerResults{}, fmt.Errorf("Error during LLM processing of fallback content: %v", err)
 	}
 
 	llmContent := oneShotResult.Text
 
-	return map[string]interface{}{
+	return ToolHandlerResults{Value: map[string]interface{}{
 		"llmContent":    llmContent,
 		"returnDisplay": fmt.Sprintf("Content for %s processed using fallback fetch.", urlToFetch),
-	}, nil
+	}}, nil
 }
 
-func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (map[string]interface{}, error) {
+func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
-		return nil, fmt.Errorf("the 'prompt' must contain at least one valid URL (starting with http:// or https://)")
+		return ToolHandlerResults{}, fmt.Errorf("the 'prompt' must contain at least one valid URL (starting with http:// or https://)")
 	}
 
 	// Check for private IP before calling LLM
@@ -185,25 +185,25 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, llmPr
 	}
 
 	// If no processing error, return the LLM's response
-	return map[string]interface{}{
+	return ToolHandlerResults{Value: map[string]interface{}{
 		"llmContent":    oneShotResult.Text,
 		"returnDisplay": "Content processed from prompt.",
-	}, nil
+	}}, nil
 }
 
 // WebFetchTool implements the handler for the web_fetch tool.
-func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (map[string]interface{}, error) {
+func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
 	if err := EnsureKnownKeys("web_fetch", args, "prompt"); err != nil {
-		return nil, err
+		return ToolHandlerResults{}, err
 	}
 	prompt, ok := args["prompt"].(string)
 	if !ok || strings.TrimSpace(prompt) == "" {
-		return nil, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
+		return ToolHandlerResults{}, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
 	}
 
 	llmProvider := CurrentProviders[params.ModelName]
 	if llmProvider == nil {
-		return nil, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s)", params.ModelName)
+		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s)", params.ModelName)
 	}
 
 	return executeWebFetch(ctx, prompt, params.ModelName, llmProvider)
