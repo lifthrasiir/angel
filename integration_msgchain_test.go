@@ -1297,15 +1297,30 @@ func TestApplyCurationRules(t *testing.T) {
 			},
 		},
 		{
-			name: "Consecutive user input with thought in between: User -> Thought -> User -> Model (first user removed)",
+			name: "Consecutive user input with thought in between: User -> Thought -> User -> Model (first user kept)",
 			input: []FrontendMessage{
-				{Type: TypeUserText, Parts: []Part{{Text: "User 1 (to be removed)"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 1"}}},
 				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
 				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
 				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
+				{Type: TypeUserText, Parts: []Part{{Text: "User 1"}}},
 				{Type: TypeThought, Parts: []Part{{Text: "Thinking..."}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+			},
+		},
+		{
+			name: "Consecutive user input with error in between: User -> Thought -> User -> Model (first user removed)",
+			input: []FrontendMessage{
+				{Type: TypeUserText, Parts: []Part{{Text: "User 1 (to be removed)"}}},
+				{Type: TypeError, Parts: []Part{{Text: "Canceled by user"}}},
+				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+			},
+			expected: []FrontendMessage{
+				{Type: TypeError, Parts: []Part{{Text: "Canceled by user"}}},
 				{Type: TypeUserText, Parts: []Part{{Text: "User 2"}}},
 				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},

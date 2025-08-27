@@ -1318,12 +1318,12 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 		currentMsg := messages[i]
 
 		// Rule 1: Remove consecutive user text messages
-		// If current is user text and next is user text (ignoring thoughts/errors in between)
+		// If current is user text and next is user text (ignoring errors in between)
 		if currentMsg.Type == TypeUserText {
 			nextUserTextIndex := -1
 			for j := i + 1; j < len(messages); j++ {
-				if messages[j].Type == TypeThought {
-					continue // Ignore thoughts and errors for continuity
+				if messages[j].Type == TypeError || messages[j].Type == TypeModelError {
+					continue // Ignore errors for continuity
 				}
 				if messages[j].Type == TypeUserText {
 					nextUserTextIndex = j
