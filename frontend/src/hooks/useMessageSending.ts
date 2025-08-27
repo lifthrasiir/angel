@@ -102,10 +102,27 @@ export const useMessageSending = ({
       setChatSessionId(sessionId);
       setSystemPrompt(systemPrompt);
       setPrimaryBranchId(primaryBranchId);
-      setSessions((prevSessions) => [
-        { id: sessionId, name: '', isEditing: false, last_updated_at: new Date().toISOString() },
-        ...prevSessions,
-      ]);
+      setSessions((prevSessions) => {
+        // Check if the session already exists
+        const existingSessionIndex = prevSessions.findIndex((s) => s.id === sessionId);
+
+        if (existingSessionIndex !== -1) {
+          // If it exists, update it (e.g., last_updated_at)
+          const updatedSessions = [...prevSessions];
+          updatedSessions[existingSessionIndex] = {
+            ...updatedSessions[existingSessionIndex],
+            last_updated_at: new Date().toISOString(),
+            name: updatedSessions[existingSessionIndex].name || '',
+          };
+          return updatedSessions;
+        } else {
+          // If it doesn't exist, add it
+          return [
+            { id: sessionId, name: '', isEditing: false, last_updated_at: new Date().toISOString() },
+            ...prevSessions,
+          ];
+        }
+      });
       navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
     },
     onSessionNameUpdate: (sessionId: string, newName: string) => {
@@ -119,7 +136,7 @@ export const useMessageSending = ({
       addErrorMessage(errorData);
     },
     // onAcknowledge is handled separately as it depends on userMessage.id
-    onAcknowledge: () => { },
+    onAcknowledge: () => {},
     onTokenCount: (messageId: string, cumulTokenCount: number) => {
       updateMessageTokenCount({ messageId, cumulTokenCount });
     },
@@ -156,6 +173,7 @@ export const useMessageSending = ({
       addMessage(userMessage);
       setInputMessage('');
       setSelectedFiles([]);
+      setTemporaryEnvChangeMessage(null);
 
       if (chatSessionId === null) {
         setIsSystemPromptEditing(false);

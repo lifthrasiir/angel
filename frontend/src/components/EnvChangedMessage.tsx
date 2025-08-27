@@ -45,7 +45,7 @@ const EnvChangedMessage: React.FC<EnvChangedMessageProps> = ({ envChanged, messa
             {roots.added.map((addedRoot: RootAdded, index: number) => (
               <div key={index} style={{ marginBottom: '8px' }}>
                 <p style={{ fontFamily: 'monospace', fontSize: '0.875rem', fontWeight: 'bold' }}># {addedRoot.path}</p>
-                <RootContentsDisplay contents={addedRoot.contents} indent="  " />
+                <RootContentsDisplay contents={addedRoot.contents ?? []} indent="  " />
               </div>
             ))}
           </div>

@@ -206,6 +206,12 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
   useEffect(() => {
     const loadChatSession = async () => {
       const currentSessionId = urlSessionId;
+
+      // If a message is currently being processed, do not load the session history again.
+      if (processingStartTime !== null) {
+        return;
+      }
+
       if (location.pathname.endsWith('/new') && !currentSessionId) {
         resetChatSessionState();
         if (urlWorkspaceId) {
@@ -355,7 +361,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
     };
 
     loadChatSession();
-  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, primaryBranchId]);
+  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, primaryBranchId, processingStartTime]);
 
   return { loadMoreMessages };
 };
