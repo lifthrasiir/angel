@@ -95,12 +95,12 @@ export interface RootRemoved {
   path: string;
 }
 
-export interface RootContents {
-  path: string;
-  isDir: boolean;
-  children?: RootContents[];
-  hasMore?: boolean;
-}
+export type RootContents =
+  | string
+  | {
+      name: string;
+      children: RootContents[];
+    };
 
 export interface RootPrompt {
   path: string;

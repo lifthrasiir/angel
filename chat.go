@@ -9,8 +9,6 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,39 +29,6 @@ type InitialState struct {
 }
 
 // EnvChanged represents the structure for environment change messages.
-type EnvChanged struct {
-	Roots *RootsChanged `json:"roots,omitempty"`
-}
-
-// RootsChanged details the changes in session roots.
-type RootsChanged struct {
-	Value   []string      `json:"value"`
-	Added   []RootAdded   `json:"added,omitempty"`
-	Removed []RootRemoved `json:"removed,omitempty"`
-	Prompts []RootPrompt  `json:"prompts,omitempty"`
-}
-
-type RootAdded struct {
-	Path     string         `json:"path"`
-	Contents []RootContents `json:"contents"`
-}
-
-type RootRemoved struct {
-	Path string `json:"path"`
-}
-
-// RootContents represents a file or directory within a root.
-type RootContents struct {
-	Path     string         `json:"path"`
-	IsDir    bool           `json:"isDir"`
-	Children []RootContents `json:"children,omitempty"`
-	HasMore  bool           `json:"hasMore,omitempty"`
-}
-
-type RootPrompt struct {
-	Path   string `json:"path"`
-	Prompt string `json:"prompt"`
-}
 
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
@@ -1384,134 +1349,4 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 		curated = append(curated, currentMsg)
 	}
 	return curated
-}
-
-// calculateRootsChanged compares old and new roots and generates RootsChanged data.
-func calculateRootsChanged(oldRoots, newRoots []string) (RootsChanged, error) {
-	rootsChanged := RootsChanged{
-		Value: newRoots,
-	}
-
-	oldMap := make(map[string]bool)
-	for _, r := range oldRoots {
-		oldMap[r] = true
-	}
-
-	newMap := make(map[string]bool)
-	for _, r := range newRoots {
-		newMap[r] = true
-	}
-
-	// Determine added roots
-	for _, newRoot := range newRoots {
-		if !oldMap[newRoot] {
-			contents, err := getRootContents(newRoot, 200) // Limit entries to 200
-			if err != nil {
-				log.Printf("calculateRootsChanged: Failed to get contents for added root %s: %v", newRoot, err)
-				// Continue even if there's an error, don't block the whole process
-			}
-			rootsChanged.Added = append(rootsChanged.Added, RootAdded{Path: newRoot, Contents: contents})
-		}
-	}
-
-	// Determine removed roots
-	for _, oldRoot := range oldRoots {
-		if !newMap[oldRoot] {
-			rootsChanged.Removed = append(rootsChanged.Removed, RootRemoved{Path: oldRoot})
-		}
-	}
-
-	// Determine prompts
-	// If there are removed roots, search all current roots for prompts.
-	// Otherwise, only search added roots for prompts.
-	rootsToSearchForPrompts := newRoots
-	if len(rootsChanged.Removed) == 0 {
-		rootsToSearchForPrompts = []string{}
-		for _, added := range rootsChanged.Added {
-			rootsToSearchForPrompts = append(rootsToSearchForPrompts, added.Path)
-		}
-	}
-
-	for _, rootPath := range rootsToSearchForPrompts {
-		// Search for GEMINI.md within each rootPath
-		geminiMDPath := filepath.Join(rootPath, "GEMINI.md")
-		content, err := os.ReadFile(geminiMDPath)
-		if err == nil {
-			rootsChanged.Prompts = append(rootsChanged.Prompts, RootPrompt{Path: geminiMDPath, Prompt: string(content)})
-		} else if !os.IsNotExist(err) {
-			log.Printf("calculateRootsChanged: Failed to read GEMINI.md from %s: %v", geminiMDPath, err)
-		}
-	}
-
-	return rootsChanged, nil
-}
-
-// getRootContents gets the contents of a directory using BFS, up to a certain limit.
-func getRootContents(rootPath string, maxEntries int) ([]RootContents, error) {
-	var result []RootContents
-	queue := []struct {
-		Path   string
-		Parent *RootContents // Pointer to the parent's RootContents in the result slice
-	}{
-		{Path: rootPath, Parent: nil},
-	}
-
-	// Map to store RootContents by their full path for easy lookup and child appending
-	pathMap := make(map[string]*RootContents)
-
-	entryCount := 0
-	hasMore := false
-
-	for len(queue) > 0 && entryCount < maxEntries {
-		current := queue[0]
-		queue = queue[1:]
-
-		entries, err := os.ReadDir(current.Path)
-		if err != nil {
-			log.Printf("getRootContents: Failed to read directory %s: %v", current.Path, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			if entryCount >= maxEntries {
-				hasMore = true
-				break
-			}
-
-			fullPath := filepath.Join(current.Path, entry.Name())
-
-			rc := RootContents{
-				Path:  fullPath,
-				IsDir: entry.IsDir(),
-			}
-
-			if current.Parent == nil { // Top-level entry
-				result = append(result, rc)
-				pathMap[fullPath] = &result[len(result)-1]
-			} else { // Child entry
-				current.Parent.Children = append(current.Parent.Children, rc)
-				pathMap[fullPath] = &current.Parent.Children[len(current.Parent.Children)-1]
-			}
-			entryCount++
-
-			if entry.IsDir() {
-				queue = append(queue, struct {
-					Path   string
-					Parent *RootContents
-				}{Path: fullPath, Parent: pathMap[fullPath]})
-			}
-		}
-	}
-
-	// Set HasMore flag on the top-level RootContents if applicable
-	if hasMore {
-		// This logic needs to be careful. If the root itself has more,
-		// or if any of its direct children have more, we need to reflect that.
-		// For now, we'll just set it on the root if we exceeded the limit.
-		if len(result) > 0 {
-			result[0].HasMore = true // Assuming result[0] is the root itself or its first child
-		}
-	}
-
-	return result, nil
 }

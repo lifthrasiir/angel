@@ -136,7 +136,11 @@ func GetEnvChangeContext(envChanged EnvChanged) string {
 			builder.WriteString("The following directories are now available from your working environment. You are also given the contents of each directory, which is current as of the following user message.\n\n")
 			for _, added := range envChanged.Roots.Added {
 				builder.WriteString(fmt.Sprintf("## New directory `%s`\n", added.Path))
-				formatRootContents(&builder, added.Contents, "") // No initial indent for root contents
+				if len(added.Contents) > 0 {
+					formatRootContents(&builder, added.Contents, "") // No initial indent for root contents
+				} else {
+					builder.WriteString("This directory is empty.")
+				}
 				builder.WriteString("\n")
 			}
 		}
@@ -169,19 +173,29 @@ func GetEnvChangeContext(envChanged EnvChanged) string {
 	return builder.String()
 }
 
-// formatRootContents recursively formats RootContents for display.
-func formatRootContents(builder *strings.Builder, contents []RootContents, indent string) {
-	for _, content := range contents {
-		builder.WriteString(fmt.Sprintf("%s%s", indent, content.Path))
-		if content.IsDir {
-			builder.WriteString("/")
+// formatRootContents recursively formats RootContents for display in a tree-like structure.
+func formatRootContents(builder *strings.Builder, contents []RootContents, prefix string) {
+	for i, content := range contents {
+		isLast := (i == len(contents)-1)
+		var currentPrefix string
+		if isLast {
+			currentPrefix = prefix + "└─ "
+		} else {
+			currentPrefix = prefix + "├─ "
 		}
-		if content.HasMore {
-			builder.WriteString(" ...")
-		}
+		builder.WriteString(currentPrefix)
+
+		builder.WriteString(content.Name) // content.Name will contain "..." if applicable
 		builder.WriteString("\n")
+
 		if len(content.Children) > 0 {
-			formatRootContents(builder, content.Children, indent+"  ")
+			var childPrefix string
+			if isLast {
+				childPrefix = prefix + "   "
+			} else {
+				childPrefix = prefix + "│  "
+			}
+			formatRootContents(builder, content.Children, childPrefix)
 		}
 	}
 }
