@@ -4,14 +4,29 @@ import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import { measureContentHeight } from '../utils/measurementUtils';
 import PrettyJSON from './PrettyJSON';
 import { FunctionCall } from '../types/chat';
+import { getFunctionCallComponent } from '../utils/functionMessageRegistry';
 
 interface FunctionCallMessageProps {
   functionCall: FunctionCall;
   messageInfo?: React.ReactNode;
-  messageId?: string; // Add messageId prop
+  messageId?: string;
 }
 
 const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall, messageInfo, messageId }) => {
+  const CustomComponent = getFunctionCallComponent(functionCall.name);
+
+  if (CustomComponent) {
+    // If a custom component exists for this function call
+    return (
+      <div id={messageId} className="chat-message-container agent-message">
+        <div className="chat-bubble agent-function-call function-message-bubble">
+          <CustomComponent functionCall={functionCall} messageId={messageId} />
+        </div>
+        {messageInfo}
+      </div>
+    );
+  }
+
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);

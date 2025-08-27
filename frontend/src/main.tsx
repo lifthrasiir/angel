@@ -9,11 +9,15 @@ import { SessionPage } from './pages/SessionPage';
 import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
-import GlobalDialogOverlay from './components/GlobalDialogOverlay'; // Import the new component
+import GlobalDialogOverlay from './components/GlobalDialogOverlay';
+import { registerAllToolComponents } from './utils/registerToolComponents';
 
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
+
+// Register all tool components at application startup
+registerAllToolComponents();
 
 const router = createBrowserRouter([
   {
@@ -94,7 +98,7 @@ const Root = () => {
         </WorkspaceProvider>
       </Provider>
       <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
-      <GlobalDialogOverlay /> {/* Render the new overlay component here */}
+      <GlobalDialogOverlay />
     </React.StrictMode>
   );
 };

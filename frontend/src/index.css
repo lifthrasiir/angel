@@ -606,7 +606,7 @@ textarea {
 }
 
 .function-pair-container .chat-bubble {
-  width: auto;
+  width: 100%;
   max-width: calc(100% - 32px);
 }
 

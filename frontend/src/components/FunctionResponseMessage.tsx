@@ -4,11 +4,12 @@ import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import { measureContentHeight } from '../utils/measurementUtils';
 import PrettyJSON from './PrettyJSON';
 import { FunctionResponse } from '../types/chat';
+import { getFunctionResponseComponent } from '../utils/functionMessageRegistry';
 
 interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
   messageInfo?: React.ReactNode;
-  messageId?: string; // Add messageId prop
+  messageId?: string;
 }
 
 const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
@@ -16,6 +17,20 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
   messageInfo,
   messageId,
 }) => {
+  const CustomComponent = getFunctionResponseComponent(functionResponse.name);
+
+  if (CustomComponent) {
+    // If a custom component exists for this function response
+    return (
+      <div id={messageId} className="chat-message-container user-message">
+        <div className="chat-bubble function-message-bubble">
+          <CustomComponent functionResponse={functionResponse} messageId={messageId} />
+        </div>
+        {messageInfo}
+      </div>
+    );
+  }
+
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
