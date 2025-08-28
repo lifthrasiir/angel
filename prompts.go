@@ -107,6 +107,7 @@ func (d PromptData) EvaluatePrompt(promptContent string) (string, error) {
 }
 
 func executePromptTemplate(filename string, data map[string]any) string {
+	// FuncMap is no longer needed here for formatRootContents
 	tmpl, err := template.New("").ParseFS(promptsDir, "prompts/*.md")
 	if err != nil {
 		log.Printf("Error parsing template files: %v", err)
@@ -127,50 +128,38 @@ func executePromptTemplate(filename string, data map[string]any) string {
 	return buf.String()
 }
 
-// GetEnvChangeContext formats EnvChanged into a plain text string.
+// GetEnvChangeContext formats EnvChanged into a plain text string using a template.
 func GetEnvChangeContext(envChanged EnvChanged) string {
-	var builder strings.Builder
+	// Create a new map to hold the data for the template
+	templateData := make(map[string]any)
 
 	if envChanged.Roots != nil {
-		if len(envChanged.Roots.Added) > 0 {
-			builder.WriteString("The following directories are now available from your working environment. You are also given the contents of each directory, which is current as of the following user message.\n\n")
-			for _, added := range envChanged.Roots.Added {
-				builder.WriteString(fmt.Sprintf("## New directory `%s`\n", added.Path))
-				if len(added.Contents) > 0 {
-					formatRootContents(&builder, added.Contents, "") // No initial indent for root contents
-				} else {
-					builder.WriteString("This directory is empty.")
-				}
-				builder.WriteString("\n")
-			}
+		// Create a temporary structure to hold the data for the template
+		// This allows us to add the FormattedContents field
+		type TempRootAdded struct {
+			RootAdded
+			FormattedContents string
 		}
 
-		if len(envChanged.Roots.Removed) > 0 {
-			builder.WriteString("## Paths no longer available:\n")
-			builder.WriteString("The following directories are now unavailable from your working environment. You can no longer access these directories.\n\n")
-			for _, removed := range envChanged.Roots.Removed {
-				builder.WriteString(fmt.Sprintf("- %s\n", removed.Path))
-			}
-			builder.WriteString("\n")
+		var tempAdded []TempRootAdded
+		for _, added := range envChanged.Roots.Added {
+			var builder strings.Builder
+			formatRootContents(&builder, added.Contents, "")
+			tempAdded = append(tempAdded, TempRootAdded{
+				RootAdded:         added,
+				FormattedContents: builder.String(),
+			})
 		}
 
-		if len(envChanged.Roots.Prompts) > 0 {
-			builder.WriteString("---\n\n")
-			builder.WriteString("You are also given the following per-directory directives.\n")
-			if len(envChanged.Roots.Removed) > 0 {
-				builder.WriteString("Forget all prior per-directory directives in advance.\n")
-			}
-			builder.WriteString("\n")
-
-			for _, prompt := range envChanged.Roots.Prompts {
-				builder.WriteString(fmt.Sprintf("## Directives from `%s`\n", prompt.Path))
-				builder.WriteString(fmt.Sprintf("%s\n", prompt.Prompt))
-				builder.WriteString("\n")
-			}
+		templateData["Roots"] = map[string]any{
+			"Value":   envChanged.Roots.Value,
+			"Added":   tempAdded, // Use the temporary slice with formatted contents
+			"Removed": envChanged.Roots.Removed,
+			"Prompts": envChanged.Roots.Prompts,
 		}
 	}
 
-	return builder.String()
+	return executePromptTemplate("environment-change.md", templateData)
 }
 
 // formatRootContents recursively formats RootContents for display in a tree-like structure.
