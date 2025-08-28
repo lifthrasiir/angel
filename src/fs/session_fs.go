@@ -291,3 +291,12 @@ func (sf *SessionFS) Run(command string, workingDir string) (stdout, stderr stri
 func (sf *SessionFS) Close() error {
 	return nil
 }
+
+// DestroySessionFS removes the session's sandbox directory and all its contents.
+func DestroySessionFS(sessionId string) error {
+	sandboxDir := GetSandboxBaseDir(sessionId)
+	if err := os.RemoveAll(sandboxDir); err != nil {
+		return fmt.Errorf("failed to remove session sandbox directory %s: %w", sandboxDir, err)
+	}
+	return nil
+}

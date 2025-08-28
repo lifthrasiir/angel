@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
+
+	"github.com/lifthrasiir/angel/fs"
 )
 
 // createTables creates the necessary tables in the database.
@@ -540,6 +542,29 @@ func DeleteSession(db *sql.DB, sessionID string) error {
 	_, err = tx.Exec("DELETE FROM sessions WHERE id = ? OR id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to delete session %s and its sub-sessions: %w", sessionID, err)
+	}
+
+	// Get all session IDs (main and sub-sessions) that will be deleted
+	var sessionIDsToDelete []string
+	rows, err := tx.Query("SELECT id FROM sessions WHERE id = ? OR id LIKE ? || '.%'", sessionID, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to query session IDs for deletion: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("failed to scan session ID for deletion: %w", err)
+		}
+		sessionIDsToDelete = append(sessionIDsToDelete, id)
+	}
+
+	// Destroy the session's file system sandbox directories for all identified sessions
+	for _, id := range sessionIDsToDelete {
+		if err := fs.DestroySessionFS(id); err != nil {
+			log.Printf("Warning: Failed to destroy session FS for %s: %v", id, err)
+		}
 	}
 
 	return tx.Commit()
