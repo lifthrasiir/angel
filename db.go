@@ -353,9 +353,9 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	var args []interface{}
 
 	if workspaceID == "" {
-		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = '' ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = '' AND id NOT LIKE '%.%' ORDER BY last_updated_at DESC"
 	} else {
-		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = ? ORDER BY last_updated_at DESC"
+		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = ? AND id NOT LIKE '%.%' ORDER BY last_updated_at DESC"
 		args = append(args, workspaceID)
 	}
 
@@ -513,33 +513,33 @@ func DeleteSession(db *sql.DB, sessionID string) error {
 	defer tx.Rollback() // Rollback on error
 
 	// Delete messages associated with the session
-	_, err = tx.Exec("DELETE FROM messages WHERE session_id = ?", sessionID)
+	_, err = tx.Exec("DELETE FROM messages WHERE session_id = ? OR session_id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete messages for session %s: %w", sessionID, err)
+		return fmt.Errorf("failed to delete messages for session %s and its sub-sessions: %w", sessionID, err)
 	}
 
 	// Delete shell commands associated with the session
-	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id = ?)", sessionID)
+	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id = ? OR session_id LIKE ? || '.%')", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete shell commands for session %s: %w", sessionID, err)
+		return fmt.Errorf("failed to delete shell commands for session %s and its sub-sessions: %w", sessionID, err)
 	}
 
 	// Delete session environments associated with the session
-	_, err = tx.Exec("DELETE FROM session_envs WHERE session_id = ?", sessionID)
+	_, err = tx.Exec("DELETE FROM session_envs WHERE session_id = ? OR session_id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete session environments for session %s: %w", sessionID, err)
+		return fmt.Errorf("failed to delete session environments for session %s and its sub-sessions: %w", sessionID, err)
 	}
 
 	// Delete branches associated with the session
-	_, err = tx.Exec("DELETE FROM branches WHERE session_id = ?", sessionID)
+	_, err = tx.Exec("DELETE FROM branches WHERE session_id = ? OR session_id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete branches for session %s: %w", sessionID, err)
+		return fmt.Errorf("failed to delete branches for session %s and its sub-sessions: %w", sessionID, err)
 	}
 
-	// Delete the session itself
-	_, err = tx.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
+	// Delete the session itself and all its sub-sessions
+	_, err = tx.Exec("DELETE FROM sessions WHERE id = ? OR id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete session %s: %w", sessionID, err)
+		return fmt.Errorf("failed to delete session %s and its sub-sessions: %w", sessionID, err)
 	}
 
 	return tx.Commit()

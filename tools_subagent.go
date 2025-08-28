@@ -12,14 +12,20 @@ import (
 	"time"
 )
 
-// SubagentSpawnTool handles the subagent_spawn tool call.
-func SubagentSpawnTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("subagent_spawn", args, "system_prompt"); err != nil {
-		return ToolHandlerResults{}, err
+// SubagentTool handles the subagent tool call, allowing to spawn a new subagent or interact with an existing one.
+func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+	subagentID, hasSubagentID := args["subagent_id"].(string)
+	systemPrompt, hasSystemPrompt := args["system_prompt"].(string)
+	text, hasText := args["text"].(string)
+
+	if hasSubagentID && hasSystemPrompt {
+		return ToolHandlerResults{}, fmt.Errorf("subagent tool: cannot provide both 'subagent_id' and 'system_prompt'")
 	}
-	systemPrompt, ok := args["system_prompt"].(string)
-	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid system_prompt argument for subagent_spawn")
+	if !hasSubagentID && !hasSystemPrompt {
+		return ToolHandlerResults{}, fmt.Errorf("subagent tool: must provide either 'subagent_id' or 'system_prompt'")
+	}
+	if !hasText {
+		return ToolHandlerResults{}, fmt.Errorf("subagent tool: must provide 'text'")
 	}
 
 	db, err := getDbFromContext(ctx)
@@ -29,64 +35,138 @@ func SubagentSpawnTool(ctx context.Context, args map[string]interface{}, params 
 
 	// Check if the current session is already a subagent session
 	if strings.Contains(params.SessionId, ".") {
-		return ToolHandlerResults{}, errors.New("subagent_spawn cannot be called from a subagent session")
+		return ToolHandlerResults{}, errors.New("subagent tool cannot be called from a subagent session")
 	}
 
-	// Generate a new session-local ID for the subagent
-	agentID := generateID()
+	if hasSystemPrompt {
+		// Spawn a new subagent
+		agentID := generateID()
+		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
 
-	// Construct the full subsession ID
-	subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
+		_, err = CreateSession(db, subsessionID, systemPrompt, "")
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("failed to create new subagent session with ID %s: %w", subsessionID, err)
+		}
 
-	// Use CreateSession function defined in db.go (pass empty string for workspaceID)
-	_, err = CreateSession(db, subsessionID, systemPrompt, "")
-	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to create new subagent session with ID %s: %w", subsessionID, err)
+		// Now send the initial message to the newly spawned subagent
+		// This part is similar to the beginning of SubagentTurnTool
+		session, err := GetSession(db, subsessionID)
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found after creation: %w", subsessionID, err)
+		}
+
+		lastMessageIDFromDB, _, _, err := GetLastMessageInBranch(db, subsessionID, session.PrimaryBranchID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return ToolHandlerResults{}, fmt.Errorf("failed to get last message in subagent branch %s: %w", session.PrimaryBranchID, err)
+		}
+		lastAddedMessageID := lastMessageIDFromDB
+
+		addMessageToCurrentSubagentSession := func(messageType MessageType, text string, attachments []FileAttachment, cumulTokenCount *int, generation int) (messageID int, err error) {
+			var parentMessageID *int
+			if lastAddedMessageID != 0 {
+				parentMessageID = &lastAddedMessageID
+			}
+			messageID, err = AddMessageToSession(ctx, db, Message{
+				SessionID:       subsessionID,
+				BranchID:        session.PrimaryBranchID,
+				ParentMessageID: parentMessageID,
+				ChosenNextID:    nil,
+				Text:            text,
+				Type:            messageType,
+				Attachments:     attachments,
+				CumulTokenCount: cumulTokenCount,
+				Model:           params.ModelName,
+				Generation:      generation,
+			})
+			if err == nil {
+				if parentMessageID != nil {
+					if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
+						log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+					}
+				}
+				lastAddedMessageID = messageID
+			}
+			return
+		}
+
+		// Initial message for a new subagent session will have generation 0
+		_, err = addMessageToCurrentSubagentSession(TypeUserText, text, nil, nil, 0)
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("failed to add initial user message to new subagent session: %w", err)
+		}
+
+		// Proceed with LLM turn for the new subagent
+		return handleSubagentTurn(ctx, db, subsessionID, &session, params, agentID, addMessageToCurrentSubagentSession)
+
+	} else {
+		// Interact with an existing subagent
+		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, subagentID)
+
+		session, err := GetSession(db, subsessionID)
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
+		}
+
+		lastMessageIDFromDB, _, _, err := GetLastMessageInBranch(db, subsessionID, session.PrimaryBranchID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return ToolHandlerResults{}, fmt.Errorf("failed to get last message in subagent branch %s: %w", session.PrimaryBranchID, err)
+		}
+		lastAddedMessageID := lastMessageIDFromDB
+
+		addMessageToCurrentSubagentSession := func(messageType MessageType, text string, attachments []FileAttachment, cumulTokenCount *int, generation int) (messageID int, err error) {
+			var parentMessageID *int
+			if lastAddedMessageID != 0 {
+				parentMessageID = &lastAddedMessageID
+			}
+			messageID, err = AddMessageToSession(ctx, db, Message{
+				SessionID:       subsessionID,
+				BranchID:        session.PrimaryBranchID,
+				ParentMessageID: parentMessageID,
+				ChosenNextID:    nil,
+				Text:            text,
+				Type:            messageType,
+				Attachments:     attachments,
+				CumulTokenCount: cumulTokenCount,
+				Model:           params.ModelName,
+				Generation:      generation,
+			})
+			if err == nil {
+				if parentMessageID != nil {
+					if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
+						log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
+					}
+				}
+				lastAddedMessageID = messageID
+			}
+			return
+		}
+
+		// For existing subagent sessions, the generation will be determined within handleSubagentTurn
+		_, err = addMessageToCurrentSubagentSession(TypeUserText, text, nil, nil, 0) // Pass 0 for now, will be updated
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
+		}
+
+		return handleSubagentTurn(ctx, db, subsessionID, &session, params, "", addMessageToCurrentSubagentSession)
 	}
-
-	return ToolHandlerResults{Value: map[string]interface{}{"subagent_id": agentID}}, nil
 }
 
-// SubagentTurnTool handles the subagent_turn tool call.
-func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("subagent_turn", args, "subagent_id", "text"); err != nil {
-		return ToolHandlerResults{}, err
-	}
-	agentID, ok := args["subagent_id"].(string)
-	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid subagent_id argument for subagent_turn")
-	}
-
-	text, ok := args["text"].(string)
-	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid text argument for subagent_turn")
-	}
-
-	db, err := getDbFromContext(ctx)
-	if err != nil {
-		return ToolHandlerResults{}, err
-	}
-
-	// Check if the current session is already a subagent session
-	if strings.Contains(params.SessionId, ".") {
-		return ToolHandlerResults{}, errors.New("subagent_turn cannot be called from a subagent session")
-	}
-
-	// Construct the full subsession ID
-	subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
-
-	// Load the subagent session (using GetSession function defined in db.go)
-	session, err := GetSession(db, subsessionID)
-	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
-	}
-
-	// Get the last message ID of the current sub-session branch.
-	lastMessageIDFromDB, _, _, err := GetLastMessageInBranch(db, subsessionID, session.PrimaryBranchID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get last message in subagent branch %s: %w", session.PrimaryBranchID, err)
-	}
-
+// handleSubagentTurn encapsulates the common logic for interacting with a subagent session.
+func handleSubagentTurn(
+	ctx context.Context,
+	db *sql.DB,
+	subsessionID string,
+	session *Session,
+	params ToolHandlerParams,
+	agentID string,
+	addMessageToCurrentSubagentSession func(
+		messageType MessageType,
+		text string,
+		attachments []FileAttachment,
+		cumulTokenCount *int,
+		generation int,
+	) (messageID int, err error),
+) (ToolHandlerResults, error) {
 	// Get main session environment
 	mainSessionEnvRoots, _, err := GetLatestSessionEnv(db, params.SessionId)
 	if err != nil {
@@ -97,36 +177,6 @@ func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params T
 	subSessionEnvRoots, subSessionGeneration, err := GetLatestSessionEnv(db, subsessionID)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to get subagent session environment: %w", err)
-	}
-
-	lastAddedMessageID := lastMessageIDFromDB
-
-	addMessageToCurrentSubagentSession := func(messageType MessageType, text string, attachments []FileAttachment, cumulTokenCount *int) (messageID int, err error) {
-		var parentMessageID *int
-		if lastAddedMessageID != 0 {
-			parentMessageID = &lastAddedMessageID
-		}
-		messageID, err = AddMessageToSession(ctx, db, Message{
-			SessionID:       subsessionID,
-			BranchID:        session.PrimaryBranchID,
-			ParentMessageID: parentMessageID,
-			ChosenNextID:    nil,
-			Text:            text,
-			Type:            messageType,
-			Attachments:     attachments,
-			CumulTokenCount: cumulTokenCount,
-			Model:           params.ModelName,
-			Generation:      subSessionGeneration,
-		})
-		if err == nil {
-			if parentMessageID != nil {
-				if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
-					log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-				}
-			}
-			lastAddedMessageID = messageID
-		}
-		return
 	}
 
 	// Check if roots have actually changed
@@ -145,8 +195,8 @@ func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params T
 			return ToolHandlerResults{}, fmt.Errorf("failed to marshal envChanged for subagent: %w", err)
 		}
 
-		// Add env_changed message to subagent session
-		_, err = addMessageToCurrentSubagentSession(TypeEnvChanged, string(envChangedJSON), nil, nil)
+		// Add env_changed message to subagent session with the new generation
+		_, err = addMessageToCurrentSubagentSession(TypeEnvChanged, string(envChangedJSON), nil, nil, subSessionGeneration)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add env_changed message to subagent session: %w", err)
 		}
@@ -155,12 +205,6 @@ func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params T
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add new subagent session environment: %w", err)
 		}
-	}
-
-	// Add user message
-	_, err = addMessageToCurrentSubagentSession(TypeUserText, text, nil, nil)
-	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
 	}
 
 	// Load conversation context for the subagent (using GetSessionHistoryContext function defined in db_chat.go)
@@ -215,7 +259,7 @@ func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params T
 
 						// Save FunctionCall message to DB
 						fcJson, _ := json.Marshal(toolCall)
-						_, err := addMessageToCurrentSubagentSession(TypeFunctionCall, string(fcJson), nil, nil)
+						_, err := addMessageToCurrentSubagentSession(TypeFunctionCall, string(fcJson), nil, nil, subSessionGeneration)
 						if err != nil {
 							log.Printf("Warning: Failed to add function call message to subagent session: %v", err)
 						}
@@ -236,7 +280,7 @@ func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params T
 							Name:     toolCall.Name,
 							Response: toolResult.Value,
 						})
-						_, err = addMessageToCurrentSubagentSession(TypeFunctionResponse, string(frJson), toolResult.Attachments, nil)
+						_, err = addMessageToCurrentSubagentSession(TypeFunctionResponse, string(frJson), toolResult.Attachments, nil, subSessionGeneration)
 						if err != nil {
 							log.Printf("Warning: Failed to add function response message to subagent session: %v", err)
 						}
@@ -270,7 +314,7 @@ func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params T
 				}
 			}
 		}
-		cancel()       // Cancel the context for the current LLM call
+		cancel()       // Ensure context is cancelled on error
 		closer.Close() // Close the stream for the current LLM call
 
 		if !hasFunctionCall {
@@ -281,54 +325,45 @@ func SubagentTurnTool(ctx context.Context, args map[string]interface{}, params T
 
 	// Add the final model response message to the database
 	if fullResponseText.Len() > 0 {
-		_, err = addMessageToCurrentSubagentSession(TypeModelText, fullResponseText.String(), nil, nil)
+		_, err = addMessageToCurrentSubagentSession(TypeModelText, fullResponseText.String(), nil, nil, subSessionGeneration)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add final model response to subagent session: %w", err)
 		}
 	}
 
-	return ToolHandlerResults{Value: map[string]interface{}{"response_text": fullResponseText.String()}}, nil
+	result := map[string]interface{}{"response_text": fullResponseText.String()}
+	if agentID != "" {
+		result["subagent_id"] = agentID
+	}
+	return ToolHandlerResults{Value: result}, nil
 }
 
 func init() {
 	// Define tool definitions locally within init function
-	subagentSpawnToolDefinition := ToolDefinition{
-		Name:        "subagent_spawn",
-		Description: "Spawns a new subagent session with a given system prompt, returning its session-local ID.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"system_prompt": {
-					Type:        TypeString,
-					Description: "The system prompt for the new subagent session.",
-				},
-			},
-			Required: []string{"system_prompt"},
-		},
-		Handler: SubagentSpawnTool,
-	}
-
-	subagentTurnToolDefinition := ToolDefinition{
-		Name:        "subagent_turn",
-		Description: "Sends a text message to a subagent session (identified by its session-local ID) and returns its text response.",
+	subagentToolDefinition := ToolDefinition{
+		Name:        "subagent",
+		Description: "Spawns a new subagent session with a given system prompt, or sends a text message to an existing subagent session (identified by its session-local ID) and returns its text response. Exactly one of 'subagent_id' or 'system_prompt' must be provided. 'subagent_id' is returned only when 'system_prompt' is provided.",
 		Parameters: &Schema{
 			Type: TypeObject,
 			Properties: map[string]*Schema{
 				"subagent_id": {
 					Type:        TypeString,
-					Description: "The session-local ID of the subagent session to interact with.",
+					Description: "The session-local ID of the subagent session to interact with. Required if 'system_prompt' is not provided.",
+				},
+				"system_prompt": {
+					Type:        TypeString,
+					Description: "The system prompt for the new subagent session. Required if 'subagent_id' is not provided.",
 				},
 				"text": {
 					Type:        TypeString,
 					Description: "The text message to send to the subagent.",
 				},
 			},
-			Required: []string{"subagent_id", "text"},
+			Required: []string{"text"},
 		},
-		Handler: SubagentTurnTool,
+		Handler: SubagentTool,
 	}
 
-	// Register tool definitions with availableTools map
-	availableTools["subagent_spawn"] = subagentSpawnToolDefinition
-	availableTools["subagent_turn"] = subagentTurnToolDefinition
+	// Register tool definition with availableTools map
+	availableTools["subagent"] = subagentToolDefinition
 }
