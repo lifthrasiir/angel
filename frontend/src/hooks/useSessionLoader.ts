@@ -308,11 +308,12 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                   type: 'function_call',
                 });
               } else if (eventType === EventFunctionReply) {
-                const [messageId, payloadJson] = splitOnceByNewline(eventData);
+                const [messageId, rest] = splitOnceByNewline(eventData);
+                const [name, payloadJson] = splitOnceByNewline(rest);
                 const { response, attachments } = JSON.parse(payloadJson);
                 addMessage({
                   id: messageId,
-                  parts: [{ functionResponse: response }],
+                  parts: [{ functionResponse: { name, response } }],
                   type: 'function_response',
                   attachments,
                 });
