@@ -297,7 +297,19 @@ func createFrontendMessage(
 		}
 	default:
 		if m.Text != "" {
-			parts = append(parts, Part{Text: m.Text, ThoughtSignature: thoughtSignature})
+			// Recover length from `<length>,<ThoughtSignature>` if possible.
+			if first, rest, found := strings.Cut(thoughtSignature, ","); found {
+				length, err := strconv.Atoi(first)
+				if err != nil {
+					log.Panicf("Failed to parse length from ThoughtSignature %q: %v", thoughtSignature, err)
+				}
+				parts = append(parts, Part{Text: m.Text[:length], ThoughtSignature: rest})
+				if len(m.Text) > length {
+					parts = append(parts, Part{Text: m.Text[length:]})
+				}
+			} else {
+				parts = append(parts, Part{Text: m.Text, ThoughtSignature: thoughtSignature})
+			}
 		}
 		fm.Parts = parts // Assign the accumulated parts to fm.Parts
 	}

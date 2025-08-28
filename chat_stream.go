@@ -298,6 +298,13 @@ func streamLLMResponse(
 					broadcastToSession(initialState.SessionId, EventThought, fmt.Sprintf("%d\n%s", messageID, thoughtText))
 				} else {
 					if modelMessageID < 0 {
+						if state != "" {
+							// Parts with ThoughtSignature should not be concatenated unlike normal Text parts.
+							// However practically ThoughtSignature only appears after a run of Thought parts,
+							// so if we record the length of the first Text part bearing ThoughtSignature,
+							// we are able to recover the original signature-bearing Part (plus remaining concatenated parts).
+							state = fmt.Sprintf("%d,%s", len(part.Text), state)
+						}
 						// Initialize agentResponseText for the new model message
 						agentResponseText = ""
 						// Add the initial model message to DB with empty text
