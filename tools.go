@@ -47,6 +47,10 @@ var availableTools = map[string]ToolDefinition{
 	"run_shell_command":  runShellCommandToolDefinition,
 	"poll_shell_command": pollShellCommandToolDefinition,
 	"kill_shell_command": killShellCommandToolDefinition,
+
+	// task_subagent_tool_definitions.go - Subagent tools (Removed to avoid cyclic dependency)
+	// "subagent_spawn": subagentSpawnToolDefinition,
+	// "subagent_turn":  subagentTurnToolDefinition,
 }
 
 func GetBuiltinToolNames() map[string]bool {
@@ -64,9 +68,9 @@ func GetToolsForGemini() []Tool {
 
 	// Add local tools
 	builtinToolNames := make(map[string]bool)
-	for _, toolDef := range availableTools {
+	for toolName, toolDef := range availableTools {
 		functionDeclarations = append(functionDeclarations, FunctionDeclaration{
-			Name:        toolDef.Name,
+			Name:        toolName,
 			Description: toolDef.Description,
 			Parameters:  toolDef.Parameters,
 		})
@@ -160,6 +164,7 @@ func convertJSONSchemaToGeminiSchema(jsonSchema *jsonschema.Schema) *Schema {
 func CallToolFunction(ctx context.Context, fc FunctionCall, params ToolHandlerParams) (ToolHandlerResults, error) {
 	// Check if it's a local tool first
 	if toolDef, ok := availableTools[fc.Name]; ok {
+		// Pass the DB instance from params to the tool handler
 		return toolDef.Handler(ctx, fc.Args, params)
 	}
 

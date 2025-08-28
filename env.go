@@ -14,12 +14,22 @@ type EnvChanged struct {
 	Roots *RootsChanged `json:"roots,omitempty"`
 }
 
+// HasChanges checks if there are any changes in the environment.
+func (e EnvChanged) HasChanges() bool {
+	return e.Roots != nil && e.Roots.HasChanges()
+}
+
 // RootsChanged details the changes in session roots.
 type RootsChanged struct {
 	Value   []string      `json:"value"`
 	Added   []RootAdded   `json:"added,omitempty"`
 	Removed []RootRemoved `json:"removed,omitempty"`
 	Prompts []RootPrompt  `json:"prompts,omitempty"`
+}
+
+// HasChanges checks if there are any added or removed roots.
+func (r RootsChanged) HasChanges() bool {
+	return len(r.Added) > 0 || len(r.Removed) > 0
 }
 
 type RootAdded struct {
