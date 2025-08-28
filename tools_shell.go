@@ -1,27 +1,26 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"log"
-	"os/exec"
-	"runtime"
 	"sync"
 	"time"
+
+	fsPkg "github.com/lifthrasiir/angel/fs" // Import the fs package
 )
 
 // runningProcessInfo stores details of a running command and its completion channel.
 type runningProcessInfo struct {
-	Cmd  *exec.Cmd
-	Done chan struct{} // Closed when the command goroutine finishes
+	RunningCommand *fsPkg.RunningCommand
+	Done           chan struct{} // Closed when the command goroutine finishes
 }
 
 // In-memory map to store details of currently running commands.
 // This is separate from the DB and is lost on Angel restart.
 // DB is the source of truth for persistence.
-var runningProcesses = make(map[string]*runningProcessInfo) // Changed type here
+var runningProcesses = make(map[string]*runningProcessInfo)
 var runningProcessesMutex sync.Mutex
 var cmdIDToBranchID = make(map[string]string)       // Maps cmdID to BranchID
 var branchShellLocks = make(map[string]*sync.Mutex) // BranchID -> Mutex for command concurrency
@@ -95,16 +94,16 @@ func manageRunningCommands(db *sql.DB) {
 		// This check is primarily for updating the DB if the command finishes in the background
 		// without an explicit poll from the agent. The exponential backoff for polling
 		// is now handled within PollShellCommandTool.
-		if info.Cmd.ProcessState != nil && info.Cmd.ProcessState.Exited() { // Changed to info.Cmd
+		if info.RunningCommand.Cmd.ProcessState != nil && info.RunningCommand.Cmd.ProcessState.Exited() { // Changed to info.Cmd
 			// Command has finished, update DB from ProcessState
-			updateCmdStateFromProcessState(db, cmdDB.ID, info.Cmd) // Changed to info.Cmd
+			updateCmdStateFromProcessState(db, cmdDB.ID, info.RunningCommand) // Changed to info.Cmd
 		}
 	}
 }
 
 // updateCmdStateFromProcessState is called when a command has exited.
 // It retrieves final output and updates the DB.
-func updateCmdStateFromProcessState(db DbOrTx, cmdID string, execCmd *exec.Cmd) {
+func updateCmdStateFromProcessState(db DbOrTx, cmdID string, rc *fsPkg.RunningCommand) {
 	cmdDB, err := GetShellCommandByID(db, cmdID)
 	if err != nil {
 		log.Printf("Error getting command %s from DB for final update: %v", cmdID, err)
@@ -112,20 +111,20 @@ func updateCmdStateFromProcessState(db DbOrTx, cmdID string, execCmd *exec.Cmd) 
 	}
 
 	// Update the full stdout/stderr content
-	cmdDB.Stdout = execCmd.Stdout.(*bytes.Buffer).Bytes()
-	cmdDB.Stderr = execCmd.Stderr.(*bytes.Buffer).Bytes()
+	cmdDB.Stdout = rc.StdoutBuf.Bytes()
+	cmdDB.Stderr = rc.StderrBuf.Bytes()
 
 	// Set final offsets to full length
 	cmdDB.StdoutOffset = int64(len(cmdDB.Stdout))
 	cmdDB.StderrOffset = int64(len(cmdDB.Stderr))
 
-	if execCmd.ProcessState != nil {
-		cmdDB.ExitCode = sql.NullInt64{Int64: int64(execCmd.ProcessState.ExitCode()), Valid: true}
-		if execCmd.ProcessState.Success() {
+	if rc.Cmd.ProcessState != nil {
+		cmdDB.ExitCode = sql.NullInt64{Int64: int64(rc.Cmd.ProcessState.ExitCode()), Valid: true}
+		if rc.Cmd.ProcessState.Success() {
 			cmdDB.Status = "completed"
 		} else {
 			cmdDB.Status = "failed"
-			cmdDB.ErrorMessage = sql.NullString{String: execCmd.ProcessState.String(), Valid: true}
+			cmdDB.ErrorMessage = sql.NullString{String: rc.Cmd.ProcessState.String(), Valid: true}
 		}
 	} else {
 		// This case should ideally not happen if Exited() is true
@@ -152,7 +151,13 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context: %w", err)
 	}
 
-	if err := EnsureKnownKeys("run_shell_command", args, "command"); err != nil {
+	sfs, err := getSessionFS(ctx, params.SessionId) // Get SessionFS from tools_fs.go
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to get SessionFS: %w", err)
+	}
+	defer releaseSessionFS(params.SessionId) // Release SessionFS reference
+
+	if err := EnsureKnownKeys("run_shell_command", args, "command", "directory"); err != nil {
 		return ToolHandlerResults{}, err
 	}
 	commandStr, ok := args["command"].(string)
@@ -160,12 +165,18 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		return ToolHandlerResults{}, fmt.Errorf("invalid command argument for run_shell_command")
 	}
 
+	workingDir := ""
+	if dir, ok := args["directory"].(string); ok {
+		workingDir = dir
+	}
+
 	if !params.ConfirmationReceived {
 		// If not confirmed, return a confirmation request
 		return ToolHandlerResults{}, &PendingConfirmation{
 			Data: map[string]interface{}{
-				"tool":    "run_shell_command",
-				"command": commandStr,
+				"tool":      "run_shell_command",
+				"command":   commandStr,
+				"directory": workingDir,
 			},
 		}
 	}
@@ -182,17 +193,13 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 	runningProcessesMutex.Unlock()
 
 	cmdCtx, cancel := context.WithCancel(context.Background())
-	var execCmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		execCmd = exec.CommandContext(cmdCtx, "cmd.exe", "/C", commandStr) // For Windows
-	} else {
-		execCmd = exec.CommandContext(cmdCtx, "bash", "-c", commandStr) // For Unix/Linux
-	}
+	defer cancel() // Ensure cancel is called on all paths
 
-	stdoutBuf := &bytes.Buffer{}
-	stderrBuf := &bytes.Buffer{}
-	execCmd.Stdout = stdoutBuf
-	execCmd.Stderr = stderrBuf
+	rc, err := sfs.Run(cmdCtx, commandStr, workingDir)
+	if err != nil {
+		// cancel() is already deferred
+		return ToolHandlerResults{}, fmt.Errorf("failed to prepare command execution: %w", err)
+	}
 
 	// Initial DB record - stdout_offset and stderr_offset are 0 for a new command
 	cmdDB := ShellCommand{
@@ -209,22 +216,22 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 
 	// Insert into DB immediately to ensure the record exists for updateCmdStateFromProcessState
 	if err := InsertShellCommand(db, cmdDB); err != nil {
-		cancel() // Cancel the command context on DB error
+		rc.Close() // rc.Close() calls rc.Cancel(), which is redundant with deferred cancel() but safe
 		return ToolHandlerResults{}, fmt.Errorf("failed to insert shell command into DB: %w", err)
 	}
 
 	// Use a channel to signal when the command goroutine finishes
 	doneChan := make(chan struct{})
 
-	// Store execCmd and its cancel function in memory
+	// Store running command and its completion channel in memory
 	runningProcessesMutex.Lock()
-	runningProcesses[cmdID] = &runningProcessInfo{Cmd: execCmd, Done: doneChan} // Store doneChan
+	runningProcesses[cmdID] = &runningProcessInfo{RunningCommand: rc, Done: doneChan}
 	runningProcessesMutex.Unlock()
 
 	go func() {
 		defer close(doneChan) // Signal completion by closing the channel
-		defer cancel()        // Ensure context is cancelled when goroutine exits
-		_ = execCmd.Run()     // Run the command; errors will be captured by ProcessState
+		defer rc.Cancel()     // Ensure context is cancelled when goroutine exits
+		_ = rc.Cmd.Run()      // Run the command; errors will be captured by ProcessState
 		log.Printf("Command '%s' (ID: %s) goroutine finished.", commandStr, cmdID)
 	}()
 
@@ -234,7 +241,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		// Command finished within the initial delay
 		log.Printf("Command '%s' (ID: %s) finished immediately. Updating DB.", commandStr, cmdID)
 		// Update DB with final status
-		updateCmdStateFromProcessState(db, cmdID, execCmd)
+		updateCmdStateFromProcessState(db, cmdID, rc)
 		// Return completed status and output
 		finalCmd, _ := GetShellCommandByID(db, cmdID) // Fetch updated status (guaranteed to exist now)
 		result := map[string]interface{}{
@@ -309,14 +316,14 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 				// Command finished while waiting, exit early
 				log.Printf("Command %s finished during poll delay. Exiting early.", cmdID)
 
-				// Get the execCmd from runningProcesses map
+				// Get the RunningCommand from runningProcesses map
 				runningProcessesMutex.Lock()
 				currentInfo, foundInMap := runningProcesses[cmdID]
 				runningProcessesMutex.Unlock()
 
-				if foundInMap && currentInfo.Cmd.ProcessState != nil && currentInfo.Cmd.ProcessState.Exited() {
+				if foundInMap && currentInfo.RunningCommand.Cmd.ProcessState != nil && currentInfo.RunningCommand.Cmd.ProcessState.Exited() {
 					// Command has truly exited, update DB immediately
-					updateCmdStateFromProcessState(db, cmdID, currentInfo.Cmd)
+					updateCmdStateFromProcessState(db, cmdID, currentInfo.RunningCommand)
 					// After updating, re-fetch the command from DB to get its final status
 					updatedCmdDB, err := GetShellCommandByID(db, cmdID)
 					if err == nil {
@@ -364,24 +371,24 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 
 	// Get latest output from in-memory buffer for running commands
 	runningProcessesMutex.Lock()
-	var execCmd *exec.Cmd
+	var rc *fsPkg.RunningCommand
 	if info, foundInMap := runningProcesses[cmdID]; foundInMap {
-		execCmd = info.Cmd
+		rc = info.RunningCommand
 	}
 	runningProcessesMutex.Unlock()
 
 	var newStdout, newStderr []byte
 	var currentStdoutLen, currentStderrLen int64
 
-	if execCmd != nil { // Command still in memory
-		currentStdoutLen = int64(execCmd.Stdout.(*bytes.Buffer).Len())
-		currentStderrLen = int64(execCmd.Stderr.(*bytes.Buffer).Len())
+	if rc != nil { // Command still in memory
+		currentStdoutLen = int64(rc.StdoutBuf.Len())
+		currentStderrLen = int64(rc.StderrBuf.Len())
 
 		if currentStdoutLen > cmdDB.StdoutOffset {
-			newStdout = execCmd.Stdout.(*bytes.Buffer).Bytes()[cmdDB.StdoutOffset:currentStdoutLen]
+			newStdout = rc.StdoutBuf.Bytes()[cmdDB.StdoutOffset:currentStdoutLen]
 		}
 		if currentStderrLen > cmdDB.StderrOffset {
-			newStderr = execCmd.Stderr.(*bytes.Buffer).Bytes()[cmdDB.StderrOffset:currentStderrLen]
+			newStderr = rc.StderrBuf.Bytes()[cmdDB.StderrOffset:currentStderrLen]
 		}
 	} else { // Command not in memory, meaning it has finished and DB has full results
 		newStdout = cmdDB.Stdout[cmdDB.StdoutOffset:]
@@ -447,13 +454,13 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	}
 
 	runningProcessesMutex.Lock()
-	var execCmd *exec.Cmd
+	var rc *fsPkg.RunningCommand
 	if info, foundInMap := runningProcesses[cmdID]; foundInMap {
-		execCmd = info.Cmd
+		rc = info.RunningCommand
 	}
 	runningProcessesMutex.Unlock()
 
-	if execCmd == nil {
+	if rc == nil {
 		// Command was running in DB but not in memory (already failed/killed externally)
 		cmdDB.Status = "failed"
 		cmdDB.EndTime = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
@@ -468,9 +475,9 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		}}, fmt.Errorf("command %s not found in memory", cmdID)
 	}
 
-	// Attempt to kill the process
-	if err := execCmd.Process.Kill(); err != nil {
-		log.Printf("Failed to kill command %s (PID: %d): %v", cmdID, execCmd.Process.Pid, err)
+	// Attempt to kill the process using RunningCommand.Close()
+	if err := rc.Close(); err != nil {
+		log.Printf("Failed to kill command %s: %v", cmdID, err)
 		cmdDB.Status = "failed_to_kill"
 		cmdDB.EndTime = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
 		cmdDB.ErrorMessage = sql.NullString{String: fmt.Sprintf("Failed to kill process: %v", err), Valid: true}
@@ -495,12 +502,7 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	delete(cmdIDToBranchID, cmdID) // Remove mapping
 	runningProcessesMutex.Unlock()
 
-	// However, we should delete from cmdIDToBranchID here.
-	runningProcessesMutex.Lock()
-	delete(cmdIDToBranchID, cmdID) // Remove mapping
-	runningProcessesMutex.Unlock()
-
-	log.Printf("Command ID %s (PID: %d) killed successfully.", cmdID, execCmd.Process.Pid)
+	log.Printf("Command ID %s killed successfully.", cmdID)
 
 	return ToolHandlerResults{Value: map[string]interface{}{
 		"command_id": cmdID,
@@ -518,6 +520,10 @@ var (
 				"command": {
 					Type:        TypeString,
 					Description: "The shell command to execute.",
+				},
+				"directory": {
+					Type:        TypeString,
+					Description: "Optional: The directory to run the command in. Can be absolute or relative to the anonymous root. If omitted, defaults to the anonymous root.",
 				},
 			},
 			Required: []string{"command"},

@@ -2,11 +2,13 @@ package fs
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -168,52 +170,84 @@ func (sf *SessionFS) ReadDir(path string) ([]fs.DirEntry, error) {
 	return os.ReadDir(resolvedPath)
 }
 
-// verifyWorkingDir resolves and validates the working directory for command execution.
-// It returns the actual absolute working directory, a Sandbox instance if created (which needs to be closed by the caller), and an error if any.
-func (sf *SessionFS) verifyWorkingDir(workingDir string) (actualWorkingDir string, sandbox *Sandbox, err error) {
-	if workingDir == "" {
-		// Default to anonymous root
-		sandbox, err = NewSandbox(sf.sessionId)
-		if err != nil {
-			err = fmt.Errorf("failed to create sandbox for command execution: %w", err)
-			return
+// RunningCommand represents a shell command that is currently running.
+type RunningCommand struct {
+	Cmd       *exec.Cmd
+	StdoutBuf *bytes.Buffer
+	StderrBuf *bytes.Buffer
+	sandbox   *Sandbox
+	Cancel    context.CancelFunc
+	done      chan struct{}
+}
+
+// Close cleans up the resources associated with the running command.
+func (rc *RunningCommand) Close() error {
+	var err error
+
+	// Attempt to kill the process if it's still running
+	if rc.Cmd != nil && rc.Cmd.Process != nil && rc.Cmd.ProcessState == nil {
+		if killErr := rc.Cmd.Process.Kill(); killErr != nil {
+			err = fmt.Errorf("failed to kill process: %w", killErr)
 		}
+	}
+
+	// Wait for the command goroutine to finish if it hasn't already
+	if rc.done != nil {
+		<-rc.done
+	}
+
+	// Close the sandbox
+	if rc.sandbox != nil {
+		if sandboxErr := rc.sandbox.Close(); sandboxErr != nil {
+			if err == nil {
+				err = fmt.Errorf("failed to close sandbox: %w", sandboxErr)
+			} else {
+				err = fmt.Errorf("%w; failed to close sandbox: %v", err, sandboxErr)
+			}
+		}
+	}
+
+	// Cancel the context
+	if rc.Cancel != nil {
+		rc.Cancel()
+	}
+
+	return err
+}
+
+// Run executes a command within the specified working directory.
+// If workingDir is empty, it defaults to the anonymous root (sandbox root).
+// If workingDir is a relative path, it's resolved against the anonymous root.
+// If workingDir is an absolute path, it must be within a registered root or the anonymous root.
+// It returns a *RunningCommand handle.
+func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string) (*RunningCommand, error) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	// Create sandbox for the duration of the command execution
+	sandbox, err := NewSandbox(sf.sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sandbox for command execution: %w", err)
+	}
+
+	var actualWorkingDir string
+
+	if workingDir == "" {
+		// Default to anonymous root (sandbox root)
 		actualWorkingDir = sandbox.RootPath()
 	} else if !filepath.IsAbs(workingDir) {
 		// Relative path, resolve against anonymous root
-		sandbox, err = NewSandbox(sf.sessionId)
-		if err != nil {
-			err = fmt.Errorf("failed to create sandbox for command execution: %w", err)
-			return
-		}
-
 		resolvedPath := filepath.Clean(workingDir)
-		if strings.HasPrefix(resolvedPath, "..") {
-			err = fmt.Errorf("relative working directory \"%s\" attempts to escape the anonymous root", workingDir)
-			return
+		if strings.HasPrefix(resolvedPath, "..") || resolvedPath == ".." {
+			_ = sandbox.Close() // Close sandbox on error
+			return nil, fmt.Errorf("relative working directory \"%s\" attempts to escape the anonymous root", workingDir)
 		}
-
 		actualWorkingDir = filepath.Join(sandbox.RootPath(), resolvedPath)
 	} else {
-		// Absolute path, must be within a registered root
+		// Absolute path, must be within a registered root or the anonymous root
 		actualWorkingDir = filepath.Clean(workingDir)
 
-		// Verify existence and containment within roots
-		var fileInfo os.FileInfo
-		fileInfo, err = os.Stat(actualWorkingDir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				err = fmt.Errorf("working directory does not exist: %s", actualWorkingDir)
-			} else {
-				err = fmt.Errorf("failed to stat working directory: %w", err)
-			}
-			return
-		}
-		if !fileInfo.IsDir() {
-			err = fmt.Errorf("working directory is not a directory: %s", actualWorkingDir)
-			return
-		}
-
+		// Verify existence and containment within roots or sandbox root
 		isValidPath := false
 		for _, root := range sf.roots {
 			if containsPath(root, actualWorkingDir) {
@@ -221,73 +255,63 @@ func (sf *SessionFS) verifyWorkingDir(workingDir string) (actualWorkingDir strin
 				break
 			}
 		}
+		if !isValidPath && containsPath(sandbox.RootPath(), actualWorkingDir) {
+			isValidPath = true
+		}
 
 		if !isValidPath {
-			err = fmt.Errorf("working directory %s is not within any accessible root", actualWorkingDir)
-			return
+			_ = sandbox.Close() // Close sandbox on error
+			return nil, fmt.Errorf("working directory %s is not within any accessible root or session temporary directory", actualWorkingDir)
+		}
+
+		// Final verification that actualWorkingDir exists and is a directory
+		fileInfo, err := os.Stat(actualWorkingDir)
+		if err != nil {
+			_ = sandbox.Close() // Close sandbox on error
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("working directory does not exist: %s", actualWorkingDir)
+			}
+			return nil, fmt.Errorf("failed to stat working directory: %w", err)
+		}
+		if !fileInfo.IsDir() {
+			_ = sandbox.Close() // Close sandbox on error
+			return nil, fmt.Errorf("working directory is not a directory: %s", actualWorkingDir)
 		}
 	}
 
-	// Final verification that actualWorkingDir exists and is a directory
-	fileInfo, err := os.Stat(actualWorkingDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			err = fmt.Errorf("working directory does not exist: %s", actualWorkingDir)
-		} else {
-			err = fmt.Errorf("failed to stat working directory: %w", err)
-		}
-		return
-	}
-	if !fileInfo.IsDir() {
-		err = fmt.Errorf("working directory is not a directory: %s", actualWorkingDir)
-		return
+	cmdCtx, cancel := context.WithCancel(ctx)
+	var execCmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		execCmd = exec.CommandContext(cmdCtx, "cmd.exe", "/C", command)
+	} else {
+		execCmd = exec.CommandContext(cmdCtx, "bash", "-c", command)
 	}
 
-	return
+	stdoutBuf := &bytes.Buffer{}
+	stderrBuf := &bytes.Buffer{}
+	execCmd.Stdout = stdoutBuf
+	execCmd.Stderr = stderrBuf
+	execCmd.Dir = actualWorkingDir
+
+	doneChan := make(chan struct{})
+	go func() {
+		defer close(doneChan)
+		_ = execCmd.Run()
+	}()
+
+	rc := &RunningCommand{
+		Cmd:       execCmd,
+		StdoutBuf: stdoutBuf,
+		StderrBuf: stderrBuf,
+		sandbox:   sandbox,
+		Cancel:    cancel,
+		done:      doneChan,
+	}
+
+	return rc, nil
 }
 
-// Run executes a command within the specified working directory.
-// If workingDir is empty, it defaults to the anonymous root.
-// If workingDir is a relative path, it's resolved against the anonymous root.
-// If workingDir is an absolute path, it must be within a registered root.
-func (sf *SessionFS) Run(command string, workingDir string) (stdout, stderr string, exitCode int, err error) {
-	sf.mu.Lock()
-	defer sf.mu.Unlock()
-
-	cmd := exec.Command("cmd.exe", "/C", command) // For Windows environment
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	actualWorkingDir, sandbox, err := sf.verifyWorkingDir(workingDir)
-	if sandbox != nil {
-		defer sandbox.Close() // Ensure sandbox is closed after use
-	}
-	if err != nil {
-		return "", "", 1, err
-	}
-
-	cmd.Dir = actualWorkingDir
-
-	err = cmd.Run()
-
-	stdout = stdoutBuf.String()
-	stderr = stderrBuf.String()
-
-	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			exitCode = exitError.ExitCode()
-		} else {
-			exitCode = 1 // Default error code
-		}
-		return stdout, stderr, exitCode, fmt.Errorf("command execution failed: %w", err)
-	}
-
-	return stdout, stderr, 0, nil
-}
-
-// Close cleans up the SessionFS resources, including unmounting the sandbox drive.
+// Close cleans up the SessionFS resources.
 func (sf *SessionFS) Close() error {
 	return nil
 }

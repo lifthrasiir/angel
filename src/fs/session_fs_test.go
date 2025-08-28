@@ -2,6 +2,7 @@ package fs
 
 import (
 	"bytes" // For checking stdout/stderr
+	"context"
 	"os"
 	"path/filepath"
 	"strings" // For checking string content
@@ -213,8 +214,17 @@ func TestSessionFS_Run(t *testing.T) {
 
 	// --- Test Case 1: Run command with empty workingDir (defaults to anonymous root) ---
 	t.Run("Run_EmptyWorkingDir", func(t *testing.T) {
-		stdout, stderr, exitCode, err := sf.Run("echo hello world", "")
+		rc, err := sf.Run(context.Background(), "echo hello world", "")
 		checkError(t, err, "Run failed for 'echo hello world' with empty workingDir")
+		defer rc.Close() // Ensure RunningCommand resources are cleaned up
+
+		// Wait for the command to finish
+		<-rc.done
+
+		stdout := rc.StdoutBuf.String()
+		stderr := rc.StderrBuf.String()
+		exitCode := rc.Cmd.ProcessState.ExitCode() // Get exit code from ProcessState
+
 		if exitCode != 0 {
 			t.Errorf("Expected exitCode 0, got %d", exitCode)
 		}
@@ -235,8 +245,16 @@ func TestSessionFS_Run(t *testing.T) {
 		subDirPath := filepath.Join(sandboxBaseDir, subDir)
 		checkError(t, os.MkdirAll(subDirPath, 0755), "MkdirAll failed for test_subdir")
 
-		stdout, _, exitCode, err := sf.Run("dir", subDir)
+		rc, err := sf.Run(context.Background(), "dir", subDir)
 		checkError(t, err, "Run failed for 'dir' with relative workingDir")
+		defer rc.Close() // Ensure RunningCommand resources are cleaned up
+
+		// Wait for the command to finish
+		<-rc.done
+
+		stdout := rc.StdoutBuf.String()
+		exitCode := rc.Cmd.ProcessState.ExitCode()
+
 		if exitCode != 0 {
 			t.Errorf("Expected exitCode 0, got %d", exitCode)
 		}
@@ -249,10 +267,17 @@ func TestSessionFS_Run(t *testing.T) {
 
 	// --- Test Case 3: Run command with relative workingDir attempting to escape anonymous root ---
 	t.Run("Run_RelativeWorkingDir_EscapeAnonymousRoot", func(t *testing.T) {
-		_, _, exitCode, err := sf.Run("echo test", "../escaped_dir")
+		rc, err := sf.Run(context.Background(), "echo test", "../escaped_dir")
 		checkExpectedError(t, err, "attempts to escape the anonymous root")
-		if exitCode == 0 {
-			t.Errorf("Expected non-zero exitCode, got %d", exitCode)
+		if rc != nil { // If rc is not nil, ensure it's closed
+			defer rc.Close()
+			// Wait for the command to finish if it started
+			<-rc.done
+		}
+		// The error should be returned by sf.Run, so exitCode might not be meaningful here
+		// if rc is nil. If rc is not nil, check its exitCode.
+		if rc != nil && rc.Cmd.ProcessState != nil && rc.Cmd.ProcessState.ExitCode() == 0 {
+			t.Errorf("Expected non-zero exitCode, got %d", rc.Cmd.ProcessState.ExitCode())
 		}
 	})
 
@@ -263,11 +288,18 @@ func TestSessionFS_Run(t *testing.T) {
 		defer os.RemoveAll(testRoot)
 
 		err = sf.SetRoots([]string{testRoot})
+		checkError(t, err, "SetRoots failed")
 
-		checkError(t, err, "AddRoot failed")
-
-		stdout, _, exitCode, err := sf.Run("dir", testRoot)
+		rc, err := sf.Run(context.Background(), "dir", testRoot)
 		checkError(t, err, "Run failed for 'dir' with absolute workingDir")
+		defer rc.Close() // Ensure RunningCommand resources are cleaned up
+
+		// Wait for the command to finish
+		<-rc.done
+
+		stdout := rc.StdoutBuf.String()
+		exitCode := rc.Cmd.ProcessState.ExitCode()
+
 		if exitCode != 0 {
 			t.Errorf("Expected exitCode 0, got %d", exitCode)
 		}
@@ -282,24 +314,39 @@ func TestSessionFS_Run(t *testing.T) {
 		checkError(t, err, "MkdirTemp failed for outsideDir")
 		defer os.RemoveAll(outsideDir)
 
-		_, _, exitCode, err := sf.Run("echo test", outsideDir)
+		rc, err := sf.Run(context.Background(), "echo test", outsideDir)
 		checkExpectedError(t, err, "is not within any accessible root")
-		if exitCode == 0 {
-			t.Errorf("Expected non-zero exitCode, got %d", exitCode)
+		if rc != nil { // If rc is not nil, ensure it's closed
+			defer rc.Close()
+			// Wait for the command to finish if it started
+			<-rc.done
+		}
+		if rc != nil && rc.Cmd.ProcessState != nil && rc.Cmd.ProcessState.ExitCode() == 0 {
+			t.Errorf("Expected non-zero exitCode, got %d", rc.Cmd.ProcessState.ExitCode())
 		}
 	})
 
 	// --- Test Case 6: Run command that fails ---
 	t.Run("Run_CommandFails", func(t *testing.T) {
-		_, stderr, exitCode, err := sf.Run("nonexistent_command", "")
-		if err == nil {
-			t.Errorf("Expected an error for nonexistent_command, but got none")
-		}
-		if exitCode == 0 {
-			t.Errorf("Expected non-zero exitCode for nonexistent_command, got %d", exitCode)
-		}
-		if stderr == "" {
-			t.Errorf("Expected non-empty stderr for nonexistent_command, got empty")
+		rc, err := sf.Run(context.Background(), "nonexistent_command", "")
+		checkError(t, err, "Run failed for 'nonexistent_command'") // sf.Run should not return error for this case
+
+		defer rc.Close() // Ensure RunningCommand resources are cleaned up
+		// Wait for the command to finish
+		<-rc.done
+
+		// Check exit code and stderr only if command started and failed
+		if rc.Cmd.ProcessState != nil {
+			exitCode := rc.Cmd.ProcessState.ExitCode()
+			stderr := rc.StderrBuf.String()
+			if exitCode == 0 {
+				t.Errorf("Expected non-zero exitCode for nonexistent_command, got %d", exitCode)
+			}
+			if stderr == "" {
+				t.Errorf("Expected non-empty stderr for nonexistent_command, got empty")
+			}
+		} else {
+			t.Fatalf("ProcessState is nil for nonexistent_command") // Should not happen if command was run
 		}
 	})
 }
@@ -315,8 +362,9 @@ func TestSessionFS_Close(t *testing.T) {
 	// Trigger anonymous root creation and mounting
 	t.Logf("TestSessionFS_Close: Running echo test to trigger anonymous root creation.")
 	// Use Run with empty workingDir to trigger sandbox creation
-	_, _, _, err = sf.Run("echo test", "")
+	rc, err := sf.Run(context.Background(), "echo test", "")
 	checkError(t, err, "Run failed to trigger anonymous root creation")
+	defer rc.Close() // Ensure RunningCommand resources are cleaned up
 
 	t.Logf("TestSessionFS_Close: Sandbox base directory: %s", sandboxBaseDir)
 	assertDirExists(t, sandboxBaseDir)
