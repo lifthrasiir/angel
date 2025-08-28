@@ -32,21 +32,7 @@ const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
     setShowCombinedView(!showCombinedView);
   };
 
-  if (CombinedComponent && showCombinedView) {
-    return (
-      <CombinedComponent
-        functionCall={functionCall}
-        functionResponse={functionResponse}
-        callMessageId={callMessageId}
-        responseMessageId={responseMessageId}
-        attachments={responseAttachments}
-        sessionId={sessionId}
-        onToggleView={handleToggleView}
-      />
-    );
-  }
-
-  return (
+  const content = (
     <div className="function-pair-container">
       <FunctionCallMessage functionCall={functionCall} messageId={callMessageId} messageInfo={callMessageInfo} />
       <div
@@ -65,6 +51,26 @@ const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
       />
     </div>
   );
+
+  if (CombinedComponent && showCombinedView) {
+    return (
+      <CombinedComponent
+        functionCall={functionCall}
+        functionResponse={functionResponse}
+        callMessageId={callMessageId}
+        responseMessageId={responseMessageId}
+        attachments={responseAttachments}
+        sessionId={sessionId}
+        onToggleView={handleToggleView}
+        callMessageInfo={callMessageInfo}
+        responseMessageInfo={responseMessageInfo}
+      >
+        {content}
+      </CombinedComponent>
+    );
+  } else {
+    return content;
+  }
 };
 
 export default FunctionPairMessage;

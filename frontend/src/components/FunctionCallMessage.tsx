@@ -15,18 +15,6 @@ interface FunctionCallMessageProps {
 const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall, messageInfo, messageId }) => {
   const CustomComponent = getFunctionCallComponent(functionCall.name);
 
-  if (CustomComponent) {
-    // If a custom component exists for this function call
-    return (
-      <div id={messageId} className="chat-message-container agent-message">
-        <div className="chat-bubble agent-function-call function-message-bubble">
-          <CustomComponent functionCall={functionCall} messageId={messageId} />
-        </div>
-        {messageInfo}
-      </div>
-    );
-  }
-
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
@@ -115,7 +103,16 @@ const FunctionCallMessage: React.FC<FunctionCallMessageProps> = ({ functionCall,
     }
   };
 
-  return <>{renderContent()}</>;
+  if (CustomComponent) {
+    // If a custom component exists for this function call
+    return (
+      <CustomComponent functionCall={functionCall} messageId={messageId} messageInfo={messageInfo}>
+        {renderContent()}
+      </CustomComponent>
+    );
+  } else {
+    return <>{renderContent()}</>;
+  }
 };
 
 export default FunctionCallMessage;

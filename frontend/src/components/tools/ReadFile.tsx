@@ -13,15 +13,20 @@ import FileAttachmentList from '../FileAttachmentList';
 
 const argsKeys = { file_path: 'string' } as const;
 
-const ReadFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall }) => {
+const ReadFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messageId, messageInfo, children }) => {
   const args = functionCall.args;
   if (!validateExactKeys(args, argsKeys)) {
-    return null;
+    return children;
   }
 
   return (
-    <div className="function-title-bar function-call-title-bar">
-      read_file: <code>{args.file_path}</code>
+    <div id={messageId} className="chat-message-container agent-message">
+      <div className="chat-bubble agent-function-call function-message-bubble">
+        <div className="function-title-bar function-call-title-bar">
+          read_file: <code>{args.file_path}</code>
+        </div>
+      </div>
+      {messageInfo}
     </div>
   );
 };
@@ -33,19 +38,26 @@ const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
   messageId,
   attachments,
   sessionId,
+  messageInfo,
+  children,
 }) => {
   const response = functionResponse.response;
   if (!validateExactKeys(response, responseKeys)) {
-    return null;
+    return children;
   }
 
   return (
-    <div className="read-file-response">
-      <pre className="function-code-block">{response.content}</pre>
-      {response.note && <p>{response.note}</p>}
-      {attachments && attachments.length > 0 && (
-        <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
-      )}
+    <div id={messageId} className="chat-message-container user-message">
+      <div className="chat-bubble function-message-bubble">
+        <div className="read-file-response">
+          <pre className="function-code-block">{response.content}</pre>
+          {response.note && <p>{response.note}</p>}
+          {attachments && attachments.length > 0 && (
+            <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+          )}
+        </div>
+      </div>
+      {messageInfo}
     </div>
   );
 };
@@ -57,6 +69,8 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
   attachments,
   sessionId,
   responseMessageId,
+  responseMessageInfo,
+  children,
 }) => {
   const args = functionCall.args;
   const response = functionResponse.response;
@@ -68,7 +82,7 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
   };
 
   if (!validateExactKeys(args, argsKeys) || !validateExactKeys(response, responseKeys)) {
-    return null;
+    return children;
   }
 
   return (
@@ -104,6 +118,7 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
           </div>
         )}
       </div>
+      {responseMessageInfo}
     </div>
   );
 };

@@ -24,23 +24,6 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
 }) => {
   const CustomComponent = getFunctionResponseComponent(functionResponse.name);
 
-  if (CustomComponent) {
-    // If a custom component exists for this function response
-    return (
-      <div id={messageId} className="chat-message-container user-message">
-        <div className="chat-bubble function-message-bubble">
-          <CustomComponent
-            functionResponse={functionResponse}
-            messageId={messageId}
-            attachments={attachments}
-            sessionId={sessionId}
-          />
-        </div>
-        {messageInfo}
-      </div>
-    );
-  }
-
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
   const [showToggle, setShowToggle] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
@@ -144,7 +127,21 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
     );
   };
 
-  return <>{renderContent()}</>;
+  if (CustomComponent) {
+    // If a custom component exists for this function response
+    return (
+      <CustomComponent
+        functionResponse={functionResponse}
+        messageId={messageId}
+        attachments={attachments}
+        sessionId={sessionId}
+      >
+        {renderContent()}
+      </CustomComponent>
+    );
+  } else {
+    return <>{renderContent()}</>;
+  }
 };
 
 export default FunctionResponseMessage;

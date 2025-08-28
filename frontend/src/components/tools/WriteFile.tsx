@@ -11,49 +11,68 @@ import {
 
 const argsKeys = { file_path: 'string', content: 'string' } as const;
 
-const WriteFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall }) => {
+const WriteFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messageId, messageInfo, children }) => {
   const args = functionCall.args;
   if (!validateExactKeys(args, argsKeys)) {
-    return null;
+    return children;
   }
 
   return (
-    <>
-      <div className="function-title-bar function-call-title-bar">
-        write_file: <code>{args.file_path}</code>
+    <div id={messageId} className="chat-message-container agent-message">
+      <div className="chat-bubble agent-function-call function-message-bubble">
+        <div className="function-title-bar function-call-title-bar">
+          write_file: <code>{args.file_path}</code>
+        </div>
+        <pre>{args.content}</pre>
       </div>
-      <pre>{args.content}</pre>
-    </>
+      {messageInfo}
+    </div>
   );
 };
 
 const responseKeys = { status: 'string', unified_diff: 'string' } as const;
 
-const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({ functionResponse }) => {
+const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({
+  functionResponse,
+  messageId,
+  messageInfo,
+  children,
+}) => {
   const response = functionResponse.response;
   if (!validateExactKeys(response, responseKeys)) {
-    return null;
+    return children;
   }
   if (response.status !== 'success') {
-    return null;
+    return children;
   }
 
   return (
-    <>
-      <div className="function-title-bar function-response-title-bar">Success</div>
-      {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
-    </>
+    <div id={messageId} className="chat-message-container user-message">
+      <div className="chat-bubble function-message-bubble">
+        <div className="function-title-bar function-response-title-bar">Success</div>
+        {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
+      </div>
+      {messageInfo}
+    </div>
   );
 };
 
-const WriteFilePair: React.FC<FunctionPairComponentProps> = ({ functionCall, functionResponse, onToggleView }) => {
+const WriteFilePair: React.FC<FunctionPairComponentProps> = ({
+  functionCall,
+  functionResponse,
+  onToggleView,
+  responseMessageInfo,
+  children,
+}) => {
   const args = functionCall.args;
   const response = functionResponse.response;
 
   if (!validateExactKeys(args, argsKeys) || !validateExactKeys(response, responseKeys)) {
-    return null;
+    return children;
   }
-  if (response.status != 'success') return null;
+  if (response.status != 'success') {
+    return children;
+  }
 
   return (
     <div className="function-pair-combined-container">
@@ -63,6 +82,7 @@ const WriteFilePair: React.FC<FunctionPairComponentProps> = ({ functionCall, fun
         </div>
         {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
       </div>
+      {responseMessageInfo}
     </div>
   );
 };

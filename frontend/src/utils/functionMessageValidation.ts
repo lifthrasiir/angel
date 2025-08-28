@@ -22,8 +22,13 @@ export function validateExactKeys<T extends Record<string, keyof PrimitiveTypeMa
   }
 
   const actualKeys = Object.keys(obj);
-  if (actualKeys.length !== Object.keys(expectedKeys).length) {
-    return false;
+  const expectedKeyNames = Object.keys(expectedKeys);
+
+  // Check for unexpected keys in obj
+  for (const actualKey of actualKeys) {
+    if (!expectedKeyNames.includes(actualKey)) {
+      return false; // Found an unexpected key
+    }
   }
 
   for (const key in expectedKeys) {

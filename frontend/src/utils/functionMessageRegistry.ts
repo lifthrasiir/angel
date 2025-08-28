@@ -4,6 +4,8 @@ import { FunctionCall, FunctionResponse, FileAttachment } from '../types/chat';
 export interface FunctionCallMessageProps {
   functionCall: FunctionCall;
   messageId?: string;
+  messageInfo?: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 export interface FunctionResponseMessageProps {
@@ -11,6 +13,8 @@ export interface FunctionResponseMessageProps {
   messageId?: string;
   attachments?: FileAttachment[];
   sessionId?: string;
+  messageInfo?: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 export interface FunctionPairComponentProps {
@@ -21,6 +25,9 @@ export interface FunctionPairComponentProps {
   onToggleView: () => void;
   attachments?: FileAttachment[];
   sessionId?: string;
+  callMessageInfo?: React.ReactNode;
+  responseMessageInfo?: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 type FunctionCallComponent = React.ComponentType<FunctionCallMessageProps>;

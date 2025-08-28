@@ -49,6 +49,10 @@ body {
   color: var(--color-system-verydark);
 }
 
+.function-pair-combined-container .message-info {
+  color: var(--color-combined-verydark);
+}
+
 .message-info {
   font-size: 80%;
   padding: 0 1em;
