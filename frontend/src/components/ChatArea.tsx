@@ -231,7 +231,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               <ProcessingIndicator
                 startTime={processingStartTime}
                 isLastThoughtGroup={false}
-                isLastModelMessage={false} // This case is not a model message
+                isLastModelMessage={true}
               />
             )}
           </>
@@ -264,8 +264,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       };
     } else {
       const isLastModelMessage =
-        isLastMessage &&
-        (['model', 'model_error', 'error', 'function_call'] as (string | undefined)[]).includes(currentMessage.type);
+        isLastMessage && (['model', 'model_error', 'error'] as (string | undefined)[]).includes(currentMessage.type);
       return {
         element: (
           <>
