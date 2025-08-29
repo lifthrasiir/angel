@@ -403,10 +403,10 @@ func getSessionHistoryInternal(
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
 					m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
 					m.state, coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
-				FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
-				GROUP BY m.id
-				HAVING m.branch_id = ? AND m.id <= ?
-				ORDER BY m.id ASC
+			FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
+			GROUP BY m.id
+			HAVING m.branch_id = ? AND m.id <= ?
+			ORDER BY m.id ASC
 			`, branchID, messageIdLimit)
 			if err != nil {
 				return fmt.Errorf("failed to query branch messages: %w", err)
@@ -552,7 +552,7 @@ func GetMessageBranchID(db *sql.DB, messageID int) (string, error) {
 }
 
 // GetLastMessageInBranch retrieves the ID and model of the last message in a given session and branch.
-func GetLastMessageInBranch(db *sql.DB, sessionID string, branchID string) (lastMessageID int, lastMessageModel string, lastMessageGeneration int, err error) {
+func GetLastMessageInBranch(db DbOrTx, sessionID string, branchID string) (lastMessageID int, lastMessageModel string, lastMessageGeneration int, err error) {
 	row := db.QueryRow("SELECT id, model, generation FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionID, branchID)
 	err = row.Scan(&lastMessageID, &lastMessageModel, &lastMessageGeneration)
 	if err != nil {

@@ -107,12 +107,15 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	userMessage := requestBody.Message
 
-	// Add message with branch_id, no parent_message_id, no chosen_next_id initially
-	userMessageID, err := AddMessageToSession(r.Context(), db, Message{
-		SessionID:       sessionId,
-		BranchID:        primaryBranchID,
-		ParentMessageID: nil,
-		ChosenNextID:    nil,
+	// Create a new message chain
+	mc, err := NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to create new message chain")
+		return
+	}
+
+	// Add user message to the chain
+	userMsg, err := mc.Add(r.Context(), db, Message{
 		Text:            userMessage,
 		Type:            TypeUserText,
 		Attachments:     requestBody.Attachments,
@@ -137,7 +140,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send acknowledgement for user message ID to frontend
-	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
+	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
 
 	// Add this sseWriter to the active list for broadcasting subsequent events
 	addSseWriter(sessionId, sseW)
@@ -183,7 +186,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, 0, true, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, userMsg.ID, modelToUse, 0, true, time.Now(), historyContext); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}
@@ -231,40 +234,14 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	systemPrompt := session.SystemPrompt
 	primaryBranchID := session.PrimaryBranchID // Get primary branch ID from session
 
-	// Find the last message in the current primary branch to update its chosen_next_id
-	var lastMessageID int
-	var parentMessageID *int
-	var modelToUse string
 	var envChangedEventPayload string
 
-	lastMessageIDFromDB, lastMessageModelFromDB, lastMessageGenerationFromDB, err := GetLastMessageInBranch(db, sessionId, primaryBranchID) // Get generation
+	// Create a new message chain
+	mc, err := NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			parentMessageID = nil
-			lastMessageID = 0
-			lastMessageGenerationFromDB = 0
-			modelToUse = requestBody.Model // Use request body model for new branch
-			if modelToUse == "" {
-				modelToUse = DefaultGeminiModel // Fallback to default
-			}
-		} else {
-			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message in session %s and branch %s", sessionId, primaryBranchID))
-			return
-		}
-	} else {
-		lastMessageID = lastMessageIDFromDB
-		parentMessageID = &lastMessageID
-
-		modelToUse = requestBody.Model
-		if modelToUse == "" {
-			modelToUse = lastMessageModelFromDB // Use the model of the last message in the branch
-			if modelToUse == "" {
-				modelToUse = DefaultGeminiModel // Fallback to default
-			}
-		}
+		sendInternalServerError(w, r, err, "Failed to create message chain")
+		return
 	}
-
-	userMessage := requestBody.Message
 
 	_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
@@ -272,12 +249,12 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for environment changes and insert system message if needed
-	if currentGeneration > lastMessageGenerationFromDB {
+	// Check for environment changes and add system message to chain if needed
+	if currentGeneration > mc.LastMessageGeneration {
 		// Get old roots from the previous generation
-		oldRoots, err := GetSessionEnv(db, sessionId, lastMessageGenerationFromDB)
+		oldRoots, err := GetSessionEnv(db, sessionId, mc.LastMessageGeneration)
 		if err != nil {
-			log.Printf("chatMessage: Failed to get old session environment for session %s, generation %d: %v", sessionId, lastMessageGenerationFromDB, err)
+			log.Printf("chatMessage: Failed to get old session environment for session %s, generation %d: %v", sessionId, mc.LastMessageGeneration, err)
 			// Non-fatal, continue with user message
 		}
 
@@ -297,65 +274,36 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		envChanged := EnvChanged{Roots: &rootsChanged}
 
 		// Marshal envChanged into JSON
-		envChangedJSON, err := json.Marshal(envChanged)
+		envChangedJSON, err := json.Marshal(envChanged) // Use = instead of :=
 		if err != nil {
 			log.Printf("chatMessage: Failed to marshal envChanged for system message: %v", err)
 			// Non-fatal, continue with user message
 		}
 
-		systemMsg := Message{
-			SessionID:       sessionId,
-			BranchID:        primaryBranchID,
-			ParentMessageID: parentMessageID, // Insert before user message
-			ChosenNextID:    nil,
+		systemMsg, err := mc.Add(r.Context(), db, Message{
 			Text:            string(envChangedJSON),
 			Type:            TypeEnvChanged,
 			Attachments:     nil,
 			CumulTokenCount: nil,
-			Model:           "",
-			Generation:      currentGeneration,
-		}
-		systemMessageID, err := AddMessageToSession(r.Context(), db, systemMsg)
+		})
 		if err != nil {
-			log.Printf("chatMessage: Failed to add roots changed system message: %v", err)
+			log.Printf("chatMessage: Failed to add envChanged message to chain: %v", err)
 			// Non-fatal, continue with user message
-		} else if parentMessageID != nil {
-			err = UpdateMessageChosenNextID(db, *parentMessageID, &systemMessageID)
-			if err != nil {
-				log.Printf("chatMessage: Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-				// Non-fatal, continue with user message
-			}
 		}
-		parentMessageID = &systemMessageID
 
-		// Send SSE event to frontend
-		envChangedEventPayload = fmt.Sprintf("%d\n%s", systemMessageID, string(envChangedJSON))
+		envChangedEventPayload = fmt.Sprintf("%d\n%s", systemMsg.ID, string(envChangedJSON))
 	}
 
-	// Add new message to the primary branch
-	userMessageID, err := AddMessageToSession(r.Context(), db, Message{
-		SessionID:       sessionId,
-		BranchID:        primaryBranchID,
-		ParentMessageID: parentMessageID,
-		ChosenNextID:    nil,
-		Text:            userMessage,
+	// Add user message to the chain
+	userMsg, err := mc.Add(r.Context(), db, Message{
+		Text:            requestBody.Message,
 		Type:            TypeUserText,
 		Attachments:     requestBody.Attachments,
 		CumulTokenCount: nil,
-		Model:           modelToUse,
-		Generation:      currentGeneration, // User message reflects current generation
 	})
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to save user message")
 		return
-	}
-
-	// Update the chosen_next_id of the last message in the primary branch
-	if parentMessageID != nil {
-		if err := UpdateMessageChosenNextID(db, *parentMessageID, &userMessageID); err != nil {
-			log.Printf("chatMessage: Failed to update chosen_next_id for message %d: %v", lastMessageID, err)
-			// Non-fatal error, continue with response
-		}
 	}
 
 	// Update last_updated_at for the session
@@ -378,7 +326,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send acknowledgement for user message ID to frontend
-	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMessageID))
+	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
 
 	// Retrieve session history from DB for LLM (full context)
 	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
@@ -394,7 +342,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roots, generation, err := GetLatestSessionEnv(db, sessionId)
+	roots, _, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -418,7 +366,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
-	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, userMsg.ID, mc.LastMessageModel, mc.LastMessageGeneration, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}
@@ -1090,17 +1038,17 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		handleNewPrimaryBranchChosenNextID(db, branchId)
 	}
 
-	// Find the last message in the current primary branch (which should be the function_call that triggered confirmation)
-	lastMessageIDFromDB, lastMessageModelFromDB, lastMessageGenerationFromDB, err := GetLastMessageInBranch(db, sessionId, branchId)
+	// Create a new message chain
+	mc, err := NewMessageChain(r.Context(), db, sessionId, branchId)
 	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message ID for session %s and branch %s", sessionId, branchId))
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to create message chain for session %s and branch %s", sessionId, branchId))
 		return
 	}
 
 	// Get the full message details for the last message (the function call)
-	lastMessage, err := GetMessageByID(db, lastMessageIDFromDB)
+	lastMessage, err := GetMessageByID(db, mc.LastMessageID)
 	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message details for ID %d", lastMessageIDFromDB))
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message details for ID %d", mc.LastMessageID))
 		return
 	}
 
@@ -1119,27 +1067,15 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Add the function response message to the session
-		denialResponseID, err := AddMessageToSession(r.Context(), db, Message{
-			SessionID:       sessionId,
-			BranchID:        branchId,
-			ParentMessageID: &lastMessageIDFromDB,
-			ChosenNextID:    nil,
+		denialResponseMsg, err := mc.Add(r.Context(), db, Message{
 			Text:            string(frJson),
 			Type:            TypeFunctionResponse,
 			Attachments:     nil,
 			CumulTokenCount: nil,
-			Model:           lastMessageModelFromDB,
-			Generation:      lastMessageGenerationFromDB,
 		})
 		if err != nil {
 			sendInternalServerError(w, r, err, "Failed to save denial function response message")
 			return
-		}
-
-		// Update the chosen_next_id of the function call message to point to the denial response
-		if err := UpdateMessageChosenNextID(db, lastMessageIDFromDB, &denialResponseID); err != nil {
-			log.Printf("confirmBranchHandler: Failed to update chosen_next_id for function call message %d after denial: %v", lastMessageIDFromDB, err)
-			// Non-fatal, but log it
 		}
 
 		// Send EventFunctionResponse to frontend
@@ -1155,7 +1091,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("confirmBranchHandler: Failed to marshal denial response map for SSE: %v", err)
 			denialResponseMapJson = fmt.Appendf(nil, `{"response": {"error": "%v"}}`, err)
 		}
-		formattedData := fmt.Sprintf("%d\n%s\n%s", denialResponseID, functionName, string(denialResponseMapJson))
+		formattedData := fmt.Sprintf("%d\n%s\n%s", denialResponseMsg.ID, functionName, string(denialResponseMapJson))
 		sseW.sendServerEvent(EventFunctionResponse, formattedData)
 
 		// Send EventComplete to signal the end of the pending state
@@ -1169,11 +1105,11 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	var fc FunctionCall
 	if lastMessage.Type == TypeFunctionCall {
 		if err := json.Unmarshal([]byte(lastMessage.Text), &fc); err != nil {
-			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to unmarshal function call from message %d", lastMessageIDFromDB))
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to unmarshal function call from message %d", lastMessage.ID))
 			return
 		}
 	} else {
-		sendBadRequestError(w, r, fmt.Sprintf("Last message %d is not a function call (type: %s)", lastMessageIDFromDB, lastMessage.Type))
+		sendBadRequestError(w, r, fmt.Sprintf("Last message %d is not a function call (type: %s)", lastMessage.ID, lastMessage.Type))
 		return
 	}
 
@@ -1186,7 +1122,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Re-execute the tool function with confirmationReceived = true
 	toolResults, err := CallToolFunction(r.Context(), fc, ToolHandlerParams{
-		ModelName:            lastMessageModelFromDB,
+		ModelName:            lastMessage.Model,
 		SessionId:            sessionId,
 		BranchId:             branchId,
 		ConfirmationReceived: true,
@@ -1216,27 +1152,15 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add the function response message to the session
 	// Note: cumulTokenCount is not updated here, as it's handled by streamLLMResponse
-	functionResponseID, err := AddMessageToSession(r.Context(), db, Message{
-		SessionID:       sessionId,
-		BranchID:        branchId,
-		ParentMessageID: &lastMessageIDFromDB,
-		ChosenNextID:    nil,
+	functionResponseMsg, err := mc.Add(r.Context(), db, Message{
 		Text:            string(frJson),
 		Type:            TypeFunctionResponse,
 		Attachments:     toolResults.Attachments,
 		CumulTokenCount: nil,
-		Model:           lastMessageModelFromDB,
-		Generation:      lastMessageGenerationFromDB,
 	})
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to save function response message after confirmation")
 		return
-	}
-
-	// Update the chosen_next_id of the function call message to point to the response
-	if err := UpdateMessageChosenNextID(db, lastMessageIDFromDB, &functionResponseID); err != nil {
-		log.Printf("confirmBranchHandler: Failed to update chosen_next_id for function call message %d: %v", lastMessageIDFromDB, err)
-		// Non-fatal, but log it
 	}
 
 	// Send EventFunctionResponse to frontend
@@ -1255,7 +1179,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("confirmBranchHandler: Failed to marshal function response value for SSE: %v", err)
 		functionResponseValueJson = fmt.Appendf(nil, `{"response": {"error": "%v"}}`, err)
 	}
-	formattedData := fmt.Sprintf("%d\n%s\n%s", functionResponseID, fc.Name, string(functionResponseValueJson))
+	formattedData := fmt.Sprintf("%d\n%s\n%s", functionResponseMsg.ID, fc.Name, string(functionResponseValueJson))
 	sseW.sendServerEvent(EventFunctionResponse, formattedData)
 
 	// Retrieve session history from DB for LLM (full context)
@@ -1283,7 +1207,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resume streaming from the point after the function response
-	if err := streamLLMResponse(db, initialState, sseW, functionResponseID, lastMessageModelFromDB, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, functionResponseMsg.ID, lastMessage.Model, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response after confirmation")
 		return
 	}
