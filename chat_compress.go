@@ -60,9 +60,15 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	for _, msg := range allMessages {
 		// Only include user and model messages for compression context, similar to gemini-cli's behavior
 		// where it curates history before compression.
-		// We might need to refine this based on how gemini-cli's `getHistory(true)` works.
+		// We'll filter thoughts later if needed for the context sent to the LLM for summarization.
 		// For now, assuming simple text content.
 		if msg.Type.Curated() {
+			// Inline validation for TypeModelText messages
+			if msg.Type == TypeModelText {
+				if len(msg.Parts) > 0 && msg.Parts[0].Text != "" && strings.TrimSpace(msg.Parts[0].Text) == "" {
+					continue // Skip invalid model messages (empty parts or empty/whitespace-only text in first part)
+				}
+			}
 			curatedHistory = append(curatedHistory, Content{
 				Role:  msg.Type.Role(),
 				Parts: msg.Parts,
@@ -102,12 +108,15 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	// 4. Implement findIndexAfterFraction and split history.
 	compressBeforeIndex := findIndexAfterFraction(curatedHistory, 1-COMPRESSION_PRESERVE_THRESHOLD)
 
-	// Ensure compressBeforeIndex is not out of bounds and points to a valid message to start compression from.
-	// Adjust to ensure we don't split a user/model turn in half.
-	// This part might need more sophisticated logic to match gemini-cli's `checkNextSpeaker` and `isFunctionResponse`
-	// For simplicity, we'll just ensure it's not the very first message.
-	if compressBeforeIndex == 0 && len(curatedHistory) > 1 {
-		compressBeforeIndex = 1 // Always keep at least the first message if history is long enough
+	// Adjust compressBeforeIndex to ensure historyToKeep starts with a user message or non-model/non-function-response turn.
+	// This mimics gemini-cli's behavior for better context coherence.
+	for compressBeforeIndex < len(curatedHistory) {
+		msg := curatedHistory[compressBeforeIndex]
+		isModelOrFunctionResponse := (msg.Role == RoleModel || (len(msg.Parts) > 0 && msg.Parts[0].FunctionResponse != nil))
+		if !isModelOrFunctionResponse {
+			break // Found a user message or other non-model/non-function-response message, stop advancing
+		}
+		compressBeforeIndex++ // Advance to the next message
 	}
 
 	historyToCompress := curatedHistory[:compressBeforeIndex]
@@ -135,7 +144,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	// 5. Construct LLM request with historyToCompress and getCompressionPrompt().
-	systemPrompt := executePromptTemplate("compression.md", nil)
+	systemPrompt := executePromptTemplate("compression-prompt.md", nil)
 	triggerPrompt := executePromptTemplate("compression-trigger.md", nil)
 	llmRequestContents := historyToCompress // Start with the history to compress
 	llmRequestContents = append(llmRequestContents, Content{
@@ -358,6 +367,14 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	result.NewTokenCount = newTotalTokenCount
+
+	// 7. Validate: If newTokenCount > originalTokenCount, revert and indicate failure.
+	if newTotalTokenCount > originalTokenCount {
+		// Rollback the transaction as compression was counterproductive
+		tx.Rollback() // Defer will handle the rollback if an error occurs before this.
+		err = fmt.Errorf("compression failed: inflated token count from %d to %d", originalTokenCount, newTotalTokenCount)
+		return
+	}
 
 	// Commit the transaction
 	if err = tx.Commit(); err != nil {
