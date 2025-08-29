@@ -1201,7 +1201,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-execute the tool function with confirmationReceived = true
-	functionResponseValue, err := CallToolFunction(r.Context(), fc, ToolHandlerParams{
+	toolResults, err := CallToolFunction(r.Context(), fc, ToolHandlerParams{
 		ModelName:            lastMessageModelFromDB,
 		SessionId:            sessionId,
 		BranchId:             branchId,
@@ -1222,7 +1222,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save the function response message
-	fr := FunctionResponse{Name: fc.Name, Response: functionResponseValue}
+	fr := FunctionResponse{Name: fc.Name, Response: toolResults.Value}
 	frJson, err := json.Marshal(fr)
 	if err != nil { // Check error from json.Marshal(fr)
 		log.Printf("confirmBranchHandler: Failed to marshal function response for frontend: %v", err)
@@ -1239,7 +1239,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		ChosenNextID:    nil,
 		Text:            string(frJson),
 		Type:            TypeFunctionResponse,
-		Attachments:     nil,
+		Attachments:     toolResults.Attachments,
 		CumulTokenCount: nil,
 		Model:           lastMessageModelFromDB,
 		Generation:      lastMessageGenerationFromDB,
@@ -1265,8 +1265,8 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	defer removeSseWriter(sessionId, sseW)
 
 	functionResponseValueJson, err := json.Marshal(FunctionReplyPayload{
-		Response:    functionResponseValue.Value,
-		Attachments: functionResponseValue.Attachments,
+		Response:    toolResults.Value,
+		Attachments: toolResults.Attachments,
 	})
 	if err != nil {
 		log.Printf("confirmBranchHandler: Failed to marshal function response value for SSE: %v", err)

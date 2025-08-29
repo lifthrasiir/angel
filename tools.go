@@ -48,9 +48,7 @@ var availableTools = map[string]ToolDefinition{
 	"poll_shell_command": pollShellCommandToolDefinition,
 	"kill_shell_command": killShellCommandToolDefinition,
 
-	// task_subagent_tool_definitions.go - Subagent tools (Removed to avoid cyclic dependency)
-	// "subagent_spawn": subagentSpawnToolDefinition,
-	// "subagent_turn":  subagentTurnToolDefinition,
+	// tools_subagent.go - Subagent tools (Removed to avoid cyclic dependency)
 }
 
 func GetBuiltinToolNames() map[string]bool {

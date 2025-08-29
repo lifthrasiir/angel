@@ -131,11 +131,7 @@ func migrateDB(db *sql.DB) error {
 	// Add new columns for generation tracking if they don't exist
 	// SQLite's ALTER TABLE ADD COLUMN does not support IF NOT EXISTS directly.
 	// We will attempt to add and log if it fails, assuming it's due to column existence.
-	alterTableStmts := []string{
-		`ALTER TABLE messages ADD COLUMN generation INTEGER DEFAULT 0;`,
-		`ALTER TABLE messages ADD COLUMN state TEXT;`,
-		`ALTER TABLE messages ADD COLUMN aux TEXT;`,
-	}
+	alterTableStmts := []string{}
 
 	for _, stmt := range alterTableStmts {
 		_, err := db.Exec(stmt)
