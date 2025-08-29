@@ -1156,7 +1156,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 			// Non-fatal, but log it
 		}
 
-		// Send EventFunctionReply to frontend
+		// Send EventFunctionResponse to frontend
 		sseW := newSseWriter(sessionId, w, r)
 		if sseW == nil {
 			return
@@ -1164,13 +1164,13 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		addSseWriter(sessionId, sseW)
 		defer removeSseWriter(sessionId, sseW)
 
-		denialResponseMapJson, err := json.Marshal(FunctionReplyPayload{Response: denialResponseMap})
+		denialResponseMapJson, err := json.Marshal(FunctionResponsePayload{Response: denialResponseMap})
 		if err != nil {
 			log.Printf("confirmBranchHandler: Failed to marshal denial response map for SSE: %v", err)
 			denialResponseMapJson = fmt.Appendf(nil, `{"response": {"error": "%v"}}`, err)
 		}
 		formattedData := fmt.Sprintf("%d\n%s\n%s", denialResponseID, functionName, string(denialResponseMapJson))
-		sseW.sendServerEvent(EventFunctionReply, formattedData)
+		sseW.sendServerEvent(EventFunctionResponse, formattedData)
 
 		// Send EventComplete to signal the end of the pending state
 		broadcastToSession(sessionId, EventComplete, "") // Signal completion
@@ -1256,7 +1256,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal, but log it
 	}
 
-	// Send EventFunctionReply to frontend
+	// Send EventFunctionResponse to frontend
 	sseW := newSseWriter(sessionId, w, r)
 	if sseW == nil {
 		return
@@ -1264,7 +1264,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	addSseWriter(sessionId, sseW)
 	defer removeSseWriter(sessionId, sseW)
 
-	functionResponseValueJson, err := json.Marshal(FunctionReplyPayload{
+	functionResponseValueJson, err := json.Marshal(FunctionResponsePayload{
 		Response:    toolResults.Value,
 		Attachments: toolResults.Attachments,
 	})
@@ -1273,7 +1273,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		functionResponseValueJson = fmt.Appendf(nil, `{"response": {"error": "%v"}}`, err)
 	}
 	formattedData := fmt.Sprintf("%d\n%s\n%s", functionResponseID, fc.Name, string(functionResponseValueJson))
-	sseW.sendServerEvent(EventFunctionReply, formattedData)
+	sseW.sendServerEvent(EventFunctionResponse, formattedData)
 
 	// Retrieve session history from DB for LLM (full context)
 	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, branchId)

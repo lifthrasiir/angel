@@ -105,13 +105,13 @@ func TestConfirmationDenial(t *testing.T) {
 	resp2 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch/%s/confirm", sessionId, branchId), confirmBody, http.StatusOK)
 	defer resp2.Body.Close()
 
-	// Expect EventFunctionReply and EventComplete
-	var receivedFunctionReply bool
+	// Expect EventFunctionResponse and EventComplete
+	var receivedFunctionResponse bool
 	var receivedComplete bool
 	for event := range parseSseStream(t, resp2) {
 		switch event.Type {
-		case EventFunctionReply:
-			receivedFunctionReply = true
+		case EventFunctionResponse:
+			receivedFunctionResponse = true
 		case EventComplete:
 			receivedComplete = true
 		case EventError:
@@ -120,8 +120,8 @@ func TestConfirmationDenial(t *testing.T) {
 			t.Errorf("Unexpected event type during denial: %c", event.Type)
 		}
 	}
-	if !receivedFunctionReply {
-		t.Fatalf("Expected EventFunctionReply after denial, but not received")
+	if !receivedFunctionResponse {
+		t.Fatalf("Expected EventFunctionResponse after denial, but not received")
 	}
 	if !receivedComplete {
 		t.Fatalf("Expected EventComplete after denial, but not received")
@@ -190,21 +190,21 @@ func TestConfirmationApproval(t *testing.T) {
 	resp2 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch/%s/confirm", sessionId, branchId), confirmBody, http.StatusOK)
 	defer resp2.Body.Close()
 
-	// Expect EventFunctionReply and EventComplete
-	var receivedFunctionReply bool
+	// Expect EventFunctionResponse and EventComplete
+	var receivedFunctionResponse bool
 	var receivedCompleteAfterApproval bool
-	var functionReplyContent string
+	var functionResponseContent string
 	var modelMessageContent string
 
 	for event := range parseSseStream(t, resp2) {
 		switch event.Type {
-		case EventFunctionReply:
-			receivedFunctionReply = true
+		case EventFunctionResponse:
+			receivedFunctionResponse = true
 			parts := strings.SplitN(event.Payload, "\n", 3) // Split into 3 parts: messageID, functionName, functionResponseJSON
 			if len(parts) < 3 {
-				t.Fatalf("Invalid EventFunctionReply payload: %s", event.Payload)
+				t.Fatalf("Invalid EventFunctionResponse payload: %s", event.Payload)
 			}
-			functionReplyContent = parts[2] // The third part is the JSON string
+			functionResponseContent = parts[2] // The third part is the JSON string
 		case EventModelMessage:
 			_, content, _ := strings.Cut(event.Payload, "\n")
 			modelMessageContent = content
@@ -217,22 +217,22 @@ func TestConfirmationApproval(t *testing.T) {
 		}
 	}
 
-	if !receivedFunctionReply {
-		t.Fatalf("Expected EventFunctionReply after approval, but not received")
+	if !receivedFunctionResponse {
+		t.Fatalf("Expected EventFunctionResponse after approval, but not received")
 	}
 	if !receivedCompleteAfterApproval {
 		t.Fatalf("Expected EventComplete after approval, but not received")
 	}
 
-	// Verify the content of the function reply (should reflect the modified data)
-	var reply FunctionReplyPayload
-	err = json.Unmarshal([]byte(functionReplyContent), &reply)
+	// Verify the content of the function response (should reflect the modified data)
+	var response FunctionResponsePayload
+	err = json.Unmarshal([]byte(functionResponseContent), &response)
 	if err != nil {
-		t.Fatalf("Failed to unmarshal function reply content: %v", err)
+		t.Fatalf("Failed to unmarshal function response content: %v", err)
 	}
 
-	if status, ok := reply.Response["status"]; !ok || status != "success" {
-		t.Errorf("Expected function reply status 'success', got %v", status)
+	if status, ok := response.Response["status"]; !ok || status != "success" {
+		t.Errorf("Expected function response status 'success', got %v", status)
 	}
 
 	// Verify pending_confirmation is cleared in DB

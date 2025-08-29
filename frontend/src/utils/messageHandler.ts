@@ -4,9 +4,9 @@ import { splitOnceByNewline } from './stringUtils';
 
 // SSE Event Types
 //
-// Sending initial messages: A -> 0 -> any number of T/M/F/R -> (Q -> N) or E
-// Sending subsequent messages: A -> any number of T/M/F/R -> Q or E
-// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R -> Q/E)
+// Sending initial messages: A -> 0 -> any number of T/M/F/R/C -> P or (Q -> N) or E
+// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C -> P/Q/E
+// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R/C -> Q/E)
 
 export const EventInitialState = '0';
 export const EventInitialStateNoCall = '1';
@@ -14,7 +14,7 @@ export const EventAcknowledge = 'A';
 export const EventThought = 'T';
 export const EventModelMessage = 'M';
 export const EventFunctionCall = 'F';
-export const EventFunctionReply = 'R';
+export const EventFunctionResponse = 'R';
 export const EventComplete = 'Q';
 export const EventSessionName = 'N';
 export const EventCumulTokenCount = 'C';
@@ -130,7 +130,7 @@ export const processStreamResponse = async (
         const [functionName, functionArgsJson] = splitOnceByNewline(rest);
         const functionArgs = JSON.parse(functionArgsJson);
         handlers.onFunctionCall(messageId, functionName, functionArgs);
-      } else if (type === EventFunctionReply) {
+      } else if (type === EventFunctionResponse) {
         const [messageId, rest] = splitOnceByNewline(data);
         const [functionName, payloadJsonString] = splitOnceByNewline(rest);
         const { response, attachments } = JSON.parse(payloadJsonString);

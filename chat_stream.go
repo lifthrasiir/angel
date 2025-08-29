@@ -231,18 +231,18 @@ func streamLLMResponse(
 						log.Printf("Failed to save function response message: %v", err)
 						return fmt.Errorf("failed to save function response message: %w", err)
 					}
-					payload := FunctionReplyPayload{
+					payload := FunctionResponsePayload{
 						Response:    toolResults.Value,
 						Attachments: toolResults.Attachments,
 					}
 					payloadJson, err := json.Marshal(payload)
 					if err != nil {
-						log.Printf("Failed to marshal EventFunctionReply payload: %v", err)
+						log.Printf("Failed to marshal EventFunctionResponse payload: %v", err)
 						payloadJson = []byte("{}") // Send empty object on error
 					}
 
 					formattedData = fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(payloadJson))
-					broadcastToSession(initialState.SessionId, EventFunctionReply, formattedData)
+					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
 
 					// Create the initial FunctionResponse part
 					frPart := Part{FunctionResponse: &fr}
