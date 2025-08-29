@@ -20,19 +20,18 @@ func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 	sessionId := vars["sessionId"]
 
 	if sessionId == "" {
-		http.NotFound(w, r)
+		sendNotFoundError(w, r, "Session not found")
 		return
 	}
 
 	exists, err := SessionExists(db, sessionId)
 	if err != nil {
-		log.Printf("handleSessionPage: Failed to check session existence for %s: %v", sessionId, err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to check session existence")
 		return
 	}
 
 	if !exists {
-		http.NotFound(w, r)
+		sendNotFoundError(w, r, "Session not found")
 		return
 	}
 
@@ -45,7 +44,7 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
@@ -58,8 +57,7 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := UpdateSessionName(db, sessionId, requestBody.Name); err != nil {
-		log.Printf("Failed to update session name for %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to update session name: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to update session name")
 		return
 	}
 
@@ -100,8 +98,7 @@ func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	workspaceID := generateID() // Reusing session ID generation for workspace ID
 
 	if err := CreateWorkspace(db, workspaceID, requestBody.Name, ""); err != nil {
-		log.Printf("Failed to create workspace %s: %v", requestBody.Name, err)
-		http.Error(w, fmt.Sprintf("Failed to create workspace: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to create workspace")
 		return
 	}
 
@@ -113,7 +110,7 @@ func listWorkspacesHandler(w http.ResponseWriter, r *http.Request) {
 
 	workspaces, err := GetAllWorkspaces(db)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to retrieve workspaces: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve workspaces")
 		return
 	}
 
@@ -125,13 +122,12 @@ func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := mux.Vars(r)["id"]
 	if workspaceID == "" {
-		http.Error(w, "Workspace ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Workspace ID is required")
 		return
 	}
 
 	if err := DeleteWorkspace(db, workspaceID); err != nil {
-		log.Printf("Failed to delete workspace %s: %v", workspaceID, err)
-		http.Error(w, fmt.Sprintf("Failed to delete workspace: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to delete workspace")
 		return
 	}
 
@@ -161,7 +157,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 	provider, ok := CurrentProviders[modelName]
 	if !ok {
-		http.Error(w, fmt.Sprintf("Unsupported model: %s", modelName), http.StatusBadRequest)
+		sendBadRequestError(w, r, fmt.Sprintf("Unsupported model: %s", modelName))
 		return
 	}
 
@@ -174,11 +170,10 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := provider.CountTokens(context.Background(), contents, modelName)
 	if err != nil {
-		log.Printf("CountTokens API call failed: %v", err)
 		if apiErr, ok := err.(*APIError); ok {
 			http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", apiErr.Message), apiErr.StatusCode)
 		} else {
-			http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "CountTokens API call failed")
 		}
 		return
 	}
@@ -197,7 +192,7 @@ func handleCall(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
@@ -207,8 +202,7 @@ func handleCall(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, map[string]bool{"isActive": isActive})
 	case "DELETE":
 		if err := cancelCall(sessionId); err != nil {
-			log.Printf("handleCall: Failed to cancel call for session %s: %v", sessionId, err)
-			http.Error(w, fmt.Sprintf("Failed to cancel call: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to cancel call for session %s", sessionId))
 			return
 		}
 		sendJSONResponse(w, map[string]string{"status": "success", "message": "Call cancelled successfully"})
@@ -234,8 +228,7 @@ func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
 	if requestBody.WorkspaceID != "" {
 		workspace, err := GetWorkspace(db, requestBody.WorkspaceID)
 		if err != nil {
-			log.Printf("handleEvaluatePrompt: Failed to get workspace %s: %v", requestBody.WorkspaceID, err)
-			http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get workspace %s", requestBody.WorkspaceID))
 			return
 		}
 		workspaceName = workspace.Name
@@ -244,8 +237,7 @@ func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
 	data := PromptData{workspaceName: workspaceName}
 	evaluatedPrompt, err := data.EvaluatePrompt(requestBody.Template)
 	if err != nil {
-		log.Printf("Error evaluating prompt template: %v", err)
-		http.Error(w, fmt.Sprintf("Error evaluating prompt template: %v", err), http.StatusBadRequest)
+		sendBadRequestError(w, r, fmt.Sprintf("Error evaluating prompt template: %v", err))
 		return
 	}
 
@@ -266,7 +258,7 @@ func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 
 	dbConfigs, err := GetMCPServerConfigs(db)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to retrieve MCP configs from DB: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve MCP configs from DB")
 		return
 	}
 
@@ -329,8 +321,7 @@ func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := SaveMCPServerConfig(db, config); err != nil {
-		log.Printf("Failed to save MCP config %s: %v", config.Name, err)
-		http.Error(w, fmt.Sprintf("Failed to save MCP config: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to save MCP config %s", config.Name))
 		return
 	}
 
@@ -349,13 +340,12 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	name := mux.Vars(r)["name"]
 	if name == "" {
-		http.Error(w, "MCP config name is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "MCP config name is required")
 		return
 	}
 
 	if err := DeleteMCPServerConfig(db, name); err != nil {
-		log.Printf("Failed to delete MCP config %s: %v", name, err)
-		http.Error(w, fmt.Sprintf("Failed to delete MCP config: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete MCP config %s", name))
 		return
 	}
 
@@ -375,14 +365,13 @@ func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionID := vars["sessionId"]
 	if sessionID == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
 	result, err := CompressSession(r.Context(), db, sessionID, DefaultGeminiModel)
 	if err != nil {
-		log.Printf("compressSessionHandler: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to compress session")
 		return
 	}
 
@@ -395,6 +384,22 @@ func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 		"compressedUpToMessageId": result.CompressedUpToMessageID,
 		"extractedSummary":        result.ExtractedSummary,
 	})
+}
+
+// sendInternalServerError logs the error and sends a 500 Internal Server Error response.
+func sendInternalServerError(w http.ResponseWriter, _ *http.Request, err error, msg string) {
+	log.Printf("%s: %v", msg, err)
+	http.Error(w, fmt.Sprintf("Internal Server Error: %s", msg), http.StatusInternalServerError)
+}
+
+// sendBadRequestError sends a 400 Bad Request response.
+func sendBadRequestError(w http.ResponseWriter, _ *http.Request, msg string) {
+	http.Error(w, msg, http.StatusBadRequest)
+}
+
+// sendNotFoundError sends a 4.04 Not Found response.
+func sendNotFoundError(w http.ResponseWriter, _ *http.Request, msg string) {
+	http.Error(w, msg, http.StatusNotFound)
 }
 
 // handleNotFound handles requests for paths that don't match any other routes.
@@ -457,7 +462,7 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
@@ -472,8 +477,7 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the SessionFS instance for this session
 	sessionFS, err := getSessionFS(r.Context(), sessionId)
 	if err != nil {
-		log.Printf("updateSessionRootsHandler: Failed to get SessionFS for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to manage exposed directories: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get SessionFS for session %s", sessionId))
 		return
 	}
 	defer releaseSessionFS(sessionId)
@@ -483,24 +487,21 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Update SessionFS with the new roots
 	if err := sessionFS.SetRoots(requestBody.Roots); err != nil {
-		log.Printf("updateSessionRootsHandler: Failed to set roots for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to set exposed directories: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to set roots for session %s", sessionId))
 		return
 	}
 
 	// Update the database
 	_, err = AddSessionEnv(db, sessionId, requestBody.Roots)
 	if err != nil {
-		log.Printf("updateSessionRootsHandler: Failed to update session roots in DB for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to update exposed directories in DB: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to update session roots in DB for session %s", sessionId))
 		return
 	}
 
 	// Calculate EnvChanged
 	rootsChanged, err := calculateRootsChanged(oldRoots, requestBody.Roots)
 	if err != nil {
-		log.Printf("updateSessionRootsHandler: Failed to calculate roots changed: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to calculate environment changes: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to calculate environment changes")
 		return
 	}
 
@@ -518,19 +519,19 @@ func handleDownloadBlob(w http.ResponseWriter, r *http.Request) {
 	blobIndexStr := vars["blobIndex"]
 
 	if sessionId == "" || messageIdStr == "" || blobIndexStr == "" {
-		http.Error(w, "Session ID, Message ID, and Blob Index are required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID, Message ID, and Blob Index are required")
 		return
 	}
 
 	messageId, err := strconv.Atoi(messageIdStr)
 	if err != nil {
-		http.Error(w, "Invalid Message ID", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Invalid Message ID")
 		return
 	}
 
 	blobIndex, err := strconv.Atoi(blobIndexStr)
 	if err != nil {
-		http.Error(w, "Invalid Blob Index", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Invalid Blob Index")
 		return
 	}
 
@@ -538,28 +539,27 @@ func handleDownloadBlob(w http.ResponseWriter, r *http.Request) {
 	message, err := GetMessageByID(db, messageId) // GetMessageByID returns Message struct
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, "Message not found", http.StatusNotFound)
+			sendNotFoundError(w, r, "Message not found")
 		} else {
-			log.Printf("Failed to retrieve message %d: %v", messageId, err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to retrieve message %d", messageId))
 		}
 		return
 	}
 
 	if message == nil || message.SessionID != sessionId {
-		http.Error(w, "Message not found in this session", http.StatusNotFound)
+		sendNotFoundError(w, r, "Message not found in this session")
 		return
 	}
 
 	// message.Attachments is already []FileAttachment type
 	attachments := message.Attachments
 	if attachments == nil { // Handle case where there are no attachments
-		http.Error(w, "No attachments found for this message", http.StatusNotFound)
+		sendNotFoundError(w, r, "No attachments found for this message")
 		return
 	}
 
 	if blobIndex < 0 || blobIndex >= len(attachments) {
-		http.Error(w, "Blob index out of range", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Blob index out of range")
 		return
 	}
 
@@ -571,10 +571,9 @@ func handleDownloadBlob(w http.ResponseWriter, r *http.Request) {
 	data, err := GetBlob(db, blobHash) // GetBlob works with hash
 	if err != nil {
 		if strings.Contains(err.Error(), "blob not found") {
-			http.Error(w, "Blob data not found", http.StatusNotFound)
+			sendNotFoundError(w, r, "Blob data not found")
 		} else {
-			log.Printf("Failed to retrieve blob data for hash %s: %v", blobHash, err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to retrieve blob data for hash %s", blobHash))
 		}
 		return
 	}
@@ -598,8 +597,7 @@ func getSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
 
 	prompts, err := GetGlobalPrompts(db)
 	if err != nil {
-		log.Printf("Failed to retrieve global prompts: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve global prompts: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve global prompts")
 		return
 	}
 
@@ -630,8 +628,7 @@ func saveSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := SaveGlobalPrompts(db, prompts); err != nil {
-		log.Printf("Failed to save global prompts: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to save global prompts: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to save global prompts")
 		return
 	}
 

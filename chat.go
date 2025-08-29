@@ -57,8 +57,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	if requestBody.WorkspaceID != "" {
 		workspace, err := GetWorkspace(db, requestBody.WorkspaceID)
 		if err != nil {
-			log.Printf("newSessionAndMessage: Failed to get workspace %s: %v", requestBody.WorkspaceID, err)
-			http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get workspace %s", requestBody.WorkspaceID))
 			return
 		}
 		workspaceName = workspace.Name
@@ -68,8 +67,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	data := PromptData{workspaceName: workspaceName}
 	systemPrompt, err := data.EvaluatePrompt(requestBody.SystemPrompt)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to evaluate system prompt: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to evaluate system prompt: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to evaluate system prompt")
 		return
 	}
 
@@ -84,8 +82,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		// Set initial roots as generation 0 environment
 		err := SetInitialSessionEnv(db, sessionId, requestBody.InitialRoots)
 		if err != nil {
-			log.Printf("newSessionAndMessage: Failed to set initial session environment: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to set initial session environment: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "Failed to set initial session environment")
 			return
 		}
 
@@ -104,8 +101,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Create session with primary_branch_id (moved after InitialRoots handling)
 	primaryBranchID, err := CreateSession(db, sessionId, systemPrompt, requestBody.WorkspaceID)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to create new session: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to create new session: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to create new session")
 		return
 	}
 
@@ -125,8 +121,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		Generation:      0, // New session starts with generation 0
 	})
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to save user message: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to save user message")
 		return
 	}
 
@@ -151,24 +146,21 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Retrieve session history from DB for LLM (full context)
 	historyContext, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to retrieve full session history for LLM: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for LLM: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
 		return
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
 	frontendHistory, err := GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to retrieve paginated session history for frontend: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve paginated session history for frontend: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
 		return
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
 	currentRoots, _, err := GetLatestSessionEnv(db, sessionId) // Generation is guaranteed to be 0
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to get latest session environment: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to get latest session environment")
 		return
 	}
 
@@ -184,8 +176,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
 	initialStateJSON, err := json.Marshal(initialState)
 	if err != nil {
-		log.Printf("newSessionAndMessage: Failed to marshal initial state: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to prepare initial state: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to marshal initial state")
 		return
 	}
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
@@ -193,7 +184,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
 	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, 0, true, time.Now(), historyContext); err != nil {
-		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}
 }
@@ -210,7 +201,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
@@ -231,9 +222,9 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, sql.ErrNoRows) ||
 			err.Error() == "sql: no rows in result set" ||
 			strings.Contains(err.Error(), "no such table") {
-			http.Error(w, "Session not found", http.StatusNotFound)
+			sendNotFoundError(w, r, "Session not found")
 		} else {
-			http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "Failed to load session")
 		}
 		return
 	}
@@ -257,8 +248,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 				modelToUse = DefaultGeminiModel // Fallback to default
 			}
 		} else {
-			log.Printf("chatMessage: Failed to get last message ID for session %s and branch %s: %v", sessionId, primaryBranchID, err)
-			http.Error(w, fmt.Sprintf("Failed to get last message: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message in session %s and branch %s", sessionId, primaryBranchID))
 			return
 		}
 	} else {
@@ -278,8 +268,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 
 	_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		log.Printf("chatMessage: Failed to get latest session environment for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
 	}
 
@@ -357,8 +346,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Generation:      currentGeneration, // User message reflects current generation
 	})
 	if err != nil {
-		log.Printf("chatMessage: Failed to save user message: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to save user message: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to save user message")
 		return
 	}
 
@@ -395,23 +383,20 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	// Retrieve session history from DB for LLM (full context)
 	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		log.Printf("chatMessage: Failed to retrieve full session history for LLM: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for LLM: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
 		return
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
 	frontendHistoryForInitialState, err := GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
 	if err != nil {
-		log.Printf("chatMessage: Failed to retrieve paginated session history for frontend: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve paginated session history for frontend: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
 		return
 	}
 
 	roots, generation, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		log.Printf("chatMessage: Failed to get latest session environment for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
 	}
 
@@ -428,15 +413,13 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
 	initialStateJSON, err := json.Marshal(initialState)
 	if err != nil {
-		log.Printf("chatMessage: Failed to marshal initial state: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to prepare initial state: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to prepare initial state")
 		return
 	}
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
 	if err := streamLLMResponse(db, initialState, sseW, userMessageID, modelToUse, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
-		log.Printf("chatMessage: Error streaming LLM response: %v", err)
-		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}
 }
@@ -453,24 +436,24 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
 	// Check if session exists
 	exists, err := SessionExists(db, sessionId)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to check session existence: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to check session existence")
 		return
 	}
 	if !exists {
-		http.Error(w, "Session not found", http.StatusNotFound)
+		sendNotFoundError(w, r, "Session not found")
 		return
 	}
 
 	session, err := GetSession(db, sessionId)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to load session")
 		return
 	}
 
@@ -482,8 +465,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	if beforeMessageIDStr != "" {
 		parsedID, err := strconv.Atoi(beforeMessageIDStr)
 		if err != nil {
-			log.Printf("loadChatSession: Invalid beforeMessageId: %v", err)
-			http.Error(w, "Invalid beforeMessageId parameter", http.StatusBadRequest)
+			sendBadRequestError(w, r, "Invalid beforeMessageId parameter")
 			return
 		}
 		beforeMessageID = parsedID
@@ -493,8 +475,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	if fetchLimitStr != "" {
 		parsedLimit, err := strconv.Atoi(fetchLimitStr)
 		if err != nil {
-			log.Printf("loadChatSession: Invalid fetchLimit: %v", err)
-			http.Error(w, "Invalid fetchLimit parameter", http.StatusBadRequest)
+			sendBadRequestError(w, r, "Invalid fetchLimit parameter")
 			return
 		}
 		fetchLimit = parsedLimit
@@ -503,7 +484,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	// Use the primary_branch_id from the session to load history with pagination
 	history, err := GetSessionHistoryPaginated(db, sessionId, session.PrimaryBranchID, beforeMessageID, fetchLimit)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load session history: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to load session history")
 		return
 	}
 
@@ -514,8 +495,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 	currentRoots, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		log.Printf("loadChatSession: Failed to get latest session environment for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
 	}
 
@@ -567,8 +547,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 	branch, err := GetBranch(db, session.PrimaryBranchID)
 	if err != nil {
-		log.Printf("loadChatSession: Failed to get branch %s: %v", session.PrimaryBranchID, err)
-		http.Error(w, fmt.Sprintf("Failed to get branch: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get branch %s", session.PrimaryBranchID))
 		return
 	}
 
@@ -593,8 +572,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 			}
 			initialStateJSON, err := json.Marshal(initialState)
 			if err != nil {
-				log.Printf("loadChatSession: Failed to marshal initial state with elapsed time: %v", err)
-				http.Error(w, "Failed to prepare initial state", http.StatusInternalServerError)
+				sendInternalServerError(w, r, err, "Failed to marshal initial state with elapsed time")
 				return
 			}
 			sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
@@ -605,8 +583,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		} else {
 			initialStateJSON, err := json.Marshal(initialState)
 			if err != nil {
-				log.Printf("loadChatSession: Failed to marshal initial state: %v", err)
-				http.Error(w, "Failed to prepare initial state", http.StatusInternalServerError)
+				sendInternalServerError(w, r, err, "Failed to marshal initial state")
 				return
 			}
 
@@ -633,7 +610,7 @@ func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 
 	wsWithSessions, err := GetWorkspaceAndSessions(db, workspaceID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to retrieve sessions: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to retrieve sessions for workspace %s", workspaceID))
 		return
 	}
 
@@ -648,14 +625,13 @@ func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request
 
 	newRootsJSON := r.URL.Query().Get("newRoots")
 	if newRootsJSON == "" {
-		http.Error(w, "newRoots query parameter is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "newRoots query parameter is required")
 		return
 	}
 
 	var newRoots []string
 	if err := json.Unmarshal([]byte(newRootsJSON), &newRoots); err != nil {
-		log.Printf("calculateNewSessionEnvChangedHandler: Failed to unmarshal newRoots: %v", err)
-		http.Error(w, "Invalid newRoots JSON", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Invalid newRoots JSON")
 		return
 	}
 
@@ -664,8 +640,7 @@ func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request
 
 	rootsChanged, err := calculateRootsChanged(oldRoots, newRoots)
 	if err != nil {
-		log.Printf("calculateNewSessionEnvChangedHandler: Failed to calculate roots changed: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to calculate environment changes: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to calculate environment changes")
 		return
 	}
 
@@ -685,7 +660,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
@@ -702,23 +677,22 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	updatedType, updatedParentMessageID, updatedBranchID, err := GetMessageDetails(db, requestBody.UpdatedMessageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Updated message not found", http.StatusNotFound)
+			sendNotFoundError(w, r, "Updated message not found")
 		} else {
-			log.Printf("createBranchHandler: Failed to get updated message details: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to get updated message details: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "Failed to get updated message details")
 		}
 		return
 	}
 
 	// Validate that the updated message is a user message of type 'text'
 	if updatedType != TypeUserText {
-		http.Error(w, "Branching is only allowed from user messages of type 'text'.", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Branching is only allowed from user messages of type 'text'.")
 		return
 	}
 
 	// Validate that the updated message is not the first message of the session
 	if !updatedParentMessageID.Valid {
-		http.Error(w, "Branching is not allowed from the first message of the session.", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Branching is not allowed from the first message of the session.")
 		return
 	}
 
@@ -730,16 +704,14 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	// Create the new branch in the branches table
 	// Pass the updatedBranchID as a pointer, and branchFromMessageID as a pointer
 	if _, err := CreateBranch(db, newBranchID, sessionId, &updatedBranchID, &branchFromMessageID); err != nil {
-		log.Printf("createBranchHandler: Failed to create new branch in branches table: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to create new branch: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to create new branch in branches table")
 		return
 	}
 
 	// Create the new message in the new branch, with updatedMessageID as its parent
 	_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		log.Printf("createBranchHandler: Failed to get latest session environment for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
 	}
 
@@ -757,8 +729,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		Generation:      currentGeneration,
 	})
 	if err != nil {
-		log.Printf("createBranchHandler: Failed to add new message to new branch: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to add new message: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to add new message to new branch")
 		return
 	}
 
@@ -770,8 +741,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Set the new branch as the primary branch for the session
 	if err := UpdateSessionPrimaryBranchID(db, sessionId, newBranchID); err != nil {
-		log.Printf("createBranchHandler: Failed to set new branch as primary for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to set primary branch: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to set new branch as primary for session %s", sessionId))
 		return
 	}
 
@@ -794,7 +764,7 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
@@ -809,16 +779,14 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 	// Get current session to retrieve old primary branch ID
 	session, err := GetSession(db, sessionId)
 	if err != nil {
-		log.Printf("switchBranchHandler: Failed to get session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to get session: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get session %s", sessionId))
 		return
 	}
 	oldPrimaryBranchID := session.PrimaryBranchID
 
 	// Update the session's primary branch ID
 	if err := UpdateSessionPrimaryBranchID(db, sessionId, requestBody.NewPrimaryBranchID); err != nil {
-		log.Printf("switchBranchHandler: Failed to switch primary branch for session %s to %s: %v", sessionId, requestBody.NewPrimaryBranchID, err)
-		http.Error(w, fmt.Sprintf("Failed to set primary branch: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to switch primary branch for session %s to %s", sessionId, requestBody.NewPrimaryBranchID))
 		return
 	}
 
@@ -940,13 +908,12 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
-		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID is required")
 		return
 	}
 
 	if err := DeleteSession(db, sessionId); err != nil {
-		log.Printf("deleteSession: Failed to delete session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to delete session: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete session %s", sessionId))
 		return
 	}
 
@@ -1087,7 +1054,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	sessionId := vars["sessionId"]
 	branchId := vars["branchId"]
 	if sessionId == "" || branchId == "" {
-		http.Error(w, "Session ID and Branch ID are required", http.StatusBadRequest)
+		sendBadRequestError(w, r, "Session ID and Branch ID are required")
 		return
 	}
 
@@ -1102,24 +1069,21 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Clear pending_confirmation for the branch regardless of approval/denial
 	if err := UpdateBranchPendingConfirmation(db, branchId, ""); err != nil { // Set to empty string to clear
-		log.Printf("confirmBranchHandler: Failed to clear pending_confirmation for branch %s: %v", branchId, err)
-		http.Error(w, fmt.Sprintf("Failed to clear confirmation status: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to clear confirmation status for branch %s", branchId))
 		return
 	}
 
 	// Get session and branch details
 	session, err := GetSession(db, sessionId)
 	if err != nil {
-		log.Printf("confirmBranchHandler: Failed to get session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to get session: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get session %s", sessionId))
 		return
 	}
 
 	// If the confirmed branch is not the primary branch, switch to it
 	if session.PrimaryBranchID != branchId {
 		if err := UpdateSessionPrimaryBranchID(db, sessionId, branchId); err != nil {
-			log.Printf("confirmBranchHandler: Failed to switch primary branch to %s: %v", branchId, err)
-			http.Error(w, fmt.Sprintf("Failed to switch primary branch: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to switch primary branch to %s", branchId))
 			return
 		}
 		handleOldPrimaryBranchChosenNextID(db, sessionId, session.PrimaryBranchID, branchId)
@@ -1129,16 +1093,14 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	// Find the last message in the current primary branch (which should be the function_call that triggered confirmation)
 	lastMessageIDFromDB, lastMessageModelFromDB, lastMessageGenerationFromDB, err := GetLastMessageInBranch(db, sessionId, branchId)
 	if err != nil {
-		log.Printf("confirmBranchHandler: Failed to get last message ID for session %s and branch %s: %v", sessionId, branchId, err)
-		http.Error(w, fmt.Sprintf("Failed to get last message: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message ID for session %s and branch %s", sessionId, branchId))
 		return
 	}
 
 	// Get the full message details for the last message (the function call)
 	lastMessage, err := GetMessageByID(db, lastMessageIDFromDB)
 	if err != nil {
-		log.Printf("confirmBranchHandler: Failed to get last message details for ID %d: %v", lastMessageIDFromDB, err)
-		http.Error(w, fmt.Sprintf("Failed to get last message details: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message details for ID %d", lastMessageIDFromDB))
 		return
 	}
 
@@ -1152,8 +1114,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		fr := FunctionResponse{Name: functionName, Response: denialResponseMap}
 		frJson, err := json.Marshal(fr)
 		if err != nil {
-			log.Printf("confirmBranchHandler: Failed to marshal denial function response: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to process denial: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "Failed to marshal denial function response")
 			return
 		}
 
@@ -1171,8 +1132,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 			Generation:      lastMessageGenerationFromDB,
 		})
 		if err != nil {
-			log.Printf("confirmBranchHandler: Failed to save denial function response message: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to save denial response: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "Failed to save denial function response message")
 			return
 		}
 
@@ -1209,13 +1169,11 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	var fc FunctionCall
 	if lastMessage.Type == TypeFunctionCall {
 		if err := json.Unmarshal([]byte(lastMessage.Text), &fc); err != nil {
-			log.Printf("confirmBranchHandler: Failed to unmarshal function call from message %d: %v", lastMessageIDFromDB, err)
-			http.Error(w, fmt.Sprintf("Failed to parse function call: %v", err), http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to unmarshal function call from message %d", lastMessageIDFromDB))
 			return
 		}
 	} else {
-		log.Printf("confirmBranchHandler: Last message %d is not a function call (type: %s)", lastMessageIDFromDB, lastMessage.Type)
-		http.Error(w, "Last message is not a function call, cannot confirm", http.StatusBadRequest)
+		sendBadRequestError(w, r, fmt.Sprintf("Last message %d is not a function call (type: %s)", lastMessageIDFromDB, lastMessage.Type))
 		return
 	}
 
@@ -1271,8 +1229,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		Generation:      lastMessageGenerationFromDB,
 	})
 	if err != nil {
-		log.Printf("confirmBranchHandler: Failed to save function response message after confirmation: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to save function response: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to save function response message after confirmation")
 		return
 	}
 
@@ -1304,15 +1261,13 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	// Retrieve session history from DB for LLM (full context)
 	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, branchId)
 	if err != nil {
-		log.Printf("confirmBranchHandler: Failed to retrieve full session history for LLM after confirmation: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to retrieve full session history for LLM: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM after confirmation")
 		return
 	}
 
 	roots, generation, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		log.Printf("confirmBranchHandler: Failed to get latest session environment for session %s: %v", sessionId, err)
-		http.Error(w, fmt.Sprintf("Failed to get latest session environment: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
 	}
 
@@ -1329,8 +1284,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Resume streaming from the point after the function response
 	if err := streamLLMResponse(db, initialState, sseW, functionResponseID, lastMessageModelFromDB, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
-		log.Printf("confirmBranchHandler: Error streaming LLM response after confirmation: %v", err)
-		http.Error(w, fmt.Sprintf("Error streaming LLM response: %v", err), http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Error streaming LLM response after confirmation")
 		return
 	}
 
