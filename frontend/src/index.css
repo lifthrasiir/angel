@@ -33,23 +33,23 @@ body {
   margin-bottom: 10px;
 }
 
-.chat-message-container.user-message .message-info,
-.chat-message-container.agent-function-response .message-info {
+.chat-message-container.user-message > .message-info,
+.chat-message-container.agent-function-response > .message-info {
   color: var(--color-user-verydark);
 }
 
-.chat-message-container.agent-message .message-info,
-.chat-message-container.agent-error-message .message-info,
-.chat-message-container.agent-thought .message-info,
-.chat-message-container.agent-function-call .message-info {
+.chat-message-container.agent-message > .message-info,
+.chat-message-container.agent-error-message > .message-info,
+.chat-message-container.agent-thought > .message-info,
+.chat-message-container.agent-function-call > .message-info {
   color: var(--color-agent-verydark);
 }
 
-.chat-message-container.system-message .message-info {
+.chat-message-container.system-message > .message-info {
   color: var(--color-system-verydark);
 }
 
-.function-pair-combined-container .message-info {
+.function-pair-combined-container > .message-info {
   color: var(--color-combined-verydark);
 }
 
@@ -245,39 +245,39 @@ textarea {
   border-left: 4px solid #52c41a;
 }
 
-.user-message .chat-bubble {
+.user-message > .chat-bubble {
   background-color: var(--color-user-light);
   color: #333;
   border: 2px solid var(--color-user-dark);
 }
 
-.agent-message .chat-bubble {
+.agent-message > .chat-bubble {
   background-color: var(--color-agent-light);
   color: #333;
   border: 2px solid var(--color-agent-dark);
 }
 
-.agent-error-message .chat-bubble {
+.agent-error-message > .chat-bubble {
   background-color: var(--color-agent-dark);
   color: #333;
   border: 2px solid var(--color-agent-dark);
 }
 
-.system-message .chat-bubble {
+.system-message > .chat-bubble {
   background-color: var(--color-system-light);
   color: #333;
   border: 2px solid var(--color-system-dark);
 }
 
 /* Specific styles for agent's internal messages */
-.agent-thought .chat-bubble {
+.agent-thought > .chat-bubble {
   background-color: white;
   border: 2px solid var(--color-agent-dark);
   font-style: italic;
   color: #555;
 }
 
-.function-pair-combined-container .chat-bubble {
+.function-pair-combined-container > .chat-bubble {
   background-color: var(--color-combined-light);
   color: #333;
   border: 2px solid var(--color-combined-dark);
@@ -296,18 +296,18 @@ textarea {
   background-color: var(--color-agent-dark);
 }
 
-.system-prompt-message .chat-bubble {
+.system-prompt-message > .chat-bubble {
   background-color: var(--color-system-light); /* Light orange */
   color: #333;
   border: 2px solid var(--color-system-dark); /* Orange */
 }
 
-.system-prompt-message .chat-bubble.expanded {
+.system-prompt-message > .chat-bubble.expanded {
   width: 80%;
   min-height: 50px; /* 최소 높이 */
 }
 
-.system-prompt-message .chat-bubble textarea {
+.system-prompt-message > .chat-bubble textarea {
   background-color: transparent;
   border: none;
   resize: none;
@@ -627,11 +627,11 @@ textarea {
   align-items: flex-start;
 }
 
-.function-pair-container .chat-message-container {
+.function-pair-container > .chat-message-container {
   max-width: calc(50% - 15px);
 }
 
-.function-pair-container .chat-bubble {
+.function-pair-container > .chat-message-container > .chat-bubble {
   width: 100%;
   max-width: calc(100% - 32px);
 }
