@@ -114,8 +114,9 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 	})
 
 	sessionParams := SessionParams{
-		ModelName: modelName,
-		Contents:  []Content{{Role: "user", Parts: []Part{{Text: fallbackPrompt}}}},
+		ModelName:        modelName,
+		Contents:         []Content{{Role: "user", Parts: []Part{{Text: fallbackPrompt}}}},
+		GenerationParams: &genParams,
 	}
 
 	oneShotResult, err := llmProvider.GenerateContentOneShot(ctx, sessionParams)
@@ -144,12 +145,13 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, llmPr
 		return executeWebFetchFallback(ctx, prompt, modelName, fallbackProvider, fallbackGenParams)
 	}
 
-	// --- Primary Gemini API call with urlContext ---
+	// Primary Gemini API call with urlContext
 	sessionParams := SessionParams{
 		ModelName: modelName,
 		Contents:  []Content{{Role: "user", Parts: []Part{{Text: prompt}}}},
 		ToolConfig: map[string]interface{}{
-			"urlContext": map[string]interface{}{}, // Empty object as per Gemini API
+			"":                       map[string]interface{}{}, // No default tools
+			GeminiUrlContextToolName: map[string]interface{}{},
 		},
 		GenerationParams: &genParams,
 	}

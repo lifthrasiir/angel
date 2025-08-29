@@ -27,13 +27,41 @@ type FunctionResponse struct {
 	Response interface{} `json:"response"`
 }
 
+type FileData struct {
+	MimeType string `json:"mimeType"`
+	FileUri  string `json:"fileUri"`
+}
+
+type ExecutableCode struct {
+	Language string `json:"language"`
+	Code     string `json:"code"`
+}
+
+const (
+	LanguagePython = "PYTHON"
+)
+
+type CodeExecutionResult struct {
+	Outcome string `json:"outcome"`
+	Output  string `json:"output,omitempty"`
+}
+
+const (
+	OutcomeOk               = "OUTCOME_OK"
+	OutcomeFailed           = "OUTCOME_FAILED"
+	OutcomeDeadlineExceeded = "OUTCOME_DEADLINE_EXCEEDED"
+)
+
 type Part struct {
-	Text             string            `json:"text,omitempty"`
-	Thought          bool              `json:"thought,omitempty"`
-	ThoughtSignature string            `json:"thoughtSignature,omitempty"`
-	InlineData       *InlineData       `json:"inlineData,omitempty"`
-	FunctionCall     *FunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *FunctionResponse `json:"functionResponse,omitempty"`
+	Text                string               `json:"text,omitempty"`
+	Thought             bool                 `json:"thought,omitempty"`
+	ThoughtSignature    string               `json:"thoughtSignature,omitempty"`
+	InlineData          *InlineData          `json:"inlineData,omitempty"`
+	FunctionCall        *FunctionCall        `json:"functionCall,omitempty"`
+	FunctionResponse    *FunctionResponse    `json:"functionResponse,omitempty"`
+	FileData            *FileData            `json:"fileData,omitempty"`
+	ExecutableCode      *ExecutableCode      `json:"executableCode,omitempty"`
+	CodeExecutionResult *CodeExecutionResult `json:"codeExecutionResult,omitempty"`
 }
 
 type Content struct {
@@ -171,7 +199,8 @@ type GenerationConfig struct {
 
 type Tool struct {
 	FunctionDeclarations []FunctionDeclaration `json:"functionDeclarations,omitempty"`
-	URLContext           *URLContext           `json:"urlContext,omitempty"` // Added for web_fetch tool
+	URLContext           *URLContext           `json:"urlContext,omitempty"`
+	CodeExecution        *CodeExecution        `json:"codeExecution,omitempty"`
 }
 
 type FunctionDeclaration struct {
@@ -186,6 +215,9 @@ type ToolConfig struct {
 
 // URLContext is an empty struct for the url_context field in the API request.
 type URLContext struct{}
+
+// CodeExecution is an empty struct for the code_execution field in the API request.
+type CodeExecution struct{}
 
 type FunctionCallingConfig struct {
 	Mode                 string   `json:"mode,omitempty"`

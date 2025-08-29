@@ -252,7 +252,17 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 						log.Printf("Failed to unmarshal FunctionCall for message %s: %v", msg.ID, err)
 						continue // Skip if malformed
 					}
-					contentParts = append(contentParts, Part{FunctionCall: &fc})
+					if fc.Name == GeminiCodeExecutionToolName {
+						var ec ExecutableCode
+						if err := json.Unmarshal([]byte(fmt.Sprintf("%v", fc.Args)), &ec); err != nil {
+							log.Printf("Failed to unmarshal ExecutableCode from FunctionCall args for message %s: %v", msg.ID, err)
+							contentParts = append(contentParts, Part{FunctionCall: &fc}) // Fallback
+						} else {
+							contentParts = append(contentParts, Part{ExecutableCode: &ec})
+						}
+					} else {
+						contentParts = append(contentParts, Part{FunctionCall: &fc})
+					}
 				} else {
 					log.Printf("Warning: Malformed function_call message %s: no text part", msg.ID)
 					continue
@@ -265,7 +275,21 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 						log.Printf("Failed to unmarshal FunctionResponse for message %s: %v", msg.ID, err)
 						continue // Skip if malformed
 					}
-					contentParts = append(contentParts, Part{FunctionResponse: &fr})
+					if fr.Name == GeminiCodeExecutionToolName {
+						var cer CodeExecutionResult
+						responseBytes, err := json.Marshal(fr.Response)
+						if err != nil {
+							log.Printf("Failed to marshal FunctionResponse.Response to JSON for message %s: %v", msg.ID, err)
+							contentParts = append(contentParts, Part{FunctionResponse: &fr}) // Fallback
+						} else if err := json.Unmarshal(responseBytes, &cer); err != nil {
+							log.Printf("Failed to unmarshal CodeExecutionResult from FunctionResponse.Response for message %s: %v", msg.ID, err)
+							contentParts = append(contentParts, Part{FunctionResponse: &fr}) // Fallback
+						} else {
+							contentParts = append(contentParts, Part{CodeExecutionResult: &cer})
+						}
+					} else {
+						contentParts = append(contentParts, Part{FunctionResponse: &fr})
+					}
 				} else {
 					log.Printf("Warning: Malformed function_response message %s: no text part", msg.ID)
 					continue

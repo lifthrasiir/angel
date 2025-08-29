@@ -120,6 +120,12 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 	return resp, nil
 }
 
+// Reserved names for Gemini's internal tools.
+const (
+	GeminiUrlContextToolName    = ".url_context"
+	GeminiCodeExecutionToolName = ".code_execution"
+)
+
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
 func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params SessionParams) (io.ReadCloser, error) {
 	// Get default generation parameters
@@ -156,9 +162,17 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 			Tools: func() []Tool {
 				currentTools := GetToolsForGemini()
 				if params.ToolConfig != nil {
-					if _, ok := params.ToolConfig["urlContext"]; ok {
+					if _, ok := params.ToolConfig[""]; ok {
+						// Remove the default tool list
+						currentTools = nil
+					}
+					if _, ok := params.ToolConfig[GeminiUrlContextToolName]; ok {
 						// Add a new Tool with URLContext
-						currentTools = []Tool{{URLContext: &URLContext{}}}
+						currentTools = append(currentTools, Tool{URLContext: &URLContext{}})
+					}
+					if _, ok := params.ToolConfig[GeminiCodeExecutionToolName]; ok {
+						// Add a new Tool with CodeExecution
+						currentTools = append(currentTools, Tool{CodeExecution: &CodeExecution{}})
 					}
 				}
 				return currentTools

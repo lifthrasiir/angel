@@ -111,6 +111,7 @@ func nilIntStr(i *int) string {
 
 func printMessages(t *testing.T, db *sql.DB, testName string) {
 	t.Logf("--- Messages in DB after %s ---", testName)
+
 	rows, err := db.Query("SELECT id, type, parent_message_id, chosen_next_id, text FROM messages ORDER BY id ASC")
 	if err != nil {
 		t.Fatalf("Failed to query messages: %v", err)
@@ -1361,6 +1362,29 @@ func TestApplyCurationRules(t *testing.T) {
 				{Type: TypeModelText, Parts: []Part{{Text: "Model D"}}},
 			},
 		},
+		{
+			name: "ExecutableCode FunctionCall without response: Model(EC) -> Model (EC removed)",
+			input: []FrontendMessage{
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+			},
+			expected: []FrontendMessage{
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+			},
+		},
+		{
+			name: "ExecutableCode FunctionCall with response: Model(EC) -> User(ECR) -> Model (all kept)",
+			input: []FrontendMessage{
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+			},
+			expected: []FrontendMessage{
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1381,5 +1405,169 @@ func TestApplyCurationRules(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCodeExecutionMessageHandling(t *testing.T) {
+	router, db, _ := setupTest(t)
+
+	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	if err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
+	}
+
+	// Mock Gemini Provider to return ExecutableCode and CodeExecutionResult
+	provider := replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{ExecutableCode: &ExecutableCode{Language: "python", Code: "print('hello')"}}),
+			responseFromPart(Part{CodeExecutionResult: &CodeExecutionResult{Outcome: "OUTCOME_OK", Output: "hello"}}),
+		},
+	})
+	defer replaceProvider(provider)
+
+	initialUserMessage := "Run some code."
+	reqBody := map[string]interface{}{
+		"message":      initialUserMessage,
+		"systemPrompt": "You are a helpful assistant.",
+		"workspaceId":  "testWorkspace",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	rr := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
+	defer rr.Body.Close()
+
+	var sessionId string
+	var userMessageID int
+	var codeCallMessageID int
+	var codeResponseMessageID int
+
+	for event := range parseSseStream(t, rr) {
+		switch event.Type {
+		case EventAcknowledge:
+			userMessageID, _ = strconv.Atoi(event.Payload)
+		case EventInitialState:
+			var initialState InitialState
+			err := json.Unmarshal([]byte(event.Payload), &initialState)
+			if err != nil {
+				t.Fatalf("Failed to unmarshal initialState: %v", err)
+			}
+			sessionId = initialState.SessionId
+		case EventFunctionCall:
+			messageIdPart, rest, _ := strings.Cut(event.Payload, "\n")
+			functionName, argsJson, _ := strings.Cut(rest, "\n")
+			codeCallMessageID, _ = strconv.Atoi(messageIdPart)
+			if functionName != GeminiCodeExecutionToolName {
+				t.Errorf("Expected function name %s, got %s", GeminiCodeExecutionToolName, functionName)
+			}
+			var ec ExecutableCode
+			if err := json.Unmarshal([]byte(argsJson), &ec); err != nil {
+				t.Errorf("Failed to unmarshal ExecutableCode from args: %v", err)
+			}
+			if ec.Language != "python" || ec.Code != "print('hello')" {
+				t.Errorf("ExecutableCode mismatch. Expected {python, print('hello')}, got {%s, %s}", ec.Language, ec.Code)
+			}
+		case EventFunctionResponse:
+			messageIdPart, rest, _ := strings.Cut(event.Payload, "\n")
+			functionName, responseJson, _ := strings.Cut(rest, "\n")
+			codeResponseMessageID, _ = strconv.Atoi(messageIdPart)
+			if functionName != GeminiCodeExecutionToolName {
+				t.Errorf("Expected function name %s, got %s", GeminiCodeExecutionToolName, functionName)
+			}
+			var payload FunctionResponsePayload
+			if err := json.Unmarshal([]byte(responseJson), &payload); err != nil {
+				t.Errorf("Failed to unmarshal FunctionResponsePayload: %v", err)
+			}
+			var cer CodeExecutionResult
+			// Payload.Response is interface{}, need to marshal then unmarshal
+			responseBytes, err := json.Marshal(payload.Response)
+			if err != nil {
+				t.Errorf("Failed to marshal payload.Response to JSON: %v", err)
+			} else if err := json.Unmarshal(responseBytes, &cer); err != nil {
+				t.Errorf("Failed to unmarshal CodeExecutionResult from payload.Response: %v", err)
+			}
+			if cer.Outcome != "OUTCOME_OK" || cer.Output != "hello" {
+				t.Errorf("CodeExecutionResult mismatch. Expected {OUTCOME_OK, hello}, got {%s, %s}", cer.Outcome, cer.Output)
+			}
+		case EventComplete:
+			// Test complete
+		}
+	}
+
+	if sessionId == "" {
+		t.Fatal("Session ID not found in SSE events")
+	}
+	if userMessageID == 0 {
+		t.Fatal("User message ID not found in SSE events")
+	}
+	if codeCallMessageID == 0 {
+		t.Fatal("Code call message ID not found in SSE events")
+	}
+	if codeResponseMessageID == 0 {
+		t.Fatal("Code response message ID not found in SSE events")
+	}
+
+	// Verify message chain in DB
+	// User -> CodeCall -> CodeResponse
+	var msg Message
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id, type, text FROM messages WHERE id = ?", []interface{}{userMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != codeCallMessageID {
+		t.Errorf("Expected user message chosen_next_id to be %d, got %v", codeCallMessageID, nilIntStr(msg.ChosenNextID))
+	}
+
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id, type, text FROM messages WHERE id = ?", []interface{}{codeCallMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
+	if msg.ParentMessageID == nil || *msg.ParentMessageID != userMessageID {
+		t.Errorf("Expected code call parent_message_id to be %d, got %v", userMessageID, nilIntStr(msg.ParentMessageID))
+	}
+	if msg.ChosenNextID == nil || *msg.ChosenNextID != codeResponseMessageID {
+		t.Errorf("Expected code call chosen_next_id to be %d, got %v", codeResponseMessageID, nilIntStr(msg.ChosenNextID))
+	}
+	if msg.Type != TypeFunctionCall {
+		t.Errorf("Expected code call message type to be %s, got %s", TypeFunctionCall, msg.Type)
+	}
+	var fc FunctionCall
+	if err := json.Unmarshal([]byte(msg.Text), &fc); err != nil {
+		t.Errorf("Failed to unmarshal FunctionCall from DB text: %v", err)
+	}
+	if fc.Name != GeminiCodeExecutionToolName {
+		t.Errorf("Expected FunctionCall name in DB to be %s, got %s", GeminiCodeExecutionToolName, fc.Name)
+	}
+	var ec ExecutableCode
+	jsonBytes, err := json.Marshal(fc.Args)
+	if err != nil {
+		t.Errorf("Failed to marshal FunctionCall args to JSON: %v", err)
+	}
+	if err := json.Unmarshal(jsonBytes, &ec); err != nil {
+		t.Errorf("Failed to unmarshal ExecutableCode from FunctionCall args in DB: %v", err)
+	}
+	if ec.Language != "python" || ec.Code != "print('hello')" {
+		t.Errorf("ExecutableCode in DB mismatch. Expected {python, print('hello')}, got {%s, %s}", ec.Language, ec.Code)
+	}
+
+	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id, type, text FROM messages WHERE id = ?", []interface{}{codeResponseMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
+	if msg.ParentMessageID == nil || *msg.ParentMessageID != codeCallMessageID {
+		t.Errorf("Expected code response parent_message_id to be %d, got %v", codeCallMessageID, nilIntStr(msg.ParentMessageID))
+	}
+	if msg.ChosenNextID != nil {
+		t.Errorf("Expected code response chosen_next_id to be nil, got %v", nilIntStr(msg.ChosenNextID))
+	}
+	if msg.Type != TypeFunctionResponse {
+		t.Errorf("Expected code response message type to be %s, got %s", TypeFunctionResponse, msg.Type)
+	}
+	var fr FunctionResponse
+	if err := json.Unmarshal([]byte(msg.Text), &fr); err != nil {
+		t.Errorf("Failed to unmarshal FunctionResponse from DB text: %v", err)
+	}
+	if fr.Name != GeminiCodeExecutionToolName {
+		t.Errorf("Expected FunctionResponse name in DB to be %s, got %s", GeminiCodeExecutionToolName, fr.Name)
+	}
+	var cer CodeExecutionResult
+	responseBytes, err := json.Marshal(fr.Response)
+	if err != nil {
+		t.Errorf("Failed to marshal FunctionResponse.Response to JSON in DB: %v", err)
+	} else if err := json.Unmarshal(responseBytes, &cer); err != nil {
+		t.Errorf("Failed to unmarshal CodeExecutionResult from FunctionResponse.Response in DB: %v", err)
+	}
+	if cer.Outcome != "OUTCOME_OK" || cer.Output != "hello" {
+		t.Errorf("CodeExecutionResult in DB mismatch. Expected {OUTCOME_OK, hello}, got {%s, %s}", cer.Outcome, cer.Output)
 	}
 }

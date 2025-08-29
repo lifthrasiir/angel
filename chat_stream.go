@@ -274,6 +274,68 @@ func streamLLMResponse(
 					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: partsForContent})
 
 					continue // Continue processing other parts in the same caResp
+				} else if part.ExecutableCode != nil {
+					// Convert ExecutableCode to FunctionCall with special name
+					executableCode := part.ExecutableCode
+					argsBytes, err := json.Marshal(executableCode)
+					if err != nil {
+						log.Printf("Error marshaling ExecutableCode to JSON: %v", err)
+						continue
+					}
+					var argsMap map[string]interface{}
+					if err := json.Unmarshal(argsBytes, &argsMap); err != nil {
+						log.Printf("Error unmarshaling ExecutableCode JSON to map: %v", err)
+						continue
+					}
+					fc := FunctionCall{
+						Name: GeminiCodeExecutionToolName,
+						Args: argsMap,
+					}
+					fcJson, _ := json.Marshal(fc)
+					messageID, err := addMessageToCurrentSession(TypeFunctionCall, string(fcJson), nil, nil, state, "")
+					if err != nil {
+						log.Printf("Failed to save executable code message: %v", err)
+						return fmt.Errorf("failed to save executable code message: %w", err)
+					}
+					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsBytes))
+					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
+
+					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}})
+					continue
+				} else if part.CodeExecutionResult != nil {
+					// Convert CodeExecutionResult to FunctionResponse with special name
+					codeExecutionResult := part.CodeExecutionResult
+					fr := FunctionResponse{
+						Name:     GeminiCodeExecutionToolName,
+						Response: codeExecutionResult,
+					}
+					frJson, _ := json.Marshal(fr)
+					var promptTokens *int
+					if lastUsageMetadata != nil && lastUsageMetadata.PromptTokenCount > 0 {
+						t := lastUsageMetadata.PromptTokenCount
+						promptTokens = &t
+					}
+					messageID, err := addMessageToCurrentSession(TypeFunctionResponse, string(frJson), nil, promptTokens, state, "")
+					if err != nil {
+						log.Printf("Failed to save code execution result message: %v", err)
+						return fmt.Errorf("failed to save code execution result message: %w", err)
+					}
+					payload := FunctionResponsePayload{
+						Response: map[string]interface{}{
+							"outcome": codeExecutionResult.Outcome,
+							"output":  codeExecutionResult.Output,
+						},
+					}
+					payloadJson, err := json.Marshal(payload)
+					if err != nil {
+						log.Printf("Failed to marshal EventFunctionResponse payload for code execution result: %v", err)
+						payloadJson = []byte("{}") // Send empty object on error
+					}
+					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fr.Name, string(payloadJson))
+					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
+
+					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: []Part{{FunctionResponse: &fr}}})
+					continue
 				}
 
 				if part.Text == "" {

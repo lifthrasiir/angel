@@ -990,15 +990,41 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 
 		// Handle function calls and responses (these should override text/attachments for their specific message types)
 		if fm.Type == TypeFunctionCall && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
-			parts = append(parts, Part{
-				FunctionCall:     fm.Parts[0].FunctionCall,
-				ThoughtSignature: fm.Parts[0].ThoughtSignature,
-			})
+			fc := fm.Parts[0].FunctionCall
+			if fc.Name == GeminiCodeExecutionToolName {
+				var ec ExecutableCode
+				// fc.Args is map[string]interface{}, need to marshal then unmarshal
+				argsBytes, err := json.Marshal(fc.Args)
+				if err != nil {
+					log.Printf("Error marshaling FunctionCall args to JSON for ExecutableCode: %v", err)
+					parts = append(parts, Part{FunctionCall: fc, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
+				} else if err := json.Unmarshal(argsBytes, &ec); err != nil {
+					log.Printf("Error unmarshaling ExecutableCode from FunctionCall args: %v", err)
+					parts = append(parts, Part{FunctionCall: fc, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
+				} else {
+					parts = append(parts, Part{ExecutableCode: &ec, ThoughtSignature: fm.Parts[0].ThoughtSignature})
+				}
+			} else {
+				parts = append(parts, Part{FunctionCall: fc, ThoughtSignature: fm.Parts[0].ThoughtSignature})
+			}
 		} else if fm.Type == TypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
-			parts = append(parts, Part{
-				FunctionResponse: fm.Parts[0].FunctionResponse,
-				ThoughtSignature: fm.Parts[0].ThoughtSignature,
-			})
+			fr := fm.Parts[0].FunctionResponse
+			if fr.Name == GeminiCodeExecutionToolName {
+				var cer CodeExecutionResult
+				// fr.Response is interface{}, need to marshal then unmarshal
+				responseBytes, err := json.Marshal(fr.Response)
+				if err != nil {
+					log.Printf("Error marshaling FunctionResponse.Response to JSON for CodeExecutionResult: %v", err)
+					parts = append(parts, Part{FunctionResponse: fr, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
+				} else if err := json.Unmarshal(responseBytes, &cer); err != nil {
+					log.Printf("Error unmarshaling CodeExecutionResult from FunctionResponse.Response: %v", err)
+					parts = append(parts, Part{FunctionResponse: fr, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
+				} else {
+					parts = append(parts, Part{CodeExecutionResult: &cer, ThoughtSignature: fm.Parts[0].ThoughtSignature})
+				}
+			} else {
+				parts = append(parts, Part{FunctionResponse: fr, ThoughtSignature: fm.Parts[0].ThoughtSignature})
+			}
 		} else if (fm.Type == TypeSystemPrompt || fm.Type == TypeEnvChanged) && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
 			// System_prompt should expand to *two* `Content`s
 			prompt := fm.Parts[0].Text
