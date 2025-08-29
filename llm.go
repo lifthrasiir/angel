@@ -44,16 +44,26 @@ type LLMProvider interface {
 	MaxTokens() int
 	RelativeDisplayOrder() int
 	DefaultGenerationParams() SessionGenerationParams
+	SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams)
 }
+
+// Well-known tasks for SubagentProviderAndParams.
+const (
+	SubagentCompressionTask      = "compression"
+	SubagentSessionNameTask      = "session_name"
+	SubagentWebFetchTask         = "web_fetch"
+	SubagentWebFetchFallbackTask = "web_fetch_fallback"
+)
 
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.
 type MockLLMProvider struct {
-	SendMessageStreamFunc        func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
-	GenerateContentOneShotFunc   func(ctx context.Context, params SessionParams) (OneShotResult, error)
-	CountTokensFunc              func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
-	MaxTokensValue               int
-	RelativeDisplayOrderValue    int
-	DefaultGenerationParamsValue SessionGenerationParams
+	SendMessageStreamFunc         func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
+	GenerateContentOneShotFunc    func(ctx context.Context, params SessionParams) (OneShotResult, error)
+	CountTokensFunc               func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
+	MaxTokensValue                int
+	RelativeDisplayOrderValue     int
+	DefaultGenerationParamsValue  SessionGenerationParams
+	SubagentProviderAndParamsFunc func(task string) (LLMProvider, SessionGenerationParams)
 }
 
 // SendMessageStream implements the LLMProvider interface for MockLLMProvider.
@@ -94,3 +104,18 @@ func (m *MockLLMProvider) RelativeDisplayOrder() int {
 func (m *MockLLMProvider) DefaultGenerationParams() SessionGenerationParams {
 	return m.DefaultGenerationParamsValue
 }
+
+// SubagentProviderAndParams implements the LLMProvider interface for MockLLMProvider.
+func (m *MockLLMProvider) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
+	if m.SubagentProviderAndParamsFunc != nil {
+		return m.SubagentProviderAndParamsFunc(task)
+	}
+	// Default mock behavior for subagent provider
+	return m, SessionGenerationParams{
+		Temperature: 0.0,
+		TopK:        -1,
+		TopP:        1.0,
+	}
+}
+
+var _ LLMProvider = (*MockLLMProvider)(nil)

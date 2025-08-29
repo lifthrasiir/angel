@@ -216,7 +216,7 @@ func handleSubagentTurn(
 	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
-	llmClient := CurrentProviders[params.ModelName]
+	llmClient, subagentGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams("")
 	if llmClient == nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM client for model %s not found", params.ModelName)
 	}
@@ -227,9 +227,10 @@ func handleSubagentTurn(
 	for {
 		// Configure SessionParams for LLM call
 		sessionParams := &SessionParams{
-			ModelName:    params.ModelName,
-			SystemPrompt: session.SystemPrompt,
-			Contents:     currentHistory, // Use updated history
+			ModelName:        params.ModelName,
+			SystemPrompt:     session.SystemPrompt,
+			Contents:         currentHistory, // Use updated history
+			GenerationParams: &subagentGenParams,
 		}
 
 		// Use a context with a timeout for the LLM call

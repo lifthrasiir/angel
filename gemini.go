@@ -68,6 +68,12 @@ type CodeAssistClient struct {
 	projectID      string
 }
 
+// geminiFlashClient is a global instance of CodeAssistClient specifically for gemini-2.5-flash.
+var geminiFlashClient *CodeAssistClient
+
+// geminiProClient is a global instance of CodeAssistClient specifically for gemini-2.5-pro.
+var geminiProClient *CodeAssistClient
+
 // NewCodeAssistClient creates a new instance of CodeAssistClient.
 func NewCodeAssistClient(provider HTTPClientProvider, projectID string) *CodeAssistClient {
 	return &CodeAssistClient{
@@ -376,5 +382,15 @@ func (c *CodeAssistClient) DefaultGenerationParams() SessionGenerationParams {
 		Temperature: 1.0,
 		TopK:        64,
 		TopP:        0.95,
+	}
+}
+
+// SubagentProviderAndParams implements the LLMProvider interface for CodeAssistClient.
+func (c *CodeAssistClient) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
+	// For subagents, always use gemini-2.5-flash with specific parameters
+	return geminiFlashClient, SessionGenerationParams{
+		Temperature: 0.0,
+		TopK:        -1,
+		TopP:        1.0,
 	}
 }

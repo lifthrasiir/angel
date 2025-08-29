@@ -90,6 +90,11 @@ func (m *MockGeminiProvider) DefaultGenerationParams() SessionGenerationParams {
 	return SessionGenerationParams{}
 }
 
+// SubagentProviderAndParams implements the LLMProvider interface for MockGeminiProvider.
+func (m *MockGeminiProvider) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
+	return m, SessionGenerationParams{}
+}
+
 // mockCloser implements io.Closer for testing purposes
 type mockCloser struct{}
 

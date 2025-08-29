@@ -105,6 +105,15 @@ func (p *AngelEvalProvider) DefaultGenerationParams() SessionGenerationParams {
 	return SessionGenerationParams{}
 }
 
+// SubagentProviderAndParams implements the LLMProvider interface for AngelEvalProvider.
+func (p *AngelEvalProvider) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
+	return p, SessionGenerationParams{
+		Temperature: 0.0,
+		TopK:        -1,
+		TopP:        1.0,
+	}
+}
+
 // Forth-like language interpreter logic will go here.
 // This will involve a stack and functions for each operation.
 

@@ -76,9 +76,9 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 
 	// Determine the model to use for token counting and generation
 	// For now, use the default model. In a real scenario, this might come from session config.
-	provider, ok := CurrentProviders[modelName]
-	if !ok {
-		err = fmt.Errorf("unsupported model: %s", modelName)
+	provider, compressionGenParams := CurrentProviders[modelName].SubagentProviderAndParams(SubagentCompressionTask)
+	if provider == nil {
+		err = fmt.Errorf("unsupported model for compression: %s", modelName)
 		return
 	}
 
@@ -146,13 +146,6 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	})
 
 	// 6. Call LLM to get summary (XML format) using GenerateContentOneShot.
-	// Specific generation parameters for compression
-	compressionGenParams := SessionGenerationParams{
-		Temperature: 0.0,
-		TopK:        -1,
-		TopP:        1.0,
-	}
-
 	oneShotResult, err := provider.GenerateContentOneShot(ctx, SessionParams{
 		Contents:         llmRequestContents,
 		SystemPrompt:     systemPrompt,

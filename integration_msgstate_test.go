@@ -47,6 +47,10 @@ func (w *testProviderWrapper) DefaultGenerationParams() SessionGenerationParams 
 	return w.original.DefaultGenerationParams()
 }
 
+func (w *testProviderWrapper) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
+	return w.original.SubagentProviderAndParams(task)
+}
+
 func TestThoughtSignatureHandling(t *testing.T) {
 	// Setup test environment
 	router, db, _ := setupTest(t)

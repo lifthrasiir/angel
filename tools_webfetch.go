@@ -21,7 +21,8 @@ const (
 	USER_AGENT           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Angel/0.0"
 )
 
-var httpUrlPattern = regexp.MustCompile(`(https?://[^\s]+)`)
+var httpUrlPattern = regexp.MustCompile(`(https?://[^
+]+)`)
 
 // extractURLs extracts URLs from a given text.
 func extractURLs(text string) []string {
@@ -84,7 +85,7 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 }
 
 // executeWebFetchFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
-func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (ToolHandlerResults, error) {
+func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider, genParams SessionGenerationParams) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		return ToolHandlerResults{}, fmt.Errorf("no URL found in the prompt for fallback")
@@ -130,7 +131,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 	}}, nil
 }
 
-func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (ToolHandlerResults, error) {
+func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider, genParams SessionGenerationParams, fallbackProvider LLMProvider, fallbackGenParams SessionGenerationParams) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		return ToolHandlerResults{}, fmt.Errorf("the 'prompt' must contain at least one valid URL (starting with http:// or https://)")
@@ -140,7 +141,7 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, llmPr
 	urlToProcess := urls[0] // Assuming we only process the first URL for private IP check
 	if isPrivateIp(urlToProcess) {
 		log.Printf("WebFetchTool: Detected private IP for %s. Bypassing LLM and performing manual fetch.", urlToProcess)
-		return executeWebFetchFallback(ctx, prompt, modelName, llmProvider)
+		return executeWebFetchFallback(ctx, prompt, modelName, fallbackProvider, fallbackGenParams)
 	}
 
 	// --- Primary Gemini API call with urlContext ---
@@ -150,6 +151,7 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, llmPr
 		ToolConfig: map[string]interface{}{
 			"urlContext": map[string]interface{}{}, // Empty object as per Gemini API
 		},
+		GenerationParams: &genParams,
 	}
 
 	oneShotResult, err := llmProvider.GenerateContentOneShot(ctx, sessionParams)
@@ -181,7 +183,7 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, llmPr
 
 	if processingError {
 		// Perform fallback for the original prompt
-		return executeWebFetchFallback(ctx, prompt, modelName, llmProvider)
+		return executeWebFetchFallback(ctx, prompt, modelName, fallbackProvider, fallbackGenParams)
 	}
 
 	// If no processing error, return the LLM's response
@@ -201,12 +203,17 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolH
 		return ToolHandlerResults{}, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
 	}
 
-	llmProvider := CurrentProviders[params.ModelName]
-	if llmProvider == nil {
+	webFetchProvider, webFetchGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(SubagentWebFetchTask)
+	if webFetchProvider == nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s)", params.ModelName)
 	}
 
-	return executeWebFetch(ctx, prompt, params.ModelName, llmProvider)
+	webFetchFallbackProvider, webFetchFallbackGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(SubagentWebFetchFallbackTask)
+	if webFetchFallbackProvider == nil {
+		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch fallback (model: %s)", params.ModelName)
+	}
+
+	return executeWebFetch(ctx, prompt, params.ModelName, webFetchProvider, webFetchGenParams, webFetchFallbackProvider, webFetchFallbackGenParams)
 }
 
 var webFetchToolDefinition = ToolDefinition{

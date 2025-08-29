@@ -497,17 +497,10 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	provider, ok := CurrentProviders[modelToUse]
-	if !ok {
-		log.Printf("inferAndSetSessionName: Unsupported model: %s", modelToUse)
+	provider, sessionNameGenParams := CurrentProviders[modelToUse].SubagentProviderAndParams(SubagentSessionNameTask)
+	if provider == nil {
+		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return
-	}
-
-	// Specific generation parameters for session name inference
-	sessionNameGenParams := SessionGenerationParams{
-		Temperature: 0.0,
-		TopK:        -1, // Use default
-		TopP:        1.0,
 	}
 
 	oneShotResult, err := provider.GenerateContentOneShot(ctx, SessionParams{

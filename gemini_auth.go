@@ -251,11 +251,11 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 
 	// Centralized CurrentProviders population
 	if ga.TokenSource != nil {
-		flashClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
-		CurrentProviders["gemini-2.5-flash"] = flashClient
+		geminiFlashClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+		CurrentProviders["gemini-2.5-flash"] = geminiFlashClient
 
-		proClient := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
-		CurrentProviders["gemini-2.5-pro"] = proClient
+		geminiProClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+		CurrentProviders["gemini-2.5-pro"] = geminiProClient
 	} else {
 		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")
 	}
