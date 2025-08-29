@@ -16,7 +16,7 @@ const CompressionMessage: React.FC<CompressionMessageProps> = ({ message, messag
     <div id={message.id} className="chat-message-container system-message compression-message">
       <div className="chat-bubble">
         <p>
-          Compression Snapshot:{' '}
+          Compression Snapshot before{' '}
           <a href={`#${firstLine}`} className="message-id-link">
             {firstLine}
           </a>

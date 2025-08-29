@@ -11,7 +11,7 @@ function getCsrfToken(): string | null {
 }
 
 interface RequestOptions extends RequestInit {
-  // Add any custom options here if needed
+  signal?: AbortSignal;
 }
 
 export async function apiFetch(input: RequestInfo | URL, init?: RequestOptions): Promise<Response> {
@@ -29,7 +29,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestOptions):
     }
   }
 
-  const response = await fetch(input, { ...init, headers });
+  const response = await fetch(input, { ...init, headers, signal: init?.signal });
 
   // You can add global error handling here if needed
   if (!response.ok) {

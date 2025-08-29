@@ -22,7 +22,8 @@ import {
   updateMessageTokenCountAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
-  pendingRootsAtom, // Add this import
+  pendingRootsAtom,
+  compressAbortControllerAtom,
 } from '../atoms/chatAtoms';
 import { ModelInfo } from '../api/models';
 
@@ -63,8 +64,10 @@ export const useMessageSending = ({
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
-  const pendingRoots = useAtomValue(pendingRootsAtom); // Add this line
-  const setPendingRoots = useSetAtom(pendingRootsAtom); // Add this line for setter
+  const pendingRoots = useAtomValue(pendingRootsAtom);
+  const setPendingRoots = useSetAtom(pendingRootsAtom);
+  const compressAbortController = useAtomValue(compressAbortControllerAtom);
+  const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
 
   const commonHandlers = {
     onMessage: (messageId: string, text: string) => {
@@ -227,6 +230,15 @@ export const useMessageSending = ({
 
   const cancelStreamingCall = async () => {
     if (!chatSessionId) return;
+
+    // If a compress operation is ongoing, abort it instead of the streaming call
+    if (compressAbortController) {
+      compressAbortController.abort();
+      setCompressAbortController(null);
+      setProcessingStartTime(null);
+      addErrorMessage('Compression cancelled by user.');
+      return;
+    }
 
     try {
       const response = await apiFetch(`/api/chat/${chatSessionId}/call`, {

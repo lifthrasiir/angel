@@ -7,9 +7,12 @@ import {
   isPickingDirectoryAtom,
   temporaryEnvChangeMessageAtom,
   primaryBranchIdAtom,
-  pendingRootsAtom, // Add this import
+  pendingRootsAtom,
+  processingStartTimeAtom,
+  addMessageAtom,
+  compressAbortControllerAtom,
 } from '../atoms/chatAtoms';
-import type { ChatMessage, RootsChanged, EnvChanged } from '../types/chat'; // Added EnvChanged
+import type { ChatMessage, RootsChanged, EnvChanged } from '../types/chat';
 import { fetchSessions } from '../utils/sessionManager';
 import { callNativeDirectoryPicker, ResultType, PickDirectoryAPIResponse } from '../utils/dialogHelpers';
 
@@ -20,17 +23,24 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const setIsPickingDirectory = useSetAtom(isPickingDirectoryAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
-  const setPendingRoots = useSetAtom(pendingRootsAtom); // Add this line
-  const currentPendingRoots = useAtomValue(pendingRootsAtom); // Get current value for calculations
+  const setPendingRoots = useSetAtom(pendingRootsAtom);
+  const currentPendingRoots = useAtomValue(pendingRootsAtom);
+  const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
+  const addMessage = useSetAtom(addMessageAtom);
+  const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
 
   const runCompress = async () => {
     setStatusMessage('Compressing chat history...');
+    setProcessingStartTime(Date.now());
+    const abortController = new AbortController();
+    setCompressAbortController(abortController);
     try {
       const response = await apiFetch(`/api/chat/${sessionId}/compress`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: abortController.signal,
       });
       if (!response.ok) {
         const errorData = await response.json();
@@ -40,6 +50,18 @@ export const useCommandProcessor = (sessionId: string | null) => {
       setStatusMessage(
         `Compression successful! Original tokens: ${result.originalTokenCount}, New tokens: ${result.newTokenCount}`,
       );
+
+      // Add the compression message to the chat history
+      if (sessionId) {
+        const compressionMessage: ChatMessage = {
+          id: String(result.compressionMessageId),
+          type: 'compression',
+          parts: [{ text: `${result.compressedUpToMessageId}\n${result.extractedSummary}` }],
+          sessionId: sessionId,
+          branchId: primaryBranchId,
+        };
+        addMessage(compressionMessage);
+      }
 
       // Refresh the session list
       if (workspaceId) {
@@ -51,12 +73,19 @@ export const useCommandProcessor = (sessionId: string | null) => {
         }
       }
     } catch (error: any) {
-      setStatusMessage(`Compression failed: ${error.message}`);
-      console.error('Compression failed:', error);
+      if (error.name === 'AbortError') {
+        setStatusMessage('Compression cancelled by user.');
+        console.log('Compression cancelled by user.');
+      } else {
+        setStatusMessage(`Compression failed: ${error.message}`);
+        console.error('Compression failed:', error);
+      }
+    } finally {
+      setProcessingStartTime(null);
+      setCompressAbortController(null);
     }
   };
 
-  // updateRoots function - MODIFIED
   const updateRoots = async (command: string, rootsToProcess: string[]): Promise<RootsChanged | undefined> => {
     setStatusMessage(`Updating exposed directories...`);
 

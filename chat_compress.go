@@ -19,9 +19,11 @@ const (
 )
 
 type CompressResult struct {
-	OriginalTokenCount int
-	NewTokenCount      int
-	CompressionMsgID   int
+	OriginalTokenCount      int
+	NewTokenCount           int
+	CompressionMsgID        int
+	CompressedUpToMessageID int
+	ExtractedSummary        string
 }
 
 var stateSnapshotPattern = regexp.MustCompile(`(?s)<state_snapshot>(.*?)</state_snapshot>`)
@@ -385,6 +387,8 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	result.OriginalTokenCount = originalTokenCount
 	result.NewTokenCount = newTotalTokenCount
 	result.CompressionMsgID = newCompressionMsgID
+	result.CompressedUpToMessageID = *compressedUpToMessageID
+	result.ExtractedSummary = extractedSummary
 	return
 }
 

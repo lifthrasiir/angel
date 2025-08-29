@@ -387,11 +387,13 @@ func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, map[string]interface{}{
-		"status":               "success",
-		"message":              "Chat history compressed successfully",
-		"originalTokenCount":   result.OriginalTokenCount,
-		"newTokenCount":        result.NewTokenCount,
-		"compressionMessageId": result.CompressionMsgID,
+		"status":                  "success",
+		"message":                 "Chat history compressed successfully",
+		"originalTokenCount":      result.OriginalTokenCount,
+		"newTokenCount":           result.NewTokenCount,
+		"compressionMessageId":    result.CompressionMsgID,
+		"compressedUpToMessageId": result.CompressedUpToMessageID,
+		"extractedSummary":        result.ExtractedSummary,
 	})
 }
 

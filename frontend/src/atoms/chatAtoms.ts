@@ -28,6 +28,7 @@ export const isPriorSessionLoadCompleteAtom = atom(false);
 export const pendingConfirmationAtom = atom<string | null>(null);
 export const temporaryEnvChangeMessageAtom = atom<ChatMessage | null>(null);
 export const pendingRootsAtom = atom<string[]>([]);
+export const compressAbortControllerAtom = atom<AbortController | null>(null);
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(
