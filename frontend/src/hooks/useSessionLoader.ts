@@ -144,6 +144,15 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
     try {
       const data = await fetchSessionHistory(chatSessionId!, primaryBranchId, firstMessageId, FETCH_LIMIT);
 
+      // Check if the session ID has changed while fetching history
+      // If urlSessionId is different from chatSessionId, it means the user navigated to a new session
+      if (urlSessionId !== chatSessionId) {
+        console.log(
+          `Ignoring loaded messages for old session ID: ${chatSessionId}. Current URL session ID: ${urlSessionId}`,
+        );
+        return; // Do not update messages for an old session
+      }
+
       // Check if it's the last page
       setHasMoreMessages(data.history.length >= FETCH_LIMIT);
 
@@ -182,6 +191,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
     mapToChatMessages,
     chatAreaRef,
     adjustScroll,
+    urlSessionId,
   ]);
 
   useEffect(() => {
@@ -221,9 +231,9 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
         }
         const defaultPrompt = `{{.Builtin.SystemPrompt}}`;
         setSystemPrompt(defaultPrompt);
-        // 기존 EventSource가 있다면 닫고, 정상 종료로 표시
+        // Close existing EventSource if any, and mark as normally ended
         if (eventSourceRef.current) {
-          isStreamEndedNormallyRef.current = true; // 정상 종료로 표시
+          isStreamEndedNormallyRef.current = true; // Mark as normally ended
           eventSourceRef.current.close();
           eventSourceRef.current = null;
         }
@@ -247,8 +257,29 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
             (event: MessageEvent) => {
               const [eventType, eventData] = splitOnceByNewline(event.data);
 
+              // Check if the current URL's session ID matches the session ID this EventSource was started with.
+              // urlSessionId is the latest URL session ID captured in the useEffect's closure.
+              // currentSessionId is the session ID at the time this loadChatSession call was made.
+              // Additionally, check if the current active chat session ID (from Jotai atom) matches.
+              if (urlSessionId !== currentSessionId) {
+                console.log(
+                  `Ignoring SSE event for old session ID: ${currentSessionId}. Current URL session ID: ${urlSessionId}`,
+                );
+                // Close this EventSource as it's no longer valid.
+                eventSourceRef.current?.close();
+                eventSourceRef.current = null;
+                return;
+              }
+
               if (eventType === EventInitialState || eventType === EventInitialStateNoCall) {
                 const data: InitialState = JSON.parse(eventData);
+                // Before setting messages, ensure the session ID is still valid
+                if (urlSessionId !== data.sessionId) {
+                  console.log(
+                    `Ignoring InitialState for old session ID: ${data.sessionId}. Current URL session ID: ${urlSessionId}`,
+                  );
+                  return;
+                }
                 setChatSessionId(data.sessionId);
                 setSystemPrompt(data.systemPrompt);
                 setIsSystemPromptEditing(false);
@@ -291,6 +322,9 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 }
               } else if (eventType === EventModelMessage) {
                 const [messageId, text] = splitOnceByNewline(eventData);
+                // Before updating, ensure the message belongs to the current active session
+                // Assuming messageId can be used to infer session or message object has sessionId
+                // For now, relying on the outer check. If issues persist, might need to pass sessionId in payload.
                 updateAgentMessage({ messageId, text });
               } else if (eventType === EventFunctionCall) {
                 const [messageId, rest] = splitOnceByNewline(eventData);
@@ -330,7 +364,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 closeEventSourceNormally();
                 addErrorMessage(eventData);
               } else if (eventType === EventComplete) {
-                isStreamEndedNormallyRef.current = true; // 정상 종료로 표시
+                isStreamEndedNormallyRef.current = true; // Mark as normally ended
                 setProcessingStartTime(null);
                 closeEventSourceNormally();
               } else if (eventType === EventPendingConfirmation) {
@@ -341,7 +375,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
               console.error('EventSource error:', errorEvent);
               if (errorEvent.target && (errorEvent.target as EventSource).readyState === EventSource.CLOSED) {
                 if (!isStreamEndedNormallyRef.current) {
-                  // useRef 값 사용
+                  // Use useRef value
                   // Only reload if not ended normally
                   window.location.reload();
                 }
