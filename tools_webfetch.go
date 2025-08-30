@@ -21,8 +21,7 @@ const (
 	USER_AGENT           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Angel/0.0"
 )
 
-var httpUrlPattern = regexp.MustCompile(`(https?://[^
-]+)`)
+var httpUrlPattern = regexp.MustCompile(`(https?://[^\n]+)`)
 
 // extractURLs extracts URLs from a given text.
 func extractURLs(text string) []string {
@@ -135,7 +134,15 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider, genParams SessionGenerationParams, fallbackProvider LLMProvider, fallbackGenParams SessionGenerationParams) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
-		return ToolHandlerResults{}, fmt.Errorf("the 'prompt' must contain at least one valid URL (starting with http:// or https://)")
+		// If no URLs are found, perform a DuckDuckGo search
+		searchQuery := url.QueryEscape(prompt)
+		duckDuckGoURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", searchQuery)
+		log.Printf("WebFetchTool: No URLs found. Performing DuckDuckGo search for: %s", duckDuckGoURL)
+
+		// Modify the prompt to explicitly ask to exclude irrelevant content
+		modifiedPrompt := fmt.Sprintf("Process the content from this URL: %s\nExtract relevant information, excluding any irrelevant content.", duckDuckGoURL)
+
+		return executeWebFetchFallback(ctx, modifiedPrompt, modelName, fallbackProvider, fallbackGenParams)
 	}
 
 	// Check for private IP before calling LLM
@@ -220,13 +227,13 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolH
 
 var webFetchToolDefinition = ToolDefinition{
 	Name:        "web_fetch",
-	Description: "Processes content from URL(s). Your prompt and instructions are forwarded to an internal AI agent that fetches and interprets the content. While not a direct search engine, it can retrieve content from HTML-only search result pages (e.g., `https://html.duckduckgo.com/html?q=query`). Without explicit instructions, the agent may summarize or extract key data for efficient information retrieval. Clear directives are required to obtain the original or full content.",
+	Description: "Processes content from URL(s). If no URLs are provided, it automatically performs a DuckDuckGo search using your prompt as the query. Your prompt and instructions are forwarded to an internal AI agent that fetches and interprets the content. While not a direct search engine, it can retrieve content from HTML-only search result pages (e.g., `https://html.duckduckgo.com/html?q=query`). Without explicit instructions, the agent may summarize or extract key data for efficient information retrieval. Clear directives are required to obtain the original or full content.",
 	Parameters: &Schema{
 		Type: TypeObject,
 		Properties: map[string]*Schema{
 			"prompt": {
 				Type:        TypeString,
-				Description: "A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content (e.g., \"Summarize https://example.com/article and extract key points from https://another.com/data\"). To retrieve the full, unsummarized content, you must include explicit instructions such as 'return full content', 'do not summarize', or 'provide original text'. Must contain at least one URL starting with http:// or https://.",
+				Description: "A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content (e.g., \"Summarize https://example.com/article and extract key points from https://another.com/data\"). If no URLs are provided, this prompt will be used as a search query for DuckDuckGo. To retrieve the full, unsummarized content, you must include explicit instructions such as 'return full content', 'do not summarize', or 'provide original text'. Must contain at least one URL starting with http:// or https://, or be a search query.",
 			},
 		},
 		Required: []string{"prompt"},
