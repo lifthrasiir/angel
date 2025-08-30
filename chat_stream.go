@@ -172,8 +172,7 @@ func streamLLMResponse(
 					fcJson, _ := json.Marshal(fc)
 					messageID, err := addMessageToCurrentSession(TypeFunctionCall, string(fcJson), nil, nil, state, "")
 					if err != nil {
-						log.Printf("Failed to save function call message: %v", err)
-						return fmt.Errorf("failed to save function call message: %w", err)
+						return logAndErrorf(err, "Failed to save function call message")
 					}
 					argsJson, _ := json.Marshal(fc.Args)
 					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsJson))
@@ -196,17 +195,15 @@ func streamLLMResponse(
 							// Handle PendingConfirmation error
 							confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
 							if marshalErr != nil {
-								log.Printf("Failed to marshal pending confirmation data: %v", marshalErr)
 								broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
-								return fmt.Errorf("failed to process confirmation: %w", marshalErr)
+								return logAndErrorf(marshalErr, "Failed to marshal pending confirmation data")
 							}
 							confirmationData := string(confirmationDataBytes)
 
 							// Update branch pending_confirmation
 							if err := UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
-								log.Printf("Failed to update branch pending_confirmation: %v", err)
 								broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
-								return fmt.Errorf("failed to update confirmation status: %w", err)
+								return logAndErrorf(err, "Failed to update branch pending_confirmation")
 							}
 
 							// Send P event to frontend
@@ -228,8 +225,7 @@ func streamLLMResponse(
 					}
 					messageID, err = addMessageToCurrentSession(TypeFunctionResponse, string(frJson), toolResults.Attachments, promptTokens, state, "")
 					if err != nil {
-						log.Printf("Failed to save function response message: %v", err)
-						return fmt.Errorf("failed to save function response message: %w", err)
+						return logAndErrorf(err, "Failed to save function response message")
 					}
 					payload := FunctionResponsePayload{
 						Response:    toolResults.Value,
@@ -294,8 +290,7 @@ func streamLLMResponse(
 					fcJson, _ := json.Marshal(fc)
 					messageID, err := addMessageToCurrentSession(TypeFunctionCall, string(fcJson), nil, nil, state, "")
 					if err != nil {
-						log.Printf("Failed to save executable code message: %v", err)
-						return fmt.Errorf("failed to save executable code message: %w", err)
+						return logAndErrorf(err, "Failed to save executable code message")
 					}
 					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsBytes))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
@@ -317,8 +312,7 @@ func streamLLMResponse(
 					}
 					messageID, err := addMessageToCurrentSession(TypeFunctionResponse, string(frJson), nil, promptTokens, state, "")
 					if err != nil {
-						log.Printf("Failed to save code execution result message: %v", err)
-						return fmt.Errorf("failed to save code execution result message: %w", err)
+						return logAndErrorf(err, "Failed to save code execution result message")
 					}
 					payload := FunctionResponsePayload{
 						Response: map[string]interface{}{
@@ -372,8 +366,7 @@ func streamLLMResponse(
 						// Add the initial model message to DB with empty text
 						modelMessageID, err = addMessageToCurrentSession(TypeModelText, "", nil, nil, state, "")
 						if err != nil {
-							log.Printf("Failed to add new model message to DB: %v", err)
-							return fmt.Errorf("failed to add new model message to DB: %w", err)
+							return logAndErrorf(err, "Failed to add new model message to DB")
 						}
 					}
 
@@ -416,8 +409,7 @@ func streamLLMResponse(
 	// Finalize the last model message if any text was streamed
 	if modelMessageID >= 0 {
 		if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
-			log.Printf("Failed to update final agent response: %v", err)
-			return fmt.Errorf("failed to update final agent response: %w", err)
+			return logAndErrorf(err, "Failed to update final agent response")
 		}
 	}
 
@@ -597,4 +589,10 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		return
 	}
 	log.Printf("inferAndSetSessionName: Finished for session %s. Inferred name: %s", sessionId, inferredName)
+}
+
+// logAndErrorf logs an error and returns a new error that wraps the original.
+func logAndErrorf(err error, format string, a ...interface{}) error {
+	log.Printf(format+": %v", append(a, err)...)
+	return fmt.Errorf(format+": %w", append(a, err)...)
 }

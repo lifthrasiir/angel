@@ -188,8 +188,7 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 	// If not found on filesystem, try to serve from embedded files
 	fsys, err := fs.Sub(embeddedFiles, "frontend/dist/assets")
 	if err != nil {
-		log.Printf("Error creating sub-filesystem for assets: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		sendInternalServerError(w, r, err, "Error creating sub-filesystem for assets")
 		return
 	}
 	http.FileServer(http.FS(fsys)).ServeHTTP(w, r)
@@ -206,24 +205,21 @@ func serveSPAIndex(w http.ResponseWriter, r *http.Request) {
 	if _, err = os.Stat(fsPath); err == nil {
 		content, err = os.ReadFile(fsPath)
 		if err != nil {
-			log.Printf("Error reading index.html from filesystem: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "Error reading index.html from filesystem")
 			return
 		}
 	} else {
 		// If not found on filesystem, try to serve from embedded files
 		file, openErr := embeddedFiles.Open("frontend/dist/index.html")
 		if openErr != nil {
-			log.Printf("Error opening embedded index.html: %v", openErr)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			sendInternalServerError(w, r, openErr, "Error opening embedded index.html")
 			return
 		}
 		defer file.Close()
 
 		content, err = io.ReadAll(file)
 		if err != nil {
-			log.Printf("Error reading embedded index.html: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, "Error reading embedded index.html")
 			return
 		}
 	}
@@ -253,16 +249,14 @@ func serveFile(filePath string) http.HandlerFunc {
 		// If not found on filesystem, try to serve from embedded files
 		file, err := embeddedFiles.Open(filepath.Join("frontend/dist", filePath))
 		if err != nil {
-			log.Printf("Error opening embedded file %s: %v", filePath, err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Error opening embedded file %s", filePath))
 			return
 		}
 		defer file.Close()
 
 		content, err := io.ReadAll(file)
 		if err != nil {
-			log.Printf("Error reading embedded file %s: %v", filePath, err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			sendInternalServerError(w, r, err, fmt.Sprintf("Error reading embedded file %s", filePath))
 			return
 		}
 
@@ -286,15 +280,13 @@ func serveFile(filePath string) http.HandlerFunc {
 }
 
 // decodeJSONRequest decodes JSON request body with error handling
-func decodeJSONRequest(r *http.Request, w http.ResponseWriter, target interface{}, handlerName string) bool {
+func decodeJSONRequest(r *http.Request, w http.ResponseWriter, target interface{}, _ string) bool {
 	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
 		// Check if it's an EOF error, which happens with empty body
 		if err == io.EOF || err.Error() == "unexpected EOF" {
-			log.Printf("%s: Empty request body", handlerName)
-			http.Error(w, "Empty request body", http.StatusBadRequest)
+			sendBadRequestError(w, r, "Empty request body")
 		} else {
-			log.Printf("%s: Invalid request body: %v", handlerName, err)
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			sendBadRequestError(w, r, "Invalid request body")
 		}
 		return false
 	}

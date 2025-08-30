@@ -65,8 +65,7 @@ func newSseWriter(sessionId string, w http.ResponseWriter, r *http.Request) *sse
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		log.Println("newSseWriter: Streaming unsupported!")
-		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		sendInternalServerError(w, r, nil, "Streaming unsupported!")
 		return nil
 	}
 	return &sseWriter{ResponseWriter: w, Flusher: flusher, ctx: r.Context(), sessionId: sessionId}
