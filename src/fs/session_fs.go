@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,13 +173,46 @@ func (sf *SessionFS) ReadDir(path string) ([]fs.DirEntry, error) {
 }
 
 // RunningCommand represents a shell command that is currently running.
+// It provides atomic methods to take accumulated stdout/stderr.
 type RunningCommand struct {
-	Cmd       *exec.Cmd
-	StdoutBuf *bytes.Buffer
-	StderrBuf *bytes.Buffer
-	sandbox   *Sandbox
-	Cancel    context.CancelFunc
-	done      chan struct{}
+	Cmd     *exec.Cmd
+	sandbox *Sandbox
+	Cancel  context.CancelFunc
+	done    chan struct{} // Closed when the command goroutine finishes
+
+	stdoutMu  sync.Mutex
+	stdoutBuf bytes.Buffer
+	stderrMu  sync.Mutex
+	stderrBuf bytes.Buffer
+}
+
+// Done returns a channel that is closed when the command goroutine finishes.
+func (rc *RunningCommand) Done() <-chan struct{} {
+	return rc.done
+}
+
+// TakeStdout atomically takes all currently accumulated stdout output and clears the buffer.
+func (rc *RunningCommand) TakeStdout() []byte {
+	rc.stdoutMu.Lock()
+	defer rc.stdoutMu.Unlock()
+	if rc.stdoutBuf.Len() == 0 {
+		return nil
+	}
+	data := rc.stdoutBuf.Bytes() // Get a copy of the bytes
+	rc.stdoutBuf.Reset()
+	return data
+}
+
+// TakeStderr atomically takes all currently accumulated stderr output and clears the buffer.
+func (rc *RunningCommand) TakeStderr() []byte {
+	rc.stderrMu.Lock()
+	defer rc.stderrMu.Unlock()
+	if rc.stderrBuf.Len() == 0 {
+		return nil
+	}
+	data := rc.stderrBuf.Bytes() // Get a copy of the bytes
+	rc.stderrBuf.Reset()
+	return data
 }
 
 // Close cleans up the resources associated with the running command.
@@ -215,6 +250,33 @@ func (rc *RunningCommand) Close() error {
 	return err
 }
 
+// readPipeToBuffer reads from an io.ReadCloser and writes to a bytes.Buffer,
+// protecting the buffer with a sync.Mutex. It signals completion via a WaitGroup.
+func readPipeToBuffer(wg *sync.WaitGroup, pipe io.ReadCloser, mu *sync.Mutex, buf *bytes.Buffer) {
+	defer wg.Done()
+	defer pipe.Close() // Ensure the pipe is closed when the goroutine exits
+
+	readBuf := make([]byte, 4096) // Small buffer to read in chunks
+	for {
+		n, err := pipe.Read(readBuf)
+		if n > 0 {
+			mu.Lock()
+			_, writeErr := buf.Write(readBuf[:n])
+			mu.Unlock()
+			if writeErr != nil {
+				log.Printf("readPipeToBuffer: Error writing to buffer: %v\n", writeErr)
+				break
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("readPipeToBuffer: Error reading from pipe: %v\n", err)
+			}
+			break
+		}
+	}
+}
+
 // Run executes a command within the specified working directory.
 // If workingDir is empty, it defaults to the anonymous root (sandbox root).
 // If workingDir is a relative path, it's resolved against the anonymous root.
@@ -231,10 +293,12 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 	}
 
 	var actualWorkingDir string
+	createAnonymousRoot := false
 
-	if workingDir == "" {
+	if workingDir == "" || filepath.Clean(workingDir) == "." {
 		// Default to anonymous root (sandbox root)
 		actualWorkingDir = sandbox.RootPath()
+		createAnonymousRoot = true // Set flag to create anonymous root if it doesn't exist
 	} else if !filepath.IsAbs(workingDir) {
 		// Relative path, resolve against anonymous root
 		resolvedPath := filepath.Clean(workingDir)
@@ -245,38 +309,50 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 		actualWorkingDir = filepath.Join(sandbox.RootPath(), resolvedPath)
 	} else {
 		// Absolute path, must be within a registered root or the anonymous root
-		actualWorkingDir = filepath.Clean(workingDir)
+		absPath := filepath.Clean(workingDir)
 
 		// Verify existence and containment within roots or sandbox root
 		isValidPath := false
 		for _, root := range sf.roots {
-			if containsPath(root, actualWorkingDir) {
+			if containsPath(root, absPath) {
 				isValidPath = true
 				break
 			}
 		}
-		if !isValidPath && containsPath(sandbox.RootPath(), actualWorkingDir) {
+		if !isValidPath && containsPath(sandbox.RootPath(), absPath) {
 			isValidPath = true
 		}
 
 		if !isValidPath {
 			_ = sandbox.Close() // Close sandbox on error
-			return nil, fmt.Errorf("working directory %s is not within any accessible root or session temporary directory", actualWorkingDir)
+			return nil, fmt.Errorf("working directory %s is not within any accessible root or session temporary directory", absPath)
 		}
+		actualWorkingDir = absPath
+	}
 
-		// Final verification that actualWorkingDir exists and is a directory
-		fileInfo, err := os.Stat(actualWorkingDir)
-		if err != nil {
-			_ = sandbox.Close() // Close sandbox on error
-			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("working directory does not exist: %s", actualWorkingDir)
+	// If it's the anonymous root and it doesn't exist, create it.
+	if createAnonymousRoot {
+		if _, err := os.Stat(actualWorkingDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(actualWorkingDir, 0755); err != nil {
+				_ = sandbox.Close() // Close sandbox on error
+				return nil, fmt.Errorf("failed to create anonymous root directory %s: %w", actualWorkingDir, err)
 			}
-			return nil, fmt.Errorf("failed to stat working directory: %w", err)
 		}
-		if !fileInfo.IsDir() {
-			_ = sandbox.Close() // Close sandbox on error
-			return nil, fmt.Errorf("working directory is not a directory: %s", actualWorkingDir)
+	}
+
+	// Now, proceed with the original existence and directory check for all cases.
+	// This check will now also cover the newly created anonymous root.
+	fileInfo, err := os.Stat(actualWorkingDir)
+	if err != nil {
+		_ = sandbox.Close() // Close sandbox on error
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("working directory does not exist: %s", actualWorkingDir)
 		}
+		return nil, fmt.Errorf("failed to stat working directory: %w", err)
+	}
+	if !fileInfo.IsDir() {
+		_ = sandbox.Close() // Close sandbox on error
+		return nil, fmt.Errorf("working directory is not a directory: %s", actualWorkingDir)
 	}
 
 	cmdCtx, cancel := context.WithCancel(ctx)
@@ -287,26 +363,49 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 		execCmd = exec.CommandContext(cmdCtx, "bash", "-c", command)
 	}
 
-	stdoutBuf := &bytes.Buffer{}
-	stderrBuf := &bytes.Buffer{}
-	execCmd.Stdout = stdoutBuf
-	execCmd.Stderr = stderrBuf
 	execCmd.Dir = actualWorkingDir
 
-	doneChan := make(chan struct{})
-	go func() {
-		defer close(doneChan)
-		_ = execCmd.Run()
-	}()
+	stdoutPipe, err := execCmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		_ = sandbox.Close()
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderrPipe, err := execCmd.StderrPipe()
+	if err != nil {
+		cancel()
+		_ = stdoutPipe.Close() // Close stdout pipe as well
+		_ = sandbox.Close()
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
 
 	rc := &RunningCommand{
-		Cmd:       execCmd,
-		StdoutBuf: stdoutBuf,
-		StderrBuf: stderrBuf,
-		sandbox:   sandbox,
-		Cancel:    cancel,
-		done:      doneChan,
+		Cmd:     execCmd,
+		sandbox: sandbox,
+		Cancel:  cancel,
+		done:    make(chan struct{}),
 	}
+
+	go func() {
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go readPipeToBuffer(&wg, stdoutPipe, &rc.stdoutMu, &rc.stdoutBuf)
+		go readPipeToBuffer(&wg, stderrPipe, &rc.stderrMu, &rc.stderrBuf)
+
+		err = execCmd.Start()
+		if err != nil {
+			log.Printf("Error starting command: %v\n", err)
+			cancel()            // Cancel the context
+			_ = sandbox.Close() // Close the sandbox
+			// Do not close doneChan here, as it's handled by the caller if this goroutine returns early.
+			return
+		}
+
+		wg.Wait()          // Wait for stdout/stderr goroutines to finish reading
+		_ = execCmd.Wait() // Wait for the command to finish
+		close(rc.done)     // Close doneChan AFTER Wait() completes
+	}()
 
 	return rc, nil
 }

@@ -14,7 +14,6 @@ import (
 // runningProcessInfo stores details of a running command and its completion channel.
 type runningProcessInfo struct {
 	RunningCommand *fsPkg.RunningCommand
-	Done           chan struct{} // Closed when the command goroutine finishes
 }
 
 // In-memory map to store details of currently running commands.
@@ -37,13 +36,6 @@ func StartShellCommandManager(db *sql.DB) {
 
 	// Clean up any stale running commands from previous runs
 	cleanupStaleCommands(db)
-
-	ticker := time.NewTicker(1 * time.Second)
-	go func() {
-		for range ticker.C {
-			manageRunningCommands(db)
-		}
-	}()
 }
 
 // cleanupStaleCommands marks any previously running commands as failed on startup.
@@ -65,42 +57,6 @@ func cleanupStaleCommands(db *sql.DB) {
 	log.Printf("Cleaned up %d stale shell commands.", rowsAffected)
 }
 
-// manageRunningCommands periodically checks and manages all running shell commands.
-func manageRunningCommands(db *sql.DB) {
-	cmds, err := GetAllRunningShellCommands(db)
-	if err != nil {
-		log.Printf("Error fetching running shell commands from DB: %v", err)
-		return
-	}
-
-	for _, cmdDB := range cmds {
-		runningProcessesMutex.Lock()
-		info, found := runningProcesses[cmdDB.ID]
-		runningProcessesMutex.Unlock()
-
-		// Case 1: Command is running in DB but not in memory (Angel restarted or external termination)
-		if !found {
-			log.Printf("Command ID %s (%s) found in DB as 'running' but not in memory. Marking as 'failed'.", cmdDB.ID, cmdDB.Command)
-			cmdDB.Status = "failed"
-			cmdDB.EndTime = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
-			cmdDB.ErrorMessage = sql.NullString{String: "Command process was not found or terminated unexpectedly.", Valid: true}
-			if err := UpdateShellCommand(db, cmdDB); err != nil {
-				log.Printf("Error updating DB for missing command %s: %v", cmdDB.ID, err)
-			}
-			continue
-		}
-
-		// Case 2: Command is running, check if it's past its current next_poll_delay
-		// This check is primarily for updating the DB if the command finishes in the background
-		// without an explicit poll from the agent. The exponential backoff for polling
-		// is now handled within PollShellCommandTool.
-		if info.RunningCommand.Cmd.ProcessState != nil && info.RunningCommand.Cmd.ProcessState.Exited() { // Changed to info.Cmd
-			// Command has finished, update DB from ProcessState
-			updateCmdStateFromProcessState(db, cmdDB.ID, info.RunningCommand) // Changed to info.Cmd
-		}
-	}
-}
-
 // updateCmdStateFromProcessState is called when a command has exited.
 // It retrieves final output and updates the DB.
 func updateCmdStateFromProcessState(db DbOrTx, cmdID string, rc *fsPkg.RunningCommand) {
@@ -110,13 +66,9 @@ func updateCmdStateFromProcessState(db DbOrTx, cmdID string, rc *fsPkg.RunningCo
 		return
 	}
 
-	// Update the full stdout/stderr content
-	cmdDB.Stdout = rc.StdoutBuf.Bytes()
-	cmdDB.Stderr = rc.StderrBuf.Bytes()
-
-	// Set final offsets to full length
-	cmdDB.StdoutOffset = int64(len(cmdDB.Stdout))
-	cmdDB.StderrOffset = int64(len(cmdDB.Stderr))
+	// Update the full stdout/stderr content using TakeStdout/TakeStderr
+	cmdDB.Stdout = append(cmdDB.Stdout, rc.TakeStdout()...)
+	cmdDB.Stderr = append(cmdDB.Stderr, rc.TakeStderr()...)
 
 	if rc.Cmd.ProcessState != nil {
 		cmdDB.ExitCode = sql.NullInt64{Int64: int64(rc.Cmd.ProcessState.ExitCode()), Valid: true}
@@ -124,7 +76,7 @@ func updateCmdStateFromProcessState(db DbOrTx, cmdID string, rc *fsPkg.RunningCo
 			cmdDB.Status = "completed"
 		} else {
 			cmdDB.Status = "failed"
-			cmdDB.ErrorMessage = sql.NullString{String: rc.Cmd.ProcessState.String(), Valid: true}
+			cmdDB.ErrorMessage = sql.NullString{String: fmt.Sprintf("Command failed with exit code %d", rc.Cmd.ProcessState.ExitCode()), Valid: true}
 		}
 	} else {
 		// This case should ideally not happen if Exited() is true
@@ -138,6 +90,9 @@ func updateCmdStateFromProcessState(db DbOrTx, cmdID string, rc *fsPkg.RunningCo
 	}
 
 	runningProcessesMutex.Lock()
+	if closeErr := rc.Close(); closeErr != nil {
+		log.Printf("Error closing RunningCommand for command %s: %v", cmdID, closeErr)
+	}
 	delete(runningProcesses, cmdID) // Remove from in-memory map
 	delete(cmdIDToBranchID, cmdID)  // Remove mapping
 	runningProcessesMutex.Unlock()
@@ -192,14 +147,14 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 	cmdIDToBranchID[cmdID] = params.BranchId
 	runningProcessesMutex.Unlock()
 
-	cmdCtx, cancel := context.WithCancel(context.Background())
-	defer cancel() // Ensure cancel is called on all paths
+	cmdCtx := context.Background()
 
 	rc, err := sfs.Run(cmdCtx, commandStr, workingDir)
 	if err != nil {
-		// cancel() is already deferred
+		log.Printf("RunShellCommandTool: Error preparing command execution for cmdID %s: %v", cmdID, err)
 		return ToolHandlerResults{}, fmt.Errorf("failed to prepare command execution: %w", err)
 	}
+	log.Printf("RunShellCommandTool: Command %s (ID: %s) started.", commandStr, cmdID)
 
 	// Initial DB record - stdout_offset and stderr_offset are 0 for a new command
 	cmdDB := ShellCommand{
@@ -220,26 +175,16 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		return ToolHandlerResults{}, fmt.Errorf("failed to insert shell command into DB: %w", err)
 	}
 
-	// Use a channel to signal when the command goroutine finishes
-	doneChan := make(chan struct{})
-
 	// Store running command and its completion channel in memory
 	runningProcessesMutex.Lock()
-	runningProcesses[cmdID] = &runningProcessInfo{RunningCommand: rc, Done: doneChan}
+	runningProcesses[cmdID] = &runningProcessInfo{RunningCommand: rc}
 	runningProcessesMutex.Unlock()
-
-	go func() {
-		defer close(doneChan) // Signal completion by closing the channel
-		defer rc.Cancel()     // Ensure context is cancelled when goroutine exits
-		_ = rc.Cmd.Run()      // Run the command; errors will be captured by ProcessState
-		log.Printf("Command '%s' (ID: %s) goroutine finished.", commandStr, cmdID)
-	}()
 
 	// Check if the command finishes very quickly (within InitialPollDelayInSeconds)
 	select {
-	case <-doneChan:
+	case <-rc.Done():
+		log.Printf("RunShellCommandTool: Command '%s' (ID: %s) finished immediately. Updating DB.", commandStr, cmdID)
 		// Command finished within the initial delay
-		log.Printf("Command '%s' (ID: %s) finished immediately. Updating DB.", commandStr, cmdID)
 		// Update DB with final status
 		updateCmdStateFromProcessState(db, cmdID, rc)
 		// Return completed status and output
@@ -259,12 +204,33 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		}
 		return ToolHandlerResults{Value: result}, nil
 	case <-time.After(InitialPollDelayInSeconds * time.Second):
-		// Command is still running after the initial delay, proceed with normal tracking
-		return ToolHandlerResults{Value: map[string]interface{}{
+		log.Printf("RunShellCommandTool: Command '%s' (ID: %s) still running after initial delay.", commandStr, cmdID)
+
+		// Take any output accumulated during the initial delay
+		initialStdout := rc.TakeStdout()
+		initialStderr := rc.TakeStderr()
+
+		// Update cmdDB with initial output and offsets
+		cmdDB.Stdout = append(cmdDB.Stdout, initialStdout...)
+		cmdDB.Stderr = append(cmdDB.Stderr, initialStderr...)
+		cmdDB.StdoutOffset = int64(len(cmdDB.Stdout))
+		cmdDB.StderrOffset = int64(len(cmdDB.Stderr))
+		if err := UpdateShellCommand(db, cmdDB); err != nil {
+			log.Printf("Warning: Failed to update initial stdout/stderr for command %s: %v", cmdID, err)
+		}
+
+		result := map[string]interface{}{
 			"command_id":      cmdID,
 			"status":          "running",
 			"elapsed_seconds": InitialPollDelayInSeconds, // After initial wait
-		}}, nil
+		}
+		if len(initialStdout) > 0 {
+			result["stdout"] = string(initialStdout)
+		}
+		if len(initialStderr) > 0 {
+			result["stderr"] = string(initialStderr)
+		}
+		return ToolHandlerResults{Value: result}, nil
 	}
 }
 
@@ -303,7 +269,6 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	// If the command is still running, wait for the NextPollDelay
 	if cmdDB.Status == "running" {
 		delay := time.Duration(cmdDB.NextPollDelay) * time.Second
-		log.Printf("Polling command %s. Waiting for %v before returning status.", cmdID, delay)
 
 		// Get the done channel for the command
 		runningProcessesMutex.Lock()
@@ -312,10 +277,9 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 
 		if found {
 			select {
-			case <-info.Done:
+			case <-info.RunningCommand.Done():
+				log.Printf("PollShellCommandTool: Command %s finished during poll delay. Exiting early.", cmdID)
 				// Command finished while waiting, exit early
-				log.Printf("Command %s finished during poll delay. Exiting early.", cmdID)
-
 				// Get the RunningCommand from runningProcesses map
 				runningProcessesMutex.Lock()
 				currentInfo, foundInMap := runningProcesses[cmdID]
@@ -342,13 +306,13 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 					}
 				}
 			case <-time.After(delay):
+
 				// Delay completed, command still running
-				log.Printf("Command %s still running after poll delay.", cmdID)
 			}
 		} else {
 			// Command not found in memory, it must have finished and been cleaned up by manageRunningCommands
 			// No need to wait, proceed to check status
-			log.Printf("Command %s not found in memory during poll delay. Assuming finished.", cmdID)
+			log.Printf("PollShellCommandTool: Command %s not found in memory during poll delay. Assuming finished.", cmdID)
 			// In this case, cmdDB already holds the final status from the initial GetShellCommandByID
 		}
 
@@ -381,16 +345,25 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	var currentStdoutLen, currentStderrLen int64
 
 	if rc != nil { // Command still in memory
-		currentStdoutLen = int64(rc.StdoutBuf.Len())
-		currentStderrLen = int64(rc.StderrBuf.Len())
+		newStdout = rc.TakeStdout()
+		newStderr = rc.TakeStderr()
 
-		if currentStdoutLen > cmdDB.StdoutOffset {
-			newStdout = rc.StdoutBuf.Bytes()[cmdDB.StdoutOffset:currentStdoutLen]
+		cmdDB.Stdout = append(cmdDB.Stdout, newStdout...)
+		cmdDB.Stderr = append(cmdDB.Stderr, newStderr...)
+
+		log.Printf("PollShellCommandTool: rc != nil. Taken stdout len: %d, stderr len: %d", len(newStdout), len(newStderr))
+
+		currentStdoutLen = cmdDB.StdoutOffset + int64(len(newStdout))
+		currentStderrLen = cmdDB.StderrOffset + int64(len(newStderr))
+
+		if len(newStdout) > 0 {
+			log.Printf("PollShellCommandTool: New stdout content: %s", string(newStdout))
 		}
-		if currentStderrLen > cmdDB.StderrOffset {
-			newStderr = rc.StderrBuf.Bytes()[cmdDB.StderrOffset:currentStderrLen]
+		if len(newStderr) > 0 {
+			log.Printf("PollShellCommandTool: New stderr content: %s", string(newStderr))
 		}
 	} else { // Command not in memory, meaning it has finished and DB has full results
+		log.Printf("PollShellCommandTool: Command %s not in memory. Reading final output from DB. StdoutOffset: %d, StderrOffset: %d", cmdID, cmdDB.StdoutOffset, cmdDB.StderrOffset)
 		newStdout = cmdDB.Stdout[cmdDB.StdoutOffset:]
 		newStderr = cmdDB.Stderr[cmdDB.StderrOffset:]
 		currentStdoutLen = int64(len(cmdDB.Stdout)) // Set to full length for final update

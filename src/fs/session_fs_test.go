@@ -56,6 +56,7 @@ func TestSessionFS_NewSessionFS(t *testing.T) {
 	sf, err := NewSessionFS("testSession1")
 	checkError(t, err, "NewSessionFS failed")
 
+	//lint:ignore SA5011 err != nil will exit the goroutine in checkError
 	defer removeSandboxBaseDir(sf.sessionId) // Clean up after test
 
 	if sf == nil {
@@ -221,8 +222,8 @@ func TestSessionFS_Run(t *testing.T) {
 		// Wait for the command to finish
 		<-rc.done
 
-		stdout := rc.StdoutBuf.String()
-		stderr := rc.StderrBuf.String()
+		stdout := string(rc.TakeStdout())
+		stderr := string(rc.TakeStderr())
 		exitCode := rc.Cmd.ProcessState.ExitCode() // Get exit code from ProcessState
 
 		if exitCode != 0 {
@@ -252,7 +253,7 @@ func TestSessionFS_Run(t *testing.T) {
 		// Wait for the command to finish
 		<-rc.done
 
-		stdout := rc.StdoutBuf.String()
+		stdout := string(rc.TakeStdout())
 		exitCode := rc.Cmd.ProcessState.ExitCode()
 
 		if exitCode != 0 {
@@ -297,7 +298,7 @@ func TestSessionFS_Run(t *testing.T) {
 		// Wait for the command to finish
 		<-rc.done
 
-		stdout := rc.StdoutBuf.String()
+		stdout := string(rc.TakeStdout())
 		exitCode := rc.Cmd.ProcessState.ExitCode()
 
 		if exitCode != 0 {
@@ -338,7 +339,7 @@ func TestSessionFS_Run(t *testing.T) {
 		// Check exit code and stderr only if command started and failed
 		if rc.Cmd.ProcessState != nil {
 			exitCode := rc.Cmd.ProcessState.ExitCode()
-			stderr := rc.StderrBuf.String()
+			stderr := string(rc.TakeStderr())
 			if exitCode == 0 {
 				t.Errorf("Expected non-zero exitCode for nonexistent_command, got %d", exitCode)
 			}
