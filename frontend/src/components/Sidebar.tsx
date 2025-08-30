@@ -30,7 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       });
       setSessions(sessions.filter((s) => s.id !== sessionId));
       if (chatSessionId === sessionId) {
-        navigate('/new');
+        navigate(workspaceId ? `/w/${workspaceId}/new` : '/new');
       }
     } catch (error) {
       console.error('Error deleting session:', error);
