@@ -10,6 +10,7 @@ import {
 } from '../../utils/functionMessageRegistry';
 import FileAttachmentList from '../FileAttachmentList';
 import ChatBubble from '../ChatBubble';
+import { getLanguageFromFilename, useHighlightCode } from '../../utils/highlightUtils';
 
 const argsKeys = { file_path: 'string' } as const;
 
@@ -49,6 +50,8 @@ const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
     return children;
   }
 
+  const highlightedContent = useHighlightCode(response.content || '');
+
   return (
     <ChatBubble
       messageId={messageId}
@@ -56,7 +59,9 @@ const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
       bubbleClassName="function-message-bubble"
       messageInfo={messageInfo}
     >
-      <pre className="function-code-block">{response.content}</pre>
+      <pre className="function-code-block">
+        <code dangerouslySetInnerHTML={{ __html: highlightedContent }} />
+      </pre>
       {response.note && <p>{response.note}</p>}
       {attachments && attachments.length > 0 && (
         <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
@@ -82,6 +87,11 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
     return children;
   }
 
+  const filePath = args.file_path;
+  const language = getLanguageFromFilename(filePath);
+
+  const highlightedContent = useHighlightCode(response.content || '', language);
+
   return (
     <ChatBubble
       containerClassName="function-pair-combined-container"
@@ -97,7 +107,9 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
       showHeaderToggle={true}
       onHeaderClick={onToggleView}
     >
-      <pre className="function-code-block">{response.content}</pre>
+      <pre className="function-code-block">
+        <code dangerouslySetInnerHTML={{ __html: highlightedContent }} />
+      </pre>
       {response.note && <p>{response.note}</p>}
       {attachments && attachments.length > 0 && (
         <FileAttachmentList attachments={attachments} messageId={responseMessageId} sessionId={sessionId} />

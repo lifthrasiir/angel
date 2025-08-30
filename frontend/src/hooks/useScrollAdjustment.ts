@@ -7,7 +7,7 @@ interface UseScrollAdjustmentProps {
 export const useScrollAdjustment = ({ chatAreaRef }: UseScrollAdjustmentProps) => {
   const observerRef = useRef<MutationObserver | null>(null);
   const lastScrollHeightRef = useRef(0);
-  const scrollAdjustmentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollAdjustmentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const adjustScroll = useCallback(
     (oldScrollHeight: number, oldScrollTop: number) => {

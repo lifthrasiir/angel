@@ -9,6 +9,7 @@ import {
   FunctionPairComponentProps,
 } from '../../utils/functionMessageRegistry';
 import ChatBubble from '../ChatBubble';
+import { getLanguageFromFilename, useHighlightCode } from '../../utils/highlightUtils';
 
 const argsKeys = { file_path: 'string', content: 'string' } as const;
 
@@ -17,6 +18,11 @@ const WriteFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messa
   if (!validateExactKeys(args, argsKeys)) {
     return children;
   }
+
+  const filePath = args.file_path;
+  const language = getLanguageFromFilename(filePath);
+
+  const highlightedContent = useHighlightCode(args.content || '', language);
 
   return (
     <ChatBubble
@@ -30,7 +36,9 @@ const WriteFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messa
         </>
       }
     >
-      <pre>{args.content}</pre>
+      <pre>
+        <code dangerouslySetInnerHTML={{ __html: highlightedContent }} />
+      </pre>
     </ChatBubble>
   );
 };
@@ -51,6 +59,9 @@ const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({
     return children;
   }
 
+  // Always highlight unified_diff as 'diff' language (for now)
+  const highlightedDiff = useHighlightCode(response.unified_diff || '', 'diff');
+
   return (
     <ChatBubble
       messageId={messageId}
@@ -59,7 +70,13 @@ const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({
       messageInfo={messageInfo}
       title="Success"
     >
-      {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
+      {response.unified_diff === 'No changes' ? (
+        <p>No changes</p>
+      ) : (
+        <pre>
+          <code dangerouslySetInnerHTML={{ __html: highlightedDiff }} />
+        </pre>
+      )}
     </ChatBubble>
   );
 };
@@ -81,6 +98,9 @@ const WriteFilePair: React.FC<FunctionPairComponentProps> = ({
     return children;
   }
 
+  // Always highlight unified_diff as 'diff' language (for now)
+  const highlightedDiff = useHighlightCode(response.unified_diff || '', 'diff');
+
   return (
     <ChatBubble
       containerClassName="function-pair-combined-container"
@@ -95,7 +115,13 @@ const WriteFilePair: React.FC<FunctionPairComponentProps> = ({
       showHeaderToggle={true}
       onHeaderClick={onToggleView}
     >
-      {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
+      {response.unified_diff === 'No changes' ? (
+        <p>No changes</p>
+      ) : (
+        <pre>
+          <code dangerouslySetInnerHTML={{ __html: highlightedDiff }} />
+        </pre>
+      )}
     </ChatBubble>
   );
 };
