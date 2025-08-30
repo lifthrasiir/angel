@@ -55,49 +55,19 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found after creation: %w", subsessionID, err)
 		}
 
-		lastMessageIDFromDB, _, _, err := GetLastMessageInBranch(db, subsessionID, session.PrimaryBranchID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return ToolHandlerResults{}, fmt.Errorf("failed to get last message in subagent branch %s: %w", session.PrimaryBranchID, err)
-		}
-		lastAddedMessageID := lastMessageIDFromDB
-
-		addMessageToCurrentSubagentSession := func(messageType MessageType, text string, attachments []FileAttachment, cumulTokenCount *int, generation int) (messageID int, err error) {
-			var parentMessageID *int
-			if lastAddedMessageID != 0 {
-				parentMessageID = &lastAddedMessageID
-			}
-			messageID, err = AddMessageToSession(ctx, db, Message{
-				SessionID:       subsessionID,
-				BranchID:        session.PrimaryBranchID,
-				ParentMessageID: parentMessageID,
-				ChosenNextID:    nil,
-				Text:            text,
-				Type:            messageType,
-				Attachments:     attachments,
-				CumulTokenCount: cumulTokenCount,
-				Model:           params.ModelName,
-				Generation:      generation,
-			})
-			if err == nil {
-				if parentMessageID != nil {
-					if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
-						log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-					}
-				}
-				lastAddedMessageID = messageID
-			}
-			return
+		mc, err := NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
 		}
 
 		// Initial message for a new subagent session will have generation 0
-		_, err = addMessageToCurrentSubagentSession(TypeUserText, text, nil, nil, 0)
-		if err != nil {
+		mc.LastMessageModel = params.ModelName
+		if _, err = mc.Add(ctx, db, Message{Type: TypeUserText, Text: text}); err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add initial user message to new subagent session: %w", err)
 		}
 
 		// Proceed with LLM turn for the new subagent
-		return handleSubagentTurn(ctx, db, subsessionID, &session, params, agentID, addMessageToCurrentSubagentSession)
-
+		return handleSubagentTurn(ctx, db, subsessionID, &session, params, agentID, mc)
 	} else {
 		// Interact with an existing subagent
 		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, subagentID)
@@ -107,47 +77,18 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
 		}
 
-		lastMessageIDFromDB, _, _, err := GetLastMessageInBranch(db, subsessionID, session.PrimaryBranchID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return ToolHandlerResults{}, fmt.Errorf("failed to get last message in subagent branch %s: %w", session.PrimaryBranchID, err)
-		}
-		lastAddedMessageID := lastMessageIDFromDB
-
-		addMessageToCurrentSubagentSession := func(messageType MessageType, text string, attachments []FileAttachment, cumulTokenCount *int, generation int) (messageID int, err error) {
-			var parentMessageID *int
-			if lastAddedMessageID != 0 {
-				parentMessageID = &lastAddedMessageID
-			}
-			messageID, err = AddMessageToSession(ctx, db, Message{
-				SessionID:       subsessionID,
-				BranchID:        session.PrimaryBranchID,
-				ParentMessageID: parentMessageID,
-				ChosenNextID:    nil,
-				Text:            text,
-				Type:            messageType,
-				Attachments:     attachments,
-				CumulTokenCount: cumulTokenCount,
-				Model:           params.ModelName,
-				Generation:      generation,
-			})
-			if err == nil {
-				if parentMessageID != nil {
-					if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
-						log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-					}
-				}
-				lastAddedMessageID = messageID
-			}
-			return
+		mc, err := NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
 		}
 
 		// For existing subagent sessions, the generation will be determined within handleSubagentTurn
-		_, err = addMessageToCurrentSubagentSession(TypeUserText, text, nil, nil, 0) // Pass 0 for now, will be updated
-		if err != nil {
+		mc.LastMessageModel = params.ModelName
+		if _, err = mc.Add(ctx, db, Message{Type: TypeUserText, Text: text}); err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
 		}
 
-		return handleSubagentTurn(ctx, db, subsessionID, &session, params, "", addMessageToCurrentSubagentSession)
+		return handleSubagentTurn(ctx, db, subsessionID, &session, params, "", mc)
 	}
 }
 
@@ -159,13 +100,7 @@ func handleSubagentTurn(
 	session *Session,
 	params ToolHandlerParams,
 	agentID string,
-	addMessageToCurrentSubagentSession func(
-		messageType MessageType,
-		text string,
-		attachments []FileAttachment,
-		cumulTokenCount *int,
-		generation int,
-	) (messageID int, err error),
+	mc *MessageChain,
 ) (ToolHandlerResults, error) {
 	// Get main session environment
 	mainSessionEnvRoots, _, err := GetLatestSessionEnv(db, params.SessionId)
@@ -196,8 +131,8 @@ func handleSubagentTurn(
 		}
 
 		// Add env_changed message to subagent session with the new generation
-		_, err = addMessageToCurrentSubagentSession(TypeEnvChanged, string(envChangedJSON), nil, nil, subSessionGeneration)
-		if err != nil {
+		mc.LastMessageGeneration = subSessionGeneration
+		if _, err = mc.Add(ctx, db, Message{Type: TypeEnvChanged, Text: string(envChangedJSON)}); err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add env_changed message to subagent session: %w", err)
 		}
 		// Add new subagent session environment in DB
@@ -260,8 +195,7 @@ func handleSubagentTurn(
 
 						// Save FunctionCall message to DB
 						fcJson, _ := json.Marshal(toolCall)
-						_, err := addMessageToCurrentSubagentSession(TypeFunctionCall, string(fcJson), nil, nil, subSessionGeneration)
-						if err != nil {
+						if _, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson)}); err != nil {
 							log.Printf("Warning: Failed to add function call message to subagent session: %v", err)
 						}
 
@@ -281,7 +215,11 @@ func handleSubagentTurn(
 							Name:     toolCall.Name,
 							Response: toolResult.Value,
 						})
-						_, err = addMessageToCurrentSubagentSession(TypeFunctionResponse, string(frJson), toolResult.Attachments, nil, subSessionGeneration)
+						_, err = mc.Add(ctx, db, Message{
+							Type:        TypeFunctionResponse,
+							Text:        string(frJson),
+							Attachments: toolResult.Attachments,
+						})
 						if err != nil {
 							log.Printf("Warning: Failed to add function response message to subagent session: %v", err)
 						}
@@ -326,8 +264,7 @@ func handleSubagentTurn(
 
 	// Add the final model response message to the database
 	if fullResponseText.Len() > 0 {
-		_, err = addMessageToCurrentSubagentSession(TypeModelText, fullResponseText.String(), nil, nil, subSessionGeneration)
-		if err != nil {
+		if _, err = mc.Add(ctx, db, Message{Type: TypeModelText, Text: fullResponseText.String()}); err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add final model response to subagent session: %w", err)
 		}
 	}

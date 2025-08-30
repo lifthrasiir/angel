@@ -115,14 +115,9 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add user message to the chain
-	userMsg, err := mc.Add(r.Context(), db, Message{
-		Text:            userMessage,
-		Type:            TypeUserText,
-		Attachments:     requestBody.Attachments,
-		CumulTokenCount: nil,
-		Model:           modelToUse,
-		Generation:      0, // New session starts with generation 0
-	})
+	mc.LastMessageModel = modelToUse
+	mc.LastMessageGeneration = 0 // New session starts with generation 0
+	userMsg, err := mc.Add(r.Context(), db, Message{Text: userMessage, Type: TypeUserText, Attachments: requestBody.Attachments})
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to save user message")
 		return
@@ -186,7 +181,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, initialState, sseW, userMsg.ID, modelToUse, 0, true, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, mc, true, time.Now(), historyContext); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}
@@ -366,7 +361,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
-	if err := streamLLMResponse(db, initialState, sseW, userMsg.ID, mc.LastMessageModel, mc.LastMessageGeneration, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}
@@ -1153,10 +1148,9 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	// Add the function response message to the session
 	// Note: cumulTokenCount is not updated here, as it's handled by streamLLMResponse
 	functionResponseMsg, err := mc.Add(r.Context(), db, Message{
-		Text:            string(frJson),
-		Type:            TypeFunctionResponse,
-		Attachments:     toolResults.Attachments,
-		CumulTokenCount: nil,
+		Text:        string(frJson),
+		Type:        TypeFunctionResponse,
+		Attachments: toolResults.Attachments,
 	})
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to save function response message after confirmation")
@@ -1189,7 +1183,8 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roots, generation, err := GetLatestSessionEnv(db, sessionId)
+	var roots []string
+	roots, mc.LastMessageGeneration, err = GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -1207,7 +1202,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resume streaming from the point after the function response
-	if err := streamLLMResponse(db, initialState, sseW, functionResponseMsg.ID, lastMessage.Model, generation, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response after confirmation")
 		return
 	}

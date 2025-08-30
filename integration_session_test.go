@@ -260,18 +260,16 @@ func TestLoadChatSession(t *testing.T) {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
-	msg1 := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "User message 1", Type: "user", Model: DefaultGeminiModel}
-	msg1ID, err := AddMessageToSession(context.Background(), testDB, msg1)
+	ctx := context.Background()
+	mc, err := NewMessageChain(ctx, testDB, sessionId, primaryBranchID)
 	if err != nil {
+		t.Fatalf("Failed to create message chain: %v", err)
+	}
+	if _, err := mc.Add(ctx, testDB, Message{Text: "User message 1", Type: "user"}); err != nil {
 		t.Fatalf("Failed to add message 1: %v", err)
 	}
-	msg2 := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "Model response 1", Type: "model", Model: DefaultGeminiModel}
-	msg2ID, err := AddMessageToSession(context.Background(), testDB, msg2)
-	if err != nil {
+	if _, err := mc.Add(ctx, testDB, Message{Text: "Model response 1", Type: "model"}); err != nil {
 		t.Fatalf("Failed to add message 2: %v", err)
-	}
-	if err := UpdateMessageChosenNextID(testDB, msg1ID, &msg2ID); err != nil {
-		t.Fatalf("Failed to update chosen_next_id for message 1: %v", err)
 	}
 
 	// Test case 1: Successful session load

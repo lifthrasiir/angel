@@ -21,9 +21,7 @@ func streamLLMResponse(
 	db *sql.DB,
 	initialState InitialState,
 	sseW *sseWriter,
-	lastUserMessageID int,
-	modelToUse string,
-	generation int,
+	mc *MessageChain,
 	inferSessionName bool,
 	callStartTime time.Time,
 	fullHistoryForLLM []FrontendMessage,
@@ -31,9 +29,6 @@ func streamLLMResponse(
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	currentHistory := convertFrontendMessagesToContent(db, fullHistoryForLLM)
-
-	// Track the ID of the last message added to the database
-	lastAddedMessageID := lastUserMessageID
 
 	// Create a cancellable context for the LLM call
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,49 +49,19 @@ func streamLLMResponse(
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
 
-	provider, ok := CurrentProviders[modelToUse]
+	provider, ok := CurrentProviders[mc.LastMessageModel]
 	if !ok {
-		return fmt.Errorf("unsupported model: %s", modelToUse)
+		return fmt.Errorf("unsupported model: %s", mc.LastMessageModel)
 	}
 
 	for {
-		addMessageToCurrentSession := func(messageType MessageType, text string, attachments []FileAttachment, cumulTokenCount *int, state string, aux string) (messageID int, err error) {
-			var parentMessageID *int
-			if lastAddedMessageID != 0 {
-				parentMessageID = &lastAddedMessageID
-			}
-			messageID, err = AddMessageToSession(ctx, db, Message{
-				SessionID:       initialState.SessionId,
-				BranchID:        initialState.PrimaryBranchID,
-				ParentMessageID: parentMessageID,
-				ChosenNextID:    nil,
-				Text:            text,
-				Type:            messageType,
-				Attachments:     attachments,
-				CumulTokenCount: cumulTokenCount,
-				Model:           modelToUse,
-				Generation:      generation,
-				State:           state,
-				Aux:             aux,
-			})
-			if err == nil {
-				if parentMessageID != nil {
-					if err := UpdateMessageChosenNextID(db, *parentMessageID, &messageID); err != nil {
-						log.Printf("Failed to update chosen_next_id for message %d: %v", *parentMessageID, err)
-					}
-				}
-				lastAddedMessageID = messageID
-			}
-			return
-		}
-
 		if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, func() {}); err != nil {
 			return err
 		}
 
 		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{
 			Contents:        currentHistory,
-			ModelName:       modelToUse,
+			ModelName:       mc.LastMessageModel,
 			SystemPrompt:    initialState.SystemPrompt,
 			IncludeThoughts: true,
 		})
@@ -113,7 +78,7 @@ func streamLLMResponse(
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
-				if _, err := addMessageToCurrentSession(TypeModelError, errorMessage, nil, nil, "", ""); err != nil {
+				if _, err := mc.Add(ctx, db, Message{Type: TypeModelError, Text: errorMessage}); err != nil {
 					log.Printf("Failed to add model error message to DB: %v", err)
 				}
 			}
@@ -131,14 +96,14 @@ func streamLLMResponse(
 				lastUsageMetadata = caResp.Response.UsageMetadata
 
 				// Update last user message's cumul_token_count with PromptTokenCount
-				if lastUsageMetadata.PromptTokenCount > 0 && lastUserMessageID != 0 {
-					if err := UpdateMessageTokens(db, lastUserMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
-						log.Printf("Failed to update cumul_token_count for user message %d: %v", lastUserMessageID, err)
+				if lastUsageMetadata.PromptTokenCount > 0 && mc.LastMessageID != 0 {
+					if err := UpdateMessageTokens(db, mc.LastMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
+						log.Printf("Failed to update cumul_token_count for user message %d: %v", mc.LastMessageID, err)
 					}
 					broadcastToSession(
 						initialState.SessionId,
 						EventCumulTokenCount,
-						fmt.Sprintf("%d\n%d", lastUserMessageID, lastUsageMetadata.PromptTokenCount))
+						fmt.Sprintf("%d\n%d", mc.LastMessageID, lastUsageMetadata.PromptTokenCount))
 				}
 			}
 
@@ -170,12 +135,12 @@ func streamLLMResponse(
 					// Immediately broadcast function call
 					fc := *part.FunctionCall
 					fcJson, _ := json.Marshal(fc)
-					messageID, err := addMessageToCurrentSession(TypeFunctionCall, string(fcJson), nil, nil, state, "")
+					newMessage, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson), State: state})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save function call message")
 					}
 					argsJson, _ := json.Marshal(fc.Args)
-					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsJson))
+					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsJson))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
 
 					// Add to current history and functionCalls for later execution
@@ -183,7 +148,7 @@ func streamLLMResponse(
 					hasFunctionCall = true
 
 					toolResults, err := CallToolFunction(ctx, fc, ToolHandlerParams{
-						ModelName: modelToUse,
+						ModelName: mc.LastMessageModel,
 						SessionId: initialState.SessionId,
 						BranchId:  initialState.PrimaryBranchID,
 					})
@@ -223,7 +188,13 @@ func streamLLMResponse(
 						t := lastUsageMetadata.PromptTokenCount
 						promptTokens = &t
 					}
-					messageID, err = addMessageToCurrentSession(TypeFunctionResponse, string(frJson), toolResults.Attachments, promptTokens, state, "")
+					newMessage, err = mc.Add(ctx, db, Message{
+						Type:            TypeFunctionResponse,
+						Text:            string(frJson),
+						Attachments:     toolResults.Attachments,
+						CumulTokenCount: promptTokens,
+						State:           state,
+					})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save function response message")
 					}
@@ -237,7 +208,7 @@ func streamLLMResponse(
 						payloadJson = []byte("{}") // Send empty object on error
 					}
 
-					formattedData = fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(payloadJson))
+					formattedData = fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(payloadJson))
 					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
 
 					// Create the initial FunctionResponse part
@@ -288,11 +259,11 @@ func streamLLMResponse(
 						Args: argsMap,
 					}
 					fcJson, _ := json.Marshal(fc)
-					messageID, err := addMessageToCurrentSession(TypeFunctionCall, string(fcJson), nil, nil, state, "")
+					newMessage, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson), State: state})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save executable code message")
 					}
-					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fc.Name, string(argsBytes))
+					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsBytes))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
 
 					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}})
@@ -310,7 +281,7 @@ func streamLLMResponse(
 						t := lastUsageMetadata.PromptTokenCount
 						promptTokens = &t
 					}
-					messageID, err := addMessageToCurrentSession(TypeFunctionResponse, string(frJson), nil, promptTokens, state, "")
+					newMessage, err := mc.Add(ctx, db, Message{Type: TypeFunctionResponse, Text: string(frJson), CumulTokenCount: promptTokens, State: state})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save code execution result message")
 					}
@@ -325,7 +296,7 @@ func streamLLMResponse(
 						log.Printf("Failed to marshal EventFunctionResponse payload for code execution result: %v", err)
 						payloadJson = []byte("{}") // Send empty object on error
 					}
-					formattedData := fmt.Sprintf("%d\n%s\n%s", messageID, fr.Name, string(payloadJson))
+					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fr.Name, string(payloadJson))
 					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
 
 					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: []Part{{FunctionResponse: &fr}}})
@@ -346,12 +317,12 @@ func streamLLMResponse(
 						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
 					}
 
-					messageID, err := addMessageToCurrentSession(TypeThought, thoughtText, nil, nil, state, "")
+					newMessage, err := mc.Add(ctx, db, Message{Type: TypeThought, Text: thoughtText, State: state})
 					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
 					// Broadcast thought immediately
-					broadcastToSession(initialState.SessionId, EventThought, fmt.Sprintf("%d\n%s", messageID, thoughtText))
+					broadcastToSession(initialState.SessionId, EventThought, fmt.Sprintf("%d\n%s", newMessage.ID, thoughtText))
 				} else {
 					if modelMessageID < 0 {
 						if state != "" {
@@ -364,10 +335,11 @@ func streamLLMResponse(
 						// Initialize agentResponseText for the new model message
 						agentResponseText = ""
 						// Add the initial model message to DB with empty text
-						modelMessageID, err = addMessageToCurrentSession(TypeModelText, "", nil, nil, state, "")
+						newMessage, err := mc.Add(ctx, db, Message{Type: TypeModelText, Text: "", State: state})
 						if err != nil {
 							return logAndErrorf(err, "Failed to add new model message to DB")
 						}
+						modelMessageID = newMessage.ID
 					}
 
 					agentResponseText += part.Text // Accumulate text for DB update
@@ -385,7 +357,7 @@ func streamLLMResponse(
 
 		addCancelErrorMessage := func() {
 			// Add a separate error message to the database
-			if _, err := addMessageToCurrentSession(TypeModelError, "user canceled request", nil, nil, "", ""); err != nil {
+			if _, err := mc.Add(ctx, db, Message{Type: TypeModelError, Text: "user canceled request"}); err != nil {
 				log.Printf("Failed to add error message to DB: %v", err)
 			}
 		}
@@ -438,7 +410,7 @@ func streamLLMResponse(
 				if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
 					userMsg = initialState.History[0].Parts[0].Text
 				}
-				inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW, modelToUse)
+				inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW, mc.LastMessageModel)
 			}()
 		}
 	}
