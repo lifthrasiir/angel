@@ -9,6 +9,7 @@ import {
   FunctionPairComponentProps,
 } from '../../utils/functionMessageRegistry';
 import ChatBubble from '../ChatBubble';
+import PrettyDiff from '../PrettyDiff';
 import { getLanguageFromFilename, useHighlightCode } from '../../utils/highlightUtils';
 
 const argsKeys = { file_path: 'string', content: 'string' } as const;
@@ -59,9 +60,6 @@ const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({
     return children;
   }
 
-  // Always highlight unified_diff as 'diff' language (for now)
-  const highlightedDiff = useHighlightCode(response.unified_diff || '', 'diff');
-
   return (
     <ChatBubble
       messageId={messageId}
@@ -70,13 +68,7 @@ const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({
       messageInfo={messageInfo}
       title="Success"
     >
-      {response.unified_diff === 'No changes' ? (
-        <p>No changes</p>
-      ) : (
-        <pre>
-          <code dangerouslySetInnerHTML={{ __html: highlightedDiff }} />
-        </pre>
-      )}
+      {response.unified_diff === 'No changes' ? <p>No changes</p> : <PrettyDiff diffContent={response.unified_diff} />}
     </ChatBubble>
   );
 };
@@ -98,8 +90,8 @@ const WriteFilePair: React.FC<FunctionPairComponentProps> = ({
     return children;
   }
 
-  // Always highlight unified_diff as 'diff' language (for now)
-  const highlightedDiff = useHighlightCode(response.unified_diff || '', 'diff');
+  const filePath = args.file_path;
+  const language = getLanguageFromFilename(filePath); // Get language from file_path
 
   return (
     <ChatBubble
@@ -118,9 +110,7 @@ const WriteFilePair: React.FC<FunctionPairComponentProps> = ({
       {response.unified_diff === 'No changes' ? (
         <p>No changes</p>
       ) : (
-        <pre>
-          <code dangerouslySetInnerHTML={{ __html: highlightedDiff }} />
-        </pre>
+        <PrettyDiff diffContent={response.unified_diff} baseLanguage={language} />
       )}
     </ChatBubble>
   );
