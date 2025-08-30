@@ -9,9 +9,8 @@ import {
   FunctionPairComponentProps,
 } from '../../utils/functionMessageRegistry';
 import SystemMessage from '../SystemMessage';
-import UserTextMessage from '../UserTextMessage';
-import ModelTextMessage from '../ModelTextMessage';
 import MarkdownRenderer from '../MarkdownRenderer';
+import ChatBubble from '../ChatBubble';
 
 // Define the expected arguments for the subagent tool call
 const argsKeys = {
@@ -30,21 +29,26 @@ const SubagentCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messag
   }
 
   return (
-    <div id={messageId} className="chat-message-container agent-message">
-      <div className="chat-bubble agent-function-call function-message-bubble">
-        <div className="function-title-bar function-call-title-bar">
+    <ChatBubble
+      messageId={messageId}
+      containerClassName="agent-message"
+      bubbleClassName="agent-function-call function-message-bubble"
+      messageInfo={messageInfo}
+      title={
+        <>
           Subagent
           {args.subagent_id && (
             <>
               : <code>{args.subagent_id}</code>
             </>
           )}
-        </div>
-        {args.system_prompt && <SystemMessage text={args.system_prompt} messageId={`${messageId}.system`} />}
-        <p>{args.text}</p>
-      </div>
-      {messageInfo}
-    </div>
+        </>
+      }
+      heighten={false}
+    >
+      {args.system_prompt && <SystemMessage text={args.system_prompt} messageId={`${messageId}.system`} />}
+      <p>{args.text}</p>
+    </ChatBubble>
   );
 };
 
@@ -66,15 +70,16 @@ const SubagentResponse: React.FC<FunctionResponseMessageProps> = ({
   }
 
   return (
-    <div id={messageId} className="chat-message-container user-message">
-      <div className="chat-bubble function-message-bubble">
-        <div className="function-title-bar function-response-title-bar">
-          Subagent: {response.subagent_id && <code>{response.subagent_id}</code>} Response
-        </div>
-        <MarkdownRenderer content={response.response_text} />
-      </div>
-      {messageInfo}
-    </div>
+    <ChatBubble
+      messageId={messageId}
+      containerClassName="user-message"
+      bubbleClassName="function-message-bubble"
+      messageInfo={messageInfo}
+      title={<>Subagent: {response.subagent_id && <code>{response.subagent_id}</code>} Response</>}
+      heighten={false}
+    >
+      <MarkdownRenderer content={response.response_text} />
+    </ChatBubble>
   );
 };
 
@@ -97,26 +102,37 @@ const SubagentPair: React.FC<FunctionPairComponentProps> = ({
   }
 
   return (
-    <div className="function-pair-combined-container">
-      <div className="chat-bubble">
-        <div className="function-title-bar function-combined-title-bar" onClick={onToggleView}>
+    <ChatBubble
+      containerClassName="function-pair-combined-container"
+      bubbleClassName="function-combined-bubble"
+      messageInfo={responseMessageInfo}
+      title={
+        <>
           Subagent: <code>{args.subagent_id || response.subagent_id}</code>
-        </div>
-        {args.system_prompt && <SystemMessage text={args.system_prompt} messageId={`${responseMessageId}.system`} />}
-        <UserTextMessage text={args.text} messageId={`${responseMessageId}.user`} />
-        <ModelTextMessage
-          className="agent-message"
-          text={response.response_text}
-          messageId={`${responseMessageId}.model`}
-        />
-      </div>
-      {responseMessageInfo}
-    </div>
+        </>
+      }
+      onHeaderClick={onToggleView}
+    >
+      {args.system_prompt && (
+        <ChatBubble messageId={`${responseMessageId}.system`} containerClassName="system-message">
+          <MarkdownRenderer content={args.system_prompt} />
+        </ChatBubble>
+      )}
+      <ChatBubble
+        messageId={`${responseMessageId}.user`}
+        containerClassName="user-message"
+        bubbleClassName="user-message-bubble-content"
+        heighten={false}
+      >
+        {args.text}
+      </ChatBubble>
+      <ChatBubble messageId={`${responseMessageId}.model`} containerClassName="agent-message" heighten={false}>
+        <MarkdownRenderer content={response.response_text} />
+      </ChatBubble>
+    </ChatBubble>
   );
 };
 
 registerFunctionCallComponent('subagent', SubagentCall);
 registerFunctionResponseComponent('subagent', SubagentResponse);
 registerFunctionPairComponent('subagent', SubagentPair);
-
-export {};

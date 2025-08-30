@@ -1,11 +1,10 @@
 import type React from 'react';
-import { useLayoutEffect, useRef, useState } from 'react';
-import { FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
-import { measureContentHeight } from '../utils/measurementUtils';
+import { useState } from 'react';
 import PrettyJSON from './PrettyJSON';
 import { FunctionResponse, FileAttachment } from '../types/chat';
 import { getFunctionResponseComponent } from '../utils/functionMessageRegistry';
 import FileAttachmentList from './FileAttachmentList';
+import ChatBubble from './ChatBubble';
 
 interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
@@ -25,8 +24,6 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
   const CustomComponent = getFunctionResponseComponent(functionResponse.name);
 
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
-  const [showToggle, setShowToggle] = useState(false);
-  const messageRef = useRef<HTMLDivElement>(null);
 
   let responseData = functionResponse.response;
   let responseText: string;
@@ -52,15 +49,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
     if (keys.length === 1 && keys[0]) soleObjectKey = keys[0];
   }
 
-  useLayoutEffect(() => {
-    if (messageRef.current && mode === 'expanded') {
-      const contentHeight = measureContentHeight(messageRef, false, codeContent, responseData, soleObjectKey);
-      const collapsedHeight = window.innerHeight * 0.3;
-      setShowToggle(contentHeight > collapsedHeight);
-    }
-  }, [functionResponse.response, codeContent, mode, soleObjectKey]);
-
-  const toggleMode = () => {
+  const handleHeaderClick = () => {
     setMode((prevMode) => {
       if (prevMode === 'compact') return 'collapsed';
       if (prevMode === 'collapsed') return 'expanded';
@@ -69,62 +58,40 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
   };
 
   const renderContent = () => {
-    return (
-      <div id={messageId} className="chat-message-container user-message">
-        <div className="chat-bubble function-message-bubble">
-          {/* Original function response rendering */}
-          {mode === 'compact' && (
-            <div
-              className="function-title-bar function-response-title-bar"
-              style={{ cursor: 'pointer' }}
-              onClick={toggleMode}
-            >
-              {codeContent}
-            </div>
-          )}
-          {mode === 'collapsed' && (
-            <>
-              <div
-                className="function-title-bar function-response-title-bar"
-                style={{ cursor: 'pointer' }}
-                onClick={toggleMode}
-              >
-                Function Response: {soleObjectKey && <code>{soleObjectKey}</code>}
-              </div>
-              <div ref={messageRef} className="function-message-content">
-                <PrettyJSON data={soleObjectKey ? responseData[soleObjectKey] : responseData} />
-              </div>
-            </>
-          )}
-          {mode === 'expanded' && (
-            <>
-              <div
-                className="function-title-bar function-response-title-bar"
-                style={{ cursor: 'pointer' }}
-                onClick={toggleMode}
-              >
-                Function Response: {soleObjectKey && <code>{soleObjectKey}</code>}
-              </div>
-              <div
-                ref={messageRef}
-                className="function-message-content"
-                style={showToggle ? { maxHeight: '30vh', overflowY: 'auto' } : {}}
-              >
-                <pre className="function-code-block">{codeContent}</pre>
-              </div>
-              {showToggle && (
-                <div className="function-message-toggle-button" onClick={toggleMode}>
-                  {mode === 'expanded' ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
-                </div>
-              )}
-            </>
-          )}
-
+    if (mode === 'compact') {
+      return (
+        <ChatBubble
+          messageId={messageId}
+          containerClassName="user-message"
+          bubbleClassName="agent-function-response function-message-bubble"
+          messageInfo={messageInfo}
+          title={codeContent}
+          onHeaderClick={handleHeaderClick}
+        >
           <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
-        </div>
-        {messageInfo}
-      </div>
-    );
+        </ChatBubble>
+      );
+    } else {
+      return (
+        <ChatBubble
+          messageId={messageId}
+          containerClassName="user-message"
+          bubbleClassName="agent-function-response function-message-bubble"
+          messageInfo={messageInfo}
+          heighten={false}
+          title={<>Function Response: {soleObjectKey && <code>{soleObjectKey}</code>}</>}
+          showHeaderToggle={true}
+          onHeaderClick={handleHeaderClick}
+        >
+          {mode === 'collapsed' ? (
+            <PrettyJSON data={soleObjectKey ? responseData[soleObjectKey] : responseData} />
+          ) : (
+            <pre className="function-code-block">{codeContent}</pre>
+          )}
+          <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+        </ChatBubble>
+      );
+    }
   };
 
   if (CustomComponent) {

@@ -1,6 +1,7 @@
 import type React from 'react';
 import MarkdownRenderer from './MarkdownRenderer';
-import { ProcessingIndicator } from './ProcessingIndicator'; // Import the new component
+import { ProcessingIndicator } from './ProcessingIndicator';
+import ChatBubble from './ChatBubble';
 
 interface ModelTextMessageProps {
   text?: string;
@@ -8,7 +9,7 @@ interface ModelTextMessageProps {
   messageInfo?: React.ReactNode;
   isLastModelMessage?: boolean;
   processingStartTime?: number | null;
-  messageId?: string; // Add messageId prop
+  messageId?: string;
 }
 
 const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
@@ -20,15 +21,12 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   messageId,
 }) => {
   return (
-    <div id={messageId} className={`chat-message-container ${className || ''}`}>
-      <div className="chat-bubble">
-        <MarkdownRenderer content={text || ''} />
-        {isLastModelMessage && processingStartTime !== null && (
-          <ProcessingIndicator startTime={processingStartTime!} isLastThoughtGroup={false} isLastModelMessage={true} />
-        )}
-      </div>
-      {messageInfo} {/* Render MessageInfo outside chat-bubble */}
-    </div>
+    <ChatBubble messageId={messageId} containerClassName={className} messageInfo={messageInfo}>
+      <MarkdownRenderer content={text || ''} />
+      {isLastModelMessage && processingStartTime !== null && (
+        <ProcessingIndicator startTime={processingStartTime!} isLastThoughtGroup={false} isLastModelMessage={true} />
+      )}
+    </ChatBubble>
   );
 };
 

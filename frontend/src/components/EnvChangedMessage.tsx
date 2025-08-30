@@ -1,6 +1,7 @@
 import React from 'react';
 import { EnvChanged, RootContents, RootAdded, RootRemoved, RootPrompt } from '../types/chat';
-import MarkdownRenderer from './MarkdownRenderer'; // Import MarkdownRenderer
+import MarkdownRenderer from './MarkdownRenderer';
+import ChatBubble from './ChatBubble';
 
 interface EnvChangedMessageProps {
   envChanged: EnvChanged;
@@ -33,68 +34,66 @@ const EnvChangedMessage: React.FC<EnvChangedMessageProps> = ({ envChanged, messa
 
   if (!roots) {
     console.warn('Nothing found in EnvChanged message:', envChanged);
-    return null; // Should not happen if backend sends valid EnvChanged
+    return null;
   }
 
   return (
-    <div id={messageId} className="chat-message-container system-message">
-      <div className="chat-bubble">
-        <p>
-          <strong>Working environment has changed:</strong>
-        </p>
+    <ChatBubble messageId={messageId} containerClassName="system-message">
+      <p>
+        <strong>Working environment has changed:</strong>
+      </p>
 
-        {roots.added &&
-          roots.added.length > 0 &&
-          roots.added.map((addedRoot: RootAdded, index: number) => (
-            <details key={index} style={{ marginBottom: '8px' }}>
-              <summary style={{ cursor: 'pointer' }}>
-                Added directory: <code>{addedRoot.path}</code>
-              </summary>
-              {addedRoot.contents && addedRoot.contents.length > 0 ? (
-                <pre>
-                  <RootContentsDisplay contents={addedRoot.contents} indent="" />
-                </pre>
-              ) : (
-                <p>This directory is empty.</p>
-              )}
-            </details>
-          ))}
-
-        {roots.removed && roots.removed.length > 0 && (
-          <details style={{ marginBottom: '16px' }}>
-            <summary style={{ cursor: 'pointer' }}>Removed directories</summary>
-            <ul style={{ listStyle: 'none', marginLeft: '20px', padding: 0 }}>
-              {roots.removed.map((removedRoot: RootRemoved, index: number) => (
-                <li key={index}>
-                  - <code>{removedRoot.path}</code>
-                </li>
-              ))}
-            </ul>
+      {roots.added &&
+        roots.added.length > 0 &&
+        roots.added.map((addedRoot: RootAdded, index: number) => (
+          <details key={index} style={{ marginBottom: '8px' }}>
+            <summary style={{ cursor: 'pointer' }}>
+              Added directory: <code>{addedRoot.path}</code>
+            </summary>
+            {addedRoot.contents && addedRoot.contents.length > 0 ? (
+              <pre>
+                <RootContentsDisplay contents={addedRoot.contents} indent="" />
+              </pre>
+            ) : (
+              <p>This directory is empty.</p>
+            )}
           </details>
-        )}
+        ))}
 
-        {roots.prompts &&
-          roots.prompts.length > 0 &&
-          roots.prompts.map((prompt: RootPrompt, index: number) => (
-            <details key={index} style={{ marginBottom: '8px' }}>
-              <summary style={{ cursor: 'pointer' }}>
-                Directives from <code>{prompt.path}</code>
-              </summary>
-              <div
-                style={{
-                  backgroundColor: '#ffffff80',
-                  border: '1px solid var(--color-system-dark)',
-                  padding: '8px',
-                  borderRadius: '4px',
-                  marginTop: '4px',
-                }}
-              >
-                <MarkdownRenderer content={prompt.prompt} />
-              </div>
-            </details>
-          ))}
-      </div>
-    </div>
+      {roots.removed && roots.removed.length > 0 && (
+        <details style={{ marginBottom: '16px' }}>
+          <summary style={{ cursor: 'pointer' }}>Removed directories</summary>
+          <ul style={{ listStyle: 'none', marginLeft: '20px', padding: 0 }}>
+            {roots.removed.map((removedRoot: RootRemoved, index: number) => (
+              <li key={index}>
+                - <code>{removedRoot.path}</code>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {roots.prompts &&
+        roots.prompts.length > 0 &&
+        roots.prompts.map((prompt: RootPrompt, index: number) => (
+          <details key={index} style={{ marginBottom: '8px' }}>
+            <summary style={{ cursor: 'pointer' }}>
+              Directives from <code>{prompt.path}</code>
+            </summary>
+            <div
+              style={{
+                backgroundColor: '#ffffff80',
+                border: '1px solid var(--color-system-dark)',
+                padding: '8px',
+                borderRadius: '4px',
+                marginTop: '4px',
+              }}
+            >
+              <MarkdownRenderer content={prompt.prompt} />
+            </div>
+          </details>
+        ))}
+    </ChatBubble>
   );
 };
 

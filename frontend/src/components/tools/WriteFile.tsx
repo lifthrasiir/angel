@@ -8,6 +8,7 @@ import {
   FunctionResponseMessageProps,
   FunctionPairComponentProps,
 } from '../../utils/functionMessageRegistry';
+import ChatBubble from '../ChatBubble';
 
 const argsKeys = { file_path: 'string', content: 'string' } as const;
 
@@ -18,15 +19,19 @@ const WriteFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messa
   }
 
   return (
-    <div id={messageId} className="chat-message-container agent-message">
-      <div className="chat-bubble agent-function-call function-message-bubble">
-        <div className="function-title-bar function-call-title-bar">
+    <ChatBubble
+      messageId={messageId}
+      containerClassName="agent-message"
+      bubbleClassName="agent-function-call function-message-bubble"
+      messageInfo={messageInfo}
+      title={
+        <>
           write_file: <code>{args.file_path}</code>
-        </div>
-        <pre>{args.content}</pre>
-      </div>
-      {messageInfo}
-    </div>
+        </>
+      }
+    >
+      <pre>{args.content}</pre>
+    </ChatBubble>
   );
 };
 
@@ -47,13 +52,15 @@ const WriteFileResponse: React.FC<FunctionResponseMessageProps> = ({
   }
 
   return (
-    <div id={messageId} className="chat-message-container user-message">
-      <div className="chat-bubble function-message-bubble">
-        <div className="function-title-bar function-response-title-bar">Success</div>
-        {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
-      </div>
-      {messageInfo}
-    </div>
+    <ChatBubble
+      messageId={messageId}
+      containerClassName="user-message"
+      bubbleClassName="function-message-bubble"
+      messageInfo={messageInfo}
+      title="Success"
+    >
+      {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
+    </ChatBubble>
   );
 };
 
@@ -75,15 +82,21 @@ const WriteFilePair: React.FC<FunctionPairComponentProps> = ({
   }
 
   return (
-    <div className="function-pair-combined-container">
-      <div className="chat-bubble">
-        <div className="function-title-bar function-combined-title-bar" onClick={onToggleView}>
+    <ChatBubble
+      containerClassName="function-pair-combined-container"
+      bubbleClassName="function-combined-bubble"
+      messageInfo={responseMessageInfo}
+      heighten={true}
+      title={
+        <>
           write_file: <code>{args.file_path}</code>
-        </div>
-        {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
-      </div>
-      {responseMessageInfo}
-    </div>
+        </>
+      }
+      showHeaderToggle={true}
+      onHeaderClick={onToggleView}
+    >
+      {response.unified_diff === 'No changes' ? <p>No changes</p> : <pre>{response.unified_diff}</pre>}
+    </ChatBubble>
   );
 };
 

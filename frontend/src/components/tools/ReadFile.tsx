@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { validateExactKeys } from '../../utils/functionMessageValidation';
 import {
   registerFunctionCallComponent,
@@ -8,8 +8,8 @@ import {
   FunctionResponseMessageProps,
   FunctionPairComponentProps,
 } from '../../utils/functionMessageRegistry';
-import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
 import FileAttachmentList from '../FileAttachmentList';
+import ChatBubble from '../ChatBubble';
 
 const argsKeys = { file_path: 'string' } as const;
 
@@ -20,14 +20,17 @@ const ReadFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messag
   }
 
   return (
-    <div id={messageId} className="chat-message-container agent-message">
-      <div className="chat-bubble agent-function-call function-message-bubble">
-        <div className="function-title-bar function-call-title-bar">
+    <ChatBubble
+      messageId={messageId}
+      containerClassName="agent-message"
+      bubbleClassName="agent-function-call function-message-bubble"
+      messageInfo={messageInfo}
+      title={
+        <>
           read_file: <code>{args.file_path}</code>
-        </div>
-      </div>
-      {messageInfo}
-    </div>
+        </>
+      }
+    />
   );
 };
 
@@ -47,18 +50,18 @@ const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
   }
 
   return (
-    <div id={messageId} className="chat-message-container user-message">
-      <div className="chat-bubble function-message-bubble">
-        <div className="read-file-response">
-          <pre className="function-code-block">{response.content}</pre>
-          {response.note && <p>{response.note}</p>}
-          {attachments && attachments.length > 0 && (
-            <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
-          )}
-        </div>
-      </div>
-      {messageInfo}
-    </div>
+    <ChatBubble
+      messageId={messageId}
+      containerClassName="user-message"
+      bubbleClassName="function-message-bubble"
+      messageInfo={messageInfo}
+    >
+      <pre className="function-code-block">{response.content}</pre>
+      {response.note && <p>{response.note}</p>}
+      {attachments && attachments.length > 0 && (
+        <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+      )}
+    </ChatBubble>
   );
 };
 
@@ -74,52 +77,32 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
 }) => {
   const args = functionCall.args;
   const response = functionResponse.response;
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const handleToggleExpand = (event: React.MouseEvent) => {
-    event.stopPropagation();
-    setIsExpanded(!isExpanded);
-  };
 
   if (!validateExactKeys(args, argsKeys) || !validateExactKeys(response, responseKeys)) {
     return children;
   }
 
   return (
-    <div className="function-pair-combined-container">
-      <div className="chat-bubble">
-        <div
-          className="function-title-bar function-combined-title-bar"
-          onClick={onToggleView}
-          style={{ display: 'flex', alignItems: 'center' }}
-        >
-          <div style={{ flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            read_file: <code>{args.file_path}</code>
-          </div>
-          <span
-            style={{
-              color: 'var(--color-combined-verydark)',
-              cursor: 'pointer',
-              height: '1em',
-              marginLeft: '10px',
-            }}
-            onClick={handleToggleExpand}
-          >
-            {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
-          </span>
-        </div>
-        {isExpanded && (
-          <div className="function-pair-expanded-content">
-            <pre className="function-code-block">{response.content}</pre>
-            {response.note && <p>{response.note}</p>}
-            {attachments && attachments.length > 0 && (
-              <FileAttachmentList attachments={attachments} messageId={responseMessageId} sessionId={sessionId} />
-            )}
-          </div>
-        )}
-      </div>
-      {responseMessageInfo}
-    </div>
+    <ChatBubble
+      containerClassName="function-pair-combined-container"
+      bubbleClassName="function-combined-bubble"
+      messageInfo={responseMessageInfo}
+      heighten={false}
+      collapsed={true}
+      title={
+        <>
+          read_file: <code>{args.file_path}</code>
+        </>
+      }
+      showHeaderToggle={true}
+      onHeaderClick={onToggleView}
+    >
+      <pre className="function-code-block">{response.content}</pre>
+      {response.note && <p>{response.note}</p>}
+      {attachments && attachments.length > 0 && (
+        <FileAttachmentList attachments={attachments} messageId={responseMessageId} sessionId={sessionId} />
+      )}
+    </ChatBubble>
   );
 };
 
