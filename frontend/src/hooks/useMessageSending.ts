@@ -80,7 +80,7 @@ export const useMessageSending = ({
         parts: [{ text: thoughtText }],
         type: 'thought',
       } as ChatMessage);
-      setLastAutoDisplayedThoughtId(null);
+      setLastAutoDisplayedThoughtId(messageId);
     },
     onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => {
       const message: ChatMessage = {
@@ -143,6 +143,7 @@ export const useMessageSending = ({
     },
     onError: (errorData: string) => {
       addErrorMessage(errorData);
+      setLastAutoDisplayedThoughtId(null);
     },
     // onAcknowledge is handled separately as it depends on userMessage.id
     onAcknowledge: () => {},
