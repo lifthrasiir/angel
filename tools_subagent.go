@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -190,65 +189,48 @@ func handleSubagentTurn(
 						// For subagent_turn, we accumulate and save at the end of the outer loop.
 					} else if part.FunctionCall != nil {
 						hasFunctionCall = true
-						toolCall := *part.FunctionCall
-						log.Printf("Subagent LLM requested tool call: %s with args: %+v", toolCall.Name, toolCall.Args)
+						fc := *part.FunctionCall
+						log.Printf("Subagent LLM requested tool call: %s with args: %+v", fc.Name, fc.Args)
 
 						// Save FunctionCall message to DB
-						fcJson, _ := json.Marshal(toolCall)
+						fcJson, _ := json.Marshal(fc)
 						if _, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson)}); err != nil {
 							log.Printf("Warning: Failed to add function call message to subagent session: %v", err)
 						}
 
 						// Execute the tool
-						toolResult, err := CallToolFunction(ctx, toolCall, ToolHandlerParams{
+						toolResults, err := CallToolFunction(ctx, fc, ToolHandlerParams{
 							ModelName: params.ModelName,
 							SessionId: subsessionID,
 							BranchId:  session.PrimaryBranchID,
 						})
 						if err != nil {
 							log.Printf("Subagent LLM tool execution failed: %v", err)
-							toolResult.Value = map[string]interface{}{"error": err.Error()}
+							toolResults.Value = map[string]interface{}{"error": err.Error()}
 						}
 
 						// Save FunctionResponse message to DB
 						frJson, _ := json.Marshal(FunctionResponse{
-							Name:     toolCall.Name,
-							Response: toolResult.Value,
+							Name:     fc.Name,
+							Response: toolResults.Value,
 						})
 						_, err = mc.Add(ctx, db, Message{
 							Type:        TypeFunctionResponse,
 							Text:        string(frJson),
-							Attachments: toolResult.Attachments,
+							Attachments: toolResults.Attachments,
 						})
 						if err != nil {
 							log.Printf("Warning: Failed to add function response message to subagent session: %v", err)
 						}
 
 						// Create the initial FunctionResponse part
-						frPart := Part{FunctionResponse: &FunctionResponse{Name: toolCall.Name, Response: toolResult.Value}}
-						partsForContent := []Part{frPart}
-
-						// Add parts for attachments
-						for _, attachment := range toolResult.Attachments {
-							// Retrieve blob data from DB using hash
-							blobData, err := GetBlob(db, attachment.Hash)
-							if err != nil {
-								log.Printf("Failed to retrieve blob data for hash %s: %v", attachment.Hash, err)
-								continue // Skip this attachment
-							}
-
-							// Add inlineData part with Base64 encoded blob data
-							partsForContent = append(partsForContent, Part{
-								InlineData: &InlineData{
-									MimeType: attachment.MimeType,
-									Data:     base64.StdEncoding.EncodeToString(blobData),
-								},
-							})
-						}
+						fr := FunctionResponse{Name: fc.Name, Response: toolResults.Value}
 
 						// Add FunctionCall and FunctionResponse (with attachments) to currentHistory for next LLM turn
-						currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &toolCall}}})
-						currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: partsForContent})
+						currentHistory = append(currentHistory,
+							Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}},
+							Content{Role: RoleUser, Parts: appendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
+						)
 					}
 				}
 			}

@@ -134,18 +134,17 @@ func streamLLMResponse(
 				if part.FunctionCall != nil {
 					// Immediately broadcast function call
 					fc := *part.FunctionCall
+					hasFunctionCall = true
+
 					fcJson, _ := json.Marshal(fc)
 					newMessage, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson), State: state})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save function call message")
 					}
+
 					argsJson, _ := json.Marshal(fc.Args)
 					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsJson))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
-
-					// Add to current history and functionCalls for later execution
-					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}})
-					hasFunctionCall = true
 
 					toolResults, err := CallToolFunction(ctx, fc, ToolHandlerParams{
 						ModelName: mc.LastMessageModel,
@@ -157,31 +156,14 @@ func streamLLMResponse(
 
 						var pendingConfirmation *PendingConfirmation
 						if errors.As(err, &pendingConfirmation) {
-							// Handle PendingConfirmation error
-							confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
-							if marshalErr != nil {
-								broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
-								return logAndErrorf(marshalErr, "Failed to marshal pending confirmation data")
-							}
-							confirmationData := string(confirmationDataBytes)
-
-							// Update branch pending_confirmation
-							if err := UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
-								broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
-								return logAndErrorf(err, "Failed to update branch pending_confirmation")
-							}
-
-							// Send P event to frontend
-							broadcastToSession(initialState.SessionId, EventPendingConfirmation, confirmationData)
-
-							// Stop streaming
-							return fmt.Errorf("user confirmation pending")
+							return handlePendingConfirmation(db, initialState, pendingConfirmation)
+						} else {
+							toolResults.Value = map[string]interface{}{"error": err.Error()}
 						}
-
-						toolResults.Value = map[string]interface{}{"error": err.Error()}
 					}
 
 					fr := FunctionResponse{Name: fc.Name, Response: toolResults.Value}
+
 					frJson, _ := json.Marshal(fr)
 					var promptTokens *int
 					if lastUsageMetadata != nil && lastUsageMetadata.PromptTokenCount > 0 {
@@ -198,6 +180,7 @@ func streamLLMResponse(
 					if err != nil {
 						return logAndErrorf(err, "Failed to save function response message")
 					}
+
 					payload := FunctionResponsePayload{
 						Response:    toolResults.Value,
 						Attachments: toolResults.Attachments,
@@ -207,39 +190,14 @@ func streamLLMResponse(
 						log.Printf("Failed to marshal EventFunctionResponse payload: %v", err)
 						payloadJson = []byte("{}") // Send empty object on error
 					}
-
 					formattedData = fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(payloadJson))
 					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
 
-					// Create the initial FunctionResponse part
-					frPart := Part{FunctionResponse: &fr}
-					partsForContent := []Part{frPart}
-
-					// Add parts for attachments
-					for _, attachment := range toolResults.Attachments {
-						// Retrieve blob data from DB using hash
-						dbFromContext, err := getDbFromContext(ctx)
-						if err != nil {
-							log.Printf("Failed to get DB from context for GetBlob: %v", err)
-							continue // Skip this attachment
-						}
-						blobData, err := GetBlob(dbFromContext, attachment.Hash)
-						if err != nil {
-							log.Printf("Failed to retrieve blob data for hash %s: %v", attachment.Hash, err)
-							continue // Skip this attachment
-						}
-
-						// Add inlineData part with Base64 encoded blob data
-						partsForContent = append(partsForContent, Part{
-							InlineData: &InlineData{
-								MimeType: attachment.MimeType,
-								Data:     base64.StdEncoding.EncodeToString(blobData),
-							},
-						})
-					}
-
-					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: partsForContent})
-
+					// Add to current history for later execution
+					currentHistory = append(currentHistory,
+						Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}},
+						Content{Role: RoleUser, Parts: appendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
+					)
 					continue // Continue processing other parts in the same caResp
 				} else if part.ExecutableCode != nil {
 					// Convert ExecutableCode to FunctionCall with special name
@@ -433,6 +391,47 @@ func streamLLMResponse(
 	completeCall(initialState.SessionId) // Mark the call as completed
 	inferWg.Wait()
 	return nil
+}
+
+func appendAttachmentParts(db *sql.DB, toolResults ToolHandlerResults, partsForContent []Part) []Part {
+	for _, attachment := range toolResults.Attachments {
+		// Retrieve blob data from DB using hash
+		blobData, err := GetBlob(db, attachment.Hash)
+		if err != nil {
+			log.Printf("Failed to retrieve blob data for hash %s: %v", attachment.Hash, err)
+			continue // Skip this attachment
+		}
+
+		// Add inlineData part with Base64 encoded blob data
+		partsForContent = append(partsForContent, Part{
+			InlineData: &InlineData{
+				MimeType: attachment.MimeType,
+				Data:     base64.StdEncoding.EncodeToString(blobData),
+			},
+		})
+	}
+	return partsForContent
+}
+
+func handlePendingConfirmation(db *sql.DB, initialState InitialState, pendingConfirmation *PendingConfirmation) error {
+	confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
+	if marshalErr != nil {
+		broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
+		return logAndErrorf(marshalErr, "Failed to marshal pending confirmation data")
+	}
+	confirmationData := string(confirmationDataBytes)
+
+	// Update branch pending_confirmation
+	if err := UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
+		broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
+		return logAndErrorf(err, "Failed to update branch pending_confirmation")
+	}
+
+	// Send P event to frontend
+	broadcastToSession(initialState.SessionId, EventPendingConfirmation, confirmationData)
+
+	// Stop streaming
+	return fmt.Errorf("user confirmation pending")
 }
 
 func checkStreamCancellation(
