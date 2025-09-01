@@ -45,6 +45,7 @@ interface ChatAreaProps {
     branchId: string,
     modifiedData?: Record<string, any>,
   ) => Promise<void>;
+  handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -55,6 +56,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   chatInputRef,
   chatAreaRef,
   sendConfirmation,
+  handleEditMessage,
 }) => {
   const [workspaceId] = useAtom(workspaceIdAtom);
   const [messages] = useAtom(messagesAtom);
@@ -163,6 +165,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     currentIndex: number,
     availableModels: Map<string, { maxTokens: number }>,
     processingStartTime: number | null,
+    handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>,
   ): { element: JSX.Element; messagesConsumed: number } => {
     // Find maxTokens for the current message's model
     const currentModelMaxTokens = currentMessage.model
@@ -274,6 +277,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               maxTokens={currentModelMaxTokens}
               isLastModelMessage={isLastModelMessage}
               processingStartTime={processingStartTime}
+              onSaveEdit={handleEditMessage}
             />
             {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
               <ProcessingIndicator
@@ -327,6 +331,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         i,
         availableModels,
         processingStartTime,
+        handleEditMessage,
       );
       renderedElements.push(element);
       i += messagesConsumed;
@@ -341,12 +346,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           maxTokens={undefined} // Temporary messages don't have token limits
           isLastModelMessage={false}
           processingStartTime={null}
+          onSaveEdit={() => {}}
         />,
       );
     }
 
     return renderedElements;
-  }, [messages, availableModels, globalPrompts, systemPrompt, processingStartTime, temporaryEnvChangeMessage]); // temporaryEnvChangeMessage 추가
+  }, [messages, availableModels, processingStartTime, temporaryEnvChangeMessage]); // temporaryEnvChangeMessage 추가
 
   const currentSystemPromptLabel = useMemo(() => {
     const found = globalPrompts.find((p) => p.value === systemPrompt);

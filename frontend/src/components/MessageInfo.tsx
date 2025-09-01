@@ -1,7 +1,9 @@
 import React from 'react';
 import type { PossibleNextMessage } from '../types/chat';
+import { useAtom } from 'jotai';
+import { processingStartTimeAtom } from '../atoms/chatAtoms';
 
-interface MessageInfoProps {
+export interface MessageInfoProps {
   cumulTokenCount?: number | null;
   branchId?: string;
   parentMessageId?: string;
@@ -9,6 +11,7 @@ interface MessageInfoProps {
   possibleNextIds?: PossibleNextMessage[];
   model?: string;
   maxTokens?: number;
+  onEditClick?: () => void;
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = ({
@@ -19,7 +22,11 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
   possibleNextIds,
   model,
   maxTokens,
+  onEditClick,
 }) => {
+  const [processingStartTime] = useAtom(processingStartTimeAtom);
+  const isProcessing = processingStartTime !== null;
+
   const hasInfo =
     cumulTokenCount !== undefined ||
     branchId ||
@@ -27,7 +34,8 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
     chosenNextId ||
     (possibleNextIds && possibleNextIds.length > 0) ||
     model ||
-    maxTokens;
+    maxTokens ||
+    onEditClick;
 
   if (!hasInfo) {
     return null;
@@ -41,11 +49,28 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
         <>
           | Next:{' '}
           {possibleNextIds.map((item) => (
-            <>
+            <React.Fragment key={item.messageId}>
               {item.messageId} ({item.branchId})
-            </>
+            </React.Fragment>
           ))}
         </>
+      )}
+      {onEditClick && (
+        <button
+          onClick={onEditClick}
+          disabled={isProcessing}
+          style={{
+            marginLeft: '10px',
+            padding: '4px 8px',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            background: isProcessing ? '#f0f0f0' : '#e0e0e0',
+            cursor: isProcessing ? 'not-allowed' : 'pointer',
+            fontSize: '0.8em',
+          }}
+        >
+          Edit
+        </button>
       )}
     </div>
   );

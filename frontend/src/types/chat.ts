@@ -42,6 +42,7 @@ export interface ChatMessage {
   possibleNextIds?: PossibleNextMessage[];
   model?: string;
   sessionId?: string;
+  edited?: boolean;
 }
 
 export interface InitialState {

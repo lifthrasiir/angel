@@ -659,6 +659,14 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the new message in the new branch, with updatedMessageID as its parent
+	// Get the original message to retrieve its model
+	originalMessage, err := GetMessageByID(db, requestBody.UpdatedMessageID)
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get original message %d: %v", requestBody.UpdatedMessageID, err))
+		return
+	}
+
+	// Create the new message in the new branch, with updatedMessageID as its parent
 	newMessageID, err := AddMessageToSession(r.Context(), db, Message{
 		SessionID:       sessionId,
 		BranchID:        newBranchID,
@@ -668,7 +676,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		Type:            TypeUserText,
 		Attachments:     nil,
 		CumulTokenCount: nil,
-		Model:           "", // Model will be inferred or set later
+		Model:           originalMessage.Model, // Use the model from the original message
 		Generation:      currentGeneration,
 	})
 	if err != nil {
@@ -688,11 +696,86 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendJSONResponse(w, map[string]string{
-		"status":       "success",
-		"newBranchId":  newBranchID,
-		"newMessageId": fmt.Sprintf("%d", newMessageID),
-	})
+	// --- Start Streaming Logic ---
+	sseW := newSseWriter(sessionId, w, r)
+	if sseW == nil {
+		return
+	}
+	addSseWriter(sessionId, sseW)
+	defer removeSseWriter(sessionId, sseW)
+
+	// Retrieve session history from DB for LLM (full context)
+	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, newBranchID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
+		return
+	}
+
+	// Retrieve session history for frontend InitialState (paginated)
+	// For a new branch, we typically want to send the new message and potentially some context
+	// For simplicity, let's send the new message as part of the initial state history
+	// and then stream the LLM response.
+	// We need to fetch the newly created message to include it in the initial state.
+	newMessageAsFrontendMessage, err := GetMessageByID(db, newMessageID)
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get new message %d for initial state", newMessageID))
+		return
+	}
+	// Convert Message to FrontendMessage using createFrontendMessage
+	// Provide dummy values for attachmentsJSON, possibleNextIDsAndBranchesStr, ignoreBeforeLastCompression, includeState
+	fm, _, err := createFrontendMessage(*newMessageAsFrontendMessage, sql.NullString{}, "", false, false)
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to convert new message %d to frontend message: %v", newMessageID, err))
+		return
+	}
+	frontendHistoryForInitialState := []FrontendMessage{fm}
+
+	session, err := GetSession(db, sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get session %s", sessionId))
+		return
+	}
+	systemPrompt := session.SystemPrompt
+
+	roots, _, err := GetLatestSessionEnv(db, sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
+		return
+	}
+
+	initialState := InitialState{
+		SessionId:       sessionId,
+		History:         frontendHistoryForInitialState,
+		SystemPrompt:    systemPrompt,
+		WorkspaceID:     session.WorkspaceID,
+		PrimaryBranchID: newBranchID,
+		Roots:           roots,
+	}
+
+	initialStateJSON, err := json.Marshal(initialState)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to marshal initial state")
+		return
+	}
+	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
+
+	// Create a new message chain for the new branch
+	mc, err := NewMessageChain(r.Context(), db, sessionId, newBranchID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to create message chain for new branch")
+		return
+	}
+
+	// Send acknowledgement for user message ID to frontend (the newly created message)
+	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", newMessageID))
+
+	if err := streamLLMResponse(db, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+		sendInternalServerError(w, r, err, "Error streaming LLM response after branch creation")
+		return
+	}
+	// --- End Streaming Logic ---
+
+	// No JSON response needed here as streaming handles the response
 }
 
 // switchBranchHandler switches the primary branch of a session.

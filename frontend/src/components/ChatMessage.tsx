@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChatMessage, EnvChanged } from '../types/chat'; // EnvChanged 임포트 추가
+import type { ChatMessage, EnvChanged } from '../types/chat';
 import { splitOnceByNewline } from '../utils/stringUtils';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
@@ -8,17 +8,18 @@ import SystemMessage from './SystemMessage';
 import UserTextMessage from './UserTextMessage';
 import MessageInfo from './MessageInfo';
 import CompressionMessage from './CompressionMessage';
-import EnvChangedMessage from './EnvChangedMessage'; // EnvChangedMessage 임포트 추가
+import EnvChangedMessage from './EnvChangedMessage';
 
 interface ChatMessageProps {
   message: ChatMessage;
   maxTokens?: number;
   isLastModelMessage?: boolean;
   processingStartTime?: number | null;
+  onSaveEdit?: (messageId: string, editedText: string) => void;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
-  ({ message, maxTokens, isLastModelMessage, processingStartTime }) => {
+  ({ message, maxTokens, isLastModelMessage, processingStartTime, onSaveEdit }) => {
     const { type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, possibleNextIds, model } =
       message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
@@ -53,6 +54,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageInfo={messageInfoComponent}
           messageId={message.id}
           sessionId={message.sessionId}
+          onSaveEdit={onSaveEdit!}
         />
       );
     } else if (type === 'thought') {

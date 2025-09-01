@@ -31,12 +31,16 @@ export const sendMessage = async (
   primaryBranchId?: string,
   model?: string,
   initialRoots?: string[],
+  beforeMessageId?: string,
 ) => {
   let apiUrl = '';
   let requestBody: any = {};
 
   if (chatSessionId) {
     apiUrl = `/api/chat/${chatSessionId}`;
+    if (beforeMessageId) {
+      apiUrl += `?beforeMessageID=${beforeMessageId}`;
+    }
     requestBody = { message: inputMessage, attachments, model };
     if (primaryBranchId) {
       requestBody.primaryBranchId = primaryBranchId;

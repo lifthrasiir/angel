@@ -109,7 +109,7 @@ export const useChatSession = () => {
     setWorkspaceId(urlWorkspaceId);
   }, [urlWorkspaceId, setWorkspaceId]);
 
-  const { handleSendMessage, cancelStreamingCall, sendConfirmation } = useMessageSending({
+  const { handleSendMessage, cancelStreamingCall, sendConfirmation, handleEditMessage } = useMessageSending({
     inputMessage,
     selectedFiles,
     chatSessionId,
@@ -145,5 +145,6 @@ export const useChatSession = () => {
     cancelStreamingCall,
     handleSetSelectedModel,
     sendConfirmation,
+    handleEditMessage,
   };
 };

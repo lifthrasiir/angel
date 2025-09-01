@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
-import { useSetAtom, useAtomValue } from 'jotai'; // Added useAtomValue
+import { useSetAtom, useAtomValue } from 'jotai';
 import type { ChatMessage, FileAttachment } from '../types/chat';
 import { convertFilesToAttachments } from '../utils/fileHandler';
 import { processStreamResponse, type StreamEventHandlers, sendMessage } from '../utils/messageHandler';
@@ -24,6 +24,8 @@ import {
   temporaryEnvChangeMessageAtom,
   pendingRootsAtom,
   compressAbortControllerAtom,
+  editingMessageIdAtom,
+  messagesAtom,
 } from '../atoms/chatAtoms';
 import { ModelInfo } from '../api/models';
 
@@ -68,6 +70,8 @@ export const useMessageSending = ({
   const setPendingRoots = useSetAtom(pendingRootsAtom);
   const compressAbortController = useAtomValue(compressAbortControllerAtom);
   const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
+  const setEditingMessageId = useSetAtom(editingMessageIdAtom);
+  const setMessages = useSetAtom(messagesAtom);
 
   const commonHandlers = {
     onMessage: (messageId: string, text: string) => {
@@ -146,7 +150,7 @@ export const useMessageSending = ({
       setLastAutoDisplayedThoughtId(null);
     },
     // onAcknowledge is handled separately as it depends on userMessage.id
-    onAcknowledge: () => {},
+    onAcknowledge: () => { },
     onTokenCount: (messageId: string, cumulTokenCount: number) => {
       updateMessageTokenCount({ messageId, cumulTokenCount });
     },
@@ -310,5 +314,75 @@ export const useMessageSending = ({
     }
   };
 
-  return { handleSendMessage, cancelStreamingCall, sendConfirmation };
+  const handleEditMessage = async (originalMessageId: string, editedText: string) => {
+    if (!chatSessionId) {
+      addErrorMessage('Cannot edit message: Session ID is missing.');
+      return;
+    }
+
+    setProcessingStartTime(performance.now());
+    setEditingMessageId(null); // Exit editing mode
+
+    // Update message content and remove subsequent messages on the frontend
+    setMessages((prevMessages) => {
+      const updatedMessages = [...prevMessages];
+      const messageIndex = updatedMessages.findIndex((msg) => msg.id === originalMessageId);
+
+      if (messageIndex !== -1) {
+        // Update message content
+        updatedMessages[messageIndex] = {
+          ...updatedMessages[messageIndex],
+          parts: [{ text: editedText }],
+        };
+        // Remove all messages after the edited message
+        return updatedMessages.slice(0, messageIndex + 1);
+      }
+      return prevMessages; // If message not found, return previous state
+    });
+
+    try {
+      const requestBody = {
+        updatedMessageId: parseInt(originalMessageId, 10), // Convert message ID to integer
+        newMessageText: editedText,
+      };
+
+      const response = await apiFetch(`/api/chat/${chatSessionId}/branch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.status === 401) {
+        window.location.reload();
+        return;
+      }
+
+      if (!response.ok) {
+        const errorMessage = `Failed to edit message: ${response.status} ${response.statusText}`;
+        addErrorMessage(errorMessage);
+        return;
+      }
+
+      const handlers: StreamEventHandlers = {
+        ...commonHandlers,
+        onAcknowledge: (messageId: string) => {
+          // When a message is edited, the backend might send an acknowledge with the new message ID.
+          // We need to update the original message's ID to the new one.
+          // This assumes the backend sends the new ID via onAcknowledge.
+          // The originalMessageId is captured in the closure.
+          // This will update the ID of the message that was just edited.
+          updateUserMessageId({ temporaryId: originalMessageId, newId: messageId });
+        },
+      };
+
+      await processStreamResponse(response, handlers);
+    } catch (error) {
+      console.error('Error editing message:', error);
+      addErrorMessage('Error editing message.');
+    } finally {
+      setProcessingStartTime(null);
+    }
+  };
+
+  return { handleSendMessage, cancelStreamingCall, sendConfirmation, handleEditMessage };
 };
