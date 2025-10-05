@@ -150,7 +150,7 @@ export const useMessageSending = ({
       setLastAutoDisplayedThoughtId(null);
     },
     // onAcknowledge is handled separately as it depends on userMessage.id
-    onAcknowledge: () => { },
+    onAcknowledge: () => {},
     onTokenCount: (messageId: string, cumulTokenCount: number) => {
       updateMessageTokenCount({ messageId, cumulTokenCount });
     },

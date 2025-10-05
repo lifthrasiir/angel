@@ -1,2 +1,1 @@
 - Refer to GEMINI.md for general provision.
-- Use `cmd.exe /c "npm run ..."` to run npm, because you are in the WSL.
