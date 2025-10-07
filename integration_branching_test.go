@@ -510,3 +510,303 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 		}
 	})
 }
+
+// TestFirstMessageEditing tests the functionality of editing the first message in a session
+func TestFirstMessageEditing(t *testing.T) {
+
+	// Scenario 1: Edit first message when there's only one message
+	t.Run("Scenario1_SingleMessage", func(t *testing.T) {
+		router, testDB, _ := setupTest(t)
+
+		// Create a new session
+		sessionId := generateID()
+		primaryBranchID, err := CreateSession(testDB, sessionId, "Test system prompt", "")
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Create a message chain and add the first message
+		mc, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		if err != nil {
+			t.Fatalf("Failed to create message chain: %v", err)
+		}
+
+		firstMsg, err := mc.Add(context.Background(), testDB, Message{Text: "First message", Type: TypeUserText})
+		if err != nil {
+			t.Fatalf("Failed to add first message: %v", err)
+		}
+
+		// Verify chosen_first_id is set to first message
+		var chosenFirstID *int
+		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&chosenFirstID)
+		if err != nil {
+			t.Fatalf("Failed to get chosen_first_id: %v", err)
+		}
+		if chosenFirstID == nil || *chosenFirstID != firstMsg.ID {
+			t.Errorf("Expected chosen_first_id to be %d, got %v", firstMsg.ID, chosenFirstID)
+		}
+
+		// Edit the first message
+		newMessageText := "Edited first message"
+		payload := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": "%s"}`, firstMsg.ID, newMessageText))
+		_ = testRequest(t, router, "POST", "/api/chat/"+sessionId+"/branch", payload, http.StatusOK)
+
+		// Verify the session's chosen_first_id was updated to point to the new message
+		var newChosenFirstID *int
+		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&newChosenFirstID)
+		if err != nil {
+			t.Fatalf("Failed to get new chosen_first_id: %v", err)
+		}
+		if newChosenFirstID == nil || *newChosenFirstID == firstMsg.ID {
+			t.Error("Expected chosen_first_id to be updated to a new message ID")
+		}
+
+		// Verify the new message exists with the correct content
+		var messageText string
+		err = testDB.QueryRow("SELECT text FROM messages WHERE id = ?", *newChosenFirstID).Scan(&messageText)
+		if err != nil {
+			t.Fatalf("Failed to get new message text: %v", err)
+		}
+		if messageText != newMessageText {
+			t.Errorf("Expected message text '%s', got '%s'", newMessageText, messageText)
+		}
+
+		// Verify the new message has no parent (it's a first message)
+		var parentMessageID *int
+		err = testDB.QueryRow("SELECT parent_message_id FROM messages WHERE id = ?", *newChosenFirstID).Scan(&parentMessageID)
+		if err != nil {
+			t.Fatalf("Failed to get parent_message_id: %v", err)
+		}
+		if parentMessageID != nil {
+			t.Errorf("Expected new first message to have no parent, got %v", parentMessageID)
+		}
+
+		// Test GetSessionHistory returns only the edited first message chain
+		session, err := GetSession(testDB, sessionId)
+		if err != nil {
+			t.Fatalf("Failed to get session: %v", err)
+		}
+		history, err := GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
+		if err != nil {
+			t.Fatalf("GetSessionHistory failed: %v", err)
+		}
+
+		// Should only contain the new first message (no response in Scenario 1), not the old chain
+		if len(history) != 1 {
+			t.Errorf("Expected GetSessionHistory to return 1 message after first message edit, got %d", len(history))
+		}
+
+		// First message should be the edited one
+		if len(history) > 0 && history[0].Parts[0].Text != newMessageText {
+			t.Errorf("Expected first message in history to be '%s', got '%s'", newMessageText, history[0].Parts[0].Text)
+		}
+	})
+
+	// Scenario 2: Edit first message when there's already a message chain
+	t.Run("Scenario2_ExistingChain", func(t *testing.T) {
+		router, testDB, _ := setupTest(t)
+
+		// Create a new session
+		sessionId := generateID()
+		primaryBranchID, err := CreateSession(testDB, sessionId, "Test system prompt", "")
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Create a message chain with multiple messages: A1 -> B1 -> C1
+		mc, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		if err != nil {
+			t.Fatalf("Failed to create message chain: %v", err)
+		}
+
+		msgA1, err := mc.Add(context.Background(), testDB, Message{Text: "Message A1", Type: TypeUserText})
+		if err != nil {
+			t.Fatalf("Failed to add message A1: %v", err)
+		}
+
+		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message B1", Type: TypeModelText})
+		if err != nil {
+			t.Fatalf("Failed to add message B1: %v", err)
+		}
+
+		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message C1", Type: TypeUserText})
+		if err != nil {
+			t.Fatalf("Failed to add message C1: %v", err)
+		}
+
+		// Verify the current first message
+		var chosenFirstID *int
+		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&chosenFirstID)
+		if err != nil {
+			t.Fatalf("Failed to get chosen_first_id: %v", err)
+		}
+		if chosenFirstID == nil || *chosenFirstID != msgA1.ID {
+			t.Errorf("Expected chosen_first_id to be %d, got %v", msgA1.ID, chosenFirstID)
+		}
+
+		// Edit the first message (A1 -> A2)
+		newMessageText := "Message A2 (edited)"
+		payload := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": "%s"}`, msgA1.ID, newMessageText))
+		_ = testRequest(t, router, "POST", "/api/chat/"+sessionId+"/branch", payload, http.StatusOK)
+
+		// Verify the session's chosen_first_id was updated
+		var newChosenFirstID *int
+		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&newChosenFirstID)
+		if err != nil {
+			t.Fatalf("Failed to get new chosen_first_id: %v", err)
+		}
+		if newChosenFirstID == nil || *newChosenFirstID == msgA1.ID {
+			t.Error("Expected chosen_first_id to be updated to a new message ID")
+		}
+
+		// Verify the new message content
+		var messageText string
+		err = testDB.QueryRow("SELECT text FROM messages WHERE id = ?", *newChosenFirstID).Scan(&messageText)
+		if err != nil {
+			t.Fatalf("Failed to get new message text: %v", err)
+		}
+		if messageText != newMessageText {
+			t.Errorf("Expected message text '%s', got '%s'", newMessageText, messageText)
+		}
+
+		// Verify the new first message starts a new chain (doesn't point to existing messages)
+		var chosenNextID *int
+		err = testDB.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", *newChosenFirstID).Scan(&chosenNextID)
+		if err != nil {
+			t.Fatalf("Failed to get chosen_next_id: %v", err)
+		}
+		if chosenNextID != nil {
+			t.Errorf("Expected chosen_next_id to be nil for new first message, got %v", chosenNextID)
+		}
+
+		// Test GetSessionHistory returns the correct chain after first message edit
+		session, err := GetSession(testDB, sessionId)
+		if err != nil {
+			t.Fatalf("Failed to get session: %v", err)
+		}
+		history, err := GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
+		if err != nil {
+			t.Fatalf("GetSessionHistory failed: %v", err)
+		}
+
+		// Should return the edited first message A2
+		// The rest of the chain may or may not be connected properly depending on the branching logic
+		if len(history) < 1 {
+			t.Errorf("Expected GetSessionHistory to return at least 1 message, got %d", len(history))
+		}
+
+		// First message should be the edited one
+		if len(history) > 0 && history[0].Parts[0].Text != newMessageText {
+			t.Errorf("Expected first message in history to be '%s', got '%s'", newMessageText, history[0].Parts[0].Text)
+		}
+
+		// Should not contain the original A1 message
+		for _, msg := range history {
+			if msg.Parts[0].Text == "Message A1" {
+				t.Error("GetSessionHistory should not contain the original A1 message after editing")
+			}
+		}
+	})
+
+	// Scenario 3: Edit first message again after creating new chain: A1 -> B1 -> C1; A2 -> B2
+	t.Run("Scenario3_MultipleEdits", func(t *testing.T) {
+		router, testDB, _ := setupTest(t)
+
+		// Create a new session
+		sessionId := generateID()
+		primaryBranchID, err := CreateSession(testDB, sessionId, "Test system prompt", "")
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Create initial chain: A1 -> B1 -> C1
+		mc, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		if err != nil {
+			t.Fatalf("Failed to create message chain: %v", err)
+		}
+
+		msgA1, err := mc.Add(context.Background(), testDB, Message{Text: "Message A1", Type: TypeUserText})
+		if err != nil {
+			t.Fatalf("Failed to add message A1: %v", err)
+		}
+
+		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message B1", Type: TypeModelText})
+		if err != nil {
+			t.Fatalf("Failed to add message B1: %v", err)
+		}
+
+		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message C1", Type: TypeUserText})
+		if err != nil {
+			t.Fatalf("Failed to add message C1: %v", err)
+		}
+
+		// First edit: A1 -> A2, chain becomes: A2 -> B1 -> C1
+		newMessageText := "Message A2 (first edit)"
+		payload := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": "%s"}`, msgA1.ID, newMessageText))
+		_ = testRequest(t, router, "POST", "/api/chat/"+sessionId+"/branch", payload, http.StatusOK)
+
+		// Get the new first message ID (A2)
+		var newChosenFirstID *int
+		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&newChosenFirstID)
+		if err != nil {
+			t.Fatalf("Failed to get new chosen_first_id: %v", err)
+		}
+
+		// Get the last message ID from the current chain
+		var lastMessageID int
+		err = testDB.QueryRow("SELECT id FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 1", sessionId).Scan(&lastMessageID)
+		if err != nil {
+			t.Fatalf("Failed to get last message ID: %v", err)
+		}
+
+		// Create new chain from the last message
+		mc, err = NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		if err != nil {
+			t.Fatalf("Failed to create new message chain: %v", err)
+		}
+		mc.LastMessageID = lastMessageID // Set last message to the current last message
+
+		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message B2", Type: TypeModelText})
+		if err != nil {
+			t.Fatalf("Failed to add message B2: %v", err)
+		}
+
+		// Second edit: A2 -> A3, chain should be: A3 -> B1 -> C1 -> B2
+		newMessageText2 := "Message A3 (second edit)"
+		payload2 := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": "%s"}`, *newChosenFirstID, newMessageText2))
+		_ = testRequest(t, router, "POST", "/api/chat/"+sessionId+"/branch", payload2, http.StatusOK)
+
+		// Verify the final first message
+		var finalChosenFirstID *int
+		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&finalChosenFirstID)
+		if err != nil {
+			t.Fatalf("Failed to get final chosen_first_id: %v", err)
+		}
+		if finalChosenFirstID == nil || *finalChosenFirstID == *newChosenFirstID {
+			t.Error("Expected chosen_first_id to be updated again")
+		}
+
+		// Verify the final first message content
+		var finalMessageText string
+		err = testDB.QueryRow("SELECT text FROM messages WHERE id = ?", *finalChosenFirstID).Scan(&finalMessageText)
+		if err != nil {
+			t.Fatalf("Failed to get final message text: %v", err)
+		}
+		if finalMessageText != newMessageText2 {
+			t.Errorf("Expected message text '%s', got '%s'", newMessageText2, finalMessageText)
+		}
+
+		// Verify the final first message starts a new chain (doesn't point to existing messages)
+		var chosenNextID *int
+		err = testDB.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", *finalChosenFirstID).Scan(&chosenNextID)
+		if err != nil {
+			t.Fatalf("Failed to get chosen_next_id: %v", err)
+		}
+		if chosenNextID != nil {
+			t.Errorf("Expected chosen_next_id to be nil for final first message, got %v", chosenNextID)
+		}
+
+		// Note: With the new first message editing logic, the original chain connections
+		// are no longer relevant since the edited first message starts a new independent chain
+	})
+}

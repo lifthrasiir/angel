@@ -392,6 +392,23 @@ func getSessionHistoryInternal(
 		messageIdLimit = beforeMessageID - 1
 	}
 
+	// For first message editing support, find the starting point using chosen_first_id
+	var startingMessageID int
+	var chosenFirstID sql.NullInt64
+	err := db.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionID).Scan(&chosenFirstID)
+	if err != nil || !chosenFirstID.Valid {
+		// If no chosen_first_id is set, fall back to the original behavior
+		startingMessageID = 1
+	} else {
+		startingMessageID = int(chosenFirstID.Int64)
+	}
+
+	// The starting message ID should not be greater than the upper limit
+	if startingMessageID > messageIdLimit {
+		// This means the cursor is before the chosen first message, return empty
+		return nil, nil
+	}
+
 	isFullHistoryFetch := (fetchLimit <= 0)
 
 	var history [][]FrontendMessage
@@ -405,9 +422,9 @@ func getSessionHistoryInternal(
 					m.state, coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
 			FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
 			GROUP BY m.id
-			HAVING m.branch_id = ? AND m.id <= ?
+			HAVING m.branch_id = ? AND m.id >= ? AND m.id <= ?
 			ORDER BY m.id ASC
-			`, branchID, messageIdLimit)
+			`, branchID, startingMessageID, messageIdLimit)
 			if err != nil {
 				return fmt.Errorf("failed to query branch messages: %w", err)
 			}
@@ -459,7 +476,12 @@ func getSessionHistoryInternal(
 			history = append(history, messages)
 			currentMessageCount += len(messages) // Update counter
 			if parentBranchMessageID < 0 {
-				keepGoing = false
+				// Reached the top level, use chosen_first_id as the final limit
+				if startingMessageID > 1 {
+					messageIdLimit = startingMessageID - 1
+				} else {
+					keepGoing = false
+				}
 			} else {
 				messageIdLimit = parentBranchMessageID
 				err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ?", parentBranchMessageID).Scan(&branchID)
@@ -634,4 +656,80 @@ func GetMessageByID(db *sql.DB, messageID int) (*Message, error) {
 	}
 
 	return &m, nil
+}
+
+// UpdateSessionChosenFirstID updates the chosen_first_id for a specific session.
+func UpdateSessionChosenFirstID(db *sql.DB, sessionID string, chosenFirstID *int) error {
+	_, err := db.Exec("UPDATE sessions SET chosen_first_id = ? WHERE id = ?", chosenFirstID, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update session chosen_first_id: %w", err)
+	}
+	return nil
+}
+
+// GetSessionChosenFirstID retrieves the chosen_first_id for a specific session.
+func GetSessionChosenFirstID(db *sql.DB, sessionID string) (*int, error) {
+	var chosenFirstID *int
+	err := db.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionID).Scan(&chosenFirstID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chosen_first_id for session %s: %w", sessionID, err)
+	}
+	return chosenFirstID, nil
+}
+
+// GetSessionFirstMessage retrieves the first message for a session using chosen_first_id.
+func GetSessionFirstMessage(db *sql.DB, sessionID string) (*Message, error) {
+	chosenFirstID, err := GetSessionChosenFirstID(db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if chosenFirstID == nil {
+		return nil, fmt.Errorf("no first message set for session %s", sessionID)
+	}
+	return GetMessageByID(db, *chosenFirstID)
+}
+
+// findVirtualRootMessage finds the starting point for message chain traversal.
+// It checks both the session's chosen_first_id and the branch's first message.
+func findVirtualRootMessage(db *sql.DB, sessionID string, branchID string) (*Message, error) {
+	// First, try to get the session's chosen_first_id
+	chosenFirstID, err := GetSessionChosenFirstID(db, sessionID)
+	if err == nil && chosenFirstID != nil {
+		// Verify this message belongs to the requested branch
+		msg, err := GetMessageByID(db, *chosenFirstID)
+		if err == nil && msg.BranchID == branchID {
+			return msg, nil
+		}
+	}
+
+	// If no chosen_first_id or it doesn't belong to the branch,
+	// fall back to finding the first message in the branch (parent_message_id IS NULL)
+	var rootMessage Message
+	err = db.QueryRow(`
+		SELECT id, session_id, branch_id, parent_message_id, chosen_next_id,
+			   text, type, attachments, cumul_token_count, created_at, model, generation, state, aux
+		FROM messages
+		WHERE session_id = ? AND branch_id = ? AND parent_message_id IS NULL
+		ORDER BY created_at DESC LIMIT 1
+	`, sessionID, branchID).Scan(
+		&rootMessage.ID, &rootMessage.SessionID, &rootMessage.BranchID,
+		&rootMessage.ParentMessageID, &rootMessage.ChosenNextID,
+		&rootMessage.Text, &rootMessage.Type, &rootMessage.Attachments,
+		&rootMessage.CumulTokenCount, &rootMessage.CreatedAt, &rootMessage.Model,
+		&rootMessage.Generation, &rootMessage.State, &rootMessage.Aux,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no root message found for session %s, branch %s", sessionID, branchID)
+		}
+		return nil, fmt.Errorf("failed to find root message: %w", err)
+	}
+
+	// Unmarshal attachments if present
+	if len(rootMessage.Attachments) > 0 {
+		// Attachments are already unmarshaled by GetSessionFirstMessage
+	}
+
+	return &rootMessage, nil
 }

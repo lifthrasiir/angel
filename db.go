@@ -25,7 +25,8 @@ func createTables(db *sql.DB) error {
 		system_prompt TEXT,
 		name TEXT DEFAULT '',
 		workspace_id TEXT DEFAULT '',
-		primary_branch_id TEXT -- New column for primary branch
+		primary_branch_id TEXT, -- New column for primary branch
+		chosen_first_id INTEGER -- Virtual root message pointer
 	);
 
 	CREATE TABLE IF NOT EXISTS branches (
@@ -131,20 +132,26 @@ func migrateDB(db *sql.DB) error {
 	// Add new columns for generation tracking if they don't exist
 	// SQLite's ALTER TABLE ADD COLUMN does not support IF NOT EXISTS directly.
 	// We will attempt to add and log if it fails, assuming it's due to column existence.
-	alterTableStmts := []string{}
+	migrationStmts := []string{
+		// Add chosen_first_id column to sessions table for first message editing
+		"ALTER TABLE sessions ADD COLUMN chosen_first_id INTEGER",
+		// Set chosen_first_id for existing sessions to their first message (where parent_message_id IS NULL)
+		"UPDATE sessions SET chosen_first_id = (SELECT MIN(id) FROM messages WHERE session_id = sessions.id AND parent_message_id IS NULL) WHERE chosen_first_id IS NULL",
+	}
 
-	for _, stmt := range alterTableStmts {
+	for _, stmt := range migrationStmts {
 		_, err := db.Exec(stmt)
 		if err != nil {
 			// Check if the error is "duplicate column name" or similar
 			// For SQLite, this typically means the column already exists.
-			if !strings.Contains(err.Error(), "duplicate column name") && !strings.Contains(err.Error(), "already exists") {
-				return fmt.Errorf("failed to alter table with statement '%s': %w", stmt, err)
-			} else {
+			if strings.Contains(err.Error(), "duplicate column name") || strings.Contains(err.Error(), "already exists") {
 				log.Printf("Column might already exist, skipping alter table: %s", stmt)
+				continue
 			}
+			return fmt.Errorf("failed to execute migration statement '%s': %w", stmt, err)
 		}
 	}
+
 	return nil
 }
 

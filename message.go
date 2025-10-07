@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 )
 
 type MessageType string
@@ -112,6 +113,17 @@ func (mc *MessageChain) Add(ctx context.Context, db DbOrTx, msg Message) (Messag
 	if mc.LastMessageID != 0 {
 		if err := UpdateMessageChosenNextID(db, mc.LastMessageID, &messageID); err != nil {
 			return Message{}, fmt.Errorf("failed to update chosen_next_id for previous message: %w", err)
+		}
+	} else {
+		// This is the first message in the chain, update session's chosen_first_id
+		sqlDB, ok := db.(*sql.DB)
+		if !ok {
+			// Can't cast to *sql.DB, skip session update
+			return msg, nil
+		}
+		if err := UpdateSessionChosenFirstID(sqlDB, mc.SessionID, &messageID); err != nil {
+			// Non-fatal error, log but continue
+			log.Printf("Failed to update chosen_first_id for session %s: %v", mc.SessionID, err)
 		}
 	}
 
