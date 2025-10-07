@@ -395,7 +395,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       {isLoggedIn && (
         <>
           <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
-            <div style={{ maxWidth: '60em', margin: '0 auto', padding: '20px' }}>
+            <div
+              style={{ maxWidth: 'var(--chat-container-max-width)', margin: '0 auto', padding: 'var(--spacing-unit)' }}
+            >
               {!hasMoreMessages && (
                 <SystemPromptEditor
                   key={chatSessionId}
@@ -420,12 +422,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           {selectedFiles.length > 0 && (
             <div
               style={{
-                padding: '5px 20px',
+                padding: 'calc(var(--spacing-unit) * 0.3) var(--spacing-unit)',
                 borderTop: '1px solid #eee',
                 background: '#f9f9f9',
                 display: 'flex',
                 flexWrap: 'wrap',
-                gap: '5px',
+                gap: 'calc(var(--spacing-unit) * 0.3)',
               }}
             >
               {selectedFiles.map((file, index) => (

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { FaPaperclip } from 'react-icons/fa';
+import { FaPaperclip, FaPaperPlane, FaTimes } from 'react-icons/fa';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import {
   inputMessageAtom,
@@ -40,8 +40,20 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const [isCommandMode, setIsCommandMode] = useState(false);
   const [commandPrefix, setCommandPrefix] = useState('');
+  const [isMobile, setIsMobile] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Debounce utility function
   const debounce = (func: Function, delay: number) => {
@@ -155,8 +167,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
         padding: '10px',
         borderTop: '1px solid #ccc',
         display: 'grid',
-        gridTemplateColumns: 'auto auto 1fr auto',
-        gridTemplateRows: '1fr auto',
+        gridTemplateColumns: isMobile ? 'auto 1fr auto auto' : 'auto auto 1fr auto',
+        gridTemplateRows: isMobile ? 'auto auto' : '1fr auto',
         gap: '0',
         alignItems: 'top',
         background: 'white',
@@ -169,32 +181,45 @@ const ChatInput: React.FC<ChatInputProps> = ({
         onChange={handleFileChange}
         style={{ display: 'none' }} // Hide the actual file input
       />
+
+      {/* File attachment button */}
       <button
         onClick={triggerFileInput}
         style={{
           height: '100%',
-          padding: '10px',
-          marginRight: '10px',
+          minHeight: isMobile ? '1em' : 'auto',
+          padding: isMobile ? '5px' : '10px',
+          marginRight: isMobile ? '5px' : '10px',
           background: '#f0f0f0',
           border: '1px solid #ccc',
           borderRadius: '5px',
           cursor: 'pointer',
-          gridArea: '1 / 1',
+          gridArea: isMobile ? '2 / 1' : '1 / 1',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
         aria-label="Attach files"
       >
         <FaPaperclip />
       </button>
-      <span
-        style={{
-          padding: commandPrefix ? '6px 5px 6px 0' : '0',
-          fontFamily: 'monospace',
-          gridArea: '1 / 2',
-          color: isCommandMode ? '#1e7e34' : 'inherit',
-        }}
-      >
-        {commandPrefix}
-      </span>
+
+      {/* Command prefix - Desktop only */}
+      {!isMobile && commandPrefix && (
+        <span
+          style={{
+            padding: '6px 5px 6px 0',
+            fontFamily: 'monospace',
+            gridArea: '1 / 2',
+            color: isCommandMode ? '#1e7e34' : 'inherit',
+            alignSelf: 'flex-start',
+          }}
+        >
+          {commandPrefix}
+        </span>
+      )}
+
+      {/* Main textarea area */}
       <textarea
         ref={inputRef}
         value={inputMessage}
@@ -214,7 +239,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           }
         }}
         placeholder={isCommandMode ? 'Enter a slash command...' : 'Enter your message...'}
-        rows={2}
+        rows={isMobile ? 1 : 2}
         style={{
           height: '100%',
           padding: '5px',
@@ -222,29 +247,82 @@ const ChatInput: React.FC<ChatInputProps> = ({
           borderRadius: '5px',
           resize: 'none',
           overflowY: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-          gridArea: '1 / 3',
+          gridArea: isMobile ? '1 / 1 / 1 / span 2' : '1 / 3',
           color: isCommandMode ? '#1e7e34' : 'inherit',
+          fontSize: '16px', // Prevent zoom on iOS
         }}
         aria-label="Message input"
       />
+
+      {/* Send/Cancel button */}
+      <div style={{ gridArea: isMobile ? '1 / 3' : '1 / 4' }}>
+        {processingStartTime !== null ? (
+          <button
+            onClick={handleCancelStreaming}
+            style={{
+              height: '100%',
+              width: isMobile ? '40px' : 'auto',
+              padding: isMobile ? '8px' : '10px 20px',
+              marginLeft: isMobile ? '5px' : '10px',
+              background: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            aria-label="Cancel"
+          >
+            {isMobile ? <FaTimes /> : 'Cancel'}
+          </button>
+        ) : (
+          <button
+            onClick={handleSendOrRunCommand}
+            disabled={isSendButtonDisabled}
+            style={{
+              height: '100%',
+              width: isMobile ? '40px' : 'auto',
+              padding: isMobile ? '8px' : '10px 20px',
+              marginLeft: isMobile ? '5px' : '10px',
+              background: isCommandMode ? '#28a745' : '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: isSendButtonDisabled ? 'not-allowed' : 'pointer',
+              opacity: isSendButtonDisabled ? 0.5 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            aria-label={isCommandMode ? 'Run command' : 'Send message'}
+          >
+            {isMobile ? isCommandMode ? <FaPaperPlane /> : <FaPaperPlane /> : isCommandMode ? 'Run' : 'Send'}
+          </button>
+        )}
+      </div>
+
+      {/* Second row: Status and Model selector - smaller height */}
       <div
         style={{
           display: 'flex',
           justifyContent: 'flex-end',
-          gridArea: '2 / 2 / 2 / span 2',
+          alignItems: 'center',
+          gridArea: isMobile ? '2 / 2 / 2 / -1' : '2 / 1 / 2 / -1',
+          padding: '2px 0',
         }}
       >
         <div
           style={{
             marginRight: 'auto',
             color: statusMessage === 'Invalid command.' ? 'red' : 'inherit',
+            fontSize: '0.8em',
           }}
         >
           {statusMessage === null ? (isCommandMode ? '' : 'Type / to enter command mode') : statusMessage}
         </div>
-        <label htmlFor="model-select" style={{ marginRight: '10px' }}>
+        <label htmlFor="model-select" style={{ marginRight: '5px', fontSize: '0.9em' }}>
           Model:
         </label>
         <select
@@ -258,11 +336,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
             }
           }}
           style={{
-            padding: '0 8px',
-            borderRadius: '5px',
+            padding: '2px 6px',
+            borderRadius: '4px',
             border: '1px solid #ccc',
             backgroundColor: '#fff',
             cursor: 'pointer',
+            fontSize: '0.9em',
           }}
         >
           {Array.from(availableModels.values()).map((model) => (
@@ -272,43 +351,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
           ))}
         </select>
       </div>
-      {processingStartTime !== null ? (
-        <button
-          onClick={handleCancelStreaming}
-          style={{
-            height: '100%',
-            padding: '10px 20px',
-            marginLeft: '10px',
-            background: '#dc3545',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: 'pointer',
-            gridArea: '1 / 4',
-          }}
-        >
-          Cancel
-        </button>
-      ) : (
-        <button
-          onClick={handleSendOrRunCommand}
-          disabled={isSendButtonDisabled}
-          style={{
-            height: '100%',
-            padding: '10px 20px',
-            marginLeft: '10px',
-            background: isCommandMode ? '#28a745' : '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: isSendButtonDisabled ? 'not-allowed' : 'pointer',
-            opacity: isSendButtonDisabled ? 0.5 : 1,
-            gridArea: '1 / 4',
-          }}
-        >
-          {isCommandMode ? 'Run' : 'Send'}
-        </button>
-      )}
     </div>
   );
 };

@@ -72,35 +72,34 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <>
-        <Sidebar workspaces={workspaces} refreshWorkspaces={refreshWorkspaces} />
+      <Sidebar workspaces={workspaces} refreshWorkspaces={refreshWorkspaces} />
 
-        {children ? (
-          <div
-            style={{
-              flexGrow: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              position: 'relative',
-            }}
-          >
-            {children}
-          </div>
-        ) : (
-          <ChatArea
-            handleSendMessage={handleSendMessage}
-            onFilesSelected={handleFilesSelected}
-            handleRemoveFile={handleRemoveFile}
-            handleCancelStreaming={cancelStreamingCall}
-            chatInputRef={chatInputRef}
-            chatAreaRef={chatAreaRef}
-            sendConfirmation={sendConfirmation}
-            handleEditMessage={handleEditMessage}
-            handleBranchSwitch={handleBranchSwitch}
-          />
-        )}
-        <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
-      </>
+      {children ? (
+        <div
+          style={{
+            flexGrow: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            position: 'relative',
+            marginLeft: '0', // No margin needed as sidebar handles positioning
+          }}
+        >
+          {children}
+        </div>
+      ) : (
+        <ChatArea
+          handleSendMessage={handleSendMessage}
+          onFilesSelected={handleFilesSelected}
+          handleRemoveFile={handleRemoveFile}
+          handleCancelStreaming={cancelStreamingCall}
+          chatInputRef={chatInputRef}
+          chatAreaRef={chatAreaRef}
+          sendConfirmation={sendConfirmation}
+          handleEditMessage={handleEditMessage}
+          handleBranchSwitch={handleBranchSwitch}
+        />
+      )}
+      <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
     </div>
   );
 };
