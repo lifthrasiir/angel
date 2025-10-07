@@ -60,3 +60,19 @@ export async function fetchSessionHistory(
   }
   return response.json();
 }
+
+export async function switchBranch(sessionId: string, newPrimaryBranchId: string): Promise<void> {
+  const response = await apiFetch(`/api/chat/${sessionId}/branch`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      newPrimaryBranchId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to switch branch: ${response.status} ${response.statusText}`);
+  }
+}

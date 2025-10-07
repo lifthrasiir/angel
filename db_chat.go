@@ -9,6 +9,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Branch struct to hold branch data
@@ -62,6 +63,8 @@ type DbOrTx interface {
 type PossibleNextMessage struct {
 	MessageID string `json:"messageId"`
 	BranchID  string `json:"branchId"`
+	UserText  string `json:"userText,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
 // FrontendMessage struct to match the frontend's ChatMessage interface
@@ -223,18 +226,45 @@ func createFrontendMessage(
 		fmChosenNextID = &s
 	}
 
-	if possibleNextIDsAndBranchesStr != "" {
-		possibleNextIDsAndBranches := strings.Split(possibleNextIDsAndBranchesStr, ",")
-		for i := 0; i < len(possibleNextIDsAndBranches); i += 2 {
-			if i+1 < len(possibleNextIDsAndBranches) { // Ensure there's a branch ID for the message ID
+	// Parse JSON array of possible next messages with user text and timestamp
+	if possibleNextIDsAndBranchesStr != "" && possibleNextIDsAndBranchesStr != "[]" {
+		var possibleNextMessages []struct {
+			ID        int    `json:"id"`
+			BranchID  string `json:"branchId"`
+			Text      string `json:"text"`
+			CreatedAt string `json:"createdAt"`
+		}
+
+		if err := json.Unmarshal([]byte(possibleNextIDsAndBranchesStr), &possibleNextMessages); err != nil {
+			log.Printf("Warning: Failed to parse possibleNextMessages JSON for message %d: %v", m.ID, err)
+		} else {
+			for _, msg := range possibleNextMessages {
+				if msg.ID == 0 {
+					continue // Skip empty entries from LEFT JOIN
+				}
+
+				// Parse created_at string to time.Time (handle both ISO 8601 and SQL format)
+				var timestamp int64
+				parsedTime, err := time.Parse(time.RFC3339, msg.CreatedAt)
+				if err != nil {
+					parsedTime, err = time.Parse("2006-01-02 15:04:05", msg.CreatedAt)
+					if err != nil {
+						log.Printf("Warning: Failed to parse created_at for message %d: %v", msg.ID, err)
+						// Still include the entry without timestamp
+						timestamp = 0
+					} else {
+						timestamp = parsedTime.Unix()
+					}
+				} else {
+					timestamp = parsedTime.Unix()
+				}
+
 				fmPossibleNextIDs = append(fmPossibleNextIDs, PossibleNextMessage{
-					MessageID: possibleNextIDsAndBranches[i],
-					BranchID:  possibleNextIDsAndBranches[i+1],
+					MessageID: strconv.Itoa(msg.ID),
+					BranchID:  msg.BranchID,
+					UserText:  msg.Text,
+					Timestamp: timestamp,
 				})
-			} else {
-				log.Printf(
-					"Warning: Malformed possibleNextIDsAndBranchesStr for message %d: %s",
-					m.ID, possibleNextIDsAndBranchesStr)
 			}
 		}
 	}
@@ -419,7 +449,17 @@ func getSessionHistoryInternal(
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
 					m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
-					m.state, coalesce(group_concat(mm.id || ',' || mm.branch_id), '')
+					m.state, coalesce(
+						json_group_array(
+							json_object(
+								'id', mm.id,
+								'branchId', mm.branch_id,
+								'text', COALESCE(mm.text, ''),
+								'createdAt', mm.created_at
+							)
+						),
+						'[]'
+					)
 			FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
 			GROUP BY m.id
 			HAVING m.branch_id = ? AND m.id >= ? AND m.id <= ?
@@ -687,4 +727,50 @@ func GetSessionFirstMessage(db *sql.DB, sessionID string) (*Message, error) {
 		return nil, fmt.Errorf("no first message set for session %s", sessionID)
 	}
 	return GetMessageByID(db, *chosenFirstID)
+}
+
+// GetSessionFirstMessages retrieves all first messages (parent_message_id IS NULL) for a session.
+func GetSessionFirstMessages(db *sql.DB, sessionID string) ([]Message, error) {
+	query := `
+		SELECT id, session_id, branch_id, parent_message_id, chosen_next_id,
+		       text, type, attachments, cumul_token_count, created_at,
+		       model, generation, state, aux
+		FROM messages
+		WHERE session_id = ? AND parent_message_id IS NULL
+		ORDER BY created_at ASC
+	`
+
+	rows, err := db.Query(query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query first messages for session %s: %w", sessionID, err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		var attachments sql.NullString
+		err := rows.Scan(
+			&msg.ID, &msg.SessionID, &msg.BranchID, &msg.ParentMessageID, &msg.ChosenNextID,
+			&msg.Text, &msg.Type, &attachments, &msg.CumulTokenCount, &msg.CreatedAt,
+			&msg.Model, &msg.Generation, &msg.State, &msg.Aux,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan first message: %w", err)
+		}
+
+		if attachments.Valid {
+			if err := json.Unmarshal([]byte(attachments.String), &msg.Attachments); err != nil {
+				log.Printf("Failed to unmarshal attachments for message %d: %v", msg.ID, err)
+			}
+		}
+
+		messages = append(messages, msg)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating first messages: %w", err)
+	}
+
+	return messages, nil
 }

@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useRef } from 'react';
-import { apiFetch } from '../api/apiClient';
+import { apiFetch, switchBranch } from '../api/apiClient';
 import { useSetAtom, useAtomValue } from 'jotai';
 import type { ChatMessage, FileAttachment } from '../types/chat';
 import { convertFilesToAttachments } from '../utils/fileHandler';
@@ -448,5 +448,27 @@ export const useMessageSending = ({
     }
   };
 
-  return { handleSendMessage, cancelStreamingCall, sendConfirmation, handleEditMessage };
+  const handleBranchSwitch = async (newBranchId: string) => {
+    if (!chatSessionId) {
+      addErrorMessage('Cannot switch branch: Session ID is missing.');
+      return;
+    }
+
+    try {
+      setProcessingStartTime(performance.now());
+
+      // Call the API to switch branches
+      await switchBranch(chatSessionId, newBranchId);
+
+      // Reload the page to reflect the branch change
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to switch branch:', error);
+      addErrorMessage('Failed to switch branch. Please try again.');
+    } finally {
+      setProcessingStartTime(null);
+    }
+  };
+
+  return { handleSendMessage, cancelStreamingCall, sendConfirmation, handleEditMessage, handleBranchSwitch };
 };

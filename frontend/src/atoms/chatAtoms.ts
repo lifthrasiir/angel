@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import type { ChatMessage, Session } from '../types/chat';
+import type { ChatMessage, Session, PossibleNextMessage } from '../types/chat';
 import { ModelInfo } from '../api/models';
 import { PredefinedPrompt } from '../components/SystemPromptEditor';
 
@@ -30,6 +30,7 @@ export const temporaryEnvChangeMessageAtom = atom<ChatMessage | null>(null);
 export const pendingRootsAtom = atom<string[]>([]);
 export const compressAbortControllerAtom = atom<AbortController | null>(null);
 export const editingMessageIdAtom = atom<string | null>(null);
+export const possibleFirstIdsAtom = atom<PossibleNextMessage[]>([]);
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(
@@ -99,6 +100,7 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(pendingConfirmationAtom, null);
   set(temporaryEnvChangeMessageAtom, null);
   set(pendingRootsAtom, []);
+  set(possibleFirstIdsAtom, []);
 });
 
 // Derived atom for setting session name

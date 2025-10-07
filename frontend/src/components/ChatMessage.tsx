@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChatMessage, EnvChanged } from '../types/chat';
+import type { ChatMessage, EnvChanged, PossibleNextMessage } from '../types/chat';
 import { splitOnceByNewline } from '../utils/stringUtils';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
@@ -10,19 +10,57 @@ import MessageInfo from './MessageInfo';
 import CompressionMessage from './CompressionMessage';
 import EnvChangedMessage from './EnvChangedMessage';
 
+// Helper function to extract text content from a message
+const getMessageText = (message: ChatMessage): string => {
+  if (message.parts && message.parts.length > 0) {
+    // Return the text content of the first part
+    return message.parts[0].text || '';
+  }
+  return '';
+};
+
 interface ChatMessageProps {
   message: ChatMessage;
   maxTokens?: number;
   isLastModelMessage?: boolean;
   processingStartTime?: number | null;
   onSaveEdit?: (messageId: string, editedText: string) => void;
+  onBranchSelect?: (newBranchId: string) => void;
+  allMessages?: ChatMessage[];
+  possibleFirstIds?: PossibleNextMessage[];
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
-  ({ message, maxTokens, isLastModelMessage, processingStartTime, onSaveEdit }) => {
-    const { type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, possibleNextIds, model } =
-      message;
+  ({
+    message,
+    maxTokens,
+    isLastModelMessage,
+    processingStartTime,
+    onSaveEdit,
+    onBranchSelect,
+    allMessages,
+    possibleFirstIds,
+  }) => {
+    const { type, attachments, cumulTokenCount, branchId, parentMessageId, chosenNextId, model } = message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
+
+    // Only show dropdown on messages that can actually switch branches
+    let dropdownPossibleNextIds: PossibleNextMessage[] | undefined;
+
+    if (parentMessageId && allMessages) {
+      // Case 1: This is a child message - show parent's possibleNextIds if parent has multiple children
+      const parentMessage = allMessages.find((msg) => msg.id === parentMessageId);
+      if (parentMessage && parentMessage.possibleNextIds && parentMessage.possibleNextIds.length > 1) {
+        dropdownPossibleNextIds = parentMessage.possibleNextIds;
+      }
+    } else if (!parentMessageId && possibleFirstIds && possibleFirstIds.length > 1) {
+      // Case 2: This is a virtual root message (no parent) - use server-provided first messages
+      const filteredMessages = possibleFirstIds.filter((msg) => msg.messageId !== message.id);
+      if (filteredMessages.length > 0) {
+        dropdownPossibleNextIds = filteredMessages;
+      }
+    }
+    // Note: Parent messages (that have children) don't get dropdowns anymore
 
     const messageInfoComponent = (
       <MessageInfo
@@ -30,9 +68,13 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
         branchId={branchId}
         parentMessageId={parentMessageId}
         chosenNextId={chosenNextId}
-        possibleNextIds={possibleNextIds}
+        possibleNextIds={dropdownPossibleNextIds}
         model={model}
         maxTokens={maxTokens}
+        onBranchSelect={onBranchSelect}
+        sessionId={message.sessionId}
+        isVirtualRoot={!parentMessageId && possibleFirstIds && possibleFirstIds.length > 1}
+        currentMessageText={getMessageText(message)}
       />
     );
 

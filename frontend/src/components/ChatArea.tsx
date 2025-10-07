@@ -27,6 +27,7 @@ import {
   isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
+  possibleFirstIdsAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
@@ -46,6 +47,7 @@ interface ChatAreaProps {
     modifiedData?: Record<string, any>,
   ) => Promise<void>;
   handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>;
+  handleBranchSwitch: (newBranchId: string) => Promise<void>;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -57,6 +59,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   chatAreaRef,
   sendConfirmation,
   handleEditMessage,
+  handleBranchSwitch,
 }) => {
   const [workspaceId] = useAtom(workspaceIdAtom);
   const [messages] = useAtom(messagesAtom);
@@ -76,6 +79,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
   const temporaryEnvChangeMessage = useAtomValue(temporaryEnvChangeMessageAtom);
+  const possibleFirstIds = useAtomValue(possibleFirstIdsAtom);
 
   const isLoggedIn = !!userEmail;
 
@@ -166,6 +170,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     availableModels: Map<string, { maxTokens: number }>,
     processingStartTime: number | null,
     handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>,
+    handleBranchSwitch: (newBranchId: string) => Promise<void>,
   ): { element: JSX.Element; messagesConsumed: number } => {
     // Find maxTokens for the current message's model
     const currentModelMaxTokens = currentMessage.model
@@ -278,6 +283,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               isLastModelMessage={isLastModelMessage}
               processingStartTime={processingStartTime}
               onSaveEdit={handleEditMessage}
+              onBranchSelect={handleBranchSwitch}
+              allMessages={messages}
+              possibleFirstIds={possibleFirstIds}
             />
             {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
               <ProcessingIndicator
@@ -332,6 +340,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         availableModels,
         processingStartTime,
         handleEditMessage,
+        handleBranchSwitch,
       );
       renderedElements.push(element);
       i += messagesConsumed;
@@ -347,6 +356,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           isLastModelMessage={false}
           processingStartTime={null}
           onSaveEdit={() => {}}
+          onBranchSelect={handleBranchSwitch}
+          allMessages={messages}
+          possibleFirstIds={possibleFirstIds}
         />,
       );
     }

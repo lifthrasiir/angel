@@ -109,14 +109,15 @@ export const useChatSession = () => {
     setWorkspaceId(urlWorkspaceId);
   }, [urlWorkspaceId, setWorkspaceId]);
 
-  const { handleSendMessage, cancelStreamingCall, sendConfirmation, handleEditMessage } = useMessageSending({
-    inputMessage,
-    selectedFiles,
-    chatSessionId,
-    systemPrompt,
-    primaryBranchId,
-    selectedModel,
-  });
+  const { handleSendMessage, cancelStreamingCall, sendConfirmation, handleEditMessage, handleBranchSwitch } =
+    useMessageSending({
+      inputMessage,
+      selectedFiles,
+      chatSessionId,
+      systemPrompt,
+      primaryBranchId,
+      selectedModel,
+    });
 
   const handleSetSelectedModel = (model: ModelInfo) => {
     setSelectedModel(model);
@@ -146,5 +147,6 @@ export const useChatSession = () => {
     handleSetSelectedModel,
     sendConfirmation,
     handleEditMessage,
+    handleBranchSwitch,
   };
 };

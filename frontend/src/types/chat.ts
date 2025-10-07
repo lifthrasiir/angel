@@ -8,6 +8,8 @@ export interface FileAttachment {
 export interface PossibleNextMessage {
   messageId: string;
   branchId: string;
+  userText?: string;
+  timestamp?: number;
 }
 
 export interface FunctionCall {
@@ -54,6 +56,7 @@ export interface InitialState {
   callElapsedTimeSeconds?: number;
   pendingConfirmation?: string;
   envChanged?: EnvChanged;
+  possibleFirstIds?: PossibleNextMessage[];
 }
 
 export interface Session {

@@ -36,6 +36,7 @@ import {
   isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
+  possibleFirstIdsAtom,
 } from '../atoms/chatAtoms';
 import { useScrollAdjustment } from './useScrollAdjustment';
 
@@ -73,6 +74,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
   const setIsPriorSessionLoadComplete = useSetAtom(isPriorSessionLoadCompleteAtom);
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
+  const setPossibleFirstIds = useSetAtom(possibleFirstIdsAtom);
 
   const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
   const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
@@ -295,6 +297,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 setWorkspaceId(data.workspaceId);
                 setPrimaryBranchId(data.primaryBranchId);
                 setPendingConfirmation(data.pendingConfirmation || null);
+                setPossibleFirstIds(data.possibleFirstIds || []);
 
                 setHasMoreMessages(data.history && data.history.length >= FETCH_LIMIT);
 

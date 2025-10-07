@@ -17,15 +17,16 @@ import (
 )
 
 type InitialState struct {
-	SessionId              string            `json:"sessionId"`
-	History                []FrontendMessage `json:"history"` // May or may not include thoughts
-	SystemPrompt           string            `json:"systemPrompt"`
-	WorkspaceID            string            `json:"workspaceId"`
-	PrimaryBranchID        string            `json:"primaryBranchId"`
-	Roots                  []string          `json:"roots"`
-	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"`
-	PendingConfirmation    string            `json:"pendingConfirmation,omitempty"`
-	EnvChanged             *EnvChanged       `json:"envChanged,omitempty"` // Added EnvChanged field
+	SessionId              string                `json:"sessionId"`
+	History                []FrontendMessage     `json:"history"` // May or may not include thoughts
+	SystemPrompt           string                `json:"systemPrompt"`
+	WorkspaceID            string                `json:"workspaceId"`
+	PrimaryBranchID        string                `json:"primaryBranchId"`
+	Roots                  []string              `json:"roots"`
+	CallElapsedTimeSeconds float64               `json:"callElapsedTimeSeconds,omitempty"`
+	PendingConfirmation    string                `json:"pendingConfirmation,omitempty"`
+	EnvChanged             *EnvChanged           `json:"envChanged,omitempty"`       // Added EnvChanged field
+	PossibleFirstIds       []PossibleNextMessage `json:"possibleFirstIds,omitempty"` // First messages of all branches
 }
 
 // New session and message handler
@@ -477,15 +478,51 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		initialStateEnvChanged = &EnvChanged{Roots: &rootsChanged}
 	}
 
+	// Get first messages for virtual root switching
+	firstMessages, err := GetSessionFirstMessages(db, sessionId)
+	if err != nil {
+		log.Printf("loadChatSession: Failed to get first messages for session %s: %v", sessionId, err)
+		// Non-fatal, continue without possible first message IDs
+	}
+
+	// Convert first messages to PossibleNextMessage format
+	var possibleFirstIds []PossibleNextMessage
+	if len(firstMessages) > 1 {
+		for _, msg := range firstMessages {
+			// Parse created_at string to time.Time (handle both ISO 8601 and SQL format)
+			var createdAt time.Time
+			var err error
+
+			// Try ISO 8601 format first (e.g., "2025-10-06T19:55:07Z")
+			createdAt, err = time.Parse(time.RFC3339, msg.CreatedAt)
+			if err != nil {
+				// If ISO 8601 fails, try SQL format (e.g., "2025-10-06 19:55:07")
+				createdAt, err = time.Parse("2006-01-02 15:04:05", msg.CreatedAt)
+				if err != nil {
+					log.Printf("Failed to parse created_at for message %d: %v", msg.ID, err)
+					continue
+				}
+			}
+
+			possibleFirstIds = append(possibleFirstIds, PossibleNextMessage{
+				MessageID: strconv.Itoa(msg.ID),
+				BranchID:  msg.BranchID,
+				UserText:  msg.Text,
+				Timestamp: createdAt.Unix(),
+			})
+		}
+	}
+
 	// Prepare initial state as a single JSON object
 	initialState := InitialState{
-		SessionId:       sessionId,
-		History:         history,
-		SystemPrompt:    session.SystemPrompt,
-		WorkspaceID:     session.WorkspaceID,
-		PrimaryBranchID: session.PrimaryBranchID,
-		Roots:           currentRoots,
-		EnvChanged:      initialStateEnvChanged,
+		SessionId:        sessionId,
+		History:          history,
+		SystemPrompt:     session.SystemPrompt,
+		WorkspaceID:      session.WorkspaceID,
+		PrimaryBranchID:  session.PrimaryBranchID,
+		Roots:            currentRoots,
+		EnvChanged:       initialStateEnvChanged,
+		PossibleFirstIds: possibleFirstIds,
 	}
 
 	branch, err := GetBranch(db, session.PrimaryBranchID)
