@@ -14,9 +14,9 @@ type EventType rune
 const (
 	// SSE Event Types
 	//
-	// Sending initial messages: A -> 0 -> any number of T/M/F/R/C -> P or (Q -> N) or E
-	// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C -> P/Q/E
-	// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R/C -> Q/E)
+	// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
+	// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
+	// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
 	EventInitialState        EventType = '0' // Initial state with history (for active call)
 	EventInitialStateNoCall  EventType = '1' // Initial state with history (for load session when no active call)
 	EventAcknowledge         EventType = 'A' // Acknowledge message ID
@@ -24,6 +24,7 @@ const (
 	EventModelMessage        EventType = 'M' // Model message (text)
 	EventFunctionCall        EventType = 'F' // Function call
 	EventFunctionResponse    EventType = 'R' // Function response
+	EventInlineData          EventType = 'I' // Inline file/image data with hash keys
 	EventComplete            EventType = 'Q' // Query complete
 	EventSessionName         EventType = 'N' // Session name inferred/updated
 	EventCumulTokenCount     EventType = 'C' // Cumulative token count update
@@ -36,6 +37,12 @@ const (
 type FunctionResponsePayload struct {
 	Response    map[string]interface{} `json:"response"`
 	Attachments []FileAttachment       `json:"attachments,omitempty"`
+}
+
+// InlineDataPayload defines the structure for the EventInlineData payload
+type InlineDataPayload struct {
+	MessageId   string           `json:"messageId"`
+	Attachments []FileAttachment `json:"attachments"`
 }
 
 // sseWriter wraps http.ResponseWriter and http.Flusher to handle client disconnections gracefully.

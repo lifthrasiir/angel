@@ -9,6 +9,7 @@ import {
   EventFunctionResponse,
   EventInitialState,
   EventInitialStateNoCall,
+  EventInlineData,
   EventModelMessage,
   EventThought,
   EventPendingConfirmation,
@@ -81,6 +82,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
   const eventSourceRef = useRef<EventSource | null>(null);
   const isStreamEndedNormallyRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
+  const latestSessionIdRef = useRef<string | null>(null);
 
   const { adjustScroll } = useScrollAdjustment({ chatAreaRef });
 
@@ -92,13 +94,14 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
     }
   };
 
-  const mapToChatMessages = useCallback((rawMessages: any[]): ChatMessage[] => {
+  const mapToChatMessages = (rawMessages: any[]): ChatMessage[] => {
     return rawMessages.map((msg: any) => {
       const chatMessage: ChatMessage = {
         ...msg,
         id: msg.id,
         attachments: msg.attachments,
         cumulTokenCount: msg.cumul_token_count,
+        sessionId: latestSessionIdRef.current || urlSessionId,
       };
       if (msg.type === 'thought') {
         chatMessage.type = 'thought';
@@ -119,7 +122,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
       }
       return chatMessage;
     });
-  }, []);
+  };
 
   const loadMoreMessages = useCallback(async () => {
     // Prevent duplicate calls
@@ -243,6 +246,10 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
 
       if (currentSessionId && currentSessionId !== chatSessionId) {
         closeEventSourceNormally();
+
+        // Store sessionId immediately for use in EventInlineData handlers
+        latestSessionIdRef.current = currentSessionId;
+
         setChatSessionId(currentSessionId);
         setSelectedFiles([]);
         setProcessingStartTime(null);
@@ -350,6 +357,15 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                   parts: [{ functionResponse: { name, response } }],
                   type: 'function_response',
                   attachments,
+                });
+              } else if (eventType === EventInlineData) {
+                const { messageId, attachments } = JSON.parse(eventData);
+                addMessage({
+                  id: messageId,
+                  parts: [], // Empty parts for inline data messages
+                  type: 'model',
+                  attachments,
+                  sessionId: latestSessionIdRef.current || undefined,
                 });
               } else if (eventType === EventThought) {
                 const [messageId, thoughtText] = splitOnceByNewline(eventData);

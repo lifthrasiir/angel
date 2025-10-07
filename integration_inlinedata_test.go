@@ -111,7 +111,7 @@ func TestInlineDataStreaming(t *testing.T) {
 		// Parse SSE events
 		var sessionId string
 		var modelMessageIDs []int
-		var attachmentMessageCount int
+		var inlineDataMessageCount int
 
 		for event := range parseSseStream(t, resp) {
 			switch event.Type {
@@ -124,7 +124,7 @@ func TestInlineDataStreaming(t *testing.T) {
 				sessionId = initialState.SessionId
 
 			case EventModelMessage:
-				// Parse model message ID
+				// Parse model message ID for text messages
 				messageIdPart, _, _ := strings.Cut(event.Payload, "\n")
 				if messageIdPart != "" {
 					messageID, err := strconv.Atoi(messageIdPart)
@@ -133,10 +133,19 @@ func TestInlineDataStreaming(t *testing.T) {
 					}
 				}
 
-				// Check if this is an attachment-only message (empty text part)
-				if strings.TrimSpace(event.Payload) == messageIdPart {
-					// This is likely an attachment message (no additional text content)
-					attachmentMessageCount++
+			case EventInlineData:
+				// Handle inline data events (for images)
+				var payload InlineDataPayload
+				err := json.Unmarshal([]byte(event.Payload), &payload)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal inline data payload: %v", err)
+				}
+
+				// Parse message ID from payload
+				messageID, err := strconv.Atoi(payload.MessageId)
+				if err == nil {
+					modelMessageIDs = append(modelMessageIDs, messageID)
+					inlineDataMessageCount++
 				}
 
 			case EventComplete:
@@ -154,9 +163,9 @@ func TestInlineDataStreaming(t *testing.T) {
 			t.Errorf("Expected at least 2 model messages, got %d", len(modelMessageIDs))
 		}
 
-		// Verify we got attachment messages (images)
-		if attachmentMessageCount < 2 {
-			t.Errorf("Expected at least 2 attachment messages, got %d", attachmentMessageCount)
+		// Verify we got inline data messages (images)
+		if inlineDataMessageCount < 2 {
+			t.Errorf("Expected at least 2 inline data messages, got %d", inlineDataMessageCount)
 		}
 	})
 }

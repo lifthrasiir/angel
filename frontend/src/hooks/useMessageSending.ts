@@ -1,4 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { useSetAtom, useAtomValue } from 'jotai';
 import type { ChatMessage, FileAttachment } from '../types/chat';
@@ -72,6 +73,37 @@ export const useMessageSending = ({
   const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
   const setEditingMessageId = useSetAtom(editingMessageIdAtom);
   const setMessages = useSetAtom(messagesAtom);
+  const currentChatSessionId = useAtomValue(chatSessionIdAtom);
+
+  // Store the sessionId from onSessionStart for immediate use in onInlineData
+  const latestSessionIdRef = useRef<string | null>(null);
+
+  // Update messages without sessionId when they exist and currentChatSessionId is available
+  useEffect(() => {
+    if (currentChatSessionId) {
+      setMessages((prevMessages) => {
+        // Check if there are any messages without sessionId
+        const needsUpdate = prevMessages.some((message) => !message.sessionId);
+        if (!needsUpdate) {
+          return prevMessages; // No need to create new array
+        }
+
+        console.log('useEffect: Found messages without sessionId, updating them');
+        return prevMessages.map((message) => {
+          if (!message.sessionId) {
+            console.log(
+              'useEffect: Updating sessionId for message:',
+              message.id,
+              '-> sessionId:',
+              currentChatSessionId,
+            );
+            return { ...message, sessionId: currentChatSessionId };
+          }
+          return message;
+        });
+      });
+    }
+  }, [currentChatSessionId, setMessages]);
 
   const commonHandlers = {
     onMessage: (messageId: string, text: string) => {
@@ -111,10 +143,42 @@ export const useMessageSending = ({
       addMessage(message);
       setLastAutoDisplayedThoughtId(null);
     },
+    onInlineData: (messageId: string, attachments: FileAttachment[]) => {
+      const message: ChatMessage = {
+        id: messageId,
+        parts: [], // Empty parts for inline data messages
+        type: 'model',
+        model: selectedModel?.name,
+        attachments: attachments,
+        sessionId: latestSessionIdRef.current || undefined,
+      };
+      addMessage(message);
+      setLastAutoDisplayedThoughtId(null);
+    },
     onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => {
+      // Store sessionId immediately for use in other handlers in the same stream
+      latestSessionIdRef.current = sessionId;
+
       setChatSessionId(sessionId);
       setSystemPrompt(systemPrompt);
       setPrimaryBranchId(primaryBranchId);
+
+      // Update existing messages that don't have sessionId yet (for new sessions)
+      setMessages((prevMessages) => {
+        // Check if there are any messages without sessionId
+        const needsUpdate = prevMessages.some((message) => !message.sessionId);
+        if (!needsUpdate) {
+          return prevMessages;
+        }
+
+        return prevMessages.map((message) => {
+          if (!message.sessionId) {
+            return { ...message, sessionId };
+          }
+          return message;
+        });
+      });
+
       setSessions((prevSessions) => {
         // Check if the session already exists
         const existingSessionIndex = prevSessions.findIndex((s) => s.id === sessionId);

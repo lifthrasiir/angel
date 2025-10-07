@@ -292,8 +292,29 @@ func streamLLMResponse(
 						continue
 					}
 
-					// Broadcast message with attachment
-					broadcastToSession(initialState.SessionId, EventModelMessage, fmt.Sprintf("%d\n", newMessage.ID))
+					// Use the attachment from newMessage which should have the hash set
+					var attachmentToSend FileAttachment
+					if len(newMessage.Attachments) > 0 {
+						attachmentToSend = newMessage.Attachments[0]
+					} else {
+						// Fallback to original attachment (shouldn't happen)
+						attachmentToSend = attachment
+						log.Printf("Warning: newMessage has no attachments, using original attachment")
+					}
+
+					// Create inline data payload with hash keys (data is already stored in blobs table)
+					inlineDataPayload := InlineDataPayload{
+						MessageId:   fmt.Sprintf("%d", newMessage.ID),
+						Attachments: []FileAttachment{attachmentToSend},
+					}
+					payloadJson, err := json.Marshal(inlineDataPayload)
+					if err != nil {
+						log.Printf("Failed to marshal inline data payload: %v", err)
+						continue
+					}
+
+					// Broadcast inline data event with hash keys
+					broadcastToSession(initialState.SessionId, EventInlineData, string(payloadJson))
 
 					// Add to current history
 					currentHistory = append(currentHistory, Content{

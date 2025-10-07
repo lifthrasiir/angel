@@ -4,9 +4,9 @@ import { splitOnceByNewline } from './stringUtils';
 
 // SSE Event Types
 //
-// Sending initial messages: A -> 0 -> any number of T/M/F/R/C -> P or (Q -> N) or E
-// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C -> P/Q/E
-// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R/C -> Q/E)
+// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
+// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
+// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
 
 export const EventInitialState = '0';
 export const EventInitialStateNoCall = '1';
@@ -15,6 +15,7 @@ export const EventThought = 'T';
 export const EventModelMessage = 'M';
 export const EventFunctionCall = 'F';
 export const EventFunctionResponse = 'R';
+export const EventInlineData = 'I';
 export const EventComplete = 'Q';
 export const EventSessionName = 'N';
 export const EventCumulTokenCount = 'C';
@@ -81,6 +82,7 @@ export interface StreamEventHandlers {
     functionResponse: any,
     attachments: FileAttachment[],
   ) => void;
+  onInlineData: (messageId: string, attachments: FileAttachment[]) => void;
   onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => void;
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
@@ -139,6 +141,9 @@ export const processStreamResponse = async (
         const [functionName, payloadJsonString] = splitOnceByNewline(rest);
         const { response, attachments } = JSON.parse(payloadJsonString);
         handlers.onFunctionResponse(messageId, functionName, response, attachments);
+      } else if (type === EventInlineData) {
+        const { messageId, attachments } = JSON.parse(data);
+        handlers.onInlineData(messageId, attachments);
       } else if (type === EventInitialState) {
         // New: Handle EventInitialState
         const { sessionId, systemPrompt, primaryBranchId } = JSON.parse(data);
