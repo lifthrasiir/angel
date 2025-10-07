@@ -162,7 +162,7 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 		// If ProjectID is not set, try to get it.
 		if ga.ProjectID == "" {
 			// Create a temporary client to get ProjectID
-			tempCaClient := NewCodeAssistClient(clientProvider, "") // Pass empty ProjectID for initial load
+			tempCaClient := NewCodeAssistClient(clientProvider, "", "") // Pass empty ProjectID for initial load
 			loadReq := LoadCodeAssistRequest{
 				CloudaicompanionProject: ga.ProjectID, // Will be empty
 				Metadata: &ClientMetadata{
@@ -251,10 +251,10 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 
 	// Centralized CurrentProviders population
 	if ga.TokenSource != nil {
-		geminiFlashClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+		geminiFlashClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash")
 		CurrentProviders["gemini-2.5-flash"] = geminiFlashClient
 
-		geminiProClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
+		geminiProClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-pro")
 		CurrentProviders["gemini-2.5-pro"] = geminiProClient
 	} else {
 		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")

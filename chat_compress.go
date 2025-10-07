@@ -91,7 +91,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	// 2. Calculate originalTokenCount.
-	originalTokenResp, err := provider.CountTokens(ctx, curatedHistory, modelName)
+	originalTokenResp, err := provider.CountTokens(ctx, curatedHistory)
 	if err != nil {
 		err = fmt.Errorf("failed to call CountTokens API: %w", err)
 		return
@@ -160,7 +160,6 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	oneShotResult, err := provider.GenerateContentOneShot(ctx, SessionParams{
 		Contents:         llmRequestContents,
 		SystemPrompt:     systemPrompt,
-		ModelName:        modelName,
 		IncludeThoughts:  false,
 		GenerationParams: &compressionGenParams,
 	})
@@ -354,7 +353,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	// Perform a single CountTokens call for the combined content
-	newTokenResp, err := provider.CountTokens(ctx, combinedContentForTokenCount, modelName)
+	newTokenResp, err := provider.CountTokens(ctx, combinedContentForTokenCount)
 	if err != nil {
 		err = fmt.Errorf("CountTokens API call failed for combined history: %w", err)
 		return

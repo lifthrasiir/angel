@@ -31,8 +31,8 @@ func (w *testProviderWrapper) GenerateContentOneShot(ctx context.Context, params
 	return w.original.GenerateContentOneShot(ctx, params)
 }
 
-func (w *testProviderWrapper) CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
-	return w.original.CountTokens(ctx, contents, modelName)
+func (w *testProviderWrapper) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
+	return w.original.CountTokens(ctx, contents)
 }
 
 func (w *testProviderWrapper) MaxTokens() int {

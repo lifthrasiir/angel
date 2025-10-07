@@ -64,21 +64,20 @@ func (e *APIError) Error() string {
 
 // Define CodeAssistClient struct
 type CodeAssistClient struct {
-	clientProvider HTTPClientProvider // Changed from *http.Client
+	clientProvider HTTPClientProvider
 	projectID      string
+	modelName      string
 }
 
-// geminiFlashClient is a global instance of CodeAssistClient specifically for gemini-2.5-flash.
 var geminiFlashClient *CodeAssistClient
-
-// geminiProClient is a global instance of CodeAssistClient specifically for gemini-2.5-pro.
 var geminiProClient *CodeAssistClient
 
 // NewCodeAssistClient creates a new instance of CodeAssistClient.
-func NewCodeAssistClient(provider HTTPClientProvider, projectID string) *CodeAssistClient {
+func NewCodeAssistClient(provider HTTPClientProvider, projectID string, modelName string) *CodeAssistClient {
 	return &CodeAssistClient{
 		clientProvider: provider,
 		projectID:      projectID,
+		modelName:      modelName,
 	}
 }
 
@@ -145,7 +144,7 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 	}
 
 	reqBody := CAGenerateContentRequest{
-		Model:   params.ModelName,
+		Model:   c.modelName,
 		Project: c.projectID,
 		Request: VertexGenerateContentRequest{
 			Contents: params.Contents,
@@ -284,10 +283,10 @@ func (c *CodeAssistClient) GenerateContentOneShot(ctx context.Context, params Se
 }
 
 // CountTokens calls the countTokens of Code Assist API.
-func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+func (c *CodeAssistClient) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
 	reqBody := CaCountTokenRequest{
 		Request: VertexCountTokenRequest{
-			Model:    modelName,
+			Model:    c.modelName,
 			Contents: contents,
 		},
 	}

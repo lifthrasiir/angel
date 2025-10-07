@@ -168,7 +168,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp, err := provider.CountTokens(context.Background(), contents, modelName)
+	resp, err := provider.CountTokens(context.Background(), contents)
 	if err != nil {
 		if apiErr, ok := err.(*APIError); ok {
 			http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", apiErr.Message), apiErr.StatusCode)

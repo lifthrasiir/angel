@@ -61,7 +61,6 @@ func streamLLMResponse(
 
 		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{
 			Contents:        currentHistory,
-			ModelName:       mc.LastMessageModel,
 			SystemPrompt:    initialState.SystemPrompt,
 			IncludeThoughts: true,
 		})
@@ -535,7 +534,6 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 				Parts: []Part{{Text: nameInputPrompt}},
 			},
 		},
-		ModelName:        modelToUse,
 		SystemPrompt:     nameSystemPrompt,
 		IncludeThoughts:  false,
 		GenerationParams: &sessionNameGenParams,

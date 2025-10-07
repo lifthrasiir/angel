@@ -9,7 +9,6 @@ import (
 	"iter"
 	"log"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -71,7 +70,7 @@ func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, params 
 	return OneShotResult{Text: "inferred name"}, nil
 }
 
-func (m *MockGeminiProvider) CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+func (m *MockGeminiProvider) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
 	return &CaCountTokenResponse{TotalTokens: 10}, nil
 }
 
@@ -456,15 +455,38 @@ func TestBranchingMessageChain(t *testing.T) {
 		"newMessageText":   msgC1Text,
 	}
 	bodyC1, _ := json.Marshal(reqBodyC1)
-	rrC1 := testRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch", sessionId), bodyC1, http.StatusOK)
+	respC1 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch", sessionId), bodyC1, http.StatusOK)
+	defer respC1.Body.Close()
 
-	var branchResponseC map[string]string
-	err = json.Unmarshal(rrC1.Body.Bytes(), &branchResponseC)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal branch response: %v", err)
+	// Parse the SSE response to get the initial state
+	var newBranchCID string
+	var msgC1ID int
+	var initialStateBranchC InitialState
+	foundInitialState := false
+
+	for event := range parseSseStream(t, respC1) {
+		if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
+			err = json.Unmarshal([]byte(event.Payload), &initialStateBranchC)
+			if err != nil {
+				t.Fatalf("Failed to unmarshal initial state for branch C: %v", err)
+			}
+			newBranchCID = initialStateBranchC.PrimaryBranchID
+			// Find the newest message in the history (C1 - the new user message)
+			if len(initialStateBranchC.History) > 0 {
+				// The new message should be the last one in history
+				newestMsg := initialStateBranchC.History[len(initialStateBranchC.History)-1]
+				if newestMsg.Type == "user" && len(newestMsg.Parts) > 0 && newestMsg.Parts[0].Text == msgC1Text {
+					msgC1ID, _ = strconv.Atoi(newestMsg.ID)
+				}
+			}
+			foundInitialState = true
+			break
+		}
 	}
-	newBranchCID := branchResponseC["newBranchId"]
-	msgC1ID, _ := strconv.Atoi(branchResponseC["newMessageId"]) // C1: User message
+
+	if !foundInitialState {
+		t.Fatalf("Did not receive EventInitialState in branch creation response")
+	}
 	if newBranchCID == "" || msgC1ID == 0 {
 		t.Fatalf("Failed to get newBranchCID or msgC1ID. NewBranchCID: %s, MsgC1ID: %d", newBranchCID, msgC1ID)
 	}
@@ -486,40 +508,18 @@ func TestBranchingMessageChain(t *testing.T) {
 		},
 	})
 
-	// Prepare initial state for streaming for the new branch
-	// Prepare initial state for streaming for the new branch
-	initialStateCStream := InitialState{
-		SessionId:       sessionId,
-		History:         []FrontendMessage{},
-		SystemPrompt:    "You are a helpful assistant.",
-		WorkspaceID:     "testWorkspace",
-		PrimaryBranchID: newBranchCID,
-		Roots:           []string{},
+	// Use the normal chat endpoint to complete C1-C3 chain (similar to B1-B3)
+	reqBodyC2 := map[string]interface{}{
+		"message": "Continue from Message C",
 	}
+	bodyC2, _ := json.Marshal(reqBodyC2)
+	respC2 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), bodyC2, http.StatusOK)
+	defer respC2.Body.Close()
 
-	// Create a dummy SSE writer for streamLLMResponse
-	rrDummy := httptest.NewRecorder()
-	reqDummy := httptest.NewRequest("GET", "/", nil)
-	dummySseW := newSseWriter(sessionId, rrDummy, reqDummy)
-	if dummySseW == nil {
-		t.Fatalf("Failed to create dummy SSE writer")
-	}
-	defer dummySseW.Close()
-
-	mc, err := NewMessageChain(context.Background(), db, sessionId, newBranchCID)
-	if err != nil {
-		t.Fatalf("Failed to create new message chain: %v", err)
-	}
-
-	// Call streamLLMResponse to add thought and model messages for C
-	if err := streamLLMResponse(db, initialStateCStream, dummySseW, mc, false, time.Now(), []FrontendMessage{}); err != nil {
-		t.Fatalf("Error streaming LLM response for C: %v", err)
-	}
-
-	// Verify that EventInitialState was NOT sent
-	for event := range parseSseStream(t, rrDummy.Result()) {
+	// Wait for the response to complete
+	for event := range parseSseStream(t, respC2) {
 		if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
-			t.Errorf("Expected NO EventInitialState or EventInitialStateNoCall, but received %c", event.Type)
+			// Process events but don't need to store them
 		}
 	}
 

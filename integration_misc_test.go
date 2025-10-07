@@ -14,7 +14,7 @@ func TestCountTokensHandler(t *testing.T) {
 
 	// Mock the CountTokens method of CurrentProvider
 	mockLLMProvider := CurrentProviders[DefaultGeminiModel].(*MockLLMProvider)
-	mockLLMProvider.CountTokensFunc = func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+	mockLLMProvider.CountTokensFunc = func(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
 		// Simulate token counting based on input text length
 		totalTokens := len(contents[0].Parts[0].Text) / 2 // Example: 2 chars per token
 		return &CaCountTokenResponse{TotalTokens: totalTokens}, nil
@@ -47,7 +47,7 @@ func TestCountTokensHandler(t *testing.T) {
 	t.Run("Authentication Failure", func(t *testing.T) {
 		// Temporarily set CurrentProvider to nil to simulate uninitialized client
 		originalProvider := replaceProvider(&MockLLMProvider{
-			CountTokensFunc: func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+			CountTokensFunc: func(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
 				return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: "Authentication failed"}
 			},
 		})

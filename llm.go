@@ -14,7 +14,6 @@ var CurrentProviders = make(map[string]LLMProvider)
 // SessionParams holds the parameters for a chat session.
 type SessionParams struct {
 	Contents         []Content
-	ModelName        string
 	SystemPrompt     string
 	IncludeThoughts  bool
 	GenerationParams *SessionGenerationParams
@@ -40,7 +39,7 @@ type OneShotResult struct {
 type LLMProvider interface {
 	SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
 	GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error)
-	CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
+	CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error)
 	MaxTokens() int
 	RelativeDisplayOrder() int
 	DefaultGenerationParams() SessionGenerationParams
@@ -59,7 +58,7 @@ const (
 type MockLLMProvider struct {
 	SendMessageStreamFunc         func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
 	GenerateContentOneShotFunc    func(ctx context.Context, params SessionParams) (OneShotResult, error)
-	CountTokensFunc               func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error)
+	CountTokensFunc               func(ctx context.Context, contents []Content) (*CaCountTokenResponse, error)
 	MaxTokensValue                int
 	RelativeDisplayOrderValue     int
 	DefaultGenerationParamsValue  SessionGenerationParams
@@ -83,9 +82,9 @@ func (m *MockLLMProvider) GenerateContentOneShot(ctx context.Context, params Ses
 }
 
 // CountTokens implements the LLMProvider interface for MockLLMProvider.
-func (m *MockLLMProvider) CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+func (m *MockLLMProvider) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
 	if m.CountTokensFunc != nil {
-		return m.CountTokensFunc(ctx, contents, modelName)
+		return m.CountTokensFunc(ctx, contents)
 	}
 	return nil, fmt.Errorf("CountTokens not implemented in mock")
 }

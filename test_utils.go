@@ -63,7 +63,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 		GenerateContentOneShotFunc: func(ctx context.Context, params SessionParams) (OneShotResult, error) {
 			return OneShotResult{Text: "Mocked one-shot response"}, nil
 		},
-		CountTokensFunc: func(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+		CountTokensFunc: func(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
 			return &CaCountTokenResponse{TotalTokens: 10}, nil
 		},
 		MaxTokensValue:            1048576, // Mocked max tokens

@@ -161,7 +161,6 @@ func handleSubagentTurn(
 	for {
 		// Configure SessionParams for LLM call
 		sessionParams := &SessionParams{
-			ModelName:        params.ModelName,
 			SystemPrompt:     session.SystemPrompt,
 			Contents:         currentHistory, // Use updated history
 			GenerationParams: &subagentGenParams,

@@ -27,7 +27,7 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 	}
 
 	// Calculate initial prompt token count (fixed)
-	initialPromptTokenCountResp, err := p.CountTokens(ctx, params.Contents, params.ModelName)
+	initialPromptTokenCountResp, err := p.CountTokens(ctx, params.Contents)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to count tokens for angel-eval prompt: %w", err)
 	}
@@ -42,7 +42,7 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 			currentResponsePartTokens := 0
 			if len(resp.Response.Candidates) > 0 && resp.Response.Candidates[0].Content.Parts != nil {
 				// Use the placeholder CountTokens for the current response part
-				partTokenResp, err := p.CountTokens(ctx, []Content{resp.Response.Candidates[0].Content}, params.ModelName)
+				partTokenResp, err := p.CountTokens(ctx, []Content{resp.Response.Candidates[0].Content})
 				if err == nil {
 					currentResponsePartTokens = partTokenResp.TotalTokens
 				}
@@ -80,7 +80,7 @@ func (p *AngelEvalProvider) GenerateContentOneShot(ctx context.Context, params S
 }
 
 // CountTokens is a placeholder for angel-eval.
-func (p *AngelEvalProvider) CountTokens(ctx context.Context, contents []Content, modelName string) (*CaCountTokenResponse, error) {
+func (p *AngelEvalProvider) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
 	totalTokens := 0
 	for _, content := range contents {
 		for _, part := range content.Parts {

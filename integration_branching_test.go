@@ -97,16 +97,24 @@ func TestBranchingLogic(t *testing.T) {
 
 		// Create a new branch using the handler
 		payload := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": "First message in new branch"}`, msgIDToBranchFrom))
-		rr := testRequest(t, router, "POST", "/api/chat/"+originalSessionId+"/branch", payload, http.StatusOK)
+		resp := testStreamingRequest(t, router, "POST", "/api/chat/"+originalSessionId+"/branch", payload, http.StatusOK)
+		defer resp.Body.Close()
 
-		var response map[string]string
-		err = json.Unmarshal(rr.Body.Bytes(), &response)
-		if err != nil {
-			t.Fatalf("could not unmarshal response: %v", err)
+		// Parse SSE events to find the initial state using parseSseStream
+		var newBranchID string
+		for event := range parseSseStream(t, resp) {
+			if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
+				var initialState InitialState
+				if err := json.Unmarshal([]byte(event.Payload), &initialState); err != nil {
+					t.Fatalf("could not unmarshal initial state: %v", err)
+				}
+				newBranchID = initialState.PrimaryBranchID
+				break
+			}
 		}
-		newBranchID := response["newBranchId"]
+
 		if newBranchID == "" {
-			t.Fatalf("newBranchId not found in response")
+			t.Fatalf("primaryBranchId not found in response")
 		}
 
 		// Verify the new branch in the branches table
@@ -445,17 +453,26 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 
 		// 2. Call createBranchHandler to create a new branch
 		payload := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": "First message in new branch"}`, parentMessageID))
-		rr := testRequest(t, router, "POST", "/api/chat/"+sessionId+"/branch", payload, http.StatusOK)
+		resp := testStreamingRequest(t, router, "POST", "/api/chat/"+sessionId+"/branch", payload, http.StatusOK)
+		defer resp.Body.Close()
 
-		var response map[string]string
-		err = json.Unmarshal(rr.Body.Bytes(), &response)
-		if err != nil {
-			t.Fatalf("could not unmarshal response: %v", err)
+		// Parse SSE events to find the initial state using parseSseStream
+		var tempBranchID string
+		for event := range parseSseStream(t, resp) {
+			if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
+				var initialState InitialState
+				if err := json.Unmarshal([]byte(event.Payload), &initialState); err != nil {
+					t.Fatalf("could not unmarshal initial state: %v", err)
+				}
+				tempBranchID = initialState.PrimaryBranchID
+				break
+			}
 		}
-		newBranchID = response["newBranchId"]
-		if newBranchID == "" {
-			t.Fatalf("newBranchId not found in response")
+
+		if tempBranchID == "" {
+			t.Fatalf("primaryBranchId not found in response")
 		}
+		newBranchID = tempBranchID
 
 		// 3. Verify the new branch in the branches table
 		var branchFromBranches Branch
