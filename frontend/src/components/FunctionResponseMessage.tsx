@@ -5,6 +5,7 @@ import { FunctionResponse, FileAttachment } from '../types/chat';
 import { getFunctionResponseComponent } from '../utils/functionMessageRegistry';
 import FileAttachmentList from './FileAttachmentList';
 import ChatBubble from './ChatBubble';
+import { isImageOnlyMessage } from '../utils/messageUtils';
 
 interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
@@ -24,6 +25,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
   const CustomComponent = getFunctionResponseComponent(functionResponse.name);
 
   const [mode, setMode] = useState<'compact' | 'collapsed' | 'expanded'>('compact');
+  const imageOnly = isImageOnlyMessage(functionResponse.response, attachments);
 
   let responseData = functionResponse.response;
   let responseText: string;
@@ -68,7 +70,12 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
           title={codeContent}
           onHeaderClick={handleHeaderClick}
         >
-          <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+          <FileAttachmentList
+            attachments={attachments}
+            messageId={messageId}
+            sessionId={sessionId}
+            isImageOnlyMessage={imageOnly}
+          />
         </ChatBubble>
       );
     } else {
@@ -88,7 +95,12 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
           ) : (
             <pre className="function-code-block">{codeContent}</pre>
           )}
-          <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+          <FileAttachmentList
+            attachments={attachments}
+            messageId={messageId}
+            sessionId={sessionId}
+            isImageOnlyMessage={imageOnly}
+          />
         </ChatBubble>
       );
     }

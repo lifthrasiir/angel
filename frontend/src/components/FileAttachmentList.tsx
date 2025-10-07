@@ -6,23 +6,39 @@ interface FileAttachmentListProps {
   attachments?: FileAttachment[];
   messageId?: string;
   sessionId?: string;
+  onRemove?: (file: File) => void;
+  isImageOnlyMessage?: boolean;
 }
 
-const FileAttachmentList: React.FC<FileAttachmentListProps> = ({ attachments, messageId, sessionId }) => {
+const FileAttachmentList: React.FC<FileAttachmentListProps> = ({
+  attachments,
+  messageId,
+  sessionId,
+  onRemove,
+  isImageOnlyMessage = false,
+}) => {
   if (!attachments || attachments.length === 0) {
     return null;
   }
 
+  const containerClassName = isImageOnlyMessage
+    ? 'image-only-message-attachments-container'
+    : 'user-message-attachments-container';
+
+  const listClassName = isImageOnlyMessage ? 'image-only-message-attachments-list' : 'user-message-attachments-list';
+
   return (
-    <div className="user-message-attachments-container">
-      <div className="user-message-attachments-list">
+    <div className={containerClassName}>
+      <div className={listClassName}>
         {attachments.map((file, index) => (
           <FileAttachmentPreview
             key={index}
             file={file}
+            onRemove={onRemove}
             messageId={messageId}
             sessionId={sessionId}
             blobIndex={index}
+            isImageOnlyMessage={isImageOnlyMessage}
           />
         ))}
       </div>

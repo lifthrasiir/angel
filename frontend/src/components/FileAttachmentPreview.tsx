@@ -10,6 +10,7 @@ interface FileAttachmentPreviewProps {
   messageId?: string;
   sessionId?: string;
   blobIndex?: number;
+  isImageOnlyMessage?: boolean;
 }
 
 const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
@@ -18,6 +19,7 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
   messageId,
   sessionId,
   blobIndex,
+  isImageOnlyMessage = false,
 }) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileName = file instanceof File ? file.name : file.fileName;
@@ -92,23 +94,34 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
     }
   };
 
+  const previewClassName =
+    isImageOnlyMessage && isImage ? 'file-attachment-preview-image-only' : 'file-attachment-preview';
+
   return (
-    <div className="file-attachment-preview">
+    <div className={previewClassName}>
       {isImage && previewUrl ? (
-        <img src={previewUrl} alt={fileName} />
+        isImageOnlyMessage ? (
+          <img src={previewUrl} alt={fileName} className="image-only-message-img" />
+        ) : (
+          <img src={previewUrl} alt={fileName} />
+        )
       ) : (
         <span className="file-icon">
           <FaFile />
         </span> // Generic file icon
       )}
-      <span className="file-name">{fileName}</span>
-      <button onClick={handleDownload}>
-        <FaDownload />
-      </button>
-      {onRemove && (
-        <button onClick={() => onRemove(file as File)} className="remove-button">
-          <FaTimes />
-        </button>
+      {!isImageOnlyMessage && (
+        <>
+          <span className="file-name">{fileName}</span>
+          <button onClick={handleDownload}>
+            <FaDownload />
+          </button>
+          {onRemove && (
+            <button onClick={() => onRemove(file as File)} className="remove-button">
+              <FaTimes />
+            </button>
+          )}
+        </>
       )}
     </div>
   );

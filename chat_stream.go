@@ -28,6 +28,7 @@ func streamLLMResponse(
 ) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
+	var inlineDataCounter int = 0 // Counter for sequential inlineData filenames
 	currentHistory := convertFrontendMessagesToContent(db, fullHistoryForLLM)
 
 	// Create a cancellable context for the LLM call
@@ -121,7 +122,7 @@ func streamLLMResponse(
 				state := part.ThoughtSignature
 
 				// Check if a non-text part interrupts the current text stream
-				if (part.FunctionCall != nil || part.Thought) && modelMessageID >= 0 {
+				if (part.FunctionCall != nil || part.Thought || part.InlineData != nil) && modelMessageID >= 0 {
 					// Finalize the current model message before processing the non-text part
 					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
 						log.Printf("Failed to finalize model message before interruption: %v", err)
@@ -257,6 +258,48 @@ func streamLLMResponse(
 					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
 
 					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: []Part{{FunctionResponse: &fr}}})
+					continue
+				} else if part.InlineData != nil {
+					// Handle inlineData part - create a separate message with attachment
+					inlineData := part.InlineData
+
+					// Increment counter for this inlineData
+					inlineDataCounter++
+
+					// Decode base64 data
+					data, err := base64.StdEncoding.DecodeString(inlineData.Data)
+					if err != nil {
+						log.Printf("Failed to decode inlineData base64: %v", err)
+						continue
+					}
+
+					// Create attachment from inlineData with a generated filename
+					attachment := FileAttachment{
+						FileName: generateFilenameFromMimeType(inlineData.MimeType, inlineDataCounter),
+						MimeType: inlineData.MimeType,
+						Data:     data,
+					}
+
+					// Create a message with empty text but with attachment
+					newMessage, err := mc.Add(ctx, db, Message{
+						Type:        TypeModelText,
+						Text:        "", // Empty text for inlineData messages
+						State:       state,
+						Attachments: []FileAttachment{attachment},
+					})
+					if err != nil {
+						log.Printf("Failed to save inlineData message: %v", err)
+						continue
+					}
+
+					// Broadcast message with attachment
+					broadcastToSession(initialState.SessionId, EventModelMessage, fmt.Sprintf("%d\n", newMessage.ID))
+
+					// Add to current history
+					currentHistory = append(currentHistory, Content{
+						Role:  RoleModel,
+						Parts: []Part{{InlineData: inlineData}},
+					})
 					continue
 				}
 
@@ -558,6 +601,65 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		return
 	}
 	log.Printf("inferAndSetSessionName: Finished for session %s. Inferred name: %s", sessionId, inferredName)
+}
+
+// generateFilenameFromMimeType generates a filename based on MIME type with sequential numbering
+func generateFilenameFromMimeType(mimeType string, counter int) string {
+	var extension, prefix string
+
+	switch mimeType {
+	case "image/png":
+		extension = ".png"
+		prefix = "generated_image"
+	case "image/jpeg":
+		extension = ".jpg"
+		prefix = "generated_image"
+	case "image/gif":
+		extension = ".gif"
+		prefix = "generated_image"
+	case "image/webp":
+		extension = ".webp"
+		prefix = "generated_image"
+	case "image/svg+xml":
+		extension = ".svg"
+		prefix = "generated_image"
+	case "audio/mpeg":
+		extension = ".mp3"
+		prefix = "generated_audio"
+	case "audio/wav":
+		extension = ".wav"
+		prefix = "generated_audio"
+	case "audio/ogg":
+		extension = ".ogg"
+		prefix = "generated_audio"
+	case "video/mp4":
+		extension = ".mp4"
+		prefix = "generated_video"
+	case "video/webm":
+		extension = ".webm"
+		prefix = "generated_video"
+	case "application/pdf":
+		extension = ".pdf"
+		prefix = "generated_document"
+	case "text/plain":
+		extension = ".txt"
+		prefix = "generated_text"
+	case "text/markdown":
+		extension = ".md"
+		prefix = "generated_text"
+	case "application/json":
+		extension = ".json"
+		prefix = "generated_data"
+	case "text/csv":
+		extension = ".csv"
+		prefix = "generated_data"
+	default:
+		// For unknown MIME types, generate a generic filename
+		extension = ""
+		prefix = "generated_file"
+	}
+
+	return fmt.Sprintf("%s_%03d%s", prefix, counter, extension)
 }
 
 // logAndErrorf logs an error and returns a new error that wraps the original.

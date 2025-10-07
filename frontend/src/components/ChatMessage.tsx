@@ -115,7 +115,9 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageInfo={messageInfoComponent}
           isLastModelMessage={isLastModelMessage}
           processingStartTime={processingStartTime}
-          messageId={message.id} // Add messageId here
+          sessionId={message.sessionId}
+          messageId={message.id}
+          attachments={attachments}
         />
       );
     }

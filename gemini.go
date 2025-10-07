@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/oauth2"
 )
@@ -71,6 +72,8 @@ type CodeAssistClient struct {
 
 var geminiFlashClient *CodeAssistClient
 var geminiProClient *CodeAssistClient
+var geminiFlashLiteClient *CodeAssistClient
+var geminiFlashImageClient *CodeAssistClient
 
 // NewCodeAssistClient creates a new instance of CodeAssistClient.
 func NewCodeAssistClient(provider HTTPClientProvider, projectID string, modelName string) *CodeAssistClient {
@@ -89,9 +92,6 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	// Log the request body for debugging
-	//log.Printf("makeAPIRequest: Sending request to %s with body: %s", url, string(jsonBody))
-
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		log.Printf("makeAPIRequest: Failed to create HTTP request: %v", err)
@@ -105,14 +105,20 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 
 	resp, err := c.clientProvider.Client(ctx).Do(httpReq)
 	if err != nil {
-		log.Printf("makeAPIRequest: API request failed: %v", err)
+		// Log both request and response (error) when request fails
+		filteredReq := filterLargeJSON(reqBody)
+		log.Printf("makeAPIRequest: API request failed - Request: %s, Error: %v", filteredReq, err)
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		log.Printf("makeAPIRequest: API response error: Status %d %s, Response: %s", resp.StatusCode, resp.Status, string(bodyBytes))
+
+		// Log both request and response when status code is not OK
+		filteredReq := filterLargeJSON(reqBody)
+		filteredResp := filterLargeJSON(string(bodyBytes))
+		log.Printf("makeAPIRequest: API response error - Request: %s, Status %d %s, Response: %s", filteredReq, resp.StatusCode, resp.Status, filteredResp)
 		return nil, &APIError{StatusCode: resp.StatusCode, Message: resp.Status, Response: string(bodyBytes)}
 	}
 
@@ -124,6 +130,10 @@ const (
 	GeminiUrlContextToolName    = ".url_context"
 	GeminiCodeExecutionToolName = ".code_execution"
 )
+
+func isGeminiImageModel(modelName string) bool {
+	return modelName == "gemini-2.5-flash-image-preview"
+}
 
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
 func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params SessionParams) (io.ReadCloser, error) {
@@ -143,6 +153,10 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 		}
 	}
 
+	if isGeminiImageModel(c.modelName) {
+		params.IncludeThoughts = false // Disable thoughts for image-preview model
+	}
+
 	reqBody := CAGenerateContentRequest{
 		Model:   c.modelName,
 		Project: c.projectID,
@@ -159,6 +173,11 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 				}
 			}(),
 			Tools: func() []Tool {
+				if c.modelName == "gemini-2.5-flash-image-preview" {
+					// gemini-2.5-flash-image-preview does not support tools
+					return nil
+				}
+
 				currentTools := GetToolsForGemini()
 				if params.ToolConfig != nil {
 					if _, ok := params.ToolConfig[""]; ok {
@@ -379,13 +398,28 @@ func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserReque
 
 // MaxTokens implements the LLMProvider interface for CodeAssistClient.
 func (c *CodeAssistClient) MaxTokens() int {
-	// Both gemini-2.5-flash and gemini-2.5-pro have a token limit of 1048576
-	return 1048576
+	switch c.modelName {
+	case "gemini-2.5-flash", "gemini-2.5-pro":
+		return 1048576
+	case "gemini-2.5-flash-image-preview":
+		return 32768
+	default:
+		return 1048576
+	}
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface for CodeAssistClient.
 func (c *CodeAssistClient) RelativeDisplayOrder() int {
-	return 0
+	switch c.modelName {
+	case "gemini-2.5-flash":
+		return 10
+	case "gemini-2.5-pro":
+		return 9
+	case "gemini-2.5-flash-image-preview":
+		return 0
+	default:
+		return 0
+	}
 }
 
 // DefaultGenerationParams implements the LLMProvider interface for CodeAssistClient.
@@ -406,4 +440,75 @@ func (c *CodeAssistClient) SubagentProviderAndParams(task string) (LLMProvider, 
 		TopK:        -1,
 		TopP:        1.0,
 	}
+}
+
+// filterLargeJSON filters large JSON content, truncating individual string literals that exceed 100 characters
+func filterLargeJSON(data interface{}) string {
+	var jsonStr string
+
+	// Convert input to JSON string
+	switch v := data.(type) {
+	case string:
+		jsonStr = v
+	case []byte:
+		jsonStr = string(v)
+	default:
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return fmt.Sprintf("Failed to marshal JSON: %v", err)
+		}
+		jsonStr = string(jsonBytes)
+	}
+
+	// Parse the JSON to truncate individual string values
+	var filteredData interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &filteredData); err != nil {
+		return jsonStr // Return original if parsing fails
+	}
+
+	// Recursively truncate string values that exceed 100 characters
+	truncateStrings(filteredData, 100)
+
+	// Marshal the filtered data back to JSON
+	filteredBytes, err := json.MarshalIndent(filteredData, "", "  ")
+	if err != nil {
+		return jsonStr // Return original if marshaling fails
+	}
+
+	return string(filteredBytes)
+}
+
+// truncateStrings recursively truncates string values in nested data structures
+func truncateStrings(data interface{}, maxLen int) {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for key, value := range v {
+			if str, ok := value.(string); ok {
+				if utf8.RuneCountInString(str) > maxLen {
+					v[key] = truncateString(str, maxLen)
+				}
+			} else {
+				truncateStrings(value, maxLen)
+			}
+		}
+	case []interface{}:
+		for i, item := range v {
+			if str, ok := item.(string); ok {
+				if utf8.RuneCountInString(str) > maxLen {
+					v[i] = truncateString(str, maxLen)
+				}
+			} else {
+				truncateStrings(item, maxLen)
+			}
+		}
+	}
+}
+
+// truncateString truncates a string to maxLen runes, adding "..." if truncated
+func truncateString(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-3]) + "..."
 }

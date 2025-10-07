@@ -6,6 +6,7 @@ import ChatBubble from './ChatBubble';
 import { editingMessageIdAtom, processingStartTimeAtom } from '../atoms/chatAtoms';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';
+import { isImageOnlyMessage } from '../utils/messageUtils';
 
 interface UserTextMessageProps {
   text?: string;
@@ -31,6 +32,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   const isEditing = messageId === editingMessageId;
   const [editedText, setEditedText] = useState(text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageOnly = isImageOnlyMessage(text, attachments);
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
@@ -107,9 +109,16 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
           rows={Math.max(3, editedText.split('\n').length)}
         />
       ) : (
-        text
+        <>
+          <FileAttachmentList
+            attachments={attachments}
+            messageId={messageId}
+            sessionId={sessionId}
+            isImageOnlyMessage={imageOnly}
+          />
+          {!imageOnly && text}
+        </>
       )}
-      <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
     </ChatBubble>
   );
 };
