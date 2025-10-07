@@ -78,7 +78,8 @@ func createTables(db *sql.DB) error {
 
 	CREATE TABLE IF NOT EXISTS blobs (
 		id TEXT PRIMARY KEY, -- SHA-512/256 hash of the data
-		data BLOB NOT NULL
+		data BLOB NOT NULL,
+		ref_count INTEGER DEFAULT 1 NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS global_prompts (
@@ -137,6 +138,67 @@ func migrateDB(db *sql.DB) error {
 		"ALTER TABLE sessions ADD COLUMN chosen_first_id INTEGER",
 		// Set chosen_first_id for existing sessions to their first message (where parent_message_id IS NULL)
 		"UPDATE sessions SET chosen_first_id = (SELECT MIN(id) FROM messages WHERE session_id = sessions.id AND parent_message_id IS NULL) WHERE chosen_first_id IS NULL",
+
+		// Skip generated column approach - it's causing compatibility issues
+		// Focus on trigger-based solution which is more reliable
+
+		// Create expression index for attachments JSON (compatible syntax)
+		"CREATE INDEX IF NOT EXISTS idx_messages_attachments ON messages(attachments)",
+
+		// Add ref_count column to blobs table
+		"ALTER TABLE blobs ADD COLUMN ref_count INTEGER DEFAULT 1 NOT NULL",
+
+		// Create triggers for automatic blob reference counting using json_each
+		`CREATE TRIGGER IF NOT EXISTS increment_blob_refs
+			AFTER INSERT ON messages
+			WHEN NEW.attachments IS NOT NULL AND NEW.attachments != '[]'
+		BEGIN
+			UPDATE blobs SET ref_count = ref_count + 1
+			WHERE id IN (
+				SELECT json_extract(json_each.value, '$.hash')
+				FROM json_each(NEW.attachments)
+				WHERE json_extract(json_each.value, '$.hash') IS NOT NULL
+			);
+		END`,
+
+		`CREATE TRIGGER IF NOT EXISTS decrement_blob_refs
+			AFTER DELETE ON messages
+			WHEN OLD.attachments IS NOT NULL AND OLD.attachments != '[]'
+		BEGIN
+			UPDATE blobs SET ref_count = ref_count - 1
+			WHERE id IN (
+				SELECT json_extract(json_each.value, '$.hash')
+				FROM json_each(OLD.attachments)
+				WHERE json_extract(json_each.value, '$.hash') IS NOT NULL
+			);
+			DELETE FROM blobs WHERE ref_count <= 0;
+		END`,
+
+		`CREATE TRIGGER IF NOT EXISTS update_blob_refs
+			AFTER UPDATE ON messages
+			WHEN NEW.attachments IS NOT NULL OR OLD.attachments IS NOT NULL
+		BEGIN
+			-- Decrease ref count for old attachments
+			UPDATE blobs SET ref_count = ref_count - 1
+			WHERE id IN (
+				SELECT json_extract(json_each.value, '$.hash')
+				FROM json_each(OLD.attachments)
+				WHERE OLD.attachments IS NOT NULL AND OLD.attachments != '[]'
+				AND json_extract(json_each.value, '$.hash') IS NOT NULL
+			);
+
+			-- Increase ref count for new attachments
+			UPDATE blobs SET ref_count = ref_count + 1
+			WHERE id IN (
+				SELECT json_extract(json_each.value, '$.hash')
+				FROM json_each(NEW.attachments)
+				WHERE NEW.attachments IS NOT NULL AND NEW.attachments != '[]'
+				AND json_extract(json_each.value, '$.hash') IS NOT NULL
+			);
+
+			-- Clean up blobs with ref_count <= 0
+			DELETE FROM blobs WHERE ref_count <= 0;
+		END`,
 	}
 
 	for _, stmt := range migrationStmts {
@@ -635,7 +697,8 @@ func DeleteMCPServerConfig(db *sql.DB, name string) error {
 	return nil
 }
 
-// SaveBlob saves a blob to the blobs table. If a blob with the same hash already exists, it replaces it.
+// SaveBlob saves a blob to the blobs table. This function ensures the blob data exists.
+// It sets ref_count = 0 for new blobs, and triggers will manage counting when messages are saved.
 // It returns the SHA-512/256 hash of the data.
 func SaveBlob(ctx context.Context, db DbOrTx, data []byte) (string, error) {
 	hasher := sha512.New512_256()
@@ -643,9 +706,15 @@ func SaveBlob(ctx context.Context, db DbOrTx, data []byte) (string, error) {
 	hash := hasher.Sum(nil)
 	hashStr := hex.EncodeToString(hash)
 
-	_, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO blobs (id, data) VALUES (?, ?)", hashStr, data)
+	// Insert blob with ref_count = 0 if it doesn't exist
+	// Triggers will increment ref_count when the message is actually saved
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO blobs (id, data, ref_count) VALUES (?, ?, 0)
+		ON CONFLICT(id) DO UPDATE SET
+			data = excluded.data
+	`, hashStr, data)
 	if err != nil {
-		return "", fmt.Errorf("failed to insert or replace blob: %w", err)
+		return "", fmt.Errorf("failed to save blob: %w", err)
 	}
 
 	return hashStr, nil
@@ -662,6 +731,52 @@ func GetBlob(db *sql.DB, hashStr string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to get blob: %w", err)
 	}
 	return data, nil
+}
+
+// InitializeBlobRefCounts initializes blob reference counts for existing data.
+// This should be called once during migration to set up ref_count values correctly.
+// After initialization, triggers will handle all reference counting automatically.
+func InitializeBlobRefCounts(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for ref count initialization: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Initialize all blobs to ref_count = 0
+	_, err = tx.Exec("UPDATE blobs SET ref_count = 0")
+	if err != nil {
+		return fmt.Errorf("failed to reset blob ref counts: %w", err)
+	}
+
+	// Count references from all existing messages
+	_, err = tx.Exec(`
+		UPDATE blobs SET ref_count = (
+			SELECT COUNT(*) FROM (
+				SELECT json_extract(json_each.value, '$.hash') as blob_hash
+				FROM messages, json_each(messages.attachments)
+				WHERE json_extract(json_each.value, '$.hash') = blobs.id
+			)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to calculate blob reference counts: %w", err)
+	}
+
+	// Remove blobs with ref_count = 0 (unused blobs)
+	result, err := tx.Exec("DELETE FROM blobs WHERE ref_count = 0")
+	if err != nil {
+		return fmt.Errorf("failed to delete unused blobs: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit ref count initialization: %w", err)
+	}
+
+	log.Printf("Blob reference count initialization completed: removed %d unused blob(s)", rowsAffected)
+	return nil
 }
 
 // GlobalPrompt struct to hold global prompt data
