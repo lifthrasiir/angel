@@ -37,6 +37,7 @@ import {
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
   possibleFirstIdsAtom,
+  preserveSelectedFilesAtom,
 } from '../atoms/chatAtoms';
 import { useScrollAdjustment } from './useScrollAdjustment';
 
@@ -75,6 +76,8 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
   const setPossibleFirstIds = useSetAtom(possibleFirstIdsAtom);
+  const preserveSelectedFiles = useAtomValue(preserveSelectedFilesAtom);
+  const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
 
   const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
   const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
@@ -228,6 +231,12 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
       }
 
       if (location.pathname.endsWith('/new') && !currentSessionId) {
+        // Handle preserveSelectedFiles before resetting state
+        if (preserveSelectedFiles.length > 0) {
+          setSelectedFiles(preserveSelectedFiles);
+          setPreserveSelectedFiles([]);
+        }
+
         resetChatSessionState();
         if (urlWorkspaceId) {
           setWorkspaceId(urlWorkspaceId);
@@ -253,7 +262,15 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
         latestSessionIdRef.current = currentSessionId;
 
         setChatSessionId(currentSessionId);
-        setSelectedFiles([]);
+
+        // Always preserve selected files during session navigation
+        // Don't clear files unless explicitly done by user action
+        if (preserveSelectedFiles.length > 0) {
+          setSelectedFiles(preserveSelectedFiles);
+          setPreserveSelectedFiles([]);
+        }
+        // Note: Don't clear existing selectedFiles - let them persist across session changes
+
         setProcessingStartTime(null);
         setMessages([]); // Clear messages from previous session
         setHasMoreMessages(true); // Always set to true when loading a new session

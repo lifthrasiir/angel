@@ -2,11 +2,9 @@ import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import type { ChatMessage as ChatMessageType } from '../types/chat';
-import ChatInput from './ChatInput';
-import TokenCountMeter from './TokenCountMeter';
 import ChatMessage from './ChatMessage';
-import FileAttachmentPreview from './FileAttachmentPreview';
 import SystemPromptEditor from './SystemPromptEditor';
+import InputArea from './InputArea';
 import { ThoughtGroup } from './ThoughtGroup';
 import FunctionPairMessage from './FunctionPairMessage';
 import ConfirmationDialog from './ConfirmationDialog';
@@ -158,6 +156,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+
+    // Check if this is a message file being dropped
+    const dragData = e.dataTransfer.getData('application/json');
+    if (dragData) {
+      try {
+        const parsed = JSON.parse(dragData);
+        if (parsed.isMessageAttachment || parsed.isExistingAttachment) {
+          // Message files dropped on ChatArea should do nothing
+          return;
+        }
+      } catch {
+        // If parsing fails, continue with normal file handling
+      }
+    }
+
+    // Only handle external files dropped on ChatArea
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       onFilesSelected(Array.from(e.dataTransfer.files));
     }
@@ -379,13 +393,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
-        border: isDragging ? '2px dashed #007bff' : '2px dashed transparent',
-        transition: 'border-color 0.3s ease-in-out',
       }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {isDragging && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+            border: '2px solid rgba(0, 123, 255, 0.3)',
+            pointerEvents: 'none',
+            zIndex: 10,
+          }}
+        />
+      )}
       {!isLoggedIn && (
         <div style={{ padding: '20px', textAlign: 'center' }}>
           <p>Login required to start chatting.</p>
@@ -419,23 +446,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               <div ref={messagesEndRef} />
             </div>
           </div>
-          {selectedFiles.length > 0 && (
-            <div
-              style={{
-                padding: 'calc(var(--spacing-unit) * 0.3) var(--spacing-unit)',
-                borderTop: '1px solid #eee',
-                background: '#f9f9f9',
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 'calc(var(--spacing-unit) * 0.3)',
-              }}
-            >
-              {selectedFiles.map((file, index) => (
-                <FileAttachmentPreview key={index} file={file} onRemove={() => handleRemoveFile(index)} />
-              ))}
-            </div>
-          )}
-          <TokenCountMeter />
           {pendingConfirmation ? (
             <ConfirmationDialog
               onConfirm={(modifiedData) => sendConfirmation(true, chatSessionId!, primaryBranchId!, modifiedData)}
@@ -443,12 +453,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               confirmationData={JSON.parse(pendingConfirmation)}
             />
           ) : (
-            <ChatInput
+            <InputArea
               handleSendMessage={handleSendMessage}
               onFilesSelected={onFilesSelected}
+              handleRemoveFile={handleRemoveFile}
               handleCancelStreaming={handleCancelStreaming}
-              inputRef={chatInputRef}
+              chatInputRef={chatInputRef}
               sessionId={chatSessionId}
+              selectedFiles={selectedFiles}
             />
           )}
         </>

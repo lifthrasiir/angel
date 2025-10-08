@@ -1,10 +1,12 @@
 import type React from 'react';
+import { useState } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import type { Session } from '../types/chat';
-import { sessionsAtom, chatSessionIdAtom } from '../atoms/chatAtoms';
+import { sessionsAtom, chatSessionIdAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
+import { extractFilesFromDrop } from '../utils/dragDropUtils';
 
 interface SessionListProps {
   handleDeleteSession: (sessionId: string) => Promise<void>;
@@ -14,9 +16,61 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
   const navigate = useNavigate();
   const [sessions, setSessions] = useAtom(sessionsAtom);
   const [chatSessionId] = useAtom(chatSessionIdAtom);
+  const [selectedFiles, setSelectedFiles] = useAtom(selectedFilesAtom);
+  const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
+  const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
 
   const updateSessionState = (sessionId: string, updateFn: (session: Session) => Session) => {
     setSessions(sessions.map((s) => (s.id === sessionId ? updateFn(s) : s)));
+  };
+
+  // Handle file drop on session button
+  const handleFileDrop = async (e: React.DragEvent<HTMLButtonElement>, sessionId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggedSessionId(null);
+    setIsDraggingOver(false);
+
+    const filesToAdd = await extractFilesFromDrop(e);
+
+    // Handle files differently based on target session
+    if (filesToAdd.length > 0) {
+      if (sessionId === chatSessionId) {
+        // Add to existing files for current session
+        setSelectedFiles((prevFiles) => [...prevFiles, ...filesToAdd]);
+      } else {
+        // Replace files for different session
+        setSelectedFiles(filesToAdd);
+        // Set preserve files to ensure they survive navigation
+        setPreserveSelectedFiles(filesToAdd);
+        navigate(`/${sessionId}`);
+      }
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDraggingOver(true);
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLButtonElement>, sessionId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggedSessionId(sessionId);
+    setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set dragging to false if we're actually leaving the button
+    if (e.currentTarget === e.target) {
+      setIsDraggingOver(false);
+      setDraggedSessionId(null);
+    }
   };
 
   return (
@@ -86,11 +140,56 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
           ) : (
             <button
               onClick={() => navigate(`/${session.id}`)}
-              className={`sidebar-session-button ${session.id === chatSessionId ? 'active' : ''}`}
+              onDrop={(e) => handleFileDrop(e, session.id)}
+              onDragOver={handleDragOver}
+              onDragEnter={(e) => handleDragEnter(e, session.id)}
+              onDragLeave={handleDragLeave}
+              className={`sidebar-session-button ${session.id === chatSessionId ? 'active' : ''} ${draggedSessionId === session.id ? 'drag-over' : ''}`}
+              style={{
+                position: 'relative',
+                transition: 'all 0.2s ease-in-out',
+              }}
               title={session.name || 'New Chat'}
               aria-label={`Go to ${session.name || 'New Chat'} session`}
             >
+              {isDraggingOver && draggedSessionId === session.id && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                    border: '2px solid rgba(0, 123, 255, 0.3)',
+                    borderRadius: '4px',
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}
+                />
+              )}
               {session.name || 'New Chat'}
+              {selectedFiles.length > 0 && session.id === chatSessionId && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    right: '2px',
+                    backgroundColor: '#007bff',
+                    color: 'white',
+                    borderRadius: '50%',
+                    width: '16px',
+                    height: '16px',
+                    fontSize: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {selectedFiles.length}
+                </span>
+              )}
             </button>
           )}
           {!session.isEditing && (

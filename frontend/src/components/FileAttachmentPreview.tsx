@@ -11,6 +11,7 @@ interface FileAttachmentPreviewProps {
   sessionId?: string;
   blobIndex?: number;
   isImageOnlyMessage?: boolean;
+  draggable?: boolean;
 }
 
 const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
@@ -20,6 +21,7 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
   sessionId,
   blobIndex,
   isImageOnlyMessage = false,
+  draggable = true,
 }) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileName = file instanceof File ? file.name : file.fileName;
@@ -94,11 +96,55 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
     }
   };
 
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!draggable) return;
+
+    if (file instanceof File) {
+      // For File objects (ChatArea attachments), set effectAllowed to 'move'
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', file.name);
+      e.dataTransfer.setData(
+        'application/json',
+        JSON.stringify({
+          isExistingAttachment: true,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+        }),
+      );
+    } else {
+      // For FileAttachment objects (message attachments), we need to create a File-like drag
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', file.fileName);
+      e.dataTransfer.setData(
+        'application/json',
+        JSON.stringify({
+          isMessageAttachment: true,
+          fileName: file.fileName,
+          fileType: file.mimeType,
+          sessionId: sessionId,
+          messageId: messageId,
+          blobIndex: blobIndex,
+        }),
+      );
+    }
+  };
+
+  const handleDragEnd = () => {
+    // Clean up any drag-related state if needed
+  };
+
   const previewClassName =
     isImageOnlyMessage && isImage ? 'file-attachment-preview-image-only' : 'file-attachment-preview';
 
   return (
-    <div className={previewClassName}>
+    <div
+      className={previewClassName}
+      draggable={draggable} // Make both File and FileAttachment objects draggable if allowed
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      style={{ cursor: 'default' }}
+    >
       {isImage && previewUrl ? (
         isImageOnlyMessage ? (
           <img src={previewUrl} alt={fileName} className="image-only-message-img" />

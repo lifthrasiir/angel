@@ -31,6 +31,7 @@ export const pendingRootsAtom = atom<string[]>([]);
 export const compressAbortControllerAtom = atom<AbortController | null>(null);
 export const editingMessageIdAtom = atom<string | null>(null);
 export const possibleFirstIdsAtom = atom<PossibleNextMessage[]>([]);
+export const preserveSelectedFilesAtom = atom<File[]>([]); // Files to preserve during session navigation
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(
@@ -94,7 +95,7 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(messagesAtom, []);
   set(systemPromptAtom, '');
   set(isSystemPromptEditingAtom, true);
-  set(selectedFilesAtom, []);
+  // Don't reset selectedFilesAtom - keep attachments across session changes
   set(primaryBranchIdAtom, '');
   set(selectedModelAtom, null);
   set(pendingConfirmationAtom, null);

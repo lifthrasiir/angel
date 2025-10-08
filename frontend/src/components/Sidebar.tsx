@@ -3,12 +3,20 @@ import { useState, useEffect } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { FaArrowLeft, FaCog, FaFolder, FaPlus, FaBars, FaTimes } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import type { Workspace } from '../types/chat';
-import { sessionsAtom, chatSessionIdAtom, workspaceNameAtom, workspaceIdAtom } from '../atoms/chatAtoms';
+import {
+  sessionsAtom,
+  chatSessionIdAtom,
+  workspaceNameAtom,
+  workspaceIdAtom,
+  selectedFilesAtom,
+  preserveSelectedFilesAtom,
+} from '../atoms/chatAtoms';
 import LogoAnimation from './LogoAnimation';
 import SessionList from './SessionList';
 import WorkspaceList from './WorkspaceList';
+import { extractFilesFromDrop } from '../utils/dragDropUtils';
 
 interface SidebarProps {
   workspaces: Workspace[];
@@ -21,9 +29,12 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   const [chatSessionId] = useAtom(chatSessionIdAtom);
   const [workspaceName] = useAtom(workspaceNameAtom);
   const [workspaceId] = useAtom(workspaceIdAtom);
+  const setSelectedFiles = useSetAtom(selectedFilesAtom);
+  const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDraggingOverNewSession, setIsDraggingOverNewSession] = useState(false);
 
   // Detect mobile screen size
   useEffect(() => {
@@ -45,6 +56,37 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
     if (isMobile) {
       setIsSidebarOpen(false);
     }
+  };
+
+  const handleNewSessionDrop = async (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOverNewSession(false);
+
+    const filesToAdd = await extractFilesFromDrop(e);
+
+    // Set files and navigate to new session
+    if (filesToAdd.length > 0) {
+      setSelectedFiles(filesToAdd);
+      setPreserveSelectedFiles(filesToAdd);
+
+      // Navigate to new session
+      const newPath = showWorkspaces ? '/w/new' : workspaceId ? `/w/${workspaceId}/new` : '/new';
+      handleNavigate(newPath);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDraggingOverNewSession(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOverNewSession(false);
   };
 
   const handleDeleteSession = async (sessionId: string) => {
@@ -181,29 +223,51 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             backgroundColor: '#ccc',
           }}
         />
-        <button
-          onClick={() => handleNavigate(showWorkspaces ? '/w/new' : workspaceId ? `/w/${workspaceId}/new` : '/new')}
-          style={{
-            width: '100%',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            cursor: 'pointer',
-            color: 'black',
-            textDecoration: 'none',
-            textAlign: 'left',
-            display: 'flex',
-            alignItems: 'center',
-            border: '0',
-            padding: '5px',
-            backgroundColor: 'transparent',
-            minHeight: 'var(--touch-target-size)',
-          }}
-          aria-label={showWorkspaces ? 'Create New Workspace' : 'Create New Session'}
-        >
-          <FaPlus style={{ marginRight: '5px' }} />
-          {showWorkspaces ? 'New Workspace' : 'New Session'}
-        </button>
+        <div style={{ position: 'relative', width: '100%' }}>
+          {isDraggingOverNewSession && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                border: '2px solid rgba(0, 123, 255, 0.3)',
+                borderRadius: '4px',
+                pointerEvents: 'none',
+                zIndex: 1,
+              }}
+            />
+          )}
+          <button
+            onClick={() => handleNavigate(showWorkspaces ? '/w/new' : workspaceId ? `/w/${workspaceId}/new` : '/new')}
+            onDrop={handleNewSessionDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            style={{
+              width: '100%',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              cursor: 'pointer',
+              color: 'black',
+              textDecoration: 'none',
+              textAlign: 'left',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              border: '0',
+              padding: '5px',
+              backgroundColor: 'transparent',
+              minHeight: 'var(--touch-target-size)',
+            }}
+            aria-label={showWorkspaces ? 'Create New Workspace' : 'Create New Session'}
+          >
+            <FaPlus style={{ marginRight: '5px' }} />
+            {showWorkspaces ? 'New Workspace' : 'New Session'}
+          </button>
+        </div>
 
         <div
           style={{
@@ -252,6 +316,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             textAlign: 'left',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'flex-start',
             border: '0',
             padding: '5px',
             backgroundColor: 'transparent',
