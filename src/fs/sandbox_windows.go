@@ -168,3 +168,10 @@ func (s *Sandbox) Glob(pattern string) ([]string, error) {
 
 	return matches, nil
 }
+
+// AddRWPath adds a directory path to be mounted as read-write within the sandbox.
+// On Windows, this is a no-op as the sandbox uses a subst drive.
+func (s *Sandbox) AddRWPath(path string) error {
+	// Windows sandbox uses subst drive, all paths within the drive are accessible
+	return nil
+}

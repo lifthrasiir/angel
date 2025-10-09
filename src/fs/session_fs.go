@@ -292,6 +292,14 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 		return nil, fmt.Errorf("failed to create sandbox for command execution: %w", err)
 	}
 
+	// Add roots as read-write paths to the sandbox
+	for _, root := range sf.roots {
+		if err := sandbox.AddRWPath(root); err != nil {
+			_ = sandbox.Close()
+			return nil, fmt.Errorf("failed to add root path %s as read-write: %w", root, err)
+		}
+	}
+
 	var actualWorkingDir string
 	createAnonymousRoot := false
 
