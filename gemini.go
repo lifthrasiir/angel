@@ -68,6 +68,8 @@ type CodeAssistClient struct {
 	clientProvider HTTPClientProvider
 	projectID      string
 	modelName      string
+	thoughtEnabled bool
+	toolSupported  bool
 }
 
 var geminiFlashClient *CodeAssistClient
@@ -76,11 +78,13 @@ var geminiFlashLiteClient *CodeAssistClient
 var geminiFlashImageClient *CodeAssistClient
 
 // NewCodeAssistClient creates a new instance of CodeAssistClient.
-func NewCodeAssistClient(provider HTTPClientProvider, projectID string, modelName string) *CodeAssistClient {
+func NewCodeAssistClient(provider HTTPClientProvider, projectID string, modelName string, thoughtEnabled bool, toolSupported bool) *CodeAssistClient {
 	return &CodeAssistClient{
 		clientProvider: provider,
 		projectID:      projectID,
 		modelName:      modelName,
+		thoughtEnabled: thoughtEnabled,
+		toolSupported:  toolSupported,
 	}
 }
 
@@ -131,10 +135,6 @@ const (
 	GeminiCodeExecutionToolName = ".code_execution"
 )
 
-func isGeminiImageModel(modelName string) bool {
-	return modelName == "gemini-2.5-flash-image-preview"
-}
-
 // streamGenerateContent calls the streamGenerateContent of Code Assist API.
 func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params SessionParams) (io.ReadCloser, error) {
 	// Get default generation parameters
@@ -153,8 +153,8 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 		}
 	}
 
-	if isGeminiImageModel(c.modelName) {
-		params.IncludeThoughts = false // Disable thoughts for image-preview model
+	if !c.thoughtEnabled {
+		params.IncludeThoughts = false
 	}
 
 	reqBody := CAGenerateContentRequest{
@@ -173,8 +173,7 @@ func (c *CodeAssistClient) streamGenerateContent(ctx context.Context, params Ses
 				}
 			}(),
 			Tools: func() []Tool {
-				if c.modelName == "gemini-2.5-flash-image-preview" {
-					// gemini-2.5-flash-image-preview does not support tools
+				if !c.toolSupported {
 					return nil
 				}
 

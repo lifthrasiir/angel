@@ -162,7 +162,7 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 		// If ProjectID is not set, try to get it.
 		if ga.ProjectID == "" {
 			// Create a temporary client to get ProjectID
-			tempCaClient := NewCodeAssistClient(clientProvider, "", "") // Pass empty ProjectID for initial load
+			tempCaClient := NewCodeAssistClient(clientProvider, "", "", false, false)
 			loadReq := LoadCodeAssistRequest{
 				CloudaicompanionProject: ga.ProjectID, // Will be empty
 				Metadata: &ClientMetadata{
@@ -251,16 +251,16 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 
 	// Centralized CurrentProviders population
 	if ga.TokenSource != nil {
-		geminiFlashClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash")
+		geminiFlashClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash", true, true)
 		CurrentProviders["gemini-2.5-flash"] = geminiFlashClient
 
-		geminiProClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-pro")
+		geminiProClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-pro", true, true)
 		CurrentProviders["gemini-2.5-pro"] = geminiProClient
 
-		geminiFlashLiteClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash-lite")
+		geminiFlashLiteClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash-lite", false, true)
 		CurrentProviders["gemini-2.5-flash-lite"] = geminiFlashLiteClient
 
-		geminiFlashImageClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash-image-preview")
+		geminiFlashImageClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash-image-preview", false, false)
 		CurrentProviders["gemini-2.5-flash-image-preview"] = geminiFlashImageClient
 	} else {
 		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")
