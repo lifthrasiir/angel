@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login Unavailable</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .warning {
+            color: #d63384;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .info {
+            color: #084298;
+            background-color: #cfe2ff;
+            border: 1px solid #b6d4fe;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        code {
+            background-color: #f1f3f4;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        li {
+            margin: 8px 0;
+        }
+        a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Login Unavailable</h1>
+    <div class="warning">
+        <strong>Warning:</strong> OAuth2 login is disabled when running on port {{PORT}}.
+    </div>
+    <div class="info">
+        <strong>Why?</strong> The OAuth2 callback URL is hardcoded to <code>http://localhost:8080/oauth2callback</code> and cannot be changed.
+    </div>
+    <div class="info">
+        <strong>To use login functionality:</strong>
+        <ol>
+            <li>Stop this server (Ctrl+C)</li>
+            <li>Run the server on port 8080: <code>{{EXECUTABLE}} 8080</code></li>
+            <li>Complete the login process</li>
+            <li>Then you can restart the server on this port with your authenticated configuration</li>
+        </ol>
+    </div>
+    <p><a href="/">← Back to Home</a></p>
+</body>
+</html>

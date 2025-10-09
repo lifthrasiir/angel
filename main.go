@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -26,7 +27,31 @@ import (
 
 const dbPath = "angel.db"
 
+//go:embed frontend/dist
+var embeddedFiles embed.FS
+
+//go:embed frontend/login-unavailable.html
+var loginUnavailableHTML []byte
+
+// getExecutableName returns the appropriate executable name for the current platform
+func getExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return "angel.exe"
+	}
+	return "./angel"
+}
+
 func main() {
+	// Parse port from command line argument (default: 8080)
+	port := 8080
+	if len(os.Args) > 1 {
+		if parsedPort, err := strconv.Atoi(os.Args[1]); err == nil && parsedPort > 0 && parsedPort <= 65535 {
+			port = parsedPort
+		} else {
+			log.Fatalf("Invalid port number: %s. Please provide a valid port (1-65535).", os.Args[1])
+		}
+	}
+
 	checkNetworkFilesystem(dbPath)
 
 	db, err := InitDB(dbPath)
@@ -89,17 +114,36 @@ func main() {
 	)
 	router.Use(csrfMiddleware)
 
-	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method
+	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method and only on default port 8080
 	if ga.GetCurrentProvider() == string(AuthTypeLoginWithGoogle) {
-		router.HandleFunc("/login", http.HandlerFunc(ga.GetAuthHandler().ServeHTTP)).Methods("GET")
-		router.HandleFunc("/oauth2callback", http.HandlerFunc(ga.GetAuthCallbackHandler().ServeHTTP)).Methods("GET")
+		if port == 8080 {
+			router.HandleFunc("/login", http.HandlerFunc(ga.GetAuthHandler().ServeHTTP)).Methods("GET")
+			router.HandleFunc("/oauth2callback", http.HandlerFunc(ga.GetAuthCallbackHandler().ServeHTTP)).Methods("GET")
+		} else {
+			// Add /login handler that shows error message when not on port 8080
+			router.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusServiceUnavailable)
+
+				// Read and modify the embedded HTML template
+				htmlContent := string(loginUnavailableHTML)
+				htmlContent = strings.ReplaceAll(htmlContent, "{{PORT}}", fmt.Sprintf("%d", port))
+				htmlContent = strings.ReplaceAll(htmlContent, "{{EXECUTABLE}}", getExecutableName())
+
+				w.Write([]byte(htmlContent))
+			}).Methods("GET")
+
+			log.Printf("WARNING: OAuth2 login is disabled when running on port %d.", port)
+			log.Printf("OAuth2 callback URL is hardcoded to http://localhost:8080/oauth2callback and cannot be changed.")
+			log.Printf("To use login functionality, please run the server on port 8080 or authenticate first on port 8080 and then copy the configuration.")
+		}
 	}
 	router.HandleFunc("/api/logout", http.HandlerFunc(ga.GetLogoutHandler().ServeHTTP)).Methods("POST")
 
 	InitRouter(router)
 
-	fmt.Println("Server started at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	fmt.Printf("Server started at http://localhost:%d\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), router))
 }
 
 func checkNetworkFilesystem(dbPath string) {
@@ -179,9 +223,6 @@ func InitRouter(router *mux.Router) {
 
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
 }
-
-//go:embed frontend/dist
-var embeddedFiles embed.FS
 
 // serveStaticFiles serves static files from the filesystem first, then from embedded files
 func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
