@@ -25,7 +25,6 @@ import {
   isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
-  possibleFirstIdsAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
@@ -77,7 +76,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
   const temporaryEnvChangeMessage = useAtomValue(temporaryEnvChangeMessageAtom);
-  const possibleFirstIds = useAtomValue(possibleFirstIdsAtom);
 
   const isLoggedIn = !!userEmail;
 
@@ -130,7 +128,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   useEffect(() => {
     const chatAreaElement = chatAreaRef.current;
     if (chatAreaElement && hasMoreMessages && !isPriorSessionLoading) {
-      // console.log(`Initial load check: scrollHeight: ${chatAreaElement.scrollHeight}, clientHeight: ${chatAreaElement.clientHeight}`);
       // Check if the content height is less than the visible height (no scrollbar)
       // This indicates that all available messages might not have been loaded yet,
       // especially in short sessions where initial messages don't fill the viewport.
@@ -212,10 +209,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       const callMessageInfoComponent = (
         <MessageInfo
           cumulTokenCount={currentMessage.cumulTokenCount}
-          branchId={currentMessage.branchId}
-          parentMessageId={currentMessage.parentMessageId}
-          chosenNextId={currentMessage.chosenNextId}
-          possibleNextIds={currentMessage.possibleNextIds}
+          possibleBranches={currentMessage.possibleBranches}
           model={currentMessage.model}
           maxTokens={availableModels.get(currentMessage.model || '')?.maxTokens}
         />
@@ -226,10 +220,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       const responseMessageInfoComponent = (
         <MessageInfo
           cumulTokenCount={responseMessage.cumulTokenCount}
-          branchId={responseMessage.branchId}
-          parentMessageId={responseMessage.parentMessageId}
-          chosenNextId={responseMessage.chosenNextId}
-          possibleNextIds={responseMessage.possibleNextIds}
+          possibleBranches={responseMessage.possibleBranches}
           model={responseMessage.model}
           maxTokens={availableModels.get(responseMessage.model || '')?.maxTokens}
         />
@@ -298,8 +289,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               processingStartTime={processingStartTime}
               onSaveEdit={handleEditMessage}
               onBranchSelect={handleBranchSwitch}
-              allMessages={messages}
-              possibleFirstIds={possibleFirstIds}
             />
             {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
               <ProcessingIndicator
@@ -371,8 +360,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           processingStartTime={null}
           onSaveEdit={() => {}}
           onBranchSelect={handleBranchSwitch}
-          allMessages={messages}
-          possibleFirstIds={possibleFirstIds}
         />,
       );
     }

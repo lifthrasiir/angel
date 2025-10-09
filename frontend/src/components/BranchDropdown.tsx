@@ -2,8 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import type { PossibleNextMessage } from '../types/chat';
 
 interface BranchDropdownProps {
-  possibleNextIds: PossibleNextMessage[];
-  chosenNextId?: string;
+  possibleBranches: PossibleNextMessage[];
   currentMessageText?: string; // Current message text for diff comparison
   onBranchSelect: (newBranchId: string) => void;
   disabled?: boolean;
@@ -144,8 +143,7 @@ const formatTextOutput = (newText: string, currentText?: string): JSX.Element =>
 };
 
 const BranchDropdown: React.FC<BranchDropdownProps> = ({
-  possibleNextIds,
-  chosenNextId,
+  possibleBranches,
   currentMessageText,
   onBranchSelect,
   disabled = false,
@@ -153,11 +151,8 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Filter to only show branches that are different from the current chosen one
-  const availableBranches = possibleNextIds.filter((branch) => branch.messageId !== chosenNextId);
-
   // Don't render if there are no alternative branches to switch to
-  if (availableBranches.length === 0) {
+  if (possibleBranches.length === 0) {
     return null;
   }
 
@@ -206,7 +201,7 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
         title="Switch branch"
       >
         <span>⎇</span>
-        <span>{availableBranches.length}</span>
+        <span>{possibleBranches.length}</span>
       </button>
 
       {/* Dropdown menu */}
@@ -237,7 +232,7 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
           >
             Switch to branch:
           </div>
-          {availableBranches.map((branch) => (
+          {possibleBranches.map((branch) => (
             <button
               key={branch.messageId}
               onClick={() => handleBranchSelect(branch)}

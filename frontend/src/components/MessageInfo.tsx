@@ -6,30 +6,22 @@ import BranchDropdown from './BranchDropdown';
 
 export interface MessageInfoProps {
   cumulTokenCount?: number | null;
-  branchId?: string;
-  parentMessageId?: string;
-  chosenNextId?: string;
-  possibleNextIds?: PossibleNextMessage[];
+  possibleBranches?: PossibleNextMessage[];
   model?: string;
   maxTokens?: number;
   onEditClick?: () => void;
   onBranchSelect?: (newBranchId: string) => void;
   sessionId?: string;
-  isVirtualRoot?: boolean;
   currentMessageText?: string; // Current message text for diff comparison
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = ({
   cumulTokenCount,
-  branchId,
-  parentMessageId,
-  chosenNextId,
-  possibleNextIds,
+  possibleBranches,
   model,
   maxTokens,
   onEditClick,
   onBranchSelect,
-  isVirtualRoot = false,
   currentMessageText,
 }) => {
   const [processingStartTime] = useAtom(processingStartTimeAtom);
@@ -37,10 +29,7 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
 
   const hasInfo =
     cumulTokenCount !== undefined ||
-    branchId ||
-    parentMessageId ||
-    chosenNextId ||
-    (possibleNextIds && possibleNextIds.length > 0) ||
+    (possibleBranches && possibleBranches.length > 0) ||
     model ||
     maxTokens ||
     onEditClick ||
@@ -76,17 +65,14 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
           Edit
         </button>
       )}
-      {onBranchSelect &&
-        possibleNextIds &&
-        (isVirtualRoot ? possibleNextIds.length > 0 : possibleNextIds.length > 1) && (
-          <BranchDropdown
-            possibleNextIds={possibleNextIds}
-            chosenNextId={chosenNextId}
-            currentMessageText={currentMessageText}
-            onBranchSelect={onBranchSelect}
-            disabled={isProcessing}
-          />
-        )}
+      {onBranchSelect && possibleBranches && possibleBranches.length > 0 && (
+        <BranchDropdown
+          possibleBranches={possibleBranches}
+          currentMessageText={currentMessageText}
+          onBranchSelect={onBranchSelect}
+          disabled={isProcessing}
+        />
+      )}
     </div>
   );
 };

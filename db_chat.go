@@ -69,17 +69,17 @@ type PossibleNextMessage struct {
 
 // FrontendMessage struct to match the frontend's ChatMessage interface
 type FrontendMessage struct {
-	ID              string                `json:"id"`
-	Parts           []Part                `json:"parts"`
-	Type            MessageType           `json:"type"`
-	Attachments     []FileAttachment      `json:"attachments,omitempty"`
-	CumulTokenCount *int                  `json:"cumul_token_count,omitempty"`
-	SessionID       string                `json:"sessionId,omitempty"`
-	BranchID        string                `json:"branchId,omitempty"`
-	ParentMessageID *string               `json:"parentMessageId,omitempty"`
-	ChosenNextID    *string               `json:"chosenNextId,omitempty"`
-	PossibleNextIDs []PossibleNextMessage `json:"possibleNextIds,omitempty"`
-	Model           string                `json:"model,omitempty"`
+	ID               string                `json:"id"`
+	Parts            []Part                `json:"parts"`
+	Type             MessageType           `json:"type"`
+	Attachments      []FileAttachment      `json:"attachments,omitempty"`
+	CumulTokenCount  *int                  `json:"cumul_token_count,omitempty"`
+	SessionID        string                `json:"sessionId,omitempty"`
+	BranchID         string                `json:"branchId,omitempty"`
+	ParentMessageID  *string               `json:"parentMessageId,omitempty"`
+	ChosenNextID     *string               `json:"chosenNextId,omitempty"`
+	PossibleBranches []PossibleNextMessage `json:"possibleBranches,omitempty"`
+	Model            string                `json:"model,omitempty"`
 }
 
 // CreateBranch creates a new branch in the database.
@@ -151,7 +151,7 @@ func UpdateSessionPrimaryBranchID(db *sql.DB, sessionID string, branchID string)
 }
 
 // GetMessagePossibleNextIDs retrieves all possible next message IDs and their branch IDs for a given message ID.
-func GetMessagePossibleNextIDs(db *sql.DB, messageID int) ([]PossibleNextMessage, error) {
+func GetMessagePossibleNextIDs(db DbOrTx, messageID int) ([]PossibleNextMessage, error) {
 	rows, err := db.Query("SELECT id, branch_id FROM messages WHERE parent_message_id = ?", messageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query possible next message IDs: %w", err)
@@ -188,11 +188,12 @@ func UpdateBranchPendingConfirmation(db *sql.DB, branchID string, confirmationDa
 	return nil
 }
 
-// createFrontendMessage converts a Message DB struct and related data into a FrontendMessage.
+// createFrontendMessage converts a Message DB struct into a FrontendMessage
+// using either provided possibleBranches or parsing from JSON string
 func createFrontendMessage(
 	m Message,
 	attachmentsJSON sql.NullString,
-	possibleNextIDsAndBranchesStr string,
+	possibleBranches []PossibleNextMessage,
 	ignoreBeforeLastCompression bool,
 	includeState bool,
 ) (FrontendMessage, *int, error) {
@@ -214,7 +215,6 @@ func createFrontendMessage(
 
 	var fmParentMessageID *string = nil
 	var fmChosenNextID *string = nil
-	var fmPossibleNextIDs []PossibleNextMessage = nil
 
 	if m.ParentMessageID != nil {
 		s := fmt.Sprintf("%d", *m.ParentMessageID)
@@ -226,62 +226,28 @@ func createFrontendMessage(
 		fmChosenNextID = &s
 	}
 
-	// Parse JSON array of possible next messages with user text and timestamp
-	if possibleNextIDsAndBranchesStr != "" && possibleNextIDsAndBranchesStr != "[]" {
-		var possibleNextMessages []struct {
-			ID        int    `json:"id"`
-			BranchID  string `json:"branchId"`
-			Text      string `json:"text"`
-			CreatedAt string `json:"createdAt"`
-		}
-
-		if err := json.Unmarshal([]byte(possibleNextIDsAndBranchesStr), &possibleNextMessages); err != nil {
-			log.Printf("Warning: Failed to parse possibleNextMessages JSON for message %d: %v", m.ID, err)
-		} else {
-			for _, msg := range possibleNextMessages {
-				if msg.ID == 0 {
-					continue // Skip empty entries from LEFT JOIN
-				}
-
-				// Parse created_at string to time.Time (handle both ISO 8601 and SQL format)
-				var timestamp int64
-				parsedTime, err := time.Parse(time.RFC3339, msg.CreatedAt)
-				if err != nil {
-					parsedTime, err = time.Parse("2006-01-02 15:04:05", msg.CreatedAt)
-					if err != nil {
-						log.Printf("Warning: Failed to parse created_at for message %d: %v", msg.ID, err)
-						// Still include the entry without timestamp
-						timestamp = 0
-					} else {
-						timestamp = parsedTime.Unix()
-					}
-				} else {
-					timestamp = parsedTime.Unix()
-				}
-
-				fmPossibleNextIDs = append(fmPossibleNextIDs, PossibleNextMessage{
-					MessageID: strconv.Itoa(msg.ID),
-					BranchID:  msg.BranchID,
-					UserText:  msg.Text,
-					Timestamp: timestamp,
-				})
-			}
+	// Filter out self-references from possibleBranches
+	var filteredPossibleBranches []PossibleNextMessage
+	currentMessageID := fmt.Sprintf("%d", m.ID)
+	for _, branch := range possibleBranches {
+		if branch.MessageID != currentMessageID {
+			filteredPossibleBranches = append(filteredPossibleBranches, branch)
 		}
 	}
 
 	// Define fm here, before the switch statement
 	fm := FrontendMessage{
-		ID:              fmt.Sprintf("%d", m.ID),
-		Parts:           parts,
-		Type:            m.Type,
-		Attachments:     m.Attachments,
-		CumulTokenCount: tokens,
-		SessionID:       m.SessionID,
-		BranchID:        m.BranchID,
-		ParentMessageID: fmParentMessageID,
-		ChosenNextID:    fmChosenNextID,
-		PossibleNextIDs: fmPossibleNextIDs,
-		Model:           m.Model,
+		ID:               fmt.Sprintf("%d", m.ID),
+		Parts:            parts,
+		Type:             m.Type,
+		Attachments:      m.Attachments,
+		CumulTokenCount:  tokens,
+		SessionID:        m.SessionID,
+		BranchID:         m.BranchID,
+		ParentMessageID:  fmParentMessageID,
+		ChosenNextID:     fmChosenNextID,
+		PossibleBranches: filteredPossibleBranches,
+		Model:            m.Model,
 	}
 
 	thoughtSignature := m.State
@@ -306,13 +272,17 @@ func createFrontendMessage(
 		}
 	case TypeCompression:
 		// For compression messages, the text is in the format "ID\nSummary"
-		textBefore, textAfter, found := strings.Cut(m.Text, "\n")
+		_, textAfter, found := strings.Cut(m.Text, "\n")
 		if found {
-			parsedID, err := strconv.Atoi(textBefore)
-			if err != nil {
-				log.Printf("Failed to parse CompressedUpToMessageId for message %d: %v", m.ID, err)
-			} else {
-				compressedUpToMessageID = &parsedID
+			// Parse ID for compressedUpToMessageID
+			before, _, found := strings.Cut(m.Text, "\n")
+			if found {
+				parsedID, err := strconv.Atoi(before)
+				if err != nil {
+					log.Printf("Failed to parse CompressedUpToMessageId for message %d: %v", m.ID, err)
+				} else {
+					compressedUpToMessageID = &parsedID
+				}
 			}
 			// If ignoreBeforeLastCompression is true, only show the summary part.
 			// Otherwise, show the full text (ID\nSummary).
@@ -346,6 +316,58 @@ func createFrontendMessage(
 	return fm, compressedUpToMessageID, nil
 }
 
+// parsePossibleNextIDs parses the JSON string containing possible next messages
+// and returns a slice of PossibleNextMessage
+func parsePossibleNextIDs(possibleNextIDsAndBranchesStr string) []PossibleNextMessage {
+	var possibleBranches []PossibleNextMessage
+
+	// Parse JSON array of possible next messages with user text and timestamp
+	if possibleNextIDsAndBranchesStr != "" && possibleNextIDsAndBranchesStr != "[]" {
+		var possibleNextMessages []struct {
+			ID        int    `json:"id"`
+			BranchID  string `json:"branchId"`
+			Text      string `json:"text"`
+			CreatedAt string `json:"createdAt"`
+		}
+
+		if err := json.Unmarshal([]byte(possibleNextIDsAndBranchesStr), &possibleNextMessages); err != nil {
+			log.Printf("Warning: Failed to parse possibleNextMessages JSON: %v", err)
+			return nil
+		}
+
+		for _, msg := range possibleNextMessages {
+			if msg.ID == 0 {
+				continue // Skip empty entries from LEFT JOIN
+			}
+
+			// Parse created_at string to time.Time (handle both ISO 8601 and SQL format)
+			var timestamp int64
+			parsedTime, err := time.Parse(time.RFC3339, msg.CreatedAt)
+			if err != nil {
+				parsedTime, err = time.Parse("2006-01-02 15:04:05", msg.CreatedAt)
+				if err != nil {
+					log.Printf("Warning: Failed to parse created_at for message %d: %v", msg.ID, err)
+					// Still include the entry without timestamp
+					timestamp = 0
+				} else {
+					timestamp = parsedTime.Unix()
+				}
+			} else {
+				timestamp = parsedTime.Unix()
+			}
+
+			possibleBranches = append(possibleBranches, PossibleNextMessage{
+				MessageID: strconv.Itoa(msg.ID),
+				BranchID:  msg.BranchID,
+				UserText:  msg.Text,
+				Timestamp: timestamp,
+			})
+		}
+	}
+
+	return possibleBranches
+}
+
 // getSessionHistoryInternal retrieves the chat history for a given session and its primary branch,
 // recursively fetching messages from parent branches. It allows for discarding thoughts
 // and ignoring messages before the last compression message.
@@ -361,6 +383,8 @@ func getSessionHistoryInternal(
 	beforeMessageID int, // Cursor: fetch messages with ID less than this
 	fetchLimit int, // Number of messages to fetch
 ) ([]FrontendMessage, error) {
+	// Determine if this is a paginated call that might have over-fetched
+	isPaginatedCall := (beforeMessageID != 0 || fetchLimit > 0)
 	branchID := primaryBranchID
 	keepGoing := true
 
@@ -443,7 +467,7 @@ func getSessionHistoryInternal(
 
 	var history [][]FrontendMessage
 	var currentMessageCount int
-	for keepGoing && (isFullHistoryFetch || currentMessageCount < fetchLimit) { // Modified condition
+	for keepGoing && (isFullHistoryFetch || currentMessageCount < fetchLimit) {
 		err := func() error {
 			rows, err := db.Query(`
 				SELECT
@@ -455,15 +479,15 @@ func getSessionHistoryInternal(
 								'id', mm.id,
 								'branchId', mm.branch_id,
 								'text', COALESCE(mm.text, ''),
-								'createdAt', mm.created_at
+								'createdAt', COALESCE(mm.created_at, '')
 							)
 						),
 						'[]'
 					)
-			FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
-			GROUP BY m.id
-			HAVING m.branch_id = ? AND m.id >= ? AND m.id <= ?
-			ORDER BY m.id ASC
+				FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
+				GROUP BY m.id
+				HAVING m.branch_id = ? AND m.id >= ? AND m.id <= ?
+				ORDER BY m.id ASC
 			`, branchID, startingMessageID, messageIdLimit)
 			if err != nil {
 				return fmt.Errorf("failed to query branch messages: %w", err)
@@ -471,7 +495,9 @@ func getSessionHistoryInternal(
 			defer rows.Close()
 
 			var messages []FrontendMessage
+			var possibleBranches []PossibleNextMessage
 			parentBranchMessageID := -1
+
 			for rows.Next() {
 				var m Message
 				var attachmentsJSON sql.NullString
@@ -496,8 +522,8 @@ func getSessionHistoryInternal(
 					continue // Skip thought messages
 				}
 
-				// discardThought implies includeState because state summarizes prior thoughts.
-				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleNextIDsAndBranchesStr, ignoreBeforeLastCompression, discardThoughts)
+				// Create frontend message with possibleBranches from previous iteration
+				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleBranches, ignoreBeforeLastCompression, discardThoughts)
 				if err != nil {
 					return fmt.Errorf("failed to create frontend message: %w", err)
 				}
@@ -506,11 +532,22 @@ func getSessionHistoryInternal(
 					parentBranchMessageID = *m.ParentMessageID
 				}
 				messages = append(messages, fm)
+
+				// Parse possibleNextIDs from current message to be used as possibleBranches for next message
+				possibleBranches = parsePossibleNextIDs(possibleNextIDsAndBranchesStr)
 			}
 
 			if len(messages) == 0 {
 				keepGoing = false
 				return nil
+			}
+
+			// Set possibleBranches for the first message in this batch from previous iteration
+			if len(history) > 0 {
+				lastBatch := history[len(history)-1]
+				if len(lastBatch) > 0 {
+					lastBatch[0].PossibleBranches = possibleBranches
+				}
 			}
 
 			history = append(history, messages)
@@ -558,6 +595,69 @@ func getSessionHistoryInternal(
 		combinedHistory[i], combinedHistory[j] = combinedHistory[j], combinedHistory[i]
 	}
 
+	// Handle paginated calls that might have over-fetched for possibleBranches
+	if isPaginatedCall && !isFullHistoryFetch && fetchLimit > 0 && len(combinedHistory) > fetchLimit {
+		// We have extra messages, so the first message in combinedHistory has its possibleNextIds
+		// which should become possibleBranches for the second message (which becomes the first)
+		if len(combinedHistory) >= 2 {
+			// Get possibleNextIds from the first message (combinedHistory[0])
+			firstMessageID, err := strconv.Atoi(combinedHistory[0].ID)
+			if err != nil {
+				log.Printf("getSessionHistoryInternal: Failed to parse message ID %s: %v", combinedHistory[0].ID, err)
+			} else {
+				nextIDs, err := GetMessagePossibleNextIDs(db, firstMessageID)
+				if err != nil {
+					log.Printf("getSessionHistoryInternal: Failed to get possible next IDs for message %s: %v", combinedHistory[0].ID, err)
+				} else {
+					combinedHistory[1].PossibleBranches = nextIDs
+				}
+			}
+		}
+		// Remove the first message (the extra one we read) to respect the original fetchLimit
+		combinedHistory = combinedHistory[1:]
+	} else if len(combinedHistory) > 0 && combinedHistory[0].ParentMessageID == nil {
+		// Full history fetch or we didn't exceed fetchLimit, handle first message case
+		firstMessages, err := GetSessionFirstMessages(db, sessionID)
+		if err != nil {
+			log.Printf("getSessionHistoryInternal: Failed to get first messages for session %s: %v", sessionID, err)
+			// Non-fatal, continue without possible first message IDs
+		} else if len(firstMessages) > 1 {
+			var possibleFirstIds []PossibleNextMessage
+			for _, msg := range firstMessages {
+				// Parse created_at string to time.Time (handle both ISO 8601 and SQL format)
+				var createdAt time.Time
+				var err error
+
+				// Try ISO 8601 format first (e.g., "2025-10-06T19:55:07Z")
+				createdAt, err = time.Parse(time.RFC3339, msg.CreatedAt)
+				if err != nil {
+					// If ISO 8601 fails, try SQL format (e.g., "2025-10-06 19:55:07")
+					createdAt, err = time.Parse("2006-01-02 15:04:05", msg.CreatedAt)
+					if err != nil {
+						log.Printf("Failed to parse created_at for message %d: %v", msg.ID, err)
+						continue
+					}
+				}
+
+				possibleFirstIds = append(possibleFirstIds, PossibleNextMessage{
+					MessageID: strconv.Itoa(msg.ID),
+					BranchID:  msg.BranchID,
+					UserText:  msg.Text,
+					Timestamp: createdAt.Unix(),
+				})
+			}
+
+			// Filter out the current message from possibleFirstIds and set as possibleBranches
+			var filteredPossibleBranches []PossibleNextMessage
+			for _, possibleMsg := range possibleFirstIds {
+				if possibleMsg.MessageID != combinedHistory[0].ID {
+					filteredPossibleBranches = append(filteredPossibleBranches, possibleMsg)
+				}
+			}
+			combinedHistory[0].PossibleBranches = filteredPossibleBranches
+		}
+	}
+
 	return combinedHistory, nil
 }
 
@@ -576,6 +676,10 @@ func GetSessionHistoryContext(db DbOrTx, sessionID string, primaryBranchID strin
 // GetSessionHistoryPaginated retrieves a paginated chat history for a given session and branch.
 // It fetches messages with IDs less than beforeMessageID, up to fetchLimit.
 func GetSessionHistoryPaginated(db DbOrTx, sessionID string, primaryBranchID string, beforeMessageID int, fetchLimit int) ([]FrontendMessage, error) {
+	// For paginated calls, we need to fetch one more message to get proper possibleBranches for the first message
+	if fetchLimit > 0 {
+		return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, beforeMessageID, fetchLimit+1)
+	}
 	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, beforeMessageID, fetchLimit)
 }
 
@@ -730,7 +834,7 @@ func GetSessionFirstMessage(db *sql.DB, sessionID string) (*Message, error) {
 }
 
 // GetSessionFirstMessages retrieves all first messages (parent_message_id IS NULL) for a session.
-func GetSessionFirstMessages(db *sql.DB, sessionID string) ([]Message, error) {
+func GetSessionFirstMessages(db DbOrTx, sessionID string) ([]Message, error) {
 	query := `
 		SELECT id, session_id, branch_id, parent_message_id, chosen_next_id,
 		       text, type, attachments, cumul_token_count, created_at,

@@ -41,7 +41,7 @@ export interface ChatMessage {
   branchId?: string;
   parentMessageId?: string;
   chosenNextId?: string;
-  possibleNextIds?: PossibleNextMessage[];
+  possibleBranches?: PossibleNextMessage[];
   model?: string;
   sessionId?: string;
   edited?: boolean;
@@ -56,7 +56,6 @@ export interface InitialState {
   callElapsedTimeSeconds?: number;
   pendingConfirmation?: string;
   envChanged?: EnvChanged;
-  possibleFirstIds?: PossibleNextMessage[];
 }
 
 export interface Session {

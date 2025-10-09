@@ -36,7 +36,6 @@ import {
   isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
-  possibleFirstIdsAtom,
   preserveSelectedFilesAtom,
 } from '../atoms/chatAtoms';
 import { useScrollAdjustment } from './useScrollAdjustment';
@@ -75,7 +74,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
   const setIsPriorSessionLoadComplete = useSetAtom(isPriorSessionLoadCompleteAtom);
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
-  const setPossibleFirstIds = useSetAtom(possibleFirstIdsAtom);
   const preserveSelectedFiles = useAtomValue(preserveSelectedFilesAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
 
@@ -314,7 +312,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
                 setWorkspaceId(data.workspaceId);
                 setPrimaryBranchId(data.primaryBranchId);
                 setPendingConfirmation(data.pendingConfirmation || null);
-                setPossibleFirstIds(data.possibleFirstIds || []);
 
                 setHasMoreMessages(data.history && data.history.length >= FETCH_LIMIT);
 
