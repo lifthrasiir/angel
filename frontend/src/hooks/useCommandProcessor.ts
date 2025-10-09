@@ -14,7 +14,7 @@ import {
 } from '../atoms/chatAtoms';
 import type { ChatMessage, RootsChanged, EnvChanged } from '../types/chat';
 import { fetchSessions } from '../utils/sessionManager';
-import { callNativeDirectoryPicker, ResultType, PickDirectoryAPIResponse } from '../utils/dialogHelpers';
+import { callDirectoryPicker } from '../utils/dialogHelpers';
 
 export const useCommandProcessor = (sessionId: string | null) => {
   const setStatusMessage = useSetAtom(statusMessageAtom);
@@ -212,31 +212,21 @@ export const useCommandProcessor = (sessionId: string | null) => {
 
     let rootsToProcess: string[] = [];
     if (command === 'expose' && !args) {
-      // If /expose is called without arguments, trigger native directory picker
-      const data: PickDirectoryAPIResponse = await callNativeDirectoryPicker(setIsPickingDirectory, setStatusMessage);
+      // If /expose is called without arguments, trigger directory picker
+      try {
+        const selectedPath = await callDirectoryPicker(setIsPickingDirectory);
 
-      switch (data.result) {
-        case ResultType.Success:
-          if (data.selectedPath) {
-            rootsToProcess = [data.selectedPath];
-          } else {
-            setStatusMessage('Error: No path returned from directory picker.');
-            setTemporaryEnvChangeMessage(null);
-            return;
-          }
-          break;
-        case ResultType.Canceled:
-          setStatusMessage('Directory selection canceled.');
+        if (selectedPath) {
+          rootsToProcess = [selectedPath];
+        } else {
+          // User cancelled directory picker - just return without doing anything
           setTemporaryEnvChangeMessage(null);
           return;
-        case ResultType.AlreadyOpen:
-          setStatusMessage('Another directory picker is already open.');
-          setTemporaryEnvChangeMessage(null);
-          return;
-        case ResultType.Error:
-          setStatusMessage(`Error selecting directory: ${data.error || 'Unknown error'}`);
-          setTemporaryEnvChangeMessage(null);
-          return;
+        }
+      } catch (error: any) {
+        setStatusMessage(`Error selecting directory: ${error.message || 'Unknown error'}`);
+        setTemporaryEnvChangeMessage(null);
+        return;
       }
     } else {
       // Existing logic for expose/unexpose with arguments or unexpose without arguments

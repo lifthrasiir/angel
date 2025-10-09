@@ -171,6 +171,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/models", listModelsHandler).Methods("GET")
 	router.HandleFunc("/api/systemPrompts", getSystemPromptsHandler).Methods("GET")
 	router.HandleFunc("/api/systemPrompts", saveSystemPromptsHandler).Methods("PUT")
+	router.HandleFunc("/api/ui/directory", handleDirectoryNavigation).Methods("GET")
 	router.HandleFunc("/api/ui/directory", handlePickDirectory).Methods("POST")
 	router.HandleFunc("/api", handleNotFound)
 

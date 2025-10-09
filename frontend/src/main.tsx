@@ -9,7 +9,7 @@ import { SessionPage } from './pages/SessionPage';
 import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
-import GlobalDialogOverlay from './components/GlobalDialogOverlay';
+import { DirectoryPickerManager } from './components/DirectoryPickerManager';
 
 import './components/tools/index.ts';
 
@@ -94,9 +94,9 @@ const Root = () => {
         <WorkspaceProvider>
           <RouterProvider router={router} />
         </WorkspaceProvider>
+        <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
+        <DirectoryPickerManager />
       </Provider>
-      <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
-      <GlobalDialogOverlay />
     </React.StrictMode>
   );
 };

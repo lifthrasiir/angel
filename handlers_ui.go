@@ -1,14 +1,16 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
 
-	"github.com/sqweek/dialog"
+	"github.com/fvbommel/sortorder"
 )
 
 // UILogicResultType indicates the outcome of the UI dialog operation.
@@ -21,6 +23,21 @@ const (
 	UILogicResultTypeError       UILogicResultType = "error"
 )
 
+// DirectoryInfo represents a directory entry in the file system
+type DirectoryInfo struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	IsParent bool   `json:"isParent"`
+	IsRoot   bool   `json:"isRoot"`
+}
+
+// DirectoryNavigationResponse holds the directory listing information
+type DirectoryNavigationResponse struct {
+	CurrentPath string          `json:"currentPath"`
+	Items       []DirectoryInfo `json:"items"`
+	Error       string          `json:"error,omitempty"`
+}
+
 // PickDirectoryAPIResponse holds the path and the type of result for API response.
 type PickDirectoryAPIResponse struct {
 	SelectedPath string            `json:"selectedPath,omitempty"`
@@ -28,99 +45,208 @@ type PickDirectoryAPIResponse struct {
 	Error        string            `json:"error,omitempty"`
 }
 
-var (
-	uiDialogMutex    sync.Mutex // Ensures only one UI dialog (like directory picker) is active at a time
-	isUIDialogActive bool       // Flag to track if a UI dialog is currently open
-)
-
-// pickDirectoryInternal opens a native directory picker dialog.
-// It uses a mutex to ensure only one dialog is active at a time.
-// The context is used to cancel the dialog operation if the HTTP request is cancelled.
-func pickDirectoryInternal(ctx context.Context) PickDirectoryAPIResponse {
-	log.Println("Attempting to acquire UI dialog mutex...")
-	if !uiDialogMutex.TryLock() { // Acquire a non-blocking lock
-		log.Println("UI dialog mutex already locked, another dialog is active.")
-		return PickDirectoryAPIResponse{Result: UILogicResultTypeAlreadyOpen, Error: "Another dialog is already open."}
-	}
-	defer uiDialogMutex.Unlock()
-	log.Println("UI dialog mutex acquired.")
-
-	// Double-check after acquiring lock in case another goroutine set it to true
-	if isUIDialogActive {
-		log.Println("isUIDialogActive flag is true, another dialog is active.")
-		return PickDirectoryAPIResponse{Result: UILogicResultTypeAlreadyOpen, Error: "Another dialog is already open."}
+// getDirectoryList returns a list of directories in the specified path
+func getDirectoryList(path string) ([]DirectoryInfo, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
 	}
 
-	isUIDialogActive = true
-	defer func() {
-		isUIDialogActive = false
-		log.Println("UI dialog operation finished, isUIDialogActive set to false.")
-	}()
+	var dirs []DirectoryInfo
 
-	resultChan := make(chan PickDirectoryAPIResponse, 1)
+	// Add parent directory entry (unless we're at root)
+	parentPath := filepath.Dir(path)
+	var shouldAddParent bool
+	var parentDirPath string
 
-	go func() {
-		log.Println("Opening directory picker dialog...")
-		dir, err := dialog.Directory().Title("Select Directory").Browse()
-		log.Printf("Directory picker dialog closed. Dir: %s, Error: %v\n", dir, err)
+	if parentPath != path {
+		shouldAddParent = true
+		parentDirPath = parentPath
+	} else if runtime.GOOS == "windows" && len(path) == 3 && path[1] == ':' && path[2] == '\\' {
+		// On Windows, if we're at a drive root (C:\, D:\), add parent to virtual root
+		shouldAddParent = true
+		parentDirPath = ""
+	}
 
-		if err != nil {
-			if err == dialog.ErrCancelled {
-				resultChan <- PickDirectoryAPIResponse{Result: UILogicResultTypeCanceled}
-			} else {
-				resultChan <- PickDirectoryAPIResponse{Result: UILogicResultTypeError, Error: fmt.Sprintf("Failed to select directory: %v", err)}
-			}
-		} else {
-			resultChan <- PickDirectoryAPIResponse{SelectedPath: dir, Result: UILogicResultTypeSuccess}
+	if shouldAddParent {
+		dirs = append(dirs, DirectoryInfo{
+			Name:     "..",
+			Path:     parentDirPath,
+			IsParent: true,
+			IsRoot:   parentDirPath == "",
+		})
+	}
+
+	// Add subdirectories
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs = append(dirs, DirectoryInfo{
+				Name:     entry.Name(),
+				Path:     filepath.Join(path, entry.Name()),
+				IsParent: false,
+				IsRoot:   false,
+			})
 		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		// HTTP request was cancelled. We cannot programmatically close the native dialog,
-		// but we can at least signal that the operation was interrupted.
-		// The dialog will remain open on the user's screen but its result won't be processed.
-		log.Printf("Directory picking cancelled by context: %v", ctx.Err())
-		return PickDirectoryAPIResponse{Result: UILogicResultTypeCanceled, Error: "Operation cancelled by client."}
-	case res := <-resultChan:
-		log.Printf("Directory picking completed: %+v\n", res)
-		return res
 	}
+
+	// Sort directories: parent first, then natural order
+	sort.Slice(dirs, func(i, j int) bool {
+		if dirs[i].IsParent {
+			return true
+		}
+		if dirs[j].IsParent {
+			return false
+		}
+		return sortorder.NaturalLess(dirs[i].Name, dirs[j].Name)
+	})
+
+	return dirs, nil
+}
+
+// handleDirectoryNavigation handles GET /api/ui/directory?path=<path>
+func handleDirectoryNavigation(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+
+	var dirs []DirectoryInfo
+	var err error
+	var resolvedPath string
+
+	// On Windows, show drives when path is empty string
+	if runtime.GOOS == "windows" && path == "" {
+		dirs, err = getWindowsDrives()
+		resolvedPath = ""
+	} else {
+		// For non-empty paths, resolve to absolute path
+		if path == "" {
+			path = "."
+		}
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			absPath = filepath.Clean(path)
+		}
+		resolvedPath = absPath
+		dirs, err = getDirectoryList(resolvedPath)
+	}
+
+	if err != nil {
+		response := DirectoryNavigationResponse{
+			CurrentPath: resolvedPath,
+			Items:       []DirectoryInfo{},
+			Error:       fmt.Sprintf("Failed to read directory: %v", err),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := DirectoryNavigationResponse{
+		CurrentPath: resolvedPath,
+		Items:       dirs,
+		Error:       "",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // handlePickDirectory handles the /api/ui/directory POST request.
-// It triggers a native directory selection dialog on the server side.
+// For web-based selection, this now expects the selected path in the request body.
 func handlePickDirectory(w http.ResponseWriter, r *http.Request) {
 	log.Println("Received /api/ui/directory request.")
-	// Use the request context to allow cancellation if the client disconnects.
-	res := pickDirectoryInternal(r.Context())
 
-	w.Header().Set("Content-Type", "application/json")
-	encoder := json.NewEncoder(w)
+	if r.Method == "GET" {
+		// Legacy GET support - return navigation response instead
+		cwd, err := os.Getwd()
+		if err != nil {
+			http.Error(w, "Failed to get current directory", http.StatusInternalServerError)
+			return
+		}
 
-	switch res.Result {
-	case UILogicResultTypeSuccess:
-		log.Printf("Directory selected: %s\n", res.SelectedPath)
-		w.WriteHeader(http.StatusOK)
-		encoder.Encode(res)
-	case UILogicResultTypeCanceled:
-		log.Println("Directory selection canceled by user or client.")
-		w.WriteHeader(http.StatusOK) // 200 OK for user cancellation
-		encoder.Encode(res)
-	case UILogicResultTypeAlreadyOpen:
-		log.Println("Another directory dialog is already open.")
-		w.WriteHeader(http.StatusConflict) // 409 Conflict
-		encoder.Encode(res)
-	case UILogicResultTypeError:
-		log.Printf("Directory selection error: %v\n", res.Error)
-		w.WriteHeader(http.StatusInternalServerError) // 500 Internal Server Error
-		encoder.Encode(res)
-	default:
-		log.Printf("Unknown result type: %s\n", res.Result)
-		w.WriteHeader(http.StatusInternalServerError)
-		encoder.Encode(PickDirectoryAPIResponse{
-			Result: UILogicResultTypeError,
-			Error:  "Unknown error during directory selection.",
-		})
+		dirs, err := getDirectoryList(cwd)
+		if err != nil {
+			response := DirectoryNavigationResponse{
+				CurrentPath: cwd,
+				Items:       []DirectoryInfo{},
+				Error:       fmt.Sprintf("Failed to read directory: %v", err),
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := DirectoryNavigationResponse{
+			CurrentPath: cwd,
+			Items:       dirs,
+			Error:       "",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
 	}
+
+	// Handle POST request with selected path in body
+	var request struct {
+		SelectedPath string `json:"selectedPath"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		res := PickDirectoryAPIResponse{
+			Result: UILogicResultTypeError,
+			Error:  "Invalid request body",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+
+	// Validate the selected path
+	if request.SelectedPath == "" {
+		res := PickDirectoryAPIResponse{
+			Result: UILogicResultTypeError,
+			Error:  "No path selected",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+
+	// Check if the path exists and is a directory
+	info, err := os.Stat(request.SelectedPath)
+	if err != nil {
+		res := PickDirectoryAPIResponse{
+			Result: UILogicResultTypeError,
+			Error:  fmt.Sprintf("Path does not exist: %v", err),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+
+	if !info.IsDir() {
+		res := PickDirectoryAPIResponse{
+			Result: UILogicResultTypeError,
+			Error:  "Selected path is not a directory",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+
+	// Success
+	res := PickDirectoryAPIResponse{
+		SelectedPath: request.SelectedPath,
+		Result:       UILogicResultTypeSuccess,
+	}
+
+	log.Printf("Directory selected: %s\n", request.SelectedPath)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(res)
 }
