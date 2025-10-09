@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import { useAtom } from 'jotai';
 import type { FileAttachment } from '../types/chat';
 import FileAttachmentList from './FileAttachmentList';
@@ -30,52 +30,23 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   const isProcessing = processingStartTime !== null;
 
   const isEditing = messageId === editingMessageId;
-  const [editedText, setEditedText] = useState(text || '');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageOnly = isImageOnlyMessage(text, attachments);
-
-  useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.focus();
-      // Adjust height on initial render if it's in editing mode
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-    }
-  }, [isEditing]);
 
   const handleEditClick = () => {
     if (!isProcessing) {
       setEditingMessageId(messageId || null);
-      setEditedText(text || '');
     }
   };
 
-  const handleCancelEdit = () => {
-    setEditingMessageId(null);
-    setEditedText(text || '');
-  };
-
-  const handleSaveEdit = () => {
+  const handleEditSave = (newText: string) => {
     if (messageId) {
-      onSaveEdit(messageId, editedText);
+      onSaveEdit(messageId, newText);
     }
     setEditingMessageId(null);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && e.ctrlKey) {
-      e.preventDefault();
-      handleSaveEdit();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      handleCancelEdit();
-    }
-  };
-
-  const handleInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
-    const target = e.target as HTMLTextAreaElement;
-    target.style.height = 'auto';
-    target.style.height = target.scrollHeight + 'px';
+  const handleEditCancel = () => {
+    setEditingMessageId(null);
   };
 
   return (
@@ -89,36 +60,20 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
           : messageInfo
       }
       heighten={false}
+      editText={!imageOnly ? text : ''}
+      isEditing={isEditing && !imageOnly}
+      onEditSave={handleEditSave}
+      onEditCancel={handleEditCancel}
     >
-      {isEditing ? (
-        <textarea
-          ref={textareaRef}
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '1px solid #ccc',
-            borderRadius: '6px',
-            resize: 'vertical',
-            boxSizing: 'border-box',
-          }}
-          value={editedText}
-          onChange={(e) => setEditedText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={handleCancelEdit}
-          onInput={handleInput}
-          rows={Math.max(3, editedText.split('\n').length)}
+      <>
+        {!imageOnly && text}
+        <FileAttachmentList
+          attachments={attachments}
+          messageId={messageId}
+          sessionId={sessionId}
+          isImageOnlyMessage={imageOnly}
         />
-      ) : (
-        <>
-          <FileAttachmentList
-            attachments={attachments}
-            messageId={messageId}
-            sessionId={sessionId}
-            isImageOnlyMessage={imageOnly}
-          />
-          {!imageOnly && text}
-        </>
-      )}
+      </>
     </ChatBubble>
   );
 };
