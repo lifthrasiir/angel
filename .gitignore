@@ -7,3 +7,4 @@ node_modules
 .claude/settings.local.json
 frontend/vite.config.ts.timestamp-*.mjs
 frontend/dist
+frontend/sourcemaps

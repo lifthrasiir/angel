@@ -220,6 +220,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api", handleNotFound)
 
 	router.PathPrefix("/assets/").HandlerFunc(serveStaticFiles)
+	router.PathPrefix("/sourcemaps/").HandlerFunc(serveSourcemapFiles)
 
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
 }
@@ -243,6 +244,22 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.FileServer(http.FS(fsys)).ServeHTTP(w, r)
+}
+
+// serveSourcemapFiles serves sourcemap files from the frontend/sourcemaps directory
+func serveSourcemapFiles(w http.ResponseWriter, r *http.Request) {
+	// Strip the /sourcemaps/ prefix for serving from frontend/sourcemaps
+	sourcemapPath := strings.TrimPrefix(r.URL.Path, "/sourcemaps/")
+	fsPath := filepath.Join("frontend", "sourcemaps", sourcemapPath)
+
+	// Check if the requested path is for a file that exists on disk
+	if _, err := os.Stat(fsPath); err == nil {
+		http.ServeFile(w, r, fsPath)
+		return
+	}
+
+	// If not found on filesystem, return 404 (sourcemaps are not embedded)
+	http.NotFound(w, r)
 }
 
 // serveSPAIndex serves the index.html file for SPA fallback
