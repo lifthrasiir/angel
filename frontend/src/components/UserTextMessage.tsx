@@ -15,6 +15,7 @@ interface UserTextMessageProps {
   messageId?: string;
   sessionId?: string;
   onSaveEdit: (messageId: string, editedText: string) => void;
+  onRetryClick?: (messageId: string) => void;
 }
 
 const UserTextMessage: React.FC<UserTextMessageProps> = ({
@@ -24,6 +25,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   messageId,
   sessionId,
   onSaveEdit,
+  onRetryClick,
 }) => {
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
   const [processingStartTime] = useAtom(processingStartTimeAtom);
@@ -45,6 +47,12 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
     setEditingMessageId(null);
   };
 
+  const handleRetry = () => {
+    if (onRetryClick && messageId) {
+      onRetryClick(messageId);
+    }
+  };
+
   const handleEditCancel = () => {
     setEditingMessageId(null);
   };
@@ -56,7 +64,10 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
       bubbleClassName="user-message-bubble-content"
       messageInfo={
         React.isValidElement(messageInfo) && messageInfo.type === MessageInfo // Add type check
-          ? React.cloneElement(messageInfo, { onEditClick: handleEditClick } as Partial<MessageInfoProps>) // Cast to Partial<MessageInfoProps>
+          ? React.cloneElement(messageInfo, {
+              onEditClick: handleEditClick,
+              onRetryClick: handleRetry,
+            } as Partial<MessageInfoProps>) // Cast to Partial<MessageInfoProps>
           : messageInfo
       }
       heighten={false}

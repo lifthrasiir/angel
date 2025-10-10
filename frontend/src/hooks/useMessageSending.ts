@@ -470,5 +470,74 @@ export const useMessageSending = ({
     }
   };
 
-  return { handleSendMessage, cancelStreamingCall, sendConfirmation, handleEditMessage, handleBranchSwitch };
+  const handleRetryMessage = async (originalMessageId: string) => {
+    if (!chatSessionId) {
+      addErrorMessage('Cannot retry message: Session ID is missing.');
+      return;
+    }
+
+    setProcessingStartTime(performance.now());
+    setEditingMessageId(null); // Exit editing mode if active
+
+    // Remove this message and all subsequent messages on the frontend
+    setMessages((prevMessages) => {
+      const updatedMessages = [...prevMessages];
+      const messageIndex = updatedMessages.findIndex((msg) => msg.id === originalMessageId);
+
+      if (messageIndex !== -1) {
+        // Remove all messages after the retry message
+        return updatedMessages.slice(0, messageIndex + 1);
+      }
+      return prevMessages; // If message not found, return previous state
+    });
+
+    try {
+      const requestBody = {
+        updatedMessageId: parseInt(originalMessageId, 10), // Convert message ID to integer
+        newMessageText: '', // Empty text for retry (server will get original text)
+      };
+
+      const response = await apiFetch(`/api/chat/${chatSessionId}/branch?retry=1`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.status === 401) {
+        window.location.reload();
+        return;
+      }
+
+      if (!response.ok) {
+        const errorMessage = `Failed to retry message: ${response.status} ${response.statusText}`;
+        addErrorMessage(errorMessage);
+        return;
+      }
+
+      const handlers: StreamEventHandlers = {
+        ...commonHandlers,
+        onAcknowledge: (messageId: string) => {
+          // When a message is retried, the backend might send an acknowledge with the new message ID.
+          // We need to update the original message's ID to the new one.
+          updateUserMessageId({ temporaryId: originalMessageId, newId: messageId });
+        },
+      };
+
+      await processStreamResponse(response, handlers);
+    } catch (error) {
+      console.error('Error retrying message:', error);
+      addErrorMessage('Error retrying message.');
+    } finally {
+      setProcessingStartTime(null);
+    }
+  };
+
+  return {
+    handleSendMessage,
+    cancelStreamingCall,
+    sendConfirmation,
+    handleEditMessage,
+    handleBranchSwitch,
+    handleRetryMessage,
+  };
 };

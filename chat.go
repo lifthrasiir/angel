@@ -616,6 +616,23 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if this is a retry request
+	isRetry := r.URL.Query().Get("retry") == "1"
+
+	// For retry, get the original message text if not provided
+	if isRetry && requestBody.NewMessageText == "" {
+		originalMessage, err := GetMessageByID(db, requestBody.UpdatedMessageID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				sendNotFoundError(w, r, "Message not found")
+			} else {
+				sendInternalServerError(w, r, err, "Failed to get original message")
+			}
+			return
+		}
+		requestBody.NewMessageText = originalMessage.Text
+	}
+
 	// Get the updated message's role, type, parent_message_id, and branch_id to validate branching and create new branch
 	updatedType, updatedParentMessageID, updatedBranchID, err := GetMessageDetails(db, requestBody.UpdatedMessageID)
 	if err != nil {

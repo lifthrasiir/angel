@@ -2,6 +2,7 @@ import React from 'react';
 import type { PossibleNextMessage } from '../types/chat';
 import { useAtom } from 'jotai';
 import { processingStartTimeAtom } from '../atoms/chatAtoms';
+import { FaEdit, FaRedo } from 'react-icons/fa';
 import BranchDropdown from './BranchDropdown';
 
 export interface MessageInfoProps {
@@ -10,6 +11,7 @@ export interface MessageInfoProps {
   model?: string;
   maxTokens?: number;
   onEditClick?: () => void;
+  onRetryClick?: () => void;
   onBranchSelect?: (newBranchId: string) => void;
   sessionId?: string;
   currentMessageText?: string; // Current message text for diff comparison
@@ -21,6 +23,7 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
   model,
   maxTokens,
   onEditClick,
+  onRetryClick,
   onBranchSelect,
   currentMessageText,
 }) => {
@@ -33,6 +36,7 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
     model ||
     maxTokens ||
     onEditClick ||
+    onRetryClick ||
     onBranchSelect;
 
   if (!hasInfo) {
@@ -50,19 +54,13 @@ const MessageInfo: React.FC<MessageInfoProps> = ({
             : ''}
       </span>
       {onEditClick && (
-        <button
-          onClick={onEditClick}
-          disabled={isProcessing}
-          style={{
-            padding: '4px 8px',
-            border: '1px solid #ccc',
-            borderRadius: '4px',
-            background: isProcessing ? '#f0f0f0' : '#e0e0e0',
-            cursor: isProcessing ? 'not-allowed' : 'pointer',
-            fontSize: '0.8em',
-          }}
-        >
-          Edit
+        <button onClick={onEditClick} disabled={isProcessing} title="Edit message">
+          <FaEdit size={16} />
+        </button>
+      )}
+      {onRetryClick && (
+        <button onClick={onRetryClick} disabled={isProcessing} title="Retry message">
+          <FaRedo size={16} />
         </button>
       )}
       {onBranchSelect && possibleBranches && possibleBranches.length > 0 && (

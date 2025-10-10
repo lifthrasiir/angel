@@ -45,6 +45,7 @@ interface ChatAreaProps {
     modifiedData?: Record<string, any>,
   ) => Promise<void>;
   handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>;
+  handleRetryMessage?: (originalMessageId: string) => Promise<void>;
   handleBranchSwitch: (newBranchId: string) => Promise<void>;
 }
 
@@ -57,6 +58,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   chatAreaRef,
   sendConfirmation,
   handleEditMessage,
+  handleRetryMessage,
   handleBranchSwitch,
 }) => {
   const [workspaceId] = useAtom(workspaceIdAtom);
@@ -292,6 +294,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               isLastModelMessage={isLastModelMessage}
               processingStartTime={processingStartTime}
               onSaveEdit={handleEditMessage}
+              onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
               onBranchSelect={handleBranchSwitch}
             />
             {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
@@ -363,6 +366,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           isLastModelMessage={false}
           processingStartTime={null}
           onSaveEdit={() => {}}
+          onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
           onBranchSelect={handleBranchSwitch}
         />,
       );

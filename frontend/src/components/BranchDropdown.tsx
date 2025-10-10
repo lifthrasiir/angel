@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { PossibleNextMessage } from '../types/chat';
+import { FaCodeBranch } from 'react-icons/fa';
 
 interface BranchDropdownProps {
   possibleBranches: PossibleNextMessage[];
@@ -149,6 +150,7 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
   disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [dropDirection, setDropDirection] = useState<'down' | 'up'>('down');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Don't render if there are no alternative branches to switch to
@@ -174,113 +176,71 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
     setIsOpen(false);
   };
 
+  // Calculate dropdown direction based on viewport
+  const calculateDropDirection = () => {
+    if (!dropdownRef.current) return;
+
+    const rect = dropdownRef.current.getBoundingClientRect();
+    const centerY = window.innerHeight / 2;
+
+    if (rect.bottom < centerY) {
+      setDropDirection('down');
+    } else {
+      setDropDirection('up');
+    }
+  };
+
   return (
     <div
       ref={dropdownRef}
       style={{
         position: 'relative',
         display: 'inline-block',
-        marginLeft: '5px',
       }}
     >
       {/* Dropdown trigger button */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        disabled={disabled}
-        style={{
-          padding: '4px 8px',
-          border: '1px solid #ccc',
-          borderRadius: '4px',
-          background: disabled ? '#f0f0f0' : '#e0e0e0',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          fontSize: '0.8em',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px',
+        onClick={() => {
+          if (!isOpen) {
+            calculateDropDirection();
+          }
+          setIsOpen(!isOpen);
         }}
-        title="Switch branch"
+        disabled={disabled}
+        className="branch-dropdown-trigger"
+        title={`Switch branch (${possibleBranches.length} available)`}
       >
-        <span>⎇</span>
-        <span>{possibleBranches.length}</span>
+        <FaCodeBranch size={16} />
+        <span className="branch-count">{possibleBranches.length}</span>
       </button>
 
       {/* Dropdown menu */}
       {isOpen && !disabled && (
         <div
+          className="branch-dropdown-menu"
           style={{
-            position: 'absolute',
-            top: '100%',
-            right: '0',
-            backgroundColor: 'white',
-            border: '1px solid #ccc',
-            borderRadius: '4px',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-            zIndex: 1000,
-            minWidth: '250px',
-            maxHeight: '300px',
-            overflowY: 'auto',
+            top: dropDirection === 'up' ? 'auto' : '100%',
+            bottom: dropDirection === 'up' ? '100%' : 'auto',
           }}
         >
-          <div
-            style={{
-              padding: '8px',
-              borderBottom: '1px solid #eee',
-              fontSize: '0.8em',
-              color: '#666',
-              fontWeight: 'bold',
-            }}
-          >
-            Switch to branch:
-          </div>
-          {possibleBranches.map((branch) => (
-            <button
-              key={branch.messageId}
-              onClick={() => handleBranchSelect(branch)}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: 'none',
-                backgroundColor: 'transparent',
-                textAlign: 'left',
-                cursor: 'pointer',
-                fontSize: '0.85em',
-                borderBottom: '1px solid #f0f0f0',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: '4px',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#f5f5f5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-            >
-              <div
-                style={{
-                  width: '100%',
-                  fontSize: '0.9em',
-                  lineHeight: '1.3',
-                  color: '#333',
-                }}
-                title={branch.userText || 'No text'}
+          <div className="branch-dropdown-header">Switch to branch:</div>
+          {possibleBranches
+            .slice()
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+            .map((branch) => (
+              <button
+                key={branch.messageId}
+                onClick={() => handleBranchSelect(branch)}
+                className="branch-dropdown-item"
               >
-                {branch.userText ? formatTextOutput(branch.userText, currentMessageText) : 'No text'}
-              </div>
-              {branch.timestamp && (
-                <div
-                  style={{
-                    fontSize: '0.75em',
-                    color: '#666',
-                    alignSelf: 'flex-end',
-                  }}
-                >
-                  {formatRelativeTime(branch.timestamp)}
+                <div className="branch-item-content">
+                  <div className="branch-text" title={branch.userText || 'No text'}>
+                    {branch.userText ? formatTextOutput(branch.userText, currentMessageText) : 'No text'}
+                  </div>
+                  {branch.timestamp && <div className="branch-time">{formatRelativeTime(branch.timestamp)}</div>}
                 </div>
-              )}
-            </button>
-          ))}
+              </button>
+            ))}
         </div>
       )}
     </div>

@@ -111,6 +111,133 @@ body {
   padding: 0 1em;
 }
 
+/* MessageInfo button styles with accent colors */
+.message-info > button {
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 1.1em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 36px;
+  height: 28px;
+  justify-content: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: none;
+  border-radius: 0 0 8px 8px; /* Bottom corners only */
+  backdrop-filter: blur(4px);
+}
+
+.message-info > button:hover:not(:disabled) {
+  filter: brightness(0.9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.message-info > button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Set background colors based on message type */
+.user-message > .message-info > button,
+.agent-function-response > .message-info > button {
+  background: var(--color-user-dark);
+}
+
+.agent-message > .message-info > button,
+.agent-error-message > .message-info > button,
+.agent-thought > .message-info > button,
+.agent-function-call > .message-info > button {
+  background: var(--color-agent-dark);
+}
+
+.system-message > .message-info > button {
+  background: var(--color-system-dark);
+}
+
+.function-pair-combined-container > .message-info > button {
+  background: var(--color-combined-dark);
+}
+
+/* Set foreground colors based on message type */
+.user-message > .message-info > button,
+.agent-function-response > .message-info > button {
+  color: var(--color-user-verydark);
+}
+
+.agent-message > .message-info > button,
+.agent-error-message > .message-info > button,
+.agent-thought > .message-info > button,
+.agent-function-call > .message-info > button {
+  color: var(--color-agent-verydark);
+}
+
+.system-message > .message-info > button {
+  color: var(--color-system-verydark);
+}
+
+.function-pair-combined-container > .message-info > button {
+  color: var(--color-combined-verydark);
+}
+
+/* BranchDropdown trigger button styles - same as MessageInfo buttons */
+.branch-dropdown-trigger {
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 1.1em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 36px;
+  height: 28px;
+  justify-content: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: none;
+  border-radius: 0 0 8px 8px; /* Bottom corners only */
+  backdrop-filter: blur(4px);
+  background: var(--color-agent-dark); /* Default background color */
+  color: var(--color-agent-verydark); /* Default text color */
+}
+
+.branch-dropdown-trigger:hover:not(:disabled) {
+  filter: brightness(0.9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.branch-dropdown-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Set BranchDropdown colors based on message type */
+.user-message > .message-info .branch-dropdown-trigger,
+.agent-function-response > .message-info .branch-dropdown-trigger {
+  background: var(--color-user-dark);
+  color: var(--color-user-verydark);
+}
+
+.agent-message > .message-info .branch-dropdown-trigger,
+.agent-error-message > .message-info .branch-dropdown-trigger,
+.agent-thought > .message-info .branch-dropdown-trigger,
+.agent-function-call > .message-info .branch-dropdown-trigger {
+  background: var(--color-agent-dark);
+  color: var(--color-agent-verydark);
+}
+
+.system-message > .message-info .branch-dropdown-trigger {
+  background: var(--color-system-dark);
+  color: var(--color-system-verydark);
+}
+
+.function-pair-combined-container > .message-info .branch-dropdown-trigger {
+  background: var(--color-combined-dark);
+  color: var(--color-combined-verydark);
+}
+
 .user-message,
 .system-message,
 .system-prompt-message,
@@ -130,6 +257,7 @@ body {
 
 .chat-bubble {
   max-width: var(--chat-bubble-max-width);
+  min-width: 180px; /* Minimum width to accommodate 3 buttons */
   padding: calc(var(--spacing-unit) * 0.6) calc(var(--spacing-unit) * 0.9); /* Restore padding-top */
   border-radius: var(--border-radius);
   line-height: 1.4;
@@ -953,4 +1081,89 @@ pre .hljs {
   .function-pair-combined-container > .chat-bubble {
     max-width: 95%;
   }
+}
+
+/* Branch count badge */
+.branch-count {
+  margin-left: 0;
+  font-size: 0.8em;
+  font-weight: bold;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* Branch dropdown menu styles */
+.branch-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  min-width: 300px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.branch-dropdown-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  font-size: 0.8em;
+  color: #666;
+  font-weight: bold;
+}
+
+.branch-dropdown-item {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.85em;
+  border-bottom: 1px solid #f0f0f0;
+  display: block;
+  color: #333;
+}
+
+.branch-dropdown-item:hover {
+  background: #f5f5f5;
+}
+
+.branch-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.branch-item-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.branch-text {
+  flex: 1;
+  font-size: 0.9em;
+  line-height: 1.3;
+  color: #333;
+  min-width: 0; /* Allows text truncation */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-time {
+  font-size: 0.75em;
+  color: #666;
+  white-space: nowrap;
+  flex-shrink: 0;
 }

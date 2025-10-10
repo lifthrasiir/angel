@@ -25,11 +25,12 @@ interface ChatMessageProps {
   isLastModelMessage?: boolean;
   processingStartTime?: number | null;
   onSaveEdit?: (messageId: string, editedText: string) => void;
+  onRetryClick?: (messageId: string) => void;
   onBranchSelect?: (newBranchId: string) => void;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
-  ({ message, maxTokens, isLastModelMessage, processingStartTime, onSaveEdit, onBranchSelect }) => {
+  ({ message, maxTokens, isLastModelMessage, processingStartTime, onSaveEdit, onRetryClick, onBranchSelect }) => {
     const { type, attachments, cumulTokenCount, model } = message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
 
@@ -64,6 +65,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageId={message.id}
           sessionId={message.sessionId}
           onSaveEdit={onSaveEdit!}
+          onRetryClick={onRetryClick}
         />
       );
     } else if (type === 'thought') {
