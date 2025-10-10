@@ -26,18 +26,9 @@ const GenerateImageCall: React.FC<FunctionCallMessageProps> = ({ functionCall, m
 
   // Convert input_hashes to FileAttachment array
   const inputHashes = args.input_hashes || [];
-  const attachments = inputHashes.map((hash: string) => {
-    // For input hashes, we don't know the MIME type, so we'll use a generic one
-    // The actual MIME type will be determined by the blob endpoint based on content detection
-    return {
-      hash,
-      fileName: `input_${hash.substring(0, 8)}`, // No extension - will be handled by backend
-      mimeType: 'application/octet-stream', // Generic MIME type
-    };
-  });
 
   // Determine title based on want_image parameter
-  const title = args.want_image ? 'generate_image(want_image=True)' : 'generate_image';
+  const title = args.want_image ? 'generate_image: want_image' : 'generate_image: !want_image';
 
   return (
     <ChatBubble
@@ -49,10 +40,10 @@ const GenerateImageCall: React.FC<FunctionCallMessageProps> = ({ functionCall, m
       heighten={false}
     >
       <p>{args.text}</p>
-      {attachments.length > 0 && (
+      {inputHashes.length > 0 && (
         <div className="input-images-container" style={{ marginTop: '10px' }}>
-          {attachments.map((attachment, index) => (
-            <BlobImage key={index} hash={attachment.hash} alt={`Input image ${attachment.hash.substring(0, 8)}`} />
+          {inputHashes.map((hash, index) => (
+            <BlobImage key={index} hash={hash} alt={`Input image ${hash.substring(0, 8)}`} />
           ))}
         </div>
       )}
@@ -122,18 +113,6 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
 
   // Convert input_hashes to FileAttachment array
   const inputHashes = args.input_hashes || [];
-  const attachments = inputHashes.map((hash: string) => {
-    // For input hashes, we don't know the MIME type, so we'll use a generic one
-    // The actual MIME type will be determined by the blob endpoint based on content detection
-    return {
-      hash,
-      fileName: `input_${hash.substring(0, 8)}`, // No extension - will be handled by backend
-      mimeType: 'application/octet-stream', // Generic MIME type
-    };
-  });
-
-  // Determine title based on want_image parameter
-  const title = args.want_image ? 'generate_image(want_image=True)' : 'generate_image';
 
   // Function to convert hash strings to image elements
   const renderHashesAsImages = (text: string) => {
@@ -143,7 +122,7 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
       if (part.match(/^[a-f0-9]{64}$/i)) {
         return <BlobImage key={index} hash={part} alt={`Generated image ${part}`} />;
       }
-      return part === ' ' ? ' ' : part;
+      return part;
     });
   };
 
@@ -152,7 +131,7 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
       containerClassName="function-pair-combined-container"
       bubbleClassName="function-combined-bubble"
       messageInfo={responseMessageInfo}
-      title={title}
+      title="Image generation"
       onHeaderClick={onToggleView}
     >
       <ChatBubble
@@ -162,15 +141,15 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
         heighten={false}
       >
         {args.text}
-        {attachments.length > 0 && (
+        {inputHashes.length > 0 && (
           <div className="input-images-container" style={{ marginTop: '10px' }}>
-            {attachments.map((attachment, index) => (
-              <BlobImage key={index} hash={attachment.hash} alt={`Input image ${attachment.hash.substring(0, 8)}`} />
+            {inputHashes.map((hash, index) => (
+              <BlobImage key={index} hash={hash} alt={`Input image ${hash.substring(0, 8)}`} />
             ))}
           </div>
         )}
       </ChatBubble>
-      <ChatBubble messageId={`${responseMessageId}.model`} containerClassName="agent-message" heighten={false}>
+      <ChatBubble messageId={`${responseMessageId}.model`} containerClassName="agent-message">
         <div className="generate-image-response">{renderHashesAsImages(response.response)}</div>
       </ChatBubble>
     </ChatBubble>

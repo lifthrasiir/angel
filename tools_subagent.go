@@ -447,7 +447,7 @@ func init() {
 	// Define generate_image tool
 	generateImageToolDefinition := ToolDefinition{
 		Name:        "generate_image",
-		Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). By default, this tool returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking. If `want_image` is set to `True`, the generated images are returned as attachments for direct user viewing.",
+		Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). By default, this tool returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking. If `want_image` is set to `True`, the generated images are returned as attachments so that you can directly assess them.",
 		Parameters: &Schema{
 			Type: TypeObject,
 			Properties: map[string]*Schema{
@@ -464,7 +464,7 @@ func init() {
 				},
 				"want_image": {
 					Type:        TypeBoolean,
-					Description: "If true, the generated image(s) will be returned directly as attachments. This parameter must be set to `True` if the user needs to visually perceive the image, as SHA-512/256 hashes are not user-perceivable representations of images.",
+					Description: "If true, the generated image(s) will be returned directly as attachments. This parameter must be set to `True` if the image has to be assessed for subsequent processing.",
 				},
 			},
 			Required: []string{"text"},

@@ -13,7 +13,6 @@ const BlobImage: React.FC<BlobImageProps> = ({
   className = 'image-only-message-img',
   style = {
     display: 'inline-block',
-    margin: '5px',
     verticalAlign: 'top',
   },
 }) => {
