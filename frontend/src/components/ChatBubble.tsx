@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { FaChevronDown, FaChevronUp, FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
+import { handleEnterKey } from '../utils/enterKeyHandler';
 
 interface ChatBubbleProps {
   messageId?: string;
@@ -154,10 +155,19 @@ const ChatBubble = forwardRef<ChatBubbleRef, ChatBubbleProps>(
     );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && e.ctrlKey) {
-        e.preventDefault();
-        handleEditSave();
-      } else if (e.key === 'Escape') {
+      // Use the common Enter key handler
+      const isHandled = handleEnterKey(e, {
+        onSendOrConfirm: handleEditSave,
+        value: currentEditText,
+      });
+
+      // If Enter key was handled, don't process Escape
+      if (isHandled) {
+        return;
+      }
+
+      // Handle Escape key for cancel
+      if (e.key === 'Escape') {
         e.preventDefault();
         handleEditCancel();
       }

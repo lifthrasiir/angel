@@ -11,6 +11,7 @@ import {
   statusMessageAtom,
 } from '../atoms/chatAtoms';
 import { useCommandProcessor } from '../hooks/useCommandProcessor';
+import { handleEnterKey } from '../utils/enterKeyHandler';
 
 interface ChatInputProps {
   handleSendMessage: () => void;
@@ -80,11 +81,21 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [inputMessage]);
 
-  const handleCtrlEnter = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && e.ctrlKey) {
-      e.preventDefault();
-      handleSendOrRunCommand();
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Use the common Enter key handler
+    const isHandled = handleEnterKey(e, {
+      onSendOrConfirm: handleSendOrRunCommand,
+      value: inputMessage,
+    });
+
+    // If Enter key was handled, don't process other key handlers
+    if (isHandled) {
+      return;
     }
+
+    // Handle other special keys
+    handleSlashKey(e);
+    handleBackspaceInCommandMode(e);
   };
 
   const handleSlashKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -228,11 +239,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           setStatusMessage(null);
           debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
         }}
-        onKeyDown={(e) => {
-          handleCtrlEnter(e);
-          handleSlashKey(e);
-          handleBackspaceInCommandMode(e);
-        }}
+        onKeyDown={handleKeyDown}
         onPaste={(e) => {
           if (e.clipboardData.files && e.clipboardData.files.length > 0) {
             onFilesSelected(Array.from(e.clipboardData.files));
