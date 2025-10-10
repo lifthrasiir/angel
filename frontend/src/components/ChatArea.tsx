@@ -365,7 +365,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           maxTokens={undefined} // Temporary messages don't have token limits
           isLastModelMessage={false}
           processingStartTime={null}
-          onSaveEdit={() => {}}
+          onSaveEdit={() => { }}
           onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
           onBranchSelect={handleBranchSwitch}
         />,
@@ -373,7 +373,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
 
     return renderedElements;
-  }, [messages, availableModels, processingStartTime, temporaryEnvChangeMessage]); // temporaryEnvChangeMessage 추가
+  }, [
+    messages,
+    availableModels,
+    processingStartTime,
+    temporaryEnvChangeMessage,
+    handleEditMessage,
+    handleBranchSwitch,
+    handleRetryMessage,
+  ]);
 
   const currentSystemPromptLabel = useMemo(() => {
     const found = globalPrompts.find((p) => p.value === systemPrompt);
@@ -418,7 +426,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <>
           <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
             <div
-              style={{ maxWidth: 'var(--chat-container-max-width)', margin: '0 auto', padding: 'var(--spacing-unit)' }}
+              style={{
+                maxWidth: 'var(--chat-container-max-width)',
+                margin: '0 auto',
+                padding: 'var(--spacing-unit)',
+              }}
             >
               {!hasMoreMessages && (
                 <SystemPromptEditor
