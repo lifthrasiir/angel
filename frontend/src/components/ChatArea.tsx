@@ -29,6 +29,7 @@ import {
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
 import { useSessionLoader } from '../hooks/useSessionLoader';
+import { useScrollAdjustment } from '../hooks/useScrollAdjustment';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -70,6 +71,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const processingStartTime = useAtomValue(processingStartTimeAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
   const { loadMoreMessages } = useSessionLoader({ chatSessionId, primaryBranchId, chatAreaRef });
+  const { scrollToBottom, handleContentLoad } = useScrollAdjustment({ chatAreaRef });
   const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
   const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
   const isPriorSessionLoadComplete = useAtomValue(isPriorSessionLoadCompleteAtom);
@@ -99,12 +101,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       !isPriorSessionLoading &&
       !(wasLoadingPrior && !isPriorSessionLoading)
     ) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      scrollToBottom();
+      // Also trigger content load handling for potential dynamic content in new messages
+      handleContentLoad();
     }
 
     prevMessagesLengthRef.current = messages.length;
     prevIsPriorSessionLoadingRef.current = isPriorSessionLoading; // Update ref
-  }, [messages, isPriorSessionLoading]);
+  }, [messages, isPriorSessionLoading, scrollToBottom, handleContentLoad]);
 
   useEffect(() => {
     const chatAreaElement = chatAreaRef.current;
