@@ -25,18 +25,12 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   processingStartTime,
   messageId,
   attachments,
-  sessionId,
 }) => {
   const imageOnly = isImageOnlyMessage(text, attachments);
 
   return (
     <ChatBubble messageId={messageId} containerClassName={className} messageInfo={messageInfo}>
-      <FileAttachmentList
-        attachments={attachments}
-        messageId={messageId}
-        sessionId={sessionId}
-        isImageOnlyMessage={imageOnly}
-      />
+      <FileAttachmentList attachments={attachments} isImageOnlyMessage={imageOnly} />
       {!imageOnly && <MarkdownRenderer content={text || ''} />}
       {isLastModelMessage && processingStartTime !== null && (
         <ProcessingIndicator startTime={processingStartTime!} isLastThoughtGroup={false} isLastModelMessage={true} />

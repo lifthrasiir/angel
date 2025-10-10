@@ -1097,7 +1097,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 			})
 		}
 
-		// Add attachments as InlineData
+		// Add attachments as InlineData with preceding hash information
 		for _, att := range fm.Attachments {
 			if att.Hash != "" { // Only process if hash exists
 				blobData, err := GetBlob(db, att.Hash)
@@ -1107,12 +1107,15 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 					// For now, we'll skip this attachment to avoid breaking the whole message.
 					continue
 				}
-				parts = append(parts, Part{
-					InlineData: &InlineData{
-						MimeType: att.MimeType,
-						Data:     base64.StdEncoding.EncodeToString(blobData),
+				parts = append(parts,
+					Part{Text: fmt.Sprintf("[Binary with hash %s follows:]", att.Hash)},
+					Part{
+						InlineData: &InlineData{
+							MimeType: att.MimeType,
+							Data:     base64.StdEncoding.EncodeToString(blobData),
+						},
 					},
-				})
+				)
 			}
 		}
 

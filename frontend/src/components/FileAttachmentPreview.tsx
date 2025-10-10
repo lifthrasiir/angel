@@ -1,15 +1,11 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import { apiFetch } from '../api/apiClient';
 import { FaDownload, FaFile, FaTimes } from 'react-icons/fa';
 import type { FileAttachment } from '../types/chat';
 
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;
   onRemove?: (file: File) => void;
-  messageId?: string;
-  sessionId?: string;
-  blobIndex?: number;
   isImageOnlyMessage?: boolean;
   draggable?: boolean;
 }
@@ -17,9 +13,6 @@ interface FileAttachmentPreviewProps {
 const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
   file,
   onRemove,
-  messageId,
-  sessionId,
-  blobIndex,
   isImageOnlyMessage = false,
   draggable = true,
 }) => {
@@ -32,8 +25,6 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
   const fileAttachment = file instanceof File ? null : file;
 
   useEffect(() => {
-    let objectUrl: string | null = null;
-
     const loadPreview = async () => {
       if (file instanceof File) {
         // For uploaded File objects, read as Data URL for preview
@@ -42,23 +33,9 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
           setPreviewUrl(reader.result as string);
         };
         reader.readAsDataURL(file);
-      } else if (isImage && messageId && sessionId && blobIndex !== undefined) {
-        // For FileAttachment objects (from messages), fetch from backend for image preview
-        const blobUrl = `/api/chat/${sessionId}/blob/${messageId}.${blobIndex}`;
-        try {
-          const response = await apiFetch(blobUrl);
-          if (response.ok) {
-            const blob = await response.blob();
-            objectUrl = URL.createObjectURL(blob);
-            setPreviewUrl(objectUrl);
-          } else {
-            console.error(`Failed to fetch blob for preview: ${response.statusText}`);
-            setPreviewUrl(null);
-          }
-        } catch (error) {
-          console.error('Error fetching blob for preview:', error);
-          setPreviewUrl(null);
-        }
+      } else if (isImage && fileAttachment && fileAttachment.hash) {
+        // For FileAttachment objects (from messages), use direct URL for image preview
+        setPreviewUrl(`/api/blob/${fileAttachment.hash}`);
       } else {
         setPreviewUrl(null); // No preview for non-image FileAttachment or missing info
       }
@@ -67,11 +44,9 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
     loadPreview();
 
     return () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl); // Clean up object URL on unmount
-      }
+      // No cleanup needed for direct URLs
     };
-  }, [file, isImage, messageId, sessionId, blobIndex, mimeType]);
+  }, [file, isImage, fileAttachment, mimeType]);
 
   const handleDownload = () => {
     if (file instanceof File) {
@@ -84,9 +59,9 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url); // Clean up
-    } else if (fileAttachment && messageId && sessionId && blobIndex !== undefined) {
-      // For attached files (FileAttachment), use the backend endpoint
-      const downloadUrl = `/api/chat/${sessionId}/blob/${messageId}.${blobIndex}`;
+    } else if (fileAttachment && fileAttachment.hash) {
+      // For attached files (FileAttachment), use the backend endpoint with hash
+      const downloadUrl = `/api/blob/${fileAttachment.hash}`;
       const a = document.createElement('a');
       a.href = downloadUrl;
       a.download = fileName; // Suggest download filename
@@ -122,9 +97,7 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
           isMessageAttachment: true,
           fileName: file.fileName,
           fileType: file.mimeType,
-          sessionId: sessionId,
-          messageId: messageId,
-          blobIndex: blobIndex,
+          blobHash: file.hash,
         }),
       );
     }

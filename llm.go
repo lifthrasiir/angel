@@ -52,6 +52,7 @@ const (
 	SubagentSessionNameTask      = "session_name"
 	SubagentWebFetchTask         = "web_fetch"
 	SubagentWebFetchFallbackTask = "web_fetch_fallback"
+	SubagentImageGenerationTask  = "image_generation"
 )
 
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.

@@ -4,9 +4,7 @@
 
 export interface DragData {
   isMessageAttachment?: boolean;
-  sessionId?: string;
-  messageId?: string;
-  blobIndex?: number;
+  blobHash?: string;
   fileName?: string;
   fileType?: string;
   isExistingAttachment?: boolean;
@@ -27,7 +25,7 @@ export async function extractFilesFromDrop(e: React.DragEvent): Promise<File[]> 
 
       if (parsed.isMessageAttachment) {
         // Handle message attachment - download it as File
-        const blobUrl = `/api/chat/${parsed.sessionId}/blob/${parsed.messageId}.${parsed.blobIndex}`;
+        const blobUrl = `/api/blob/${parsed.blobHash}`;
         try {
           const response = await fetch(blobUrl);
           if (response.ok) {

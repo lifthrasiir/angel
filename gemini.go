@@ -432,13 +432,22 @@ func (c *CodeAssistClient) DefaultGenerationParams() SessionGenerationParams {
 }
 
 // SubagentProviderAndParams implements the LLMProvider interface for CodeAssistClient.
-func (c *CodeAssistClient) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
-	// For subagents, always use gemini-2.5-flash with specific parameters
-	return geminiFlashClient, SessionGenerationParams{
+func (c *CodeAssistClient) SubagentProviderAndParams(task string) (provider LLMProvider, params SessionGenerationParams) {
+	params = SessionGenerationParams{
 		Temperature: 0.0,
 		TopK:        -1,
 		TopP:        1.0,
 	}
+
+	if task == SubagentImageGenerationTask {
+		provider = geminiFlashImageClient
+	} else if c.modelName == "gemini-2.5-pro" {
+		provider = geminiFlashClient
+	} else {
+		provider = geminiFlashLiteClient
+	}
+
+	return
 }
 
 // filterLargeJSON filters large JSON content, truncating individual string literals that exceed 100 characters

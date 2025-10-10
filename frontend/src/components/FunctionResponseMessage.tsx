@@ -68,7 +68,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
           title={codeContent}
           onHeaderClick={handleHeaderClick}
         >
-          <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+          <FileAttachmentList attachments={attachments} />
         </ChatBubble>
       );
     } else {
@@ -88,7 +88,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
           ) : (
             <pre className="function-code-block">{codeContent}</pre>
           )}
-          <FileAttachmentList attachments={attachments} messageId={messageId} sessionId={sessionId} />
+          <FileAttachmentList attachments={attachments} />
         </ChatBubble>
       );
     }

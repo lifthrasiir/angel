@@ -23,7 +23,6 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   attachments,
   messageInfo,
   messageId,
-  sessionId,
   onSaveEdit,
   onRetryClick,
 }) => {
@@ -87,12 +86,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
     >
       <>
         {!imageOnly && text}
-        <FileAttachmentList
-          attachments={attachments}
-          messageId={messageId}
-          sessionId={sessionId}
-          isImageOnlyMessage={imageOnly}
-        />
+        <FileAttachmentList attachments={attachments} isImageOnlyMessage={imageOnly} />
       </>
     </ChatBubble>
   );

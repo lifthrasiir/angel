@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -509,64 +508,24 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, rootsChanged)
 }
 
-// handleDownloadBlob retrieves a blob by its message ID and attachment index and serves it as a download.
-func handleDownloadBlob(w http.ResponseWriter, r *http.Request) {
+// handleDownloadBlobByHash retrieves a blob by its hash and serves it directly.
+func handleDownloadBlobByHash(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
 	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	messageIdStr := vars["messageId"]
-	blobIndexStr := vars["blobIndex"]
+	blobHash := vars["blobHash"]
 
-	if sessionId == "" || messageIdStr == "" || blobIndexStr == "" {
-		sendBadRequestError(w, r, "Session ID, Message ID, and Blob Index are required")
+	if blobHash == "" {
+		sendBadRequestError(w, r, "Blob hash is required")
 		return
 	}
 
-	messageId, err := strconv.Atoi(messageIdStr)
-	if err != nil {
-		sendBadRequestError(w, r, "Invalid Message ID")
-		return
+	// Extract extension from hash if present (format: hash.extension)
+	var extension string
+	if dotIndex := strings.LastIndex(blobHash, "."); dotIndex != -1 {
+		extension = blobHash[dotIndex+1:]
+		blobHash = blobHash[:dotIndex]
 	}
-
-	blobIndex, err := strconv.Atoi(blobIndexStr)
-	if err != nil {
-		sendBadRequestError(w, r, "Invalid Blob Index")
-		return
-	}
-
-	// Get the message from the database
-	message, err := GetMessageByID(db, messageId) // GetMessageByID returns Message struct
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			sendNotFoundError(w, r, "Message not found")
-		} else {
-			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to retrieve message %d", messageId))
-		}
-		return
-	}
-
-	if message == nil || message.SessionID != sessionId {
-		sendNotFoundError(w, r, "Message not found in this session")
-		return
-	}
-
-	// message.Attachments is already []FileAttachment type
-	attachments := message.Attachments
-	if attachments == nil { // Handle case where there are no attachments
-		sendNotFoundError(w, r, "No attachments found for this message")
-		return
-	}
-
-	if blobIndex < 0 || blobIndex >= len(attachments) {
-		sendBadRequestError(w, r, "Blob index out of range")
-		return
-	}
-
-	// Use the Hash field for the blob hash
-	blobHash := attachments[blobIndex].Hash
-	fileName := attachments[blobIndex].FileName
-	mimeType := attachments[blobIndex].MimeType
 
 	data, err := GetBlob(db, blobHash) // GetBlob works with hash
 	if err != nil {
@@ -578,11 +537,45 @@ func handleDownloadBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set appropriate headers for file download
-	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
+	// Determine MIME type based on extension or content detection
+	mimeType := ""
+	if extension != "" {
+		// Common extension to MIME type mapping
+		switch strings.ToLower(extension) {
+		case "jpg", "jpeg":
+			mimeType = "image/jpeg"
+		case "png":
+			mimeType = "image/png"
+		case "gif":
+			mimeType = "image/gif"
+		case "webp":
+			mimeType = "image/webp"
+		case "pdf":
+			mimeType = "application/pdf"
+		case "txt":
+			mimeType = "text/plain"
+		case "json":
+			mimeType = "application/json"
+		case "xml":
+			mimeType = "application/xml"
+		case "csv":
+			mimeType = "text/csv"
+		default:
+			mimeType = "application/octet-stream"
+		}
+	} else {
+		// If no extension, try to detect from content
+		mimeType = http.DetectContentType(data)
+	}
 
+	// Set appropriate headers
+	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+
+	// For images, set cache control headers
+	if strings.HasPrefix(mimeType, "image/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000") // 1 year cache
+	}
 
 	_, err = w.Write(data)
 	if err != nil {

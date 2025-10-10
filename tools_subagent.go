@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -257,6 +259,165 @@ func handleSubagentTurn(
 	return ToolHandlerResults{Value: result}, nil
 }
 
+// GenerateImageTool handles the generate_image tool call, allowing to generate images using a subagent with image generation capabilities.
+func GenerateImageTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+	text, hasText := args["text"].(string)
+	inputHashesInterface, hasInputHashes := args["input_hashes"].([]interface{})
+	wantImage, hasWantImage := args["want_image"].(bool)
+
+	if !hasText {
+		return ToolHandlerResults{}, fmt.Errorf("generate_image tool: must provide 'text'")
+	}
+
+	// Convert input_hashes from []interface{} to []string
+	var inputHashes []string
+	if hasInputHashes {
+		inputHashes = make([]string, len(inputHashesInterface))
+		for i, hash := range inputHashesInterface {
+			if hashStr, ok := hash.(string); ok {
+				inputHashes[i] = hashStr
+			} else {
+				return ToolHandlerResults{}, fmt.Errorf("generate_image tool: input_hashes must be strings")
+			}
+		}
+	}
+
+	// Edge case: if text is empty, just return the input hashes as response
+	if text == "" {
+		response := strings.Join(inputHashes, " ")
+		result := map[string]interface{}{
+			"response": response,
+		}
+		if hasWantImage && wantImage {
+			// For empty text with want_image=true, we still need to convert hashes to images
+			// The response is just the hashes, but images should be returned as attachments
+			var attachments []FileAttachment
+			for _, hash := range inputHashes {
+				attachments = append(attachments, FileAttachment{Hash: hash})
+			}
+			return ToolHandlerResults{Value: result, Attachments: attachments}, nil
+		}
+		return ToolHandlerResults{Value: result}, nil
+	}
+
+	db, err := getDbFromContext(ctx)
+	if err != nil {
+		return ToolHandlerResults{}, err
+	}
+
+	// Get LLM client for image generation using the new task
+	llmClient, imageGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(SubagentImageGenerationTask)
+	if llmClient == nil {
+		return ToolHandlerResults{}, fmt.Errorf("LLM client for image generation with model %s not found", params.ModelName)
+	}
+
+	// Prepare the content for image generation
+	var content []Content
+
+	// Add user text part
+	content = append(content, Content{
+		Role: RoleUser,
+		Parts: []Part{
+			{Text: text},
+		},
+	})
+
+	// Add input images as attachments if provided
+	for _, hash := range inputHashes {
+		if hash != "" {
+			// Retrieve blob data for the hash
+			blobData, err := GetBlob(db, hash)
+			if err != nil {
+				log.Printf("Warning: Failed to retrieve blob for hash %s: %v", hash, err)
+				continue
+			}
+
+			// Determine MIME type by detecting content type
+			mimeType := http.DetectContentType(blobData)
+			content = append(content, Content{
+				Role: RoleUser,
+				Parts: []Part{
+					{
+						InlineData: &InlineData{
+							MimeType: mimeType,
+							Data:     base64.StdEncoding.EncodeToString(blobData),
+						},
+					},
+				},
+			})
+		}
+	}
+
+	// Configure session params for image generation
+	sessionParams := &SessionParams{
+		SystemPrompt:     "Generate images based on the user's request. The output should contain the generated images.",
+		Contents:         content,
+		GenerationParams: &imageGenParams,
+	}
+
+	// Use a context with timeout for the image generation
+	llmCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	// Stream LLM response
+	seq, closer, err := llmClient.SendMessageStream(llmCtx, *sessionParams)
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to get streaming response from image generation LLM: %w", err)
+	}
+	defer closer.Close()
+
+	var fullResponseText strings.Builder
+	var generatedAttachments []FileAttachment
+
+	// Process the response
+	for caResp := range seq {
+		if len(caResp.Response.Candidates) > 0 {
+			candidate := caResp.Response.Candidates[0]
+			for _, part := range candidate.Content.Parts {
+				if part.Text != "" {
+					fullResponseText.WriteString(part.Text)
+				} else if part.InlineData != nil {
+					// Convert generated image data to blob and get hash
+					imageData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
+					if err != nil {
+						log.Printf("Warning: Failed to decode generated image data: %v", err)
+						continue
+					}
+
+					hash, err := SaveBlob(ctx, db, imageData)
+					if err != nil {
+						log.Printf("Warning: Failed to save generated image blob: %v", err)
+						continue
+					}
+
+					// Replace image in response with hash
+					fullResponseText.WriteString(hash)
+
+					// Add to attachments if want_image is true
+					if hasWantImage && wantImage {
+						generatedAttachments = append(generatedAttachments, FileAttachment{
+							Hash:     hash,
+							MimeType: part.InlineData.MimeType,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// Prepare result
+	result := map[string]interface{}{
+		"response": fullResponseText.String(),
+	}
+
+	// Return with attachments if want_image is true
+	if hasWantImage && wantImage {
+		return ToolHandlerResults{Value: result, Attachments: generatedAttachments}, nil
+	}
+
+	return ToolHandlerResults{Value: result}, nil
+}
+
 func init() {
 	// Define tool definitions locally within init function
 	subagentToolDefinition := ToolDefinition{
@@ -283,6 +444,35 @@ func init() {
 		Handler: SubagentTool,
 	}
 
-	// Register tool definition with availableTools map
+	// Define generate_image tool
+	generateImageToolDefinition := ToolDefinition{
+		Name:        "generate_image",
+		Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). By default, this tool returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking. If `want_image` is set to `True`, the generated images are returned as attachments for direct user viewing.",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"text": {
+					Type:        TypeString,
+					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied.",
+				},
+				"input_hashes": {
+					Type:        TypeArray,
+					Description: "Array of SHA-512/256 hashes of input images to use for generation or as a base for modifications.",
+					Items: &Schema{
+						Type: TypeString,
+					},
+				},
+				"want_image": {
+					Type:        TypeBoolean,
+					Description: "If true, the generated image(s) will be returned directly as attachments. This parameter must be set to `True` if the user needs to visually perceive the image, as SHA-512/256 hashes are not user-perceivable representations of images.",
+				},
+			},
+			Required: []string{"text"},
+		},
+		Handler: GenerateImageTool,
+	}
+
+	// Register tool definitions with availableTools map
 	availableTools["subagent"] = subagentToolDefinition
+	availableTools["generate_image"] = generateImageToolDefinition
 }

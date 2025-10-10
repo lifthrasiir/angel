@@ -3,8 +3,10 @@ type PrimitiveTypeMap = {
   'string?': string | undefined | null;
   number: number;
   boolean: boolean;
+  'boolean?': boolean | undefined | null;
   object: object;
   array: any[];
+  'array?': any[] | undefined | null;
   any: any;
 };
 
