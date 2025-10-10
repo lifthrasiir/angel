@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { FaChevronDown, FaChevronUp, FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 
 interface ChatBubbleProps {
@@ -21,23 +21,30 @@ interface ChatBubbleProps {
   disableEdit?: boolean; // Disable edit functionality
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = React.memo(
-  ({
-    messageId,
-    containerClassName,
-    bubbleClassName,
-    messageInfo,
-    children,
-    heighten,
-    collapsed,
-    title,
-    showHeaderToggle = false,
-    onHeaderClick,
-    editText,
-    isEditing = false,
-    onEditSave,
-    onEditCancel,
-  }) => {
+export interface ChatBubbleRef {
+  saveEdit: () => void;
+}
+
+const ChatBubble = forwardRef<ChatBubbleRef, ChatBubbleProps>(
+  (
+    {
+      messageId,
+      containerClassName,
+      bubbleClassName,
+      messageInfo,
+      children,
+      heighten,
+      collapsed,
+      title,
+      showHeaderToggle = false,
+      onHeaderClick,
+      editText,
+      isEditing = false,
+      onEditSave,
+      onEditCancel,
+    },
+    ref,
+  ) => {
     const [isExpanded, setIsExpanded] = useState(heighten === true); // Heighten toggle
     const [isContentVisible, setIsContentVisible] = useState(collapsed !== true); // Content toggle
     const [showHeightenToggleChevron, setShowHeightenToggleChevron] = useState(false); // Is heighten toggle required?
@@ -136,6 +143,15 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(
         onEditCancel();
       }
     };
+
+    // Expose methods via ref
+    useImperativeHandle(
+      ref,
+      () => ({
+        saveEdit: handleEditSave,
+      }),
+      [currentEditText, onEditSave],
+    );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && e.ctrlKey) {
@@ -278,7 +294,6 @@ const ChatBubble: React.FC<ChatBubbleProps> = React.memo(
                     value={currentEditText}
                     onChange={(e) => setCurrentEditText(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    onBlur={handleEditCancel}
                     onInput={handleInput}
                     placeholder="Edit your message..."
                   />

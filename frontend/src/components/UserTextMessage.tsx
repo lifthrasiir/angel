@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { useAtom } from 'jotai';
 import type { FileAttachment } from '../types/chat';
 import FileAttachmentList from './FileAttachmentList';
-import ChatBubble from './ChatBubble';
+import ChatBubble, { type ChatBubbleRef } from './ChatBubble';
 import { editingMessageIdAtom, processingStartTimeAtom } from '../atoms/chatAtoms';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';
@@ -29,6 +29,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
 }) => {
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
   const [processingStartTime] = useAtom(processingStartTimeAtom);
+  const chatBubbleRef = useRef<ChatBubbleRef>(null);
   const isProcessing = processingStartTime !== null;
 
   const isEditing = messageId === editingMessageId;
@@ -59,6 +60,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
 
   return (
     <ChatBubble
+      ref={chatBubbleRef}
       messageId={messageId}
       containerClassName="user-message"
       bubbleClassName="user-message-bubble-content"
@@ -67,6 +69,13 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
           ? React.cloneElement(messageInfo, {
               onEditClick: handleEditClick,
               onRetryClick: handleRetry,
+              isEditing: isEditing && !imageOnly,
+              onEditSave: () => {
+                if (chatBubbleRef.current) {
+                  chatBubbleRef.current.saveEdit();
+                }
+              },
+              onEditCancel: handleEditCancel,
             } as Partial<MessageInfoProps>) // Cast to Partial<MessageInfoProps>
           : messageInfo
       }

@@ -140,6 +140,25 @@ body {
   cursor: not-allowed;
 }
 
+/* Edit mode confirm/cancel button styles */
+.message-info .edit-confirm-btn {
+  background: #007bff !important;
+  color: white !important;
+}
+
+.message-info .edit-confirm-btn:hover:not(:disabled) {
+  background: #0056b3 !important;
+}
+
+.message-info .edit-cancel-btn {
+  background: #dc3545 !important;
+  color: white !important;
+}
+
+.message-info .edit-cancel-btn:hover:not(:disabled) {
+  background: #c82333 !important;
+}
+
 /* Set background colors based on message type */
 .user-message > .message-info > button,
 .agent-function-response > .message-info > button {

@@ -365,7 +365,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           maxTokens={undefined} // Temporary messages don't have token limits
           isLastModelMessage={false}
           processingStartTime={null}
-          onSaveEdit={() => { }}
+          onSaveEdit={() => {}}
           onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
           onBranchSelect={handleBranchSwitch}
         />,

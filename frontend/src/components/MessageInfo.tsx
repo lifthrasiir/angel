@@ -2,7 +2,7 @@ import React from 'react';
 import type { PossibleNextMessage } from '../types/chat';
 import { useAtom } from 'jotai';
 import { processingStartTimeAtom } from '../atoms/chatAtoms';
-import { FaEdit, FaRedo } from 'react-icons/fa';
+import { FaEdit, FaRedo, FaTimes, FaPaperPlane } from 'react-icons/fa';
 import BranchDropdown from './BranchDropdown';
 
 export interface MessageInfoProps {
@@ -15,6 +15,9 @@ export interface MessageInfoProps {
   onBranchSelect?: (newBranchId: string) => void;
   sessionId?: string;
   currentMessageText?: string; // Current message text for diff comparison
+  isEditing?: boolean; // Whether the message is currently being edited
+  onEditSave?: () => void; // Callback for edit save
+  onEditCancel?: () => void; // Callback for edit cancel
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = React.memo(
@@ -27,6 +30,9 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     onRetryClick,
     onBranchSelect,
     currentMessageText,
+    isEditing = false,
+    onEditSave,
+    onEditCancel,
   }) => {
     const [processingStartTime] = useAtom(processingStartTimeAtom);
     const isProcessing = processingStartTime !== null;
@@ -54,15 +60,44 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
               ? `${cumulTokenCount}T`
               : ''}
         </span>
-        {onEditClick && (
-          <button onClick={onEditClick} disabled={isProcessing} title="Edit message">
-            <FaEdit size={16} />
-          </button>
-        )}
-        {onRetryClick && (
-          <button onClick={onRetryClick} disabled={isProcessing} title="Retry message">
-            <FaRedo size={16} />
-          </button>
+        {isEditing ? (
+          <>
+            {onEditSave && (
+              <button
+                onClick={onEditSave}
+                disabled={isProcessing}
+                title="Save edit"
+                className="edit-confirm-btn"
+                aria-label="Save edit"
+              >
+                <FaPaperPlane size={16} />
+              </button>
+            )}
+            {onEditCancel && (
+              <button
+                onClick={onEditCancel}
+                disabled={isProcessing}
+                title="Cancel edit"
+                className="edit-cancel-btn"
+                aria-label="Cancel edit"
+              >
+                <FaTimes size={16} />
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            {onEditClick && (
+              <button onClick={onEditClick} disabled={isProcessing} title="Edit message">
+                <FaEdit size={16} />
+              </button>
+            )}
+            {onRetryClick && (
+              <button onClick={onRetryClick} disabled={isProcessing} title="Retry message">
+                <FaRedo size={16} />
+              </button>
+            )}
+          </>
         )}
         {onBranchSelect && possibleBranches && possibleBranches.length > 0 && (
           <BranchDropdown
