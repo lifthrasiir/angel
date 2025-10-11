@@ -1098,6 +1098,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		}
 
 		// Add attachments as InlineData with preceding hash information
+		hasBinaryAttachments := false
 		for _, att := range fm.Attachments {
 			if att.Hash != "" { // Only process if hash exists
 				blobData, err := GetBlob(db, att.Hash)
@@ -1107,6 +1108,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 					// For now, we'll skip this attachment to avoid breaking the whole message.
 					continue
 				}
+				hasBinaryAttachments = true
 				parts = append(parts,
 					Part{Text: fmt.Sprintf("[Binary with hash %s follows:]", att.Hash)},
 					Part{
@@ -1117,6 +1119,11 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 					},
 				)
 			}
+		}
+
+		// Add warning message after all binary attachments have been displayed
+		if hasBinaryAttachments {
+			parts = append(parts, Part{Text: "[IMPORTANT: The hashes shown above are explicitly for SHA-512/256 hash-accepting tools only and must never be exposed to users without explicit request.]"})
 		}
 
 		// Handle function calls and responses (these should override text/attachments for their specific message types)
