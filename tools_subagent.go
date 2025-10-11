@@ -157,6 +157,9 @@ func handleSubagentTurn(
 		return ToolHandlerResults{}, fmt.Errorf("LLM client for model %s not found", params.ModelName)
 	}
 
+	// Update LastMessageModel to use the actual provider's model name
+	mc.LastMessageModel = llmClient.ModelName()
+
 	var fullResponseText strings.Builder
 
 	// Loop to continue LLM calls after tool execution
@@ -333,8 +336,14 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for image generation subsession: %w", err)
 	}
 
-	// Set the last message model
-	mc.LastMessageModel = params.ModelName
+	// Get LLM client for image generation using the new task first to determine the correct model
+	llmClient, imageGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(SubagentImageGenerationTask)
+	if llmClient == nil {
+		return ToolHandlerResults{}, fmt.Errorf("LLM client for image generation with model %s not found", params.ModelName)
+	}
+
+	// Set the last message model to use the actual provider's model name
+	mc.LastMessageModel = llmClient.ModelName()
 
 	// Save user message to subsession with input image attachments
 	var userMessageAttachments []FileAttachment
@@ -355,12 +364,6 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		Attachments: userMessageAttachments,
 	}); err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to add user message to image generation subsession: %w", err)
-	}
-
-	// Get LLM client for image generation using the new task
-	llmClient, imageGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(SubagentImageGenerationTask)
-	if llmClient == nil {
-		return ToolHandlerResults{}, fmt.Errorf("LLM client for image generation with model %s not found", params.ModelName)
 	}
 
 	// Prepare the content for image generation

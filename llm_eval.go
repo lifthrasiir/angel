@@ -13,6 +13,11 @@ import (
 // AngelEvalProvider implements the LLMProvider interface for the angel-eval model.
 type AngelEvalProvider struct{}
 
+// ModelName implements the LLMProvider interface for AngelEvalProvider.
+func (p *AngelEvalProvider) ModelName() string {
+	return "angel-eval"
+}
+
 // SendMessageStream processes the Forth-like language and streams responses.
 func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	// The input will be the last message from the user.

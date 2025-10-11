@@ -24,6 +24,11 @@ type MockGeminiProvider struct {
 	ExtraDelayAmount time.Duration // Amount of extra delay to apply
 }
 
+// ModelName implements the LLMProvider interface for MockGeminiProvider.
+func (m *MockGeminiProvider) ModelName() string {
+	return "gemini-2.5-flash"
+}
+
 func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	if m.Err != nil {
 		return nil, nil, m.Err

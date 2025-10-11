@@ -88,6 +88,11 @@ func NewCodeAssistClient(provider HTTPClientProvider, projectID string, modelNam
 	}
 }
 
+// ModelName implements the LLMProvider interface for CodeAssistClient.
+func (c *CodeAssistClient) ModelName() string {
+	return c.modelName
+}
+
 // makeAPIRequest creates and executes an HTTP request with common error handling
 func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBody interface{}, headers map[string]string) (*http.Response, error) {
 	jsonBody, err := json.Marshal(reqBody)

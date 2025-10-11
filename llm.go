@@ -37,6 +37,7 @@ type OneShotResult struct {
 
 // LLMProvider defines the interface for interacting with an LLM.
 type LLMProvider interface {
+	ModelName() string
 	SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
 	GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error)
 	CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error)
@@ -64,6 +65,7 @@ type MockLLMProvider struct {
 	RelativeDisplayOrderValue     int
 	DefaultGenerationParamsValue  SessionGenerationParams
 	SubagentProviderAndParamsFunc func(task string) (LLMProvider, SessionGenerationParams)
+	ModelNameValue                string
 }
 
 // SendMessageStream implements the LLMProvider interface for MockLLMProvider.
@@ -116,6 +118,11 @@ func (m *MockLLMProvider) SubagentProviderAndParams(task string) (LLMProvider, S
 		TopK:        -1,
 		TopP:        1.0,
 	}
+}
+
+// ModelName implements the LLMProvider interface for MockLLMProvider.
+func (m *MockLLMProvider) ModelName() string {
+	return m.ModelNameValue
 }
 
 var _ LLMProvider = (*MockLLMProvider)(nil)

@@ -22,6 +22,10 @@ type testProviderWrapper struct {
 	captureParams *SessionParams
 }
 
+func (w *testProviderWrapper) ModelName() string {
+	return w.original.ModelName()
+}
+
 func (w *testProviderWrapper) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	*w.captureParams = params // Capture the SessionParams
 	return w.original.SendMessageStream(ctx, params)
