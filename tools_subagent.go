@@ -282,6 +282,11 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		}
 	}
 
+	db, err := getDbFromContext(ctx)
+	if err != nil {
+		return ToolHandlerResults{}, err
+	}
+
 	// Edge case: if text is empty, just return the input hashes as response
 	if text == "" {
 		response := strings.Join(inputHashes, " ")
@@ -293,16 +298,16 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 			// The response is just the hashes, but images should be returned as attachments
 			var attachments []FileAttachment
 			for _, hash := range inputHashes {
-				attachments = append(attachments, FileAttachment{Hash: hash})
+				attachment, err := GetBlobAsFileAttachment(db, hash)
+				if err != nil {
+					log.Printf("Warning: Failed to create file attachment for hash %s: %v", hash, err)
+					continue
+				}
+				attachments = append(attachments, attachment)
 			}
 			return ToolHandlerResults{Value: result, Attachments: attachments}, nil
 		}
 		return ToolHandlerResults{Value: result}, nil
-	}
-
-	db, err := getDbFromContext(ctx)
-	if err != nil {
-		return ToolHandlerResults{}, err
 	}
 
 	// Create a subsession for image generation
@@ -528,7 +533,7 @@ func init() {
 			Properties: map[string]*Schema{
 				"text": {
 					Type:        TypeString,
-					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied.",
+					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied. If empty, returns input hashes unchanged (useful for retrieving input images as attachments when want_image=true).",
 				},
 				"input_hashes": {
 					Type:        TypeArray,
