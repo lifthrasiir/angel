@@ -305,6 +305,53 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		return ToolHandlerResults{}, err
 	}
 
+	// Create a subsession for image generation
+	agentID := generateID()
+	subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
+
+	// Create subsession with system prompt for image generation
+	systemPrompt := "Generate images based on the user's request. The output should contain the generated images."
+	_, err = CreateSession(db, subsessionID, systemPrompt, "")
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to create image generation subsession with ID %s: %w", subsessionID, err)
+	}
+
+	// Get session for message chain creation
+	session, err := GetSession(db, subsessionID)
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("image generation subsession with ID %s not found after creation: %w", subsessionID, err)
+	}
+
+	// Create message chain for the subsession
+	mc, err := NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for image generation subsession: %w", err)
+	}
+
+	// Set the last message model
+	mc.LastMessageModel = params.ModelName
+
+	// Save user message to subsession with input image attachments
+	var userMessageAttachments []FileAttachment
+	for _, hash := range inputHashes {
+		if hash != "" {
+			attachment, err := GetBlobAsFileAttachment(db, hash)
+			if err != nil {
+				log.Printf("Warning: Failed to create file attachment for hash %s: %v", hash, err)
+				continue
+			}
+			userMessageAttachments = append(userMessageAttachments, attachment)
+		}
+	}
+
+	if _, err = mc.Add(ctx, db, Message{
+		Type:        TypeUserText,
+		Text:        text,
+		Attachments: userMessageAttachments,
+	}); err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to add user message to image generation subsession: %w", err)
+	}
+
 	// Get LLM client for image generation using the new task
 	llmClient, imageGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(SubagentImageGenerationTask)
 	if llmClient == nil {
@@ -368,6 +415,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 
 	var fullResponseText strings.Builder
 	var generatedAttachments []FileAttachment
+	imageCounter := 1
 
 	// Process the response
 	for caResp := range seq {
@@ -375,7 +423,14 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 			candidate := caResp.Response.Candidates[0]
 			for _, part := range candidate.Content.Parts {
 				if part.Text != "" {
+					// Add text to response and immediately save to message chain
 					fullResponseText.WriteString(part.Text)
+					if _, err = mc.Add(ctx, db, Message{
+						Type: TypeModelText,
+						Text: part.Text,
+					}); err != nil {
+						log.Printf("Warning: Failed to add text response to subsession: %v", err)
+					}
 				} else if part.InlineData != nil {
 					// Convert generated image data to blob and get hash
 					imageData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
@@ -390,14 +445,34 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 						continue
 					}
 
-					// Replace image in response with hash
+					// Add hash to response
 					fullResponseText.WriteString(hash)
+
+					// Generate filename with counter for generated images
+					filename := generateFilenameFromMimeType(part.InlineData.MimeType, imageCounter)
+					imageCounter++
+
+					// Immediately save the image as a separate message to preserve blob
+					messageAttachments := []FileAttachment{{
+						Hash:     hash,
+						MimeType: part.InlineData.MimeType,
+						FileName: filename,
+					}}
+
+					if _, err = mc.Add(ctx, db, Message{
+						Type:        TypeModelText,
+						Text:        "",
+						Attachments: messageAttachments,
+					}); err != nil {
+						log.Printf("Warning: Failed to add image response to subsession: %v", err)
+					}
 
 					// Add to attachments if want_image is true
 					if hasWantImage && wantImage {
 						generatedAttachments = append(generatedAttachments, FileAttachment{
 							Hash:     hash,
 							MimeType: part.InlineData.MimeType,
+							FileName: filename,
 						})
 					}
 				}

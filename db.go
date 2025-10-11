@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
@@ -731,6 +732,39 @@ func GetBlob(db *sql.DB, hashStr string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to get blob: %w", err)
 	}
 	return data, nil
+}
+
+// GetBlobAsFileAttachment retrieves a blob and returns it as a FileAttachment with detected MIME type and appropriate filename.
+func GetBlobAsFileAttachment(db *sql.DB, hash string) (FileAttachment, error) {
+	// Get blob data
+	blobData, err := GetBlob(db, hash)
+	if err != nil {
+		return FileAttachment{}, fmt.Errorf("failed to retrieve blob for hash %s: %w", hash, err)
+	}
+
+	// Determine MIME type by detecting content type
+	mimeType := http.DetectContentType(blobData)
+
+	// Generate filename with extension based on MIME type
+	var filename string
+	switch {
+	case mimeType == "image/jpeg":
+		filename = hash + ".jpg"
+	case mimeType == "image/png":
+		filename = hash + ".png"
+	case mimeType == "image/gif":
+		filename = hash + ".gif"
+	case mimeType == "image/webp":
+		filename = hash + ".webp"
+	default:
+		filename = hash // No extension if MIME type is not recognized
+	}
+
+	return FileAttachment{
+		Hash:     hash,
+		MimeType: mimeType,
+		FileName: filename,
+	}, nil
 }
 
 // InitializeBlobRefCounts initializes blob reference counts for existing data.
