@@ -430,16 +430,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		if len(caResp.Response.Candidates) > 0 {
 			candidate := caResp.Response.Candidates[0]
 			for _, part := range candidate.Content.Parts {
-				if part.Text != "" {
-					// Add text to response and immediately save to message chain
-					fullResponseText.WriteString(part.Text)
-					if _, err = mc.Add(ctx, db, Message{
-						Type: TypeModelText,
-						Text: part.Text,
-					}); err != nil {
-						log.Printf("Warning: Failed to add text response to subsession: %v", err)
-					}
-				} else if part.InlineData != nil {
+				if part.InlineData != nil {
 					// Convert generated image data to blob and get hash
 					imageData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 					if err != nil {
@@ -482,6 +473,20 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 							MimeType: part.InlineData.MimeType,
 							FileName: filename,
 						})
+					}
+				} else {
+					// Handle text part (could be empty or non-empty)
+					textToAdd := part.Text
+					if textToAdd == "" {
+						textToAdd = "(empty string, typically indicates output was moderated)"
+					}
+					// Add text to response and immediately save to message chain
+					fullResponseText.WriteString(textToAdd)
+					if _, err = mc.Add(ctx, db, Message{
+						Type: TypeModelText,
+						Text: textToAdd,
+					}); err != nil {
+						log.Printf("Warning: Failed to add text response to subsession: %v", err)
 					}
 				}
 			}
