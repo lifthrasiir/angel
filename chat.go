@@ -619,7 +619,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a retry request
 	isRetry := r.URL.Query().Get("retry") == "1"
 
-	// For retry, get the original message text if not provided
+	// For retry, get the original message text and attachments if not provided
 	if isRetry && requestBody.NewMessageText == "" {
 		originalMessage, err := GetMessageByID(db, requestBody.UpdatedMessageID)
 		if err != nil {
@@ -772,7 +772,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 			ChosenNextID:    nil,
 			Text:            requestBody.NewMessageText,
 			Type:            TypeUserText,
-			Attachments:     nil,
+			Attachments:     originalMessage.Attachments,
 			CumulTokenCount: nil,
 			Model:           originalMessage.Model,
 			Generation:      currentGeneration,
