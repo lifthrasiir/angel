@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -20,14 +23,92 @@ func (p *AngelEvalProvider) ModelName() string {
 
 // SendMessageStream processes the Forth-like language and streams responses.
 func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
-	// The input will be the last message from the user.
+	// Find the last user message with actual text content and check for saved state
 	var input string
-	if len(params.Contents) > 0 && len(params.Contents[len(params.Contents)-1].Parts) > 0 {
-		// Directly access the Text field of the Part struct
-		input = params.Contents[len(params.Contents)-1].Parts[0].Text
+	var savedState *EvalState
+
+	// First, find the most recent user text input to determine the search boundary
+	lastUserTextIndex := -1
+	for i := len(params.Contents) - 1; i >= 0; i-- {
+		content := params.Contents[i]
+		if content.Role == RoleUser && len(content.Parts) > 0 {
+			for _, part := range content.Parts {
+				if part.Text != "" && part.FunctionResponse == nil {
+					lastUserTextIndex = i
+					break
+				}
+			}
+			if lastUserTextIndex >= 0 {
+				break
+			}
+		}
 	}
 
-	if input == "" {
+	// Only look for saved state in FunctionCalls AFTER the most recent user text
+	for i := len(params.Contents) - 1; i > lastUserTextIndex; i-- {
+		content := params.Contents[i]
+		if content.Role == RoleModel && len(content.Parts) > 0 {
+			for _, part := range content.Parts {
+				if part.FunctionCall != nil && part.ThoughtSignature != "" {
+					// Decode saved state from ThoughtSignature
+					stateData, err := base64.StdEncoding.DecodeString(part.ThoughtSignature)
+					if err != nil {
+						continue
+					}
+					var state EvalState
+					if json.Unmarshal(stateData, &state) != nil {
+						continue
+					}
+					savedState = &state
+					// Look for the FunctionResponse that follows this FunctionCall
+					// and push its result to the saved state's stack
+					for j := i + 1; j < len(params.Contents); j++ {
+						respContent := params.Contents[j]
+						if respContent.Role == RoleUser && len(respContent.Parts) > 0 {
+							for _, respPart := range respContent.Parts {
+								if respPart.FunctionResponse != nil {
+									// Found FunctionResponse, push result to stack
+									resultJSON, err := json.Marshal(respPart.FunctionResponse.Response)
+									if err == nil {
+										savedState.Stack = append(savedState.Stack, string(resultJSON))
+									}
+									break
+								}
+							}
+							break // Found the FunctionResponse, stop searching
+						}
+					}
+					break
+				}
+			}
+		}
+		if savedState != nil {
+			break
+		}
+	}
+
+	// If no saved state found, look for user input
+	if savedState == nil {
+		for i := len(params.Contents) - 1; i >= 0; i-- {
+			content := params.Contents[i]
+			// Only look at user messages (function responses are added as user messages)
+			if content.Role == RoleUser && len(content.Parts) > 0 {
+				// Look for parts with actual text content (excluding FunctionResponse)
+				for _, part := range content.Parts {
+					if part.Text != "" && part.FunctionResponse == nil {
+						input = part.Text
+						break
+					}
+				}
+				// If we found text from a user message, break the outer loop
+				if input != "" {
+					break
+				}
+			}
+		}
+	}
+
+	if savedState == nil && input == "" {
 		return nil, nil, fmt.Errorf("no input provided for angel-eval")
 	}
 
@@ -42,7 +123,7 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 	cumulativeTotalTokenCount := initialPromptTokenCount
 
 	return func(yield func(CaGenerateContentResponse) bool) {
-		err := parseAndExecute(ctx, input, func(resp CaGenerateContentResponse) bool {
+		err := parseAndExecute(ctx, input, savedState, func(resp CaGenerateContentResponse) bool {
 			// Calculate tokens for the current response part
 			currentResponsePartTokens := 0
 			if len(resp.Response.Candidates) > 0 && resp.Response.Candidates[0].Content.Parts != nil {
@@ -119,8 +200,49 @@ func (p *AngelEvalProvider) SubagentProviderAndParams(task string) (LLMProvider,
 	}
 }
 
+// Helper functions for random generation
+func generateRandomString(length int) string {
+	charset := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	result := make([]byte, length)
+	for i := range result {
+		result[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(result)
+}
+
+func generateRandomNumber(digits int) (int, error) {
+	if digits > 9 { // Prevent overflow for int (max 9 digits)
+		return 0, fmt.Errorf("too many digits: %d (max 9)", digits)
+	}
+
+	min := 1
+	for i := 1; i < digits; i++ {
+		min *= 10
+	}
+	if digits == 1 {
+		min = 0
+	}
+
+	max := 1
+	for i := 0; i < digits; i++ {
+		max *= 10
+	}
+	if digits == 1 {
+		max = 10
+	}
+
+	return min + rand.Intn(max-min), nil
+}
+
 // Forth-like language interpreter logic will go here.
 // This will involve a stack and functions for each operation.
+
+// EvalState represents the execution state of angel-eval
+type EvalState struct {
+	ProgramCounter int           `json:"pc"`     // Next token to execute
+	Stack          []interface{} `json:"stack"`  // Current stack contents
+	Tokens         []string      `json:"tokens"` // All tokens from input
+}
 
 // Stack for the Forth-like language
 type stack []interface{}
@@ -138,18 +260,45 @@ func (s *stack) pop() (interface{}, error) {
 	return v, nil
 }
 
-// parseAndExecute parses the input and executes Forth-like operations.
-func parseAndExecute(ctx context.Context, input string, yield func(CaGenerateContentResponse) bool) error {
-	st := make(stack, 0)
-	tokens := tokenize(input)
+// parseAndExecute parses the input and executes Forth-like operations with state management.
+func parseAndExecute(ctx context.Context, input string, savedState *EvalState, yield func(CaGenerateContentResponse) bool) error {
+	var st stack
+	var tokens []string
+	var startIndex int
 
-	for _, token := range tokens {
+	if savedState != nil {
+		// Restore saved state (stack already contains FunctionResponse result)
+		st = stack(savedState.Stack)
+		tokens = savedState.Tokens
+		startIndex = savedState.ProgramCounter
+	} else {
+		// Fresh execution
+		st = make(stack, 0)
+		tokens = tokenize(input)
+		startIndex = 0
+	}
+
+	// Create yieldPart wrapper function
+	yieldPart := func(part Part) bool {
+		return yield(CaGenerateContentResponse{
+			Response: VertexGenerateContentResponse{
+				Candidates: []Candidate{{
+					Content: Content{
+						Parts: []Part{part},
+					},
+				}},
+			},
+		})
+	}
+
+	for i := startIndex; i < len(tokens); i++ {
 		select {
 		case <-ctx.Done(): // Check for context cancellation
 			return ctx.Err()
 		default:
 		}
 
+		token := tokens[i]
 		if num, err := strconv.ParseFloat(token, 64); err == nil {
 			st.push(num)
 		} else if strings.HasPrefix(token, "\"") && strings.HasSuffix(token, "\"") {
@@ -157,9 +306,50 @@ func parseAndExecute(ctx context.Context, input string, yield func(CaGenerateCon
 			str := strings.Trim(token, "\"")
 			str = strings.ReplaceAll(str, "\"\"", "\"") // Unescape double quotes
 			st.push(str)
+		} else if strings.HasPrefix(token, "`") && strings.HasSuffix(token, "`") {
+			// Handle backtick string literals
+			str := strings.Trim(token, "`")
+			str = strings.ReplaceAll(str, "``", "`") // Unescape backticks
+			st.push(str)
 		} else if strings.HasPrefix(token, "(") && strings.HasSuffix(token, ")") {
 			// Comment, do nothing
 		} else {
+			// Check for s/ss/sss... commands (random alphanumeric strings)
+			if strings.HasPrefix(token, "s") && len(token) >= 1 {
+				allS := true
+				for _, r := range token {
+					if r != 's' {
+						allS = false
+						break
+					}
+				}
+				if allS {
+					length := len(token)
+					st.push(generateRandomString(length))
+					continue
+				}
+			}
+
+			// Check for n/nn/nnn... commands (random numbers)
+			if strings.HasPrefix(token, "n") && len(token) >= 1 {
+				allN := true
+				for _, r := range token {
+					if r != 'n' {
+						allN = false
+						break
+					}
+				}
+				if allN {
+					digits := len(token)
+					num, err := generateRandomNumber(digits)
+					if err != nil {
+						return err
+					}
+					st.push(float64(num))
+					continue
+				}
+			}
+
 			switch token {
 			case "say":
 				val, err := st.pop()
@@ -170,17 +360,7 @@ func parseAndExecute(ctx context.Context, input string, yield func(CaGenerateCon
 				if !ok {
 					return fmt.Errorf("type mismatch: expected string for 'say', got %T", val)
 				}
-				if !yield(CaGenerateContentResponse{
-					Response: VertexGenerateContentResponse{
-						Candidates: []Candidate{{
-							Content: Content{
-								Parts: []Part{
-									{Text: strVal},
-								},
-							},
-						}},
-					},
-				}) {
+				if !yieldPart(Part{Text: strVal}) {
 					return nil // Stop if yield returns false
 				}
 			case "think":
@@ -202,17 +382,7 @@ func parseAndExecute(ctx context.Context, input string, yield func(CaGenerateCon
 					return fmt.Errorf("type mismatch: expected string for 'think' title, got %T", titleVal)
 				}
 
-				if !yield(CaGenerateContentResponse{
-					Response: VertexGenerateContentResponse{
-						Candidates: []Candidate{{
-							Content: Content{
-								Parts: []Part{
-									{Thought: true, Text: fmt.Sprintf("**%s**\n\n%s", titleStr, contentStr)},
-								},
-							},
-						}},
-					},
-				}) {
+				if !yieldPart(Part{Thought: true, Text: fmt.Sprintf("**%s**\n\n%s", titleStr, contentStr)}) {
 					return nil // Stop if yield returns false
 				}
 			case "sleep":
@@ -230,6 +400,60 @@ func parseAndExecute(ctx context.Context, input string, yield func(CaGenerateCon
 				case <-ctx.Done():
 					return ctx.Err() // Context was cancelled
 				}
+			case "call":
+				// Pop args JSON string
+				argsVal, err := st.pop()
+				if err != nil {
+					return err
+				}
+				argsStr, ok := argsVal.(string)
+				if !ok {
+					return fmt.Errorf("type mismatch: expected string for call args, got %T", argsVal)
+				}
+
+				// Pop tool name
+				nameVal, err := st.pop()
+				if err != nil {
+					return err
+				}
+				nameStr, ok := nameVal.(string)
+				if !ok {
+					return fmt.Errorf("type mismatch: expected string for call name, got %T", nameVal)
+				}
+
+				// Parse args JSON
+				var argsMap map[string]interface{}
+				if err := json.Unmarshal([]byte(argsStr), &argsMap); err != nil {
+					return fmt.Errorf("call: invalid args JSON: %v", err)
+				}
+
+				// Create FunctionCall
+				fc := FunctionCall{
+					Name: nameStr,
+					Args: argsMap,
+				}
+
+				// Save current state for next execution (continue after this call)
+				nextState := &EvalState{
+					ProgramCounter: i + 1, // Continue from next token after call
+					Stack:          []interface{}(st),
+					Tokens:         tokens,
+				}
+
+				// Create ThoughtSignature with proper error handling
+				stateJSON, err := json.Marshal(nextState)
+				if err != nil {
+					return err
+				}
+				thoughtSignature := base64.StdEncoding.EncodeToString(stateJSON)
+
+				// Display tool call as FunctionCall with state
+				if !yieldPart(Part{FunctionCall: &fc, ThoughtSignature: thoughtSignature}) {
+					return nil // Stop if yield returns false
+				}
+
+				// Terminate this execution - chat_stream will call us again with the restored state
+				return nil
 			default:
 				return fmt.Errorf("unknown operation: %s", token)
 			}
@@ -243,6 +467,7 @@ func tokenize(input string) []string {
 	var tokens []string
 	var currentToken strings.Builder
 	inString := false
+	inBacktick := false
 	inComment := false
 
 	for i := 0; i < len(input); i++ {
@@ -264,10 +489,25 @@ func tokenize(input string) []string {
 			} else {
 				currentToken.WriteByte(char)
 			}
+		} else if inBacktick {
+			if char == '`' {
+				if i+1 < len(input) && input[i+1] == '`' {
+					// Escaped backtick
+					currentToken.WriteByte('`')
+					i++ // Skip next backtick
+				} else {
+					// End of backtick string
+					inBacktick = false
+					currentToken.WriteByte('`')
+					tokens = append(tokens, currentToken.String())
+					currentToken.Reset()
+				}
+			} else {
+				currentToken.WriteByte(char)
+			}
 		} else if inComment {
 			if char == ')' {
 				inComment = false
-				// tokens = append(tokens, "("+currentToken.String()+")") // Keep comment as a single token
 				currentToken.Reset() // Discard comment content
 			} else {
 				currentToken.WriteByte(char)
@@ -281,6 +521,13 @@ func tokenize(input string) []string {
 				}
 				inString = true
 				currentToken.WriteByte('"')
+			case '`':
+				if currentToken.Len() > 0 {
+					tokens = append(tokens, currentToken.String())
+					currentToken.Reset()
+				}
+				inBacktick = true
+				currentToken.WriteByte('`')
 			case '(': // Start of comment
 				if currentToken.Len() > 0 {
 					tokens = append(tokens, currentToken.String())
@@ -301,6 +548,10 @@ func tokenize(input string) []string {
 
 	if inString {
 		// Unclosed string literal is a syntax error
+		return []string{} // Or return an error
+	}
+	if inBacktick {
+		// Unclosed backtick string is a syntax error
 		return []string{} // Or return an error
 	}
 	if inComment {

@@ -195,7 +195,7 @@ func streamLLMResponse(
 
 					// Add to current history for later execution
 					currentHistory = append(currentHistory,
-						Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}},
+						Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc, ThoughtSignature: state}}},
 						Content{Role: RoleUser, Parts: appendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
 					)
 					continue // Continue processing other parts in the same caResp
@@ -224,7 +224,7 @@ func streamLLMResponse(
 					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsBytes))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
 
-					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}})
+					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc, ThoughtSignature: state}}})
 					continue
 				} else if part.CodeExecutionResult != nil {
 					// Convert CodeExecutionResult to FunctionResponse with special name
