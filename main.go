@@ -238,7 +238,7 @@ func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If not found on filesystem, try to serve from embedded files
-	fsys, err := fs.Sub(embeddedFiles, "frontend/dist/assets")
+	fsys, err := fs.Sub(embeddedFiles, "frontend/dist")
 	if err != nil {
 		sendInternalServerError(w, r, err, "Error creating sub-filesystem for assets")
 		return
