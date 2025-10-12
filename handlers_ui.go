@@ -120,7 +120,8 @@ func handleDirectoryNavigation(w http.ResponseWriter, r *http.Request) {
 		if path == "" {
 			path = "."
 		}
-		absPath, err := filepath.Abs(path)
+		var absPath string
+		absPath, err = filepath.Abs(path)
 		if err != nil {
 			absPath = filepath.Clean(path)
 		}

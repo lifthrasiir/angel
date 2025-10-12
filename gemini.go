@@ -114,6 +114,10 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 
 	resp, err := c.clientProvider.Client(ctx).Do(httpReq)
 	if err != nil {
+		// Skip logging for cancellation errors
+		if ctx.Err() == context.Canceled {
+			return nil, fmt.Errorf("API request failed: %w", err)
+		}
 		// Log both request and response (error) when request fails
 		filteredReq := filterLargeJSON(reqBody)
 		log.Printf("makeAPIRequest: API request failed - Request: %s, Error: %v", filteredReq, err)
@@ -123,6 +127,11 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+
+		// Skip logging for cancellation errors
+		if ctx.Err() == context.Canceled {
+			return nil, &APIError{StatusCode: resp.StatusCode, Message: resp.Status, Response: string(bodyBytes)}
+		}
 
 		// Log both request and response when status code is not OK
 		filteredReq := filterLargeJSON(reqBody)

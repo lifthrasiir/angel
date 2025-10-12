@@ -84,7 +84,7 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 }
 
 // executeWebFetchFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
-func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider, genParams SessionGenerationParams) (ToolHandlerResults, error) {
+func executeWebFetchFallback(ctx context.Context, prompt string, llmProvider LLMProvider, genParams SessionGenerationParams) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		return ToolHandlerResults{}, fmt.Errorf("no URL found in the prompt for fallback")
@@ -130,7 +130,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 	}}, nil
 }
 
-func executeWebFetch(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider, genParams SessionGenerationParams, fallbackProvider LLMProvider, fallbackGenParams SessionGenerationParams) (ToolHandlerResults, error) {
+func executeWebFetch(ctx context.Context, prompt string, llmProvider LLMProvider, genParams SessionGenerationParams, fallbackProvider LLMProvider, fallbackGenParams SessionGenerationParams) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		// If no URLs are found, perform a DuckDuckGo search
@@ -141,14 +141,14 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, llmPr
 		// Modify the prompt to explicitly ask to exclude irrelevant content
 		modifiedPrompt := fmt.Sprintf("Process the content from this URL: %s\nExtract relevant information, excluding any irrelevant content.", duckDuckGoURL)
 
-		return executeWebFetchFallback(ctx, modifiedPrompt, modelName, fallbackProvider, fallbackGenParams)
+		return executeWebFetchFallback(ctx, modifiedPrompt, fallbackProvider, fallbackGenParams)
 	}
 
 	// Check for private IP before calling LLM
 	urlToProcess := urls[0] // Assuming we only process the first URL for private IP check
 	if isPrivateIp(urlToProcess) {
 		log.Printf("WebFetchTool: Detected private IP for %s. Bypassing LLM and performing manual fetch.", urlToProcess)
-		return executeWebFetchFallback(ctx, prompt, modelName, fallbackProvider, fallbackGenParams)
+		return executeWebFetchFallback(ctx, prompt, fallbackProvider, fallbackGenParams)
 	}
 
 	// Primary Gemini API call with urlContext
@@ -190,7 +190,7 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, llmPr
 
 	if processingError {
 		// Perform fallback for the original prompt
-		return executeWebFetchFallback(ctx, prompt, modelName, fallbackProvider, fallbackGenParams)
+		return executeWebFetchFallback(ctx, prompt, fallbackProvider, fallbackGenParams)
 	}
 
 	// If no processing error, return the LLM's response
@@ -220,7 +220,7 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolH
 		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch fallback (model: %s)", params.ModelName)
 	}
 
-	return executeWebFetch(ctx, prompt, params.ModelName, webFetchProvider, webFetchGenParams, webFetchFallbackProvider, webFetchFallbackGenParams)
+	return executeWebFetch(ctx, prompt, webFetchProvider, webFetchGenParams, webFetchFallbackProvider, webFetchFallbackGenParams)
 }
 
 var webFetchToolDefinition = ToolDefinition{
