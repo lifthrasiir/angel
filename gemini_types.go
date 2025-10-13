@@ -458,3 +458,13 @@ type OnboardUserResponse struct {
 		Name string `json:"name"`
 	} `json:"cloudaicompanionProject,omitempty"`
 }
+
+type SetCodeAssistGlobalUserSettingRequest struct {
+	CloudaicompanionProject     string `json:"cloudaicompanionProject,omitempty"`
+	FreeTierDataCollectionOptin bool   `json:"freeTierDataCollectionOptin"`
+}
+
+type CodeAssistGlobalUserSettingResponse struct {
+	CloudaicompanionProject     string `json:"cloudaicompanionProject,omitempty"`
+	FreeTierDataCollectionOptin bool   `json:"freeTierDataCollectionOptin"`
+}

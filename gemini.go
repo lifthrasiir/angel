@@ -358,23 +358,6 @@ func (c *CodeAssistClient) LoadCodeAssist(ctx context.Context, req LoadCodeAssis
 		return nil, fmt.Errorf("failed to decode API response: %w", err)
 	}
 
-	// If cloudaicompanionProject is not set, generate an accurate error indicating that the free tier cannot be used based on the contents of ineligibleTiers.
-	if loadRes.CloudaicompanionProject == "" {
-		if len(loadRes.IneligibleTiers) > 0 {
-			var errorMessages []string
-			for _, tier := range loadRes.IneligibleTiers {
-				if tier.TierID == "free-tier" {
-					errorMessages = append(errorMessages, fmt.Sprintf("Free tier (%s) is not available: %s (Reason Code: %s)", tier.TierName, tier.ReasonMessage, tier.ReasonCode))
-				}
-			}
-			if len(errorMessages) > 0 {
-				return nil, fmt.Errorf("failed to load code assist: %s", strings.Join(errorMessages, "; "))
-			}
-		}
-		// This means that the initial CloudAICompanion project will be assigned soon. (TODO: restart required for some reason)
-		return nil, fmt.Errorf("failed to load code assist: cloudaicompanionProject is not set and no specific ineligible tiers found. This still means that you are going to get assigned for the project, try to restart the application to take the effect")
-	}
-
 	// If cloudaicompanionProject is set and showNotice is true, print the privacy notice to the console and a message indicating that continuing to use it automatically accepts the notice.
 	if loadRes.CurrentTier != nil && loadRes.CurrentTier.PrivacyNotice != nil && loadRes.CurrentTier.PrivacyNotice.ShowNotice {
 		log.Println("--- Privacy Notice ---")
@@ -407,6 +390,29 @@ func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserReque
 	}
 
 	return &lroRes, nil
+}
+
+// SetCodeAssistGlobalUserSetting calls the setCodeAssistGlobalUserSetting of Code Assist API.
+func (c *CodeAssistClient) SetCodeAssistGlobalUserSetting(ctx context.Context, req SetCodeAssistGlobalUserSettingRequest) (*CodeAssistGlobalUserSettingResponse, error) {
+	url := "https://cloudcode-pa.googleapis.com/v1internal:setCodeAssistGlobalUserSetting"
+	resp, err := c.makeAPIRequest(ctx, url, req, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	resp.Body.Close() // Close the body after reading
+
+	var settingRes CodeAssistGlobalUserSettingResponse
+	if err := json.Unmarshal(bodyBytes, &settingRes); err != nil {
+		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	}
+
+	return &settingRes, nil
 }
 
 // MaxTokens implements the LLMProvider interface for CodeAssistClient.
