@@ -13,6 +13,7 @@ replace (
 )
 
 require (
+	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/csrf v1.7.3

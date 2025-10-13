@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build-frontend": "npm run build --prefix frontend",
-    "build-backend": "goimports -w . && go build -ldflags=\"-w\" .",
+    "build-backend": "goimports -w . && go build -tags sqlite_fts5 -ldflags=\"-w\" .",
     "build": "npm run build-frontend && npm run build-backend",
     "test-backend": "goimports -w . && go test -count=3 -timeout=20s ./... ./src/fs/... ./src/editor/...",
     "test": "npm run test-backend",

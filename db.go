@@ -11,10 +11,15 @@ import (
 	"net/http"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3" // SQLite driver
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/lifthrasiir/angel/fs"
 )
+
+func init() {
+	sqlite_vec.Auto()
+}
 
 // createTables creates the necessary tables in the database.
 func createTables(db *sql.DB) error {
@@ -149,6 +154,9 @@ func migrateDB(db *sql.DB) error {
 		// Add ref_count column to blobs table
 		"ALTER TABLE blobs ADD COLUMN ref_count INTEGER DEFAULT 1 NOT NULL",
 
+		// Add indexed column to messages table for search indexing tracking
+		"ALTER TABLE messages ADD COLUMN indexed INTEGER DEFAULT 0 NOT NULL",
+
 		// Create triggers for automatic blob reference counting using json_each
 		`CREATE TRIGGER IF NOT EXISTS increment_blob_refs
 			AFTER INSERT ON messages
@@ -218,6 +226,124 @@ func migrateDB(db *sql.DB) error {
 	return nil
 }
 
+// initializeSearchTables creates search tables and migrates existing data.
+// This function should only be called once when search tables are first created.
+func initializeSearchTables(db *sql.DB) error {
+	// Check if messages_searchable already exists
+	var exists bool
+	err := db.QueryRow(`
+		SELECT COUNT(*) > 0 FROM sqlite_master
+		WHERE type = 'view' AND name = 'messages_searchable'
+	`).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check if messages_searchable exists: %w", err)
+	}
+
+	// If search tables already exist, skip initialization
+	if exists {
+		log.Println("Search tables already exist, skipping initialization")
+		return nil
+	}
+
+	log.Println("Initializing search tables...")
+
+	// Create messages searchable view for FTS5
+	_, err = db.Exec(`
+		CREATE VIEW messages_searchable AS
+			SELECT id, text FROM messages WHERE type IN ('user', 'model')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create messages_searchable: %w", err)
+	}
+
+	// Create FTS5 search tables for messages
+	_, err = db.Exec(`
+		CREATE VIRTUAL TABLE message_stems USING fts5(
+			text,
+			content='messages_searchable',
+			content_rowid='id',
+			tokenize='porter unicode61'
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create message_stems table: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE VIRTUAL TABLE message_trigrams USING fts5(
+			text,
+			content='messages_searchable',
+			content_rowid='id',
+			tokenize='trigram'
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create message_trigrams table: %w", err)
+	}
+
+	// Populate search tables with existing data using rebuild
+	log.Println("Populating search tables with existing data...")
+
+	_, err = db.Exec(`INSERT INTO message_stems(message_stems) VALUES('rebuild')`)
+	if err != nil {
+		return fmt.Errorf("failed to populate message_stems: %w", err)
+	}
+
+	_, err = db.Exec(`INSERT INTO message_trigrams(message_trigrams) VALUES('rebuild')`)
+	if err != nil {
+		return fmt.Errorf("failed to populate message_trigrams: %w", err)
+	}
+
+	log.Println("Search tables initialization completed")
+
+	// Create triggers to keep search tables in sync with source data
+	// Message triggers - unified for both search tables
+	_, err = db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS message_search_insert
+		AFTER INSERT ON messages
+		WHEN NEW.type IN ('user', 'model')
+		BEGIN
+			INSERT INTO message_stems(rowid, text) VALUES (NEW.id, NEW.text);
+			INSERT INTO message_trigrams(rowid, text) VALUES (NEW.id, NEW.text);
+		END
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create message_search_insert trigger: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS message_search_update
+		AFTER UPDATE ON messages
+		WHEN OLD.text != NEW.text OR OLD.type != NEW.type
+		BEGIN
+			-- Remove old record if it existed in search
+			DELETE FROM message_stems WHERE rowid = OLD.id;
+			DELETE FROM message_trigrams WHERE rowid = OLD.id;
+
+			-- Add new record if new type is searchable
+			INSERT INTO message_stems(rowid, text) SELECT NEW.id, NEW.text WHERE NEW.type IN ('user', 'model');
+			INSERT INTO message_trigrams(rowid, text) SELECT NEW.id, NEW.text WHERE NEW.type IN ('user', 'model');
+		END
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create message_search_update trigger: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS message_search_delete
+		AFTER DELETE ON messages
+		BEGIN
+			DELETE FROM message_stems WHERE rowid = OLD.id;
+			DELETE FROM message_trigrams WHERE rowid = OLD.id;
+		END
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create message_search_delete trigger: %w", err)
+	}
+
+	return nil
+}
+
 // InitDB initializes the SQLite database connection and creates tables if they don't exist.
 func InitDB(dataSourceName string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dataSourceName)
@@ -246,6 +372,12 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	if err = migrateDB(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run database migrations: %w", err)
+	}
+
+	// Initialize search tables (one-time setup)
+	if err = initializeSearchTables(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize search tables: %w", err)
 	}
 
 	log.Println("Database initialized and tables created.")
