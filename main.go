@@ -174,6 +174,7 @@ func InitRouter(router *mux.Router) {
 	}).Methods("GET")
 
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
+	router.HandleFunc("/search", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
 
 	router.HandleFunc("/w", handleNotFound).Methods("GET")
@@ -215,6 +216,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/models", listModelsHandler).Methods("GET")
 	router.HandleFunc("/api/systemPrompts", getSystemPromptsHandler).Methods("GET")
 	router.HandleFunc("/api/systemPrompts", saveSystemPromptsHandler).Methods("PUT")
+	router.HandleFunc("/api/search", searchMessagesHandler).Methods("POST")
 	router.HandleFunc("/api/ui/directory", handleDirectoryNavigation).Methods("GET")
 	router.HandleFunc("/api/ui/directory", handlePickDirectory).Methods("POST")
 	router.HandleFunc("/api", handleNotFound)

@@ -262,7 +262,7 @@ func initializeSearchTables(db *sql.DB) error {
 			text,
 			content='messages_searchable',
 			content_rowid='id',
-			tokenize='porter unicode61'
+			tokenize='porter unicode61 remove_diacritics 1'
 		)
 	`)
 	if err != nil {
@@ -274,7 +274,7 @@ func initializeSearchTables(db *sql.DB) error {
 			text,
 			content='messages_searchable',
 			content_rowid='id',
-			tokenize='trigram'
+			tokenize='trigram remove_diacritics 1'
 		)
 	`)
 	if err != nil {
@@ -1165,4 +1165,101 @@ func SetInitialSessionEnv(db DbOrTx, sessionID string, roots []string) error {
 		return fmt.Errorf("failed to set initial session environment: %w", err)
 	}
 	return nil
+}
+
+// SearchResult represents a single search result
+type SearchResult struct {
+	MessageID   int    `json:"message_id"`
+	SessionID   string `json:"session_id"`
+	Text        string `json:"text"`
+	Type        string `json:"type"`
+	CreatedAt   string `json:"created_at"`
+	SessionName string `json:"session_name"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+// SearchMessages searches for messages matching the query using FTS5 tables
+func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID string) ([]SearchResult, bool, error) {
+	// Validate query
+	if strings.TrimSpace(query) == "" {
+		return nil, false, fmt.Errorf("search query cannot be empty")
+	}
+
+	// Set default limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100 // Cap at 100 for performance
+	}
+
+	// Build the search query using both FTS tables for better results
+	searchQuery := `
+		SELECT DISTINCT
+			m.id,
+			m.session_id,
+			m.text,
+			m.type,
+			m.created_at,
+			COALESCE(s.name, '') as session_name,
+			COALESCE(s.workspace_id, '') as workspace_id
+		FROM messages m
+		JOIN sessions s ON m.session_id = s.id
+		WHERE m.id IN (
+			SELECT rowid FROM message_stems WHERE message_stems MATCH ?
+			UNION
+			SELECT rowid FROM message_trigrams WHERE message_trigrams MATCH ?
+		)
+	`
+
+	args := []interface{}{query, query}
+
+	// Add max_id filter for pagination (get messages older than max_id)
+	if maxID > 0 {
+		searchQuery += " AND m.id < ?"
+		args = append(args, maxID)
+	}
+
+	// Add workspace filter if provided
+	if workspaceID != "" {
+		searchQuery += " AND s.workspace_id = ?"
+		args = append(args, workspaceID)
+	}
+
+	// Order by message ID (descending for newest first) and limit
+	searchQuery += " ORDER BY m.id DESC LIMIT ?"
+	args = append(args, limit+1) // Request one more to check if there are more results
+
+	rows, err := db.Query(searchQuery, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to search messages: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var result SearchResult
+		err := rows.Scan(
+			&result.MessageID,
+			&result.SessionID,
+			&result.Text,
+			&result.Type,
+			&result.CreatedAt,
+			&result.SessionName,
+			&result.WorkspaceID,
+		)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to scan search result: %w", err)
+		}
+		results = append(results, result)
+	}
+
+	// Check if there are more results
+	hasMore := len(results) > limit
+	if hasMore {
+		// Remove the extra result we used for checking
+		results = results[:limit]
+	}
+
+	return results, hasMore, nil
 }

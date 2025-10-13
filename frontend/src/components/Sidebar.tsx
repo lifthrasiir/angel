@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api/apiClient';
-import { FaArrowLeft, FaCog, FaFolder, FaPlus, FaBars, FaTimes } from 'react-icons/fa';
+import { FaArrowLeft, FaCog, FaFolder, FaPlus, FaBars, FaTimes, FaSearch } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Workspace } from '../types/chat';
@@ -303,6 +303,30 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             backgroundColor: '#ccc',
           }}
         />
+        <button
+          onClick={() => handleNavigate('/search')}
+          style={{
+            width: '100%',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            cursor: 'pointer',
+            color: 'black',
+            textDecoration: 'none',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
+            border: '0',
+            padding: '5px',
+            backgroundColor: 'transparent',
+            minHeight: 'var(--touch-target-size)',
+          }}
+          aria-label="Go to Search"
+        >
+          <FaSearch style={{ marginRight: '5px' }} />
+          Search
+        </button>
         <button
           onClick={() => handleNavigate('/settings')}
           style={{

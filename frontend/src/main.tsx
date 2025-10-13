@@ -14,6 +14,7 @@ import { DirectoryPickerManager } from './components/DirectoryPickerManager';
 import './components/tools/index.ts';
 
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const SearchPage = lazy(() => import('./pages/SearchPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
@@ -49,6 +50,14 @@ const router = createBrowserRouter([
   {
     path: '/:sessionId',
     element: <SessionPage />,
+  },
+  {
+    path: '/search',
+    element: (
+      <ChatLayout>
+        <SearchPage />
+      </ChatLayout>
+    ),
   },
   {
     path: '/settings',

@@ -627,3 +627,40 @@ func saveSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
 
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "Global prompts updated successfully"})
 }
+
+// SearchRequest represents the search request payload
+type SearchRequest struct {
+	Query       string `json:"query"`
+	MaxID       int    `json:"max_id,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+// SearchResponse represents the search response
+type SearchResponse struct {
+	Results []SearchResult `json:"results"`
+	HasMore bool           `json:"has_more"`
+}
+
+// searchMessagesHandler handles POST requests to /api/search
+func searchMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	var req SearchRequest
+	if !decodeJSONRequest(r, w, &req, "searchMessagesHandler") {
+		return
+	}
+
+	results, hasMore, err := SearchMessages(db, req.Query, req.MaxID, req.Limit, req.WorkspaceID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to search messages")
+		return
+	}
+
+	response := SearchResponse{
+		Results: results,
+		HasMore: hasMore,
+	}
+
+	sendJSONResponse(w, response)
+}
