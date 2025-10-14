@@ -63,15 +63,6 @@ func main() {
 	// Start the shell command manager
 	StartShellCommandManager(db) // Pass the database connection
 
-	// Initialize blob reference counts for existing data (first-time setup)
-	log.Println("Initializing blob reference counts...")
-	err = InitializeBlobRefCounts(db)
-	if err != nil {
-		log.Printf("Warning: Failed to initialize blob reference counts: %v", err)
-	} else {
-		log.Println("Blob reference counting initialized successfully")
-	}
-
 	// Retrieve or generate CSRF key
 	csrfKey, err := GetAppConfig(db, CSRFKeyName)
 	if err != nil {

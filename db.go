@@ -59,8 +59,11 @@ func createTables(db *sql.DB) error {
 		model TEXT NOT NULL,
 		generation INTEGER DEFAULT 0,
 		state TEXT NOT NULL DEFAULT '', -- Opaque state that has to be relayed to the LLM provider
-		aux TEXT NOT NULL DEFAULT ''    -- Angel-internal metadata that doesn't go to the LLM provider
+		aux TEXT NOT NULL DEFAULT '',   -- Angel-internal metadata that doesn't go to the LLM provider
+		indexed INTEGER DEFAULT 0 NOT NULL
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_messages_attachments ON messages(attachments);
 
 	CREATE TABLE IF NOT EXISTS oauth_tokens (
 		id INTEGER PRIMARY KEY,
@@ -87,6 +90,57 @@ func createTables(db *sql.DB) error {
 		data BLOB NOT NULL,
 		ref_count INTEGER DEFAULT 1 NOT NULL
 	);
+
+	CREATE TRIGGER IF NOT EXISTS increment_blob_refs
+		AFTER INSERT ON messages
+		WHEN NEW.attachments IS NOT NULL AND NEW.attachments != '[]'
+	BEGIN
+		UPDATE blobs SET ref_count = ref_count + 1
+		WHERE id IN (
+			SELECT json_extract(json_each.value, '$.hash')
+			FROM json_each(NEW.attachments)
+			WHERE json_extract(json_each.value, '$.hash') IS NOT NULL
+		);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS decrement_blob_refs
+		AFTER DELETE ON messages
+		WHEN OLD.attachments IS NOT NULL AND OLD.attachments != '[]'
+	BEGIN
+		UPDATE blobs SET ref_count = ref_count - 1
+		WHERE id IN (
+			SELECT json_extract(json_each.value, '$.hash')
+			FROM json_each(OLD.attachments)
+			WHERE json_extract(json_each.value, '$.hash') IS NOT NULL
+		);
+		DELETE FROM blobs WHERE ref_count <= 0;
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS update_blob_refs
+		AFTER UPDATE ON messages
+		WHEN NEW.attachments IS NOT NULL OR OLD.attachments IS NOT NULL
+	BEGIN
+		-- Decrease ref count for old attachments
+		UPDATE blobs SET ref_count = ref_count - 1
+		WHERE id IN (
+			SELECT json_extract(json_each.value, '$.hash')
+			FROM json_each(OLD.attachments)
+			WHERE OLD.attachments IS NOT NULL AND OLD.attachments != '[]'
+			AND json_extract(json_each.value, '$.hash') IS NOT NULL
+		);
+
+		-- Increase ref count for new attachments
+		UPDATE blobs SET ref_count = ref_count + 1
+		WHERE id IN (
+			SELECT json_extract(json_each.value, '$.hash')
+			FROM json_each(NEW.attachments)
+			WHERE NEW.attachments IS NOT NULL AND NEW.attachments != '[]'
+			AND json_extract(json_each.value, '$.hash') IS NOT NULL
+		);
+
+		-- Clean up blobs with ref_count <= 0
+		DELETE FROM blobs WHERE ref_count <= 0;
+	END;
 
 	CREATE TABLE IF NOT EXISTS global_prompts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,6 +180,63 @@ func createTables(db *sql.DB) error {
 		UNIQUE(session_id, generation),
 		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 	);
+
+	CREATE VIEW IF NOT EXISTS messages_searchable AS
+		SELECT id, text, session_id,
+		(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
+		FROM messages WHERE type IN ('user', 'model');
+
+	CREATE VIRTUAL TABLE IF NOT EXISTS message_stems USING fts5(
+		text,
+		session_id UNINDEXED,
+		workspace_id UNINDEXED,
+		content='messages_searchable',
+		content_rowid='id',
+		tokenize='porter unicode61 remove_diacritics 1'
+	);
+
+	CREATE VIRTUAL TABLE IF NOT EXISTS message_trigrams USING fts5(
+		text,
+		session_id UNINDEXED,
+		workspace_id UNINDEXED,
+		content='messages_searchable',
+		content_rowid='id',
+		tokenize='trigram remove_diacritics 1'
+	);
+
+	CREATE TRIGGER IF NOT EXISTS message_search_insert
+	AFTER INSERT ON messages
+	WHEN NEW.type IN ('user', 'model')
+	BEGIN
+		INSERT INTO message_stems(rowid, text, session_id, workspace_id)
+			VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
+		INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
+			VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS message_search_update
+	AFTER UPDATE ON messages
+	WHEN OLD.text != NEW.text OR OLD.type != NEW.type OR OLD.session_id != NEW.session_id
+	BEGIN
+		-- Remove old record if it existed in search
+		DELETE FROM message_stems WHERE rowid = OLD.id;
+		DELETE FROM message_trigrams WHERE rowid = OLD.id;
+
+		-- Add new record if new type is searchable
+		INSERT INTO message_stems(rowid, text, session_id, workspace_id)
+			SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
+			WHERE NEW.type IN ('user', 'model');
+		INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
+			SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
+			WHERE NEW.type IN ('user', 'model');
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS message_search_delete
+	AFTER DELETE ON messages
+	BEGIN
+		DELETE FROM message_stems WHERE rowid = OLD.id;
+		DELETE FROM message_trigrams WHERE rowid = OLD.id;
+	END;
 	`
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
@@ -136,221 +247,14 @@ func createTables(db *sql.DB) error {
 
 // migrateDB handles database schema migrations.
 func migrateDB(db *sql.DB) error {
-	// Add new columns for generation tracking if they don't exist
-	// SQLite's ALTER TABLE ADD COLUMN does not support IF NOT EXISTS directly.
-	// We will attempt to add and log if it fails, assuming it's due to column existence.
-	migrationStmts := []string{
-		// Add chosen_first_id column to sessions table for first message editing
-		"ALTER TABLE sessions ADD COLUMN chosen_first_id INTEGER",
-		// Set chosen_first_id for existing sessions to their first message (where parent_message_id IS NULL)
-		"UPDATE sessions SET chosen_first_id = (SELECT MIN(id) FROM messages WHERE session_id = sessions.id AND parent_message_id IS NULL) WHERE chosen_first_id IS NULL",
-
-		// Skip generated column approach - it's causing compatibility issues
-		// Focus on trigger-based solution which is more reliable
-
-		// Create expression index for attachments JSON (compatible syntax)
-		"CREATE INDEX IF NOT EXISTS idx_messages_attachments ON messages(attachments)",
-
-		// Add ref_count column to blobs table
-		"ALTER TABLE blobs ADD COLUMN ref_count INTEGER DEFAULT 1 NOT NULL",
-
-		// Add indexed column to messages table for search indexing tracking
-		"ALTER TABLE messages ADD COLUMN indexed INTEGER DEFAULT 0 NOT NULL",
-
-		// Create triggers for automatic blob reference counting using json_each
-		`CREATE TRIGGER IF NOT EXISTS increment_blob_refs
-			AFTER INSERT ON messages
-			WHEN NEW.attachments IS NOT NULL AND NEW.attachments != '[]'
-		BEGIN
-			UPDATE blobs SET ref_count = ref_count + 1
-			WHERE id IN (
-				SELECT json_extract(json_each.value, '$.hash')
-				FROM json_each(NEW.attachments)
-				WHERE json_extract(json_each.value, '$.hash') IS NOT NULL
-			);
-		END`,
-
-		`CREATE TRIGGER IF NOT EXISTS decrement_blob_refs
-			AFTER DELETE ON messages
-			WHEN OLD.attachments IS NOT NULL AND OLD.attachments != '[]'
-		BEGIN
-			UPDATE blobs SET ref_count = ref_count - 1
-			WHERE id IN (
-				SELECT json_extract(json_each.value, '$.hash')
-				FROM json_each(OLD.attachments)
-				WHERE json_extract(json_each.value, '$.hash') IS NOT NULL
-			);
-			DELETE FROM blobs WHERE ref_count <= 0;
-		END`,
-
-		`CREATE TRIGGER IF NOT EXISTS update_blob_refs
-			AFTER UPDATE ON messages
-			WHEN NEW.attachments IS NOT NULL OR OLD.attachments IS NOT NULL
-		BEGIN
-			-- Decrease ref count for old attachments
-			UPDATE blobs SET ref_count = ref_count - 1
-			WHERE id IN (
-				SELECT json_extract(json_each.value, '$.hash')
-				FROM json_each(OLD.attachments)
-				WHERE OLD.attachments IS NOT NULL AND OLD.attachments != '[]'
-				AND json_extract(json_each.value, '$.hash') IS NOT NULL
-			);
-
-			-- Increase ref count for new attachments
-			UPDATE blobs SET ref_count = ref_count + 1
-			WHERE id IN (
-				SELECT json_extract(json_each.value, '$.hash')
-				FROM json_each(NEW.attachments)
-				WHERE NEW.attachments IS NOT NULL AND NEW.attachments != '[]'
-				AND json_extract(json_each.value, '$.hash') IS NOT NULL
-			);
-
-			-- Clean up blobs with ref_count <= 0
-			DELETE FROM blobs WHERE ref_count <= 0;
-		END`,
-	}
+	// Placeholder for future migrations
+	migrationStmts := []string{}
 
 	for _, stmt := range migrationStmts {
 		_, err := db.Exec(stmt)
 		if err != nil {
-			// Check if the error is "duplicate column name" or similar
-			// For SQLite, this typically means the column already exists.
-			if strings.Contains(err.Error(), "duplicate column name") || strings.Contains(err.Error(), "already exists") {
-				log.Printf("Column might already exist, skipping alter table: %s", stmt)
-				continue
-			}
 			return fmt.Errorf("failed to execute migration statement '%s': %w", stmt, err)
 		}
-	}
-
-	return nil
-}
-
-// initializeSearchTables creates search tables and migrates existing data.
-// This function should only be called once when search tables are first created.
-func initializeSearchTables(db *sql.DB) error {
-	// Check if messages_searchable already exists
-	var exists bool
-	err := db.QueryRow(`
-		SELECT COUNT(*) > 0 FROM sqlite_master
-		WHERE type = 'view' AND name = 'messages_searchable'
-	`).Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("failed to check if messages_searchable exists: %w", err)
-	}
-
-	// If search tables already exist, skip initialization
-	if exists {
-		log.Println("Search tables already exist, skipping initialization")
-		return nil
-	}
-
-	log.Println("Initializing search tables...")
-
-	// Create messages searchable view for FTS5
-	_, err = db.Exec(`
-		CREATE VIEW messages_searchable AS
-			SELECT id, text, session_id,
-			(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
-			FROM messages WHERE type IN ('user', 'model')
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create messages_searchable: %w", err)
-	}
-
-	// Create FTS5 search tables for messages
-	_, err = db.Exec(`
-		CREATE VIRTUAL TABLE message_stems USING fts5(
-			text,
-			session_id UNINDEXED,
-			workspace_id UNINDEXED,
-			content='messages_searchable',
-			content_rowid='id',
-			tokenize='porter unicode61 remove_diacritics 1'
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create message_stems table: %w", err)
-	}
-
-	_, err = db.Exec(`
-		CREATE VIRTUAL TABLE message_trigrams USING fts5(
-			text,
-			session_id UNINDEXED,
-			workspace_id UNINDEXED,
-			content='messages_searchable',
-			content_rowid='id',
-			tokenize='trigram remove_diacritics 1'
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create message_trigrams table: %w", err)
-	}
-
-	// Populate search tables with existing data using rebuild
-	log.Println("Populating search tables with existing data...")
-
-	_, err = db.Exec(`INSERT INTO message_stems(message_stems) VALUES('rebuild')`)
-	if err != nil {
-		return fmt.Errorf("failed to populate message_stems: %w", err)
-	}
-
-	_, err = db.Exec(`INSERT INTO message_trigrams(message_trigrams) VALUES('rebuild')`)
-	if err != nil {
-		return fmt.Errorf("failed to populate message_trigrams: %w", err)
-	}
-
-	log.Println("Search tables initialization completed")
-
-	// Create triggers to keep search tables in sync with source data
-	// Message triggers - unified for both search tables
-	_, err = db.Exec(`
-		CREATE TRIGGER IF NOT EXISTS message_search_insert
-		AFTER INSERT ON messages
-		WHEN NEW.type IN ('user', 'model')
-		BEGIN
-			INSERT INTO message_stems(rowid, text, session_id, workspace_id)
-				VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
-			INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
-				VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
-		END
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create message_search_insert trigger: %w", err)
-	}
-
-	_, err = db.Exec(`
-		CREATE TRIGGER IF NOT EXISTS message_search_update
-		AFTER UPDATE ON messages
-		WHEN OLD.text != NEW.text OR OLD.type != NEW.type OR OLD.session_id != NEW.session_id
-		BEGIN
-			-- Remove old record if it existed in search
-			DELETE FROM message_stems WHERE rowid = OLD.id;
-			DELETE FROM message_trigrams WHERE rowid = OLD.id;
-
-			-- Add new record if new type is searchable
-			INSERT INTO message_stems(rowid, text, session_id, workspace_id)
-				SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
-				WHERE NEW.type IN ('user', 'model');
-			INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
-				SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
-				WHERE NEW.type IN ('user', 'model');
-		END
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create message_search_update trigger: %w", err)
-	}
-
-	_, err = db.Exec(`
-		CREATE TRIGGER IF NOT EXISTS message_search_delete
-		AFTER DELETE ON messages
-		BEGIN
-			DELETE FROM message_stems WHERE rowid = OLD.id;
-			DELETE FROM message_trigrams WHERE rowid = OLD.id;
-		END
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create message_search_delete trigger: %w", err)
 	}
 
 	return nil
@@ -384,12 +288,6 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	if err = migrateDB(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run database migrations: %w", err)
-	}
-
-	// Initialize search tables (one-time setup)
-	if err = initializeSearchTables(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to initialize search tables: %w", err)
 	}
 
 	log.Println("Database initialized and tables created.")
@@ -909,52 +807,6 @@ func GetBlobAsFileAttachment(db *sql.DB, hash string) (FileAttachment, error) {
 		MimeType: mimeType,
 		FileName: filename,
 	}, nil
-}
-
-// InitializeBlobRefCounts initializes blob reference counts for existing data.
-// This should be called once during migration to set up ref_count values correctly.
-// After initialization, triggers will handle all reference counting automatically.
-func InitializeBlobRefCounts(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction for ref count initialization: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Initialize all blobs to ref_count = 0
-	_, err = tx.Exec("UPDATE blobs SET ref_count = 0")
-	if err != nil {
-		return fmt.Errorf("failed to reset blob ref counts: %w", err)
-	}
-
-	// Count references from all existing messages
-	_, err = tx.Exec(`
-		UPDATE blobs SET ref_count = (
-			SELECT COUNT(*) FROM (
-				SELECT json_extract(json_each.value, '$.hash') as blob_hash
-				FROM messages, json_each(messages.attachments)
-				WHERE json_extract(json_each.value, '$.hash') = blobs.id
-			)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to calculate blob reference counts: %w", err)
-	}
-
-	// Remove blobs with ref_count = 0 (unused blobs)
-	result, err := tx.Exec("DELETE FROM blobs WHERE ref_count = 0")
-	if err != nil {
-		return fmt.Errorf("failed to delete unused blobs: %w", err)
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit ref count initialization: %w", err)
-	}
-
-	log.Printf("Blob reference count initialization completed: removed %d unused blob(s)", rowsAffected)
-	return nil
 }
 
 // GlobalPrompt struct to hold global prompt data
