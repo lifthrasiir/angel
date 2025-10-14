@@ -48,6 +48,9 @@ var availableTools = map[string]ToolDefinition{
 	"poll_shell_command": pollShellCommandToolDefinition,
 	"kill_shell_command": killShellCommandToolDefinition,
 
+	// tools_search_chat.go
+	"search_chat": searchChatToolDefinition,
+
 	// tools_subagent.go - Subagent tools (Removed to avoid cyclic dependency)
 }
 
