@@ -1319,6 +1319,14 @@ pre .hljs {
   word-break: break-word;
 }
 
+.search-result-content mark {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 1px 2px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
 .search-result-workspace {
   margin-top: 8px;
   font-size: 12px;

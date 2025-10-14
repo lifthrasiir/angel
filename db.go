@@ -182,8 +182,8 @@ func createTables(db *sql.DB) error {
 	);
 
 	CREATE VIEW IF NOT EXISTS messages_searchable AS
-		SELECT id, text, session_id,
-		(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
+		SELECT id, replace(replace(text, '<', '\x0e'), '>', '\x0f') as text, session_id,
+			(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
 		FROM messages WHERE type IN ('user', 'model');
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS message_stems USING fts5(
@@ -208,10 +208,8 @@ func createTables(db *sql.DB) error {
 	AFTER INSERT ON messages
 	WHEN NEW.type IN ('user', 'model')
 	BEGIN
-		INSERT INTO message_stems(rowid, text, session_id, workspace_id)
-			VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
-		INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
-			VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
+		INSERT INTO message_stems(rowid) VALUES (NEW.id);
+		INSERT INTO message_trigrams(rowid) VALUES (NEW.id);
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS message_search_update
@@ -223,12 +221,8 @@ func createTables(db *sql.DB) error {
 		DELETE FROM message_trigrams WHERE rowid = OLD.id;
 
 		-- Add new record if new type is searchable
-		INSERT INTO message_stems(rowid, text, session_id, workspace_id)
-			SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
-			WHERE NEW.type IN ('user', 'model');
-		INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
-			SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
-			WHERE NEW.type IN ('user', 'model');
+		INSERT INTO message_stems(rowid) VALUES (NEW.id);
+		INSERT INTO message_trigrams(rowid) VALUES (NEW.id);
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS message_search_delete
@@ -247,8 +241,17 @@ func createTables(db *sql.DB) error {
 
 // migrateDB handles database schema migrations.
 func migrateDB(db *sql.DB) error {
-	// Placeholder for future migrations
-	migrationStmts := []string{}
+	// Migration for SI/SO HTML tag handling in FTS
+	migrationStmts := []string{
+		// Drop and recreate the view to trigger FTS rebuild
+		`DROP VIEW IF EXISTS messages_searchable`,
+
+		// Recreate the view with SI/SO conversion
+		`CREATE VIEW messages_searchable AS
+			SELECT id, replace(replace(text, '<', '\x0e'), '>', '\x0f') as text, session_id,
+			(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
+			FROM messages WHERE type IN ('user', 'model')`,
+	}
 
 	for _, stmt := range migrationStmts {
 		_, err := db.Exec(stmt)
@@ -1035,7 +1038,7 @@ func SetInitialSessionEnv(db DbOrTx, sessionID string, roots []string) error {
 type SearchResult struct {
 	MessageID   int    `json:"message_id"`
 	SessionID   string `json:"session_id"`
-	Text        string `json:"text"`
+	Excerpt     string `json:"excerpt"`
 	Type        string `json:"type"`
 	CreatedAt   string `json:"created_at"`
 	SessionName string `json:"session_name"`
@@ -1057,59 +1060,59 @@ func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID 
 		limit = 100 // Cap at 100 for performance
 	}
 
-	// Build the search query using both FTS tables for better results
-	// Use unindexed columns in FTS tables for filtering to avoid joins
-	searchQuery := `
+	// Build search query with snippet directly from FTS tables
+	searchSubQueryFormat := `
 		SELECT DISTINCT
 			rowid as id,
 			session_id,
 			workspace_id,
-			text
-		FROM (
-			SELECT rowid, session_id, workspace_id, text FROM message_stems WHERE message_stems MATCH ?
-			UNION
-			SELECT rowid, session_id, workspace_id, text FROM message_trigrams WHERE message_trigrams MATCH ?
-		)
+			-- Convert SI/SO back to HTML tags, then escape for safe display
+			replace(
+				replace(
+					replace(
+						snippet(%s, 0, '<mark>', '</mark>', '...', 64),
+						'&', '&amp;'
+					),
+					'\x0e', '&lt;'
+				),
+				'\x0f', '&gt;'
+			) as excerpt
+		FROM %[1]s WHERE %[1]s MATCH ?
 	`
-
 	args := []interface{}{query, query}
-
-	// Add workspace filter using unindexed column if provided
 	if workspaceID != "" {
-		searchQuery += " WHERE workspace_id = ?"
-		args = append(args, workspaceID)
+		searchSubQueryFormat += " AND workspace_id = ?"
+		args = []interface{}{query, workspaceID, query, workspaceID}
 	}
+	searchSubQuery := fmt.Sprintf(searchSubQueryFormat, "message_stems") + " UNION " +
+		fmt.Sprintf(searchSubQueryFormat, "message_trigrams")
 
-	// Get message details from messages table
-	searchQuery = `
+	// Build final query joining with messages and sessions
+	baseQuery := `
 		SELECT DISTINCT
 			m.id,
-			fts.session_id,
-			m.text,
+			m.session_id,
+			fts.excerpt,
 			m.type,
 			m.created_at,
 			COALESCE(s.name, '') as session_name,
 			fts.workspace_id
 		FROM messages m
 		JOIN sessions s ON m.session_id = s.id
-		JOIN (` + searchQuery + `) fts ON m.id = fts.id
+		JOIN (` + searchSubQuery + `) fts ON m.id = fts.id
 	`
 
 	// Add max_id filter for pagination (get messages older than max_id)
 	if maxID > 0 {
-		if workspaceID != "" {
-			searchQuery += " AND m.id < ?"
-		} else {
-			searchQuery += " WHERE m.id < ?"
-		}
+		baseQuery += " WHERE m.id < ?"
 		args = append(args, maxID)
 	}
 
 	// Order by message ID (descending for newest first) and limit
-	searchQuery += " ORDER BY m.id DESC LIMIT ?"
+	baseQuery += " ORDER BY m.id DESC LIMIT ?"
 	args = append(args, limit+1) // Request one more to check if there are more results
 
-	rows, err := db.Query(searchQuery, args...)
+	rows, err := db.Query(baseQuery, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to search messages: %w", err)
 	}
@@ -1121,7 +1124,7 @@ func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID 
 		err := rows.Scan(
 			&result.MessageID,
 			&result.SessionID,
-			&result.Text,
+			&result.Excerpt,
 			&result.Type,
 			&result.CreatedAt,
 			&result.SessionName,
