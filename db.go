@@ -250,7 +250,9 @@ func initializeSearchTables(db *sql.DB) error {
 	// Create messages searchable view for FTS5
 	_, err = db.Exec(`
 		CREATE VIEW messages_searchable AS
-			SELECT id, text FROM messages WHERE type IN ('user', 'model')
+			SELECT id, text, session_id,
+			(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
+			FROM messages WHERE type IN ('user', 'model')
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create messages_searchable: %w", err)
@@ -260,6 +262,8 @@ func initializeSearchTables(db *sql.DB) error {
 	_, err = db.Exec(`
 		CREATE VIRTUAL TABLE message_stems USING fts5(
 			text,
+			session_id UNINDEXED,
+			workspace_id UNINDEXED,
 			content='messages_searchable',
 			content_rowid='id',
 			tokenize='porter unicode61 remove_diacritics 1'
@@ -272,6 +276,8 @@ func initializeSearchTables(db *sql.DB) error {
 	_, err = db.Exec(`
 		CREATE VIRTUAL TABLE message_trigrams USING fts5(
 			text,
+			session_id UNINDEXED,
+			workspace_id UNINDEXED,
 			content='messages_searchable',
 			content_rowid='id',
 			tokenize='trigram remove_diacritics 1'
@@ -303,8 +309,10 @@ func initializeSearchTables(db *sql.DB) error {
 		AFTER INSERT ON messages
 		WHEN NEW.type IN ('user', 'model')
 		BEGIN
-			INSERT INTO message_stems(rowid, text) VALUES (NEW.id, NEW.text);
-			INSERT INTO message_trigrams(rowid, text) VALUES (NEW.id, NEW.text);
+			INSERT INTO message_stems(rowid, text, session_id, workspace_id)
+				VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
+			INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
+				VALUES (NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id));
 		END
 	`)
 	if err != nil {
@@ -314,15 +322,19 @@ func initializeSearchTables(db *sql.DB) error {
 	_, err = db.Exec(`
 		CREATE TRIGGER IF NOT EXISTS message_search_update
 		AFTER UPDATE ON messages
-		WHEN OLD.text != NEW.text OR OLD.type != NEW.type
+		WHEN OLD.text != NEW.text OR OLD.type != NEW.type OR OLD.session_id != NEW.session_id
 		BEGIN
 			-- Remove old record if it existed in search
 			DELETE FROM message_stems WHERE rowid = OLD.id;
 			DELETE FROM message_trigrams WHERE rowid = OLD.id;
 
 			-- Add new record if new type is searchable
-			INSERT INTO message_stems(rowid, text) SELECT NEW.id, NEW.text WHERE NEW.type IN ('user', 'model');
-			INSERT INTO message_trigrams(rowid, text) SELECT NEW.id, NEW.text WHERE NEW.type IN ('user', 'model');
+			INSERT INTO message_stems(rowid, text, session_id, workspace_id)
+				SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
+				WHERE NEW.type IN ('user', 'model');
+			INSERT INTO message_trigrams(rowid, text, session_id, workspace_id)
+				SELECT NEW.id, NEW.text, NEW.session_id, (SELECT workspace_id FROM sessions WHERE id = NEW.session_id)
+				WHERE NEW.type IN ('user', 'model');
 		END
 	`)
 	if err != nil {
@@ -1194,36 +1206,51 @@ func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID 
 	}
 
 	// Build the search query using both FTS tables for better results
+	// Use unindexed columns in FTS tables for filtering to avoid joins
 	searchQuery := `
 		SELECT DISTINCT
-			m.id,
-			m.session_id,
-			m.text,
-			m.type,
-			m.created_at,
-			COALESCE(s.name, '') as session_name,
-			COALESCE(s.workspace_id, '') as workspace_id
-		FROM messages m
-		JOIN sessions s ON m.session_id = s.id
-		WHERE m.id IN (
-			SELECT rowid FROM message_stems WHERE message_stems MATCH ?
+			rowid as id,
+			session_id,
+			workspace_id,
+			text
+		FROM (
+			SELECT rowid, session_id, workspace_id, text FROM message_stems WHERE message_stems MATCH ?
 			UNION
-			SELECT rowid FROM message_trigrams WHERE message_trigrams MATCH ?
+			SELECT rowid, session_id, workspace_id, text FROM message_trigrams WHERE message_trigrams MATCH ?
 		)
 	`
 
 	args := []interface{}{query, query}
 
-	// Add max_id filter for pagination (get messages older than max_id)
-	if maxID > 0 {
-		searchQuery += " AND m.id < ?"
-		args = append(args, maxID)
+	// Add workspace filter using unindexed column if provided
+	if workspaceID != "" {
+		searchQuery += " WHERE workspace_id = ?"
+		args = append(args, workspaceID)
 	}
 
-	// Add workspace filter if provided
-	if workspaceID != "" {
-		searchQuery += " AND s.workspace_id = ?"
-		args = append(args, workspaceID)
+	// Get message details from messages table
+	searchQuery = `
+		SELECT DISTINCT
+			m.id,
+			fts.session_id,
+			m.text,
+			m.type,
+			m.created_at,
+			COALESCE(s.name, '') as session_name,
+			fts.workspace_id
+		FROM messages m
+		JOIN sessions s ON m.session_id = s.id
+		JOIN (` + searchQuery + `) fts ON m.id = fts.id
+	`
+
+	// Add max_id filter for pagination (get messages older than max_id)
+	if maxID > 0 {
+		if workspaceID != "" {
+			searchQuery += " AND m.id < ?"
+		} else {
+			searchQuery += " WHERE m.id < ?"
+		}
+		args = append(args, maxID)
 	}
 
 	// Order by message ID (descending for newest first) and limit
