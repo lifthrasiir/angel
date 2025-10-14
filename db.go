@@ -1061,8 +1061,9 @@ func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID 
 	}
 
 	// Build search query with snippet directly from FTS tables
+	// Use source_order to prefer stems over trigrams when both match the same message
 	searchSubQueryFormat := `
-		SELECT DISTINCT
+		SELECT
 			rowid as id,
 			session_id,
 			workspace_id,
@@ -1076,7 +1077,8 @@ func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID 
 					'\x0e', '&lt;'
 				),
 				'\x0f', '&gt;'
-			) as excerpt
+			) as excerpt,
+			%d as source_order -- Add source order to identify which table this came from (stems=0, trigrams=1)
 		FROM %[1]s WHERE %[1]s MATCH ?
 	`
 	args := []interface{}{query, query}
@@ -1084,8 +1086,18 @@ func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID 
 		searchSubQueryFormat += " AND workspace_id = ?"
 		args = []interface{}{query, workspaceID, query, workspaceID}
 	}
-	searchSubQuery := fmt.Sprintf(searchSubQueryFormat, "message_stems") + " UNION " +
-		fmt.Sprintf(searchSubQueryFormat, "message_trigrams")
+
+	// Combine results from both tables, preferring stems (order 0) over trigrams (order 1) for duplicates
+	searchSubQuery := `
+		SELECT id, session_id, workspace_id, excerpt
+		FROM (
+			SELECT * FROM (` + fmt.Sprintf(searchSubQueryFormat, "message_stems", 0) + `)
+			UNION ALL
+			SELECT * FROM (` + fmt.Sprintf(searchSubQueryFormat, "message_trigrams", 1) + `)
+		)
+		GROUP BY id
+		ORDER BY MIN(source_order)
+	`
 
 	// Build final query joining with messages and sessions
 	baseQuery := `

@@ -84,8 +84,12 @@ const SearchPage: React.FC = () => {
           return;
         }
 
-        // Update results and hasMore
-        setResults((prev) => [...prev, ...(data.results || [])]);
+        // Update results and hasMore, removing duplicates by message_id
+        setResults((prev) => {
+          const existingIds = new Set(prev.map((r) => r.message_id));
+          const newResults = (data.results || []).filter((r) => !existingIds.has(r.message_id));
+          return [...prev, ...newResults];
+        });
         setHasMore(data.has_more);
 
         if (!data.has_more || (data.results && data.results.length === 0)) {
