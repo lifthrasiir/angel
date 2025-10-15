@@ -64,7 +64,7 @@ var searchChatToolDefinition = ToolDefinition{
 		}
 
 		// Perform search
-		results, err := searchChatHistory(ctx, db, keywords, currentWorkspaceID, currentSessionID)
+		results, err := searchChatHistory(db, keywords, currentWorkspaceID, currentSessionID)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to search chat history: %w", err)
 		}
@@ -90,7 +90,7 @@ var searchChatToolDefinition = ToolDefinition{
 }
 
 // searchChatHistory searches through chat history using the common SearchMessages function
-func searchChatHistory(ctx context.Context, db *sql.DB, keywords, workspaceID, currentSessionID string) ([]ChatSearchResult, error) {
+func searchChatHistory(db *sql.DB, keywords, workspaceID, currentSessionID string) ([]ChatSearchResult, error) {
 	// Use the common SearchMessages function
 	searchResults, _, err := SearchMessages(db, keywords, 0, 20, workspaceID)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/fvbommel/sortorder"
 	"github.com/gorilla/mux"
 )
 
@@ -431,12 +432,12 @@ func listModelsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Sort models:
 	// 1. By RelativeDisplayOrder in descending order
-	// 2. Then by Name in ascending order
+	// 2. Then by Name in natural ascending order
 	sort.Slice(sortableModels, func(i, j int) bool {
 		if sortableModels[i].RelativeDisplayOrder != sortableModels[j].RelativeDisplayOrder {
-			return sortableModels[i].RelativeDisplayOrder > sortableModels[j].RelativeDisplayOrder // Descending
+			return sortableModels[i].RelativeDisplayOrder > sortableModels[j].RelativeDisplayOrder
 		}
-		return sortableModels[i].Name < sortableModels[j].Name // Ascending
+		return sortorder.NaturalLess(sortableModels[i].Name, sortableModels[j].Name)
 	})
 
 	var models []ModelInfo

@@ -56,6 +56,8 @@ type OpenAIChatRequest struct {
 	MaxTokens   *int                `json:"max_tokens,omitempty"`
 	TopP        *float32            `json:"top_p,omitempty"`
 	Stream      bool                `json:"stream,omitempty"`
+	Tools       []OpenAITool        `json:"tools,omitempty"`
+	ToolChoice  interface{}         `json:"tool_choice,omitempty"`
 }
 
 // OpenAIChatResponse represents the response from /v1/chat/completions endpoint
@@ -113,6 +115,19 @@ type OpenAIImageURL struct {
 type OpenAIFunctionCall struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+// OpenAITool represents a tool definition for OpenAI API
+type OpenAITool struct {
+	Type     string         `json:"type"`
+	Function OpenAIFunction `json:"function"`
+}
+
+// OpenAIFunction represents a function definition for OpenAI API
+type OpenAIFunction struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
 }
 
 // OpenAIToolCall represents a tool call in streaming
@@ -216,6 +231,88 @@ func convertOpenAIToGeminiPart(text string) []Part {
 	return parts
 }
 
+// convertGeminiToolsToOpenAI converts Gemini tools to OpenAI function format
+func convertGeminiToolsToOpenAI(tools []Tool) []OpenAITool {
+	var openAITools []OpenAITool
+
+	if tools == nil {
+		return openAITools
+	}
+
+	for _, tool := range tools {
+		if len(tool.FunctionDeclarations) > 0 {
+			for _, funcDecl := range tool.FunctionDeclarations {
+				openAIFunc := OpenAIFunction{
+					Name:        funcDecl.Name,
+					Description: funcDecl.Description,
+				}
+
+				// Convert parameters from Gemini schema to JSON schema format
+				if funcDecl.Parameters != nil {
+					openAIFunc.Parameters = convertGeminiSchemaToJSONSchema(funcDecl.Parameters)
+				}
+
+				openAITools = append(openAITools, OpenAITool{
+					Type:     "function",
+					Function: openAIFunc,
+				})
+			}
+		}
+	}
+
+	return openAITools
+}
+
+// convertGeminiSchemaToJSONSchema converts Gemini Schema to JSON Schema format for OpenAI
+func convertGeminiSchemaToJSONSchema(geminiSchema *Schema) map[string]interface{} {
+	if geminiSchema == nil {
+		return nil
+	}
+
+	jsonSchema := make(map[string]interface{})
+
+	// Set type
+	switch geminiSchema.Type {
+	case TypeString:
+		jsonSchema["type"] = "string"
+	case TypeNumber:
+		jsonSchema["type"] = "number"
+	case TypeInteger:
+		jsonSchema["type"] = "integer"
+	case TypeBoolean:
+		jsonSchema["type"] = "boolean"
+	case TypeArray:
+		jsonSchema["type"] = "array"
+	case TypeObject:
+		jsonSchema["type"] = "object"
+	default:
+		jsonSchema["type"] = "object"
+	}
+
+	// Set properties for object type
+	if geminiSchema.Type == TypeObject && len(geminiSchema.Properties) > 0 {
+		properties := make(map[string]interface{})
+		for key, propSchema := range geminiSchema.Properties {
+			properties[key] = convertGeminiSchemaToJSONSchema(propSchema)
+		}
+		jsonSchema["properties"] = properties
+
+		// Set required fields
+		if len(geminiSchema.Required) > 0 {
+			jsonSchema["required"] = geminiSchema.Required
+		}
+	}
+
+	// Set items for array type
+	if geminiSchema.Type == TypeArray {
+		// For arrays, we'd need item schema, but Gemini doesn't specify it in the same way
+		// For now, we'll leave it empty or set a generic object type
+		jsonSchema["items"] = map[string]interface{}{"type": "object"}
+	}
+
+	return jsonSchema
+}
+
 // NewOpenAIClient creates a new OpenAI-compatible client
 func NewOpenAIClient(config *OpenAIConfig, modelName string) *OpenAIClient {
 	return &OpenAIClient{
@@ -307,6 +404,14 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, params SessionPara
 		}
 	}
 
+	// Convert Gemini tools to OpenAI format
+	var openAITools []OpenAITool
+	if params.ToolConfig == nil {
+		// If no specific tool config, include all available tools
+		geminiTools := GetToolsForGemini()
+		openAITools = convertGeminiToolsToOpenAI(geminiTools)
+	}
+
 	// Prepare request
 	req := OpenAIChatRequest{
 		Model:       c.modelName,
@@ -314,6 +419,12 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, params SessionPara
 		Temperature: &genParams.Temperature,
 		TopP:        &genParams.TopP,
 		Stream:      true,
+		Tools:       openAITools,
+	}
+
+	// Set tool choice if specified
+	if len(openAITools) > 0 {
+		req.ToolChoice = "auto" // Let the model decide when to use tools
 	}
 
 	// Convert request to JSON
@@ -351,6 +462,14 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, params SessionPara
 	// Create streaming response
 	seq := func(yield func(CaGenerateContentResponse) bool) {
 		scanner := bufio.NewScanner(resp.Body)
+
+		// Track ongoing function calls to accumulate arguments
+		type ongoingCall struct {
+			name       string
+			argsBuffer string
+		}
+		currentCalls := make(map[string]*ongoingCall)
+
 		for scanner.Scan() {
 			line := scanner.Text()
 
@@ -384,40 +503,72 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, params SessionPara
 				// Handle function calls (legacy format)
 				if choice.Delta.FunctionCall != nil {
 					if choice.Delta.FunctionCall.Name != "" {
-						parts = append(parts, Part{
-							FunctionCall: &FunctionCall{
-								Name: choice.Delta.FunctionCall.Name,
-							},
-						})
+						// Start a new function call
+						if _, exists := currentCalls["legacy"]; !exists {
+							currentCalls["legacy"] = &ongoingCall{name: choice.Delta.FunctionCall.Name}
+						}
 					}
 					if choice.Delta.FunctionCall.Arguments != "" {
-						parts = append(parts, Part{
-							FunctionResponse: &FunctionResponse{
-								Name:     choice.Delta.FunctionCall.Name,
-								Response: choice.Delta.FunctionCall.Arguments,
-							},
-						})
+						// Legacy format usually comes as complete JSON
+						if call, exists := currentCalls["legacy"]; exists {
+							call.argsBuffer = choice.Delta.FunctionCall.Arguments
+						}
 					}
 				}
 
 				// Handle tool calls (current format)
 				for _, toolCall := range choice.Delta.ToolCalls {
 					if toolCall.Function != nil {
+						callKey := toolCall.ID
+						if callKey == "" {
+							callKey = fmt.Sprintf("call_%d", len(currentCalls))
+						}
+
+						// Get or create ongoing call
+						var call *ongoingCall
+						if existing, exists := currentCalls[callKey]; exists {
+							call = existing
+						} else {
+							call = &ongoingCall{}
+							currentCalls[callKey] = call
+						}
+
+						// Handle name (usually comes first)
 						if toolCall.Function.Name != "" {
-							parts = append(parts, Part{
-								FunctionCall: &FunctionCall{
-									Name: toolCall.Function.Name,
-								},
-							})
+							call.name = toolCall.Function.Name
 						}
+
+						// Handle arguments (comes in chunks - just accumulate)
 						if toolCall.Function.Arguments != "" {
-							parts = append(parts, Part{
-								FunctionResponse: &FunctionResponse{
-									Name:     toolCall.Function.Name,
-									Response: toolCall.Function.Arguments,
-								},
-							})
+							call.argsBuffer += toolCall.Function.Arguments
 						}
+					}
+				}
+
+				// When stream is ending, try to parse all accumulated function calls
+				if choice.FinishReason != nil && (*choice.FinishReason == "tool_calls" || *choice.FinishReason == "function_call" || *choice.FinishReason == "stop") {
+					for callKey, call := range currentCalls {
+						if call.name != "" && call.argsBuffer != "" {
+							funcCall := &FunctionCall{
+								Name: call.name,
+							}
+
+							// Try to parse accumulated arguments as JSON
+							var args map[string]interface{}
+							if err := json.Unmarshal([]byte(call.argsBuffer), &args); err != nil {
+								// If JSON parsing fails, pass the raw string as a single argument
+								log.Printf("Failed to parse function arguments for %s as JSON: %v, treating as raw string", call.name, err)
+								funcCall.Args = map[string]interface{}{
+									"raw_arguments": call.argsBuffer,
+								}
+							} else {
+								funcCall.Args = args
+							}
+
+							parts = append(parts, Part{FunctionCall: funcCall})
+						}
+						// Clear processed call
+						delete(currentCalls, callKey)
 					}
 				}
 
@@ -537,13 +688,17 @@ func (c *OpenAIClient) DefaultGenerationParams() SessionGenerationParams {
 }
 
 // SubagentProviderAndParams implements the LLMProvider interface
-func (c *OpenAIClient) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
-	params := SessionGenerationParams{
+func (c *OpenAIClient) SubagentProviderAndParams(task string) (provider LLMProvider, params SessionGenerationParams) {
+	provider = c
+	params = SessionGenerationParams{
 		Temperature: 0.0,
 		TopK:        -1,
 		TopP:        1.0,
 	}
-	return c, params
+	if task == SubagentImageGenerationTask {
+		provider = geminiFlashImageClient
+	}
+	return
 }
 
 // InitOpenAIProviders initializes OpenAI providers from database configurations

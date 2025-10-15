@@ -418,7 +418,7 @@ func (c *CodeAssistClient) SetCodeAssistGlobalUserSetting(ctx context.Context, r
 // MaxTokens implements the LLMProvider interface for CodeAssistClient.
 func (c *CodeAssistClient) MaxTokens() int {
 	switch c.modelName {
-	case "gemini-2.5-flash", "gemini-2.5-pro":
+	case "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
 		return 1048576
 	case "gemini-2.5-flash-image-preview":
 		return 32768
@@ -435,7 +435,9 @@ func (c *CodeAssistClient) RelativeDisplayOrder() int {
 	case "gemini-2.5-pro":
 		return 9
 	case "gemini-2.5-flash-image-preview":
-		return 0
+		return 8
+	case "gemini-2.5-flash-lite":
+		return 7
 	default:
 		return 0
 	}
