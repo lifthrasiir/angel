@@ -12,6 +12,7 @@ import (
 	"iter"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -21,11 +22,12 @@ var _ LLMProvider = (*OpenAIClient)(nil)
 
 // OpenAIClient implements the LLMProvider interface for OpenAI-compatible APIs
 type OpenAIClient struct {
-	config      *OpenAIConfig
-	modelName   string
-	httpClient  *http.Client
-	modelsCache map[string][]OpenAIModel
-	cacheTime   time.Time
+	config        *OpenAIConfig
+	modelName     string
+	httpClient    *http.Client
+	modelsCache   map[string][]OpenAIModel
+	cacheTime     time.Time
+	contextLength int // 0 means unknown/not probed yet
 }
 
 // OpenAIModel represents a model from OpenAI-compatible API
@@ -135,6 +137,19 @@ type OpenAIToolCall struct {
 	ID       string              `json:"id,omitempty"`
 	Type     string              `json:"type,omitempty"`
 	Function *OpenAIFunctionCall `json:"function,omitempty"`
+}
+
+// Ollama API types for probing model information
+type OllamaShowRequest struct {
+	Model string `json:"model"`
+}
+
+type OllamaModelInfo struct {
+	Modelfile  string                 `json:"modelfile"`
+	Parameters interface{}            `json:"parameters"` // Can be string or object
+	Template   string                 `json:"template"`
+	Details    map[string]interface{} `json:"details"`
+	ModelInfo  map[string]interface{} `json:"model_info"`
 }
 
 // convertGeminiToOpenAIContent converts Gemini Content to OpenAI message format
@@ -315,13 +330,82 @@ func convertGeminiSchemaToJSONSchema(geminiSchema *Schema) map[string]interface{
 
 // NewOpenAIClient creates a new OpenAI-compatible client
 func NewOpenAIClient(config *OpenAIConfig, modelName string) *OpenAIClient {
-	return &OpenAIClient{
+	client := &OpenAIClient{
 		config:      config,
 		modelName:   modelName,
 		httpClient:  &http.Client{Timeout: 60 * time.Second},
 		modelsCache: make(map[string][]OpenAIModel),
 		cacheTime:   time.Time{},
 	}
+
+	// Try to probe context length for known endpoints
+	if modelName != "" {
+		client.contextLength = client.probeContextLength()
+	}
+
+	return client
+}
+
+// probeContextLength tries to detect context length for known OpenAI-compatible APIs
+func (c *OpenAIClient) probeContextLength() int {
+	// Try Ollama API first
+	if length := c.probeOllamaContextLength(); length > 0 {
+		return length
+	}
+
+	// Could add more providers here later
+	return 0
+}
+
+// probeOllamaContextLength uses ../api/show endpoint to get model details
+func (c *OpenAIClient) probeOllamaContextLength() int {
+	apiURL, _ := url.JoinPath(c.config.Endpoint, "../api/show")
+
+	reqBody := OllamaShowRequest{Model: c.modelName}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		log.Printf("Failed to marshal Ollama show request: %v", err)
+		return 0
+	}
+
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		log.Printf("Failed to create Ollama show request: %v", err)
+		return 0
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		log.Printf("Failed to call %s: %v", apiURL, err)
+		return 0
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("API %s returned status %d", apiURL, resp.StatusCode)
+		return 0
+	}
+
+	var modelInfo OllamaModelInfo
+	if err := json.NewDecoder(resp.Body).Decode(&modelInfo); err != nil {
+		log.Printf("Failed to decode model info from %s: %v", apiURL, err)
+		return 0
+	}
+
+	if modelInfo.ModelInfo != nil {
+		for key, value := range modelInfo.ModelInfo {
+			if strings.HasSuffix(key, ".context_length") {
+				if contextLength, ok := value.(float64); ok && contextLength > 0 {
+					log.Printf("Detected context length for %s: %d", c.modelName, int(contextLength))
+					return int(contextLength)
+				}
+			}
+		}
+	}
+
+	return 0
 }
 
 // ModelName implements the LLMProvider interface
@@ -669,8 +753,60 @@ func (c *OpenAIClient) CountTokens(ctx context.Context, contents []Content) (*Ca
 
 // MaxTokens implements the LLMProvider interface
 func (c *OpenAIClient) MaxTokens() int {
-	// Default max tokens for most OpenAI-compatible models
-	return 4096
+	// If we probed context length and it's available, use it
+	if c.contextLength > 0 {
+		return c.contextLength
+	}
+
+	// Fall back to known model context lengths
+	switch c.modelName {
+	// All public OpenAI models as of 2025-10-15
+	case "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-codex", "gpt-5-pro":
+		return 400000
+	case "gpt-5-chat-latest":
+		return 128000
+	case "gpt-4.5-preview":
+		return 128000
+	case "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano":
+		return 1047576
+	case "gpt-4o", "gpt-4o-audio", "gpt-4o-mini", "gpt-4o-mini-audio", "gpt-4o-search-preview", "gpt-4o-mini-search-prview", "chatgpt-4o-latest":
+		return 128000
+	case "gpt-4o-realtime-preview":
+		return 32000
+	case "gpt-4o-mini-realtime-preview", "gpt-4o-mini-transcribe", "gpt-4o-transcribe":
+		return 16000
+	case "gpt-4":
+		return 8192
+	case "gpt-4-turbo", "gpt-4-turbo-preview":
+		return 128000
+	case "gpt-3.5-turbo":
+		return 16385
+	case "babbage-002", "davinci-002":
+		return 16384
+	case "codex-mini-latest":
+		return 200000
+	case "o4-mini", "o4-deep-research":
+		return 200000
+	case "o3", "o3-mini", "o3-pro", "o3-deep-research":
+		return 200000
+	case "o1", "o1-mini", "o1-pro":
+		return 200000
+	case "o1-preview":
+		return 128000
+	case "computer-use-preview":
+		return 8192
+	case "gpt-audio", "gpt-audio-mini":
+		return 128000
+	case "gpt-realtime", "gpt-realtime-mini":
+		return 32000
+	case "text-moderation", "text-moderation-stable":
+		return 32768
+
+	case "gpt-oss-120b", "gpt-oss-20b", "gpt-oss:120b", "gpt-oss:20b":
+		return 131072
+	default:
+		return 4096 // Safe default
+	}
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface
