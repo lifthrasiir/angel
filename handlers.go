@@ -664,3 +664,118 @@ func searchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 
 	sendJSONResponse(w, response)
 }
+
+// getOpenAIConfigsHandler handles GET requests for /api/openai-configs
+func getOpenAIConfigsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	configs, err := GetOpenAIConfigs(db)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to retrieve OpenAI configs")
+		return
+	}
+
+	sendJSONResponse(w, configs)
+}
+
+// saveOpenAIConfigHandler handles POST requests for /api/openai-configs
+func saveOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	var config OpenAIConfig
+	if !decodeJSONRequest(r, w, &config, "saveOpenAIConfigHandler") {
+		return
+	}
+
+	// Generate ID if not provided
+	if config.ID == "" {
+		config.ID = generateID()
+	}
+
+	if err := SaveOpenAIConfig(db, config); err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to save OpenAI config %s", config.Name))
+		return
+	}
+
+	// Reload OpenAI providers to reflect the changes
+	ReloadOpenAIProviders(db)
+
+	sendJSONResponse(w, config)
+}
+
+// deleteOpenAIConfigHandler handles DELETE requests for /api/openai-configs/{id}
+func deleteOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		sendBadRequestError(w, r, "OpenAI config ID is required")
+		return
+	}
+
+	if err := DeleteOpenAIConfig(db, id); err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete OpenAI config %s", id))
+		return
+	}
+
+	// Reload OpenAI providers to reflect the deletion
+	ReloadOpenAIProviders(db)
+
+	sendJSONResponse(w, map[string]string{"status": "success", "message": "OpenAI config deleted successfully"})
+}
+
+// getOpenAIModelsHandler handles GET requests for /api/openai-configs/{id}/models
+func getOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		sendBadRequestError(w, r, "OpenAI config ID is required")
+		return
+	}
+
+	// Get config
+	config, err := GetOpenAIConfig(db, id)
+	if err != nil {
+		sendNotFoundError(w, r, fmt.Sprintf("OpenAI config with ID %s not found", id))
+		return
+	}
+
+	// Create client and get models
+	client := NewOpenAIClient(config, "")
+	models, err := client.GetModels(r.Context())
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to fetch models for OpenAI config %s", id))
+		return
+	}
+
+	sendJSONResponse(w, models)
+}
+
+// refreshOpenAIModelsHandler handles POST requests for /api/openai-configs/{id}/models/refresh
+func refreshOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		sendBadRequestError(w, r, "OpenAI config ID is required")
+		return
+	}
+
+	// Get config
+	config, err := GetOpenAIConfig(db, id)
+	if err != nil {
+		sendNotFoundError(w, r, fmt.Sprintf("OpenAI config with ID %s not found", id))
+		return
+	}
+
+	// Create client and refresh models
+	client := NewOpenAIClient(config, "")
+	models, err := client.RefreshModels(r.Context())
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to refresh models for OpenAI config %s", id))
+		return
+	}
+
+	sendJSONResponse(w, models)
+}

@@ -89,6 +89,9 @@ func main() {
 	// Add angel-eval provider after default models are initialized
 	CurrentProviders["angel-eval"] = &AngelEvalProvider{}
 
+	// Initialize OpenAI providers from database configurations
+	InitOpenAIProviders(db)
+
 	router := mux.NewRouter()
 	router.Use(makeContextMiddleware(db, ga))
 
@@ -208,6 +211,13 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/systemPrompts", getSystemPromptsHandler).Methods("GET")
 	router.HandleFunc("/api/systemPrompts", saveSystemPromptsHandler).Methods("PUT")
 	router.HandleFunc("/api/search", searchMessagesHandler).Methods("POST")
+
+	// OpenAI configuration endpoints
+	router.HandleFunc("/api/openai-configs", getOpenAIConfigsHandler).Methods("GET")
+	router.HandleFunc("/api/openai-configs", saveOpenAIConfigHandler).Methods("POST")
+	router.HandleFunc("/api/openai-configs/{id}", deleteOpenAIConfigHandler).Methods("DELETE")
+	router.HandleFunc("/api/openai-configs/{id}/models", getOpenAIModelsHandler).Methods("GET")
+	router.HandleFunc("/api/openai-configs/{id}/models/refresh", refreshOpenAIModelsHandler).Methods("POST")
 	router.HandleFunc("/api/ui/directory", handleDirectoryNavigation).Methods("GET")
 	router.HandleFunc("/api/ui/directory", handlePickDirectory).Methods("POST")
 	router.HandleFunc("/api", handleNotFound)

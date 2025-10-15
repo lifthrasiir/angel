@@ -4,6 +4,7 @@ import { apiFetch } from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
 import { useAtom } from 'jotai';
 import MCPSettings from '../components/MCPSettings'; // Import the new component
+import OpenAISettings from '../components/OpenAISettings'; // Import OpenAI settings component
 import SystemPromptEditor, { PredefinedPrompt } from '../components/SystemPromptEditor'; // Import SystemPromptEditor and PredefinedPrompt type
 
 import { globalPromptsAtom } from '../atoms/chatAtoms';
@@ -394,6 +395,22 @@ const SettingsPage: React.FC = () => {
           </li>
           <li style={{ marginBottom: '10px' }}>
             <button
+              onClick={() => setActiveTab('openai')}
+              style={{
+                width: '100%',
+                padding: '10px',
+                textAlign: 'left',
+                background: activeTab === 'openai' ? '#e0e0e0' : 'none',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: 'pointer',
+              }}
+            >
+              OpenAI API
+            </button>
+          </li>
+          <li style={{ marginBottom: '10px' }}>
+            <button
               onClick={() => setActiveTab('prompts')}
               style={{
                 width: '100%',
@@ -446,6 +463,7 @@ const SettingsPage: React.FC = () => {
           />
         )}
         {activeTab === 'mcp' && <MCPSettings />}
+        {activeTab === 'openai' && <OpenAISettings />}
         {activeTab === 'prompts' && (
           <PromptSettings
             globalPrompts={globalPrompts}

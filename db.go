@@ -153,6 +153,16 @@ func createTables(db *sql.DB) error {
 		value BLOB NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS openai_configs (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		endpoint TEXT NOT NULL,
+		api_key TEXT,
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS shell_commands (
 		id TEXT PRIMARY KEY,
 		branch_id TEXT NOT NULL,
@@ -1034,6 +1044,17 @@ func SetInitialSessionEnv(db DbOrTx, sessionID string, roots []string) error {
 	return nil
 }
 
+// OpenAIConfig struct to hold OpenAI-compatible API configuration data
+type OpenAIConfig struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Endpoint  string `json:"endpoint"`
+	APIKey    string `json:"api_key"`
+	Enabled   bool   `json:"enabled"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 // SearchResult represents a single search result
 type SearchResult struct {
 	MessageID   int    `json:"message_id"`
@@ -1156,4 +1177,71 @@ func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID 
 	}
 
 	return results, hasMore, nil
+}
+
+// SaveOpenAIConfig saves an OpenAI configuration to the database.
+func SaveOpenAIConfig(db *sql.DB, config OpenAIConfig) error {
+	_, err := db.Exec(`
+		INSERT OR REPLACE INTO openai_configs (id, name, endpoint, api_key, enabled, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+	`, config.ID, config.Name, config.Endpoint, config.APIKey, config.Enabled)
+	if err != nil {
+		return fmt.Errorf("failed to save OpenAI config: %w", err)
+	}
+	return nil
+}
+
+// GetOpenAIConfigs retrieves all OpenAI configurations from the database.
+func GetOpenAIConfigs(db *sql.DB) ([]OpenAIConfig, error) {
+	rows, err := db.Query("SELECT id, name, endpoint, api_key, enabled, created_at, updated_at FROM openai_configs ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query OpenAI configs: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []OpenAIConfig
+	for rows.Next() {
+		var config OpenAIConfig
+		err := rows.Scan(&config.ID, &config.Name, &config.Endpoint, &config.APIKey, &config.Enabled, &config.CreatedAt, &config.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan OpenAI config: %w", err)
+		}
+		configs = append(configs, config)
+	}
+	if configs == nil {
+		return []OpenAIConfig{}, nil
+	}
+	return configs, nil
+}
+
+// GetOpenAIConfig retrieves a single OpenAI configuration by its ID.
+func GetOpenAIConfig(db *sql.DB, id string) (*OpenAIConfig, error) {
+	var config OpenAIConfig
+	err := db.QueryRow("SELECT id, name, endpoint, api_key, enabled, created_at, updated_at FROM openai_configs WHERE id = ?", id).
+		Scan(&config.ID, &config.Name, &config.Endpoint, &config.APIKey, &config.Enabled, &config.CreatedAt, &config.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("OpenAI config with id %s not found", id)
+		}
+		return nil, fmt.Errorf("failed to get OpenAI config: %w", err)
+	}
+	return &config, nil
+}
+
+// DeleteOpenAIConfig deletes an OpenAI configuration from the database.
+func DeleteOpenAIConfig(db *sql.DB, id string) error {
+	result, err := db.Exec("DELETE FROM openai_configs WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete OpenAI config: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("OpenAI config with id %s not found", id)
+	}
+	return nil
 }
