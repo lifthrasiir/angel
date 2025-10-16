@@ -338,11 +338,6 @@ func NewOpenAIClient(config *OpenAIConfig, modelName string) *OpenAIClient {
 		cacheTime:   time.Time{},
 	}
 
-	// Try to probe context length for known endpoints
-	if modelName != "" {
-		client.contextLength = client.probeContextLength()
-	}
-
 	return client
 }
 
@@ -753,12 +748,7 @@ func (c *OpenAIClient) CountTokens(ctx context.Context, contents []Content) (*Ca
 
 // MaxTokens implements the LLMProvider interface
 func (c *OpenAIClient) MaxTokens() int {
-	// If we probed context length and it's available, use it
-	if c.contextLength > 0 {
-		return c.contextLength
-	}
-
-	// Fall back to known model context lengths
+	// First check known model context lengths
 	switch c.modelName {
 	// All public OpenAI models as of 2025-10-15
 	case "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-codex", "gpt-5-pro":
@@ -769,7 +759,7 @@ func (c *OpenAIClient) MaxTokens() int {
 		return 128000
 	case "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano":
 		return 1047576
-	case "gpt-4o", "gpt-4o-audio", "gpt-4o-mini", "gpt-4o-mini-audio", "gpt-4o-search-preview", "gpt-4o-mini-search-prview", "chatgpt-4o-latest":
+	case "gpt-4o", "gpt-4o-audio", "gpt-4o-mini", "gpt-4o-mini-audio", "gpt-4o-search-preview", "gpt-4o-mini-search-preview", "chatgpt-4o-latest":
 		return 128000
 	case "gpt-4o-realtime-preview":
 		return 32000
@@ -804,9 +794,22 @@ func (c *OpenAIClient) MaxTokens() int {
 
 	case "gpt-oss-120b", "gpt-oss-20b", "gpt-oss:120b", "gpt-oss:20b":
 		return 131072
-	default:
-		return 4096 // Safe default
 	}
+
+	// If we have already probed context length and it's available, use it
+	if c.contextLength > 0 {
+		return c.contextLength
+	}
+
+	// For unknown models, try to probe context length (cached)
+	if c.contextLength == 0 && c.modelName != "" {
+		c.contextLength = c.probeContextLength()
+		if c.contextLength > 0 {
+			return c.contextLength
+		}
+	}
+
+	return 4096 // Safe default
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface
