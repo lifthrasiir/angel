@@ -74,7 +74,7 @@ func streamLLMResponse(
 			}
 			// If a model message was already created, update it with the error
 			if modelMessageID >= 0 {
-				if err := UpdateMessageContent(db, modelMessageID, errorMessage); err != nil {
+				if err := UpdateMessageContent(db, modelMessageID, errorMessage, true); err != nil {
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
@@ -124,7 +124,7 @@ func streamLLMResponse(
 				// Check if a non-text part interrupts the current text stream
 				if (part.FunctionCall != nil || part.Thought || part.InlineData != nil) && modelMessageID >= 0 {
 					// Finalize the current model message before processing the non-text part
-					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+					if err := UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
 						log.Printf("Failed to finalize model message before interruption: %v", err)
 					}
 					agentResponseText = "" // Reset for the next text block
@@ -365,8 +365,8 @@ func streamLLMResponse(
 
 					agentResponseText += part.Text // Accumulate text for DB update
 
-					// Update the message content in DB immediately for all parts
-					if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+					// Update the message content in DB immediately for all parts (no FTS sync during streaming)
+					if err := UpdateMessageContent(db, modelMessageID, agentResponseText, false); err != nil {
 						log.Printf("Failed to update model message content: %v", err)
 					}
 
@@ -399,9 +399,9 @@ func streamLLMResponse(
 	// Small delay to allow all clients to receive EventComplete before removeCall is executed
 	time.Sleep(50 * time.Millisecond)
 
-	// Finalize the last model message if any text was streamed
+	// Finalize the last model message if any text was streamed (sync FTS)
 	if modelMessageID >= 0 {
-		if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+		if err := UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
 			return logAndErrorf(err, "Failed to update final agent response")
 		}
 	}
@@ -512,7 +512,7 @@ func checkStreamCancellation(
 		failCall(initialState.SessionId, ctx.Err())
 		// Update the message in DB with current accumulated text as-is
 		if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created and has content
-			if err := UpdateMessageContent(db, modelMessageID, agentResponseText); err != nil {
+			if err := UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
 				log.Printf("Failed to update model message: %v", err)
 			}
 		}

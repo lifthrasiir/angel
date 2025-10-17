@@ -213,34 +213,6 @@ func createTables(db *sql.DB) error {
 		content_rowid='id',
 		tokenize='trigram remove_diacritics 1'
 	);
-
-	CREATE TRIGGER IF NOT EXISTS message_search_insert
-	AFTER INSERT ON messages
-	WHEN NEW.type IN ('user', 'model')
-	BEGIN
-		INSERT INTO message_stems(rowid) VALUES (NEW.id);
-		INSERT INTO message_trigrams(rowid) VALUES (NEW.id);
-	END;
-
-	CREATE TRIGGER IF NOT EXISTS message_search_update
-	AFTER UPDATE ON messages
-	WHEN OLD.text != NEW.text OR OLD.type != NEW.type OR OLD.session_id != NEW.session_id
-	BEGIN
-		-- Remove old record if it existed in search
-		DELETE FROM message_stems WHERE rowid = OLD.id;
-		DELETE FROM message_trigrams WHERE rowid = OLD.id;
-
-		-- Add new record if new type is searchable
-		INSERT INTO message_stems(rowid) VALUES (NEW.id);
-		INSERT INTO message_trigrams(rowid) VALUES (NEW.id);
-	END;
-
-	CREATE TRIGGER IF NOT EXISTS message_search_delete
-	AFTER DELETE ON messages
-	BEGIN
-		DELETE FROM message_stems WHERE rowid = OLD.id;
-		DELETE FROM message_trigrams WHERE rowid = OLD.id;
-	END;
 	`
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
@@ -251,8 +223,13 @@ func createTables(db *sql.DB) error {
 
 // migrateDB handles database schema migrations.
 func migrateDB(db *sql.DB) error {
-	// Migration for SI/SO HTML tag handling in FTS
+	// Migration for SI/SO HTML tag handling in FTS and trigger cleanup
 	migrationStmts := []string{
+		// Drop old FTS triggers if they exist
+		`DROP TRIGGER IF EXISTS message_search_insert`,
+		`DROP TRIGGER IF EXISTS message_search_update`,
+		`DROP TRIGGER IF EXISTS message_search_delete`,
+
 		// Drop and recreate the view to trigger FTS rebuild
 		`DROP VIEW IF EXISTS messages_searchable`,
 
@@ -273,6 +250,75 @@ func migrateDB(db *sql.DB) error {
 	return nil
 }
 
+// syncFTSOnStartup syncs FTS tables with messages that might be missing due to crashes during streaming
+func syncFTSOnStartup(db *sql.DB) error {
+	log.Println("Checking for FTS desync on startup...")
+
+	// Count missing entries in message_stems
+	var missingStems int
+	err := db.QueryRow(`
+		SELECT COUNT(*) FROM messages_searchable
+		WHERE id NOT IN (SELECT rowid FROM message_stems)
+	`).Scan(&missingStems)
+	if err != nil {
+		return fmt.Errorf("failed to count missing FTS stems entries: %w", err)
+	}
+
+	// Count missing entries in message_trigrams
+	var missingTrigrams int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM messages_searchable
+		WHERE id NOT IN (SELECT rowid FROM message_trigrams)
+	`).Scan(&missingTrigrams)
+	if err != nil {
+		return fmt.Errorf("failed to count missing FTS trigrams entries: %w", err)
+	}
+
+	if missingStems > 0 || missingTrigrams > 0 {
+		log.Printf("Found %d missing stems and %d missing trigrams, syncing...", missingStems, missingTrigrams)
+
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to begin FTS sync transaction: %w", err)
+		}
+		defer tx.Rollback()
+
+		// Sync missing stems entries
+		if missingStems > 0 {
+			_, err = tx.Exec(`
+				INSERT INTO message_stems(rowid)
+				SELECT id FROM messages_searchable
+				WHERE id NOT IN (SELECT rowid FROM message_stems)
+			`)
+			if err != nil {
+				return fmt.Errorf("failed to sync missing stems entries: %w", err)
+			}
+		}
+
+		// Sync missing trigrams entries
+		if missingTrigrams > 0 {
+			_, err = tx.Exec(`
+				INSERT INTO message_trigrams(rowid)
+				SELECT id FROM messages_searchable
+				WHERE id NOT IN (SELECT rowid FROM message_trigrams)
+			`)
+			if err != nil {
+				return fmt.Errorf("failed to sync missing trigrams entries: %w", err)
+			}
+		}
+
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit FTS sync: %w", err)
+		}
+
+		log.Printf("FTS sync completed successfully")
+	} else {
+		log.Println("FTS is already in sync")
+	}
+
+	return nil
+}
+
 // InitDB initializes the SQLite database connection and creates tables if they don't exist.
 func InitDB(dataSourceName string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dataSourceName)
@@ -284,6 +330,24 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0) // No connection lifetime limit
+
+	// SQLite performance and concurrency optimizations
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA busy_timeout=30000",
+		"PRAGMA cache_size=-65536",
+		"PRAGMA mmap_size=268435456",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA foreign_keys=ON",
+	}
+
+	for _, pragma := range pragmas {
+		if _, err = db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to execute pragma '%s': %w", pragma, err)
+		}
+	}
 
 	// Ping the database to ensure the connection is established
 	if err = db.Ping(); err != nil {
@@ -301,6 +365,12 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	if err = migrateDB(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run database migrations: %w", err)
+	}
+
+	// Sync FTS tables in case of desync from crashes
+	if err = syncFTSOnStartup(db); err != nil {
+		log.Printf("Warning: FTS sync failed: %v", err)
+		// Continue even if sync fails, FTS will be updated on next message completion
 	}
 
 	log.Println("Database initialized and tables created.")

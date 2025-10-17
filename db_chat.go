@@ -128,7 +128,26 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 		return 0, fmt.Errorf("failed to get last insert ID: %w", err)
 	}
 
-	return int(lastInsertID), nil
+	messageID := int(lastInsertID)
+
+	// Add message to FTS tables only for user and model messages
+	// FTS tables are contentless and will automatically read from messages_searchable view
+	// which only includes messages with type IN ('user', 'model')
+	if msg.Type == TypeUserText || msg.Type == TypeModelText {
+		_, err = db.Exec("INSERT INTO message_stems(rowid) VALUES (?)", messageID)
+		if err != nil {
+			log.Printf("AddMessageToSession: Failed to insert into message_stems: %v", err)
+			// Don't fail the operation, but log the error
+		}
+
+		_, err = db.Exec("INSERT INTO message_trigrams(rowid) VALUES (?)", messageID)
+		if err != nil {
+			log.Printf("AddMessageToSession: Failed to insert into message_trigrams: %v", err)
+			// Don't fail the operation, but log the error
+		}
+	}
+
+	return messageID, nil
 }
 
 // UpdateMessageChosenNextID updates the chosen_next_id for a specific message.
@@ -693,8 +712,16 @@ func UpdateMessageTokens(db DbOrTx, messageID int, cumulTokenCount int) error {
 }
 
 // UpdateMessageContent updates the content of a message in the database.
-func UpdateMessageContent(db *sql.DB, messageID int, content string) error {
-	stmt, err := db.Prepare("UPDATE messages SET text = ? WHERE id = ?")
+func UpdateMessageContent(db *sql.DB, messageID int, content string, syncFTS bool) error {
+	// Start transaction for atomic update
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Update message content
+	stmt, err := tx.Prepare("UPDATE messages SET text = ? WHERE id = ?")
 	if err != nil {
 		return fmt.Errorf("failed to prepare update message content statement: %w", err)
 	}
@@ -704,7 +731,23 @@ func UpdateMessageContent(db *sql.DB, messageID int, content string) error {
 	if err != nil {
 		return fmt.Errorf("failed to execute update message content statement: %w", err)
 	}
-	return nil
+
+	// Sync FTS if requested (for final message updates)
+	if syncFTS {
+		// FTS tables are contentless and will automatically read from messages_searchable view
+		// Use INSERT OR REPLACE to force re-indexing with new content
+		_, err = tx.Exec("INSERT OR REPLACE INTO message_stems(rowid) VALUES (?)", messageID)
+		if err != nil {
+			return fmt.Errorf("failed to update message_stems: %w", err)
+		}
+
+		_, err = tx.Exec("INSERT OR REPLACE INTO message_trigrams(rowid) VALUES (?)", messageID)
+		if err != nil {
+			return fmt.Errorf("failed to update message_trigrams: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // GetMessageBranchID retrieves the branch_id for a given message ID.
