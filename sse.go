@@ -69,6 +69,7 @@ func newSseWriter(sessionId string, w http.ResponseWriter, r *http.Request) *sse
 	header.Set("Cache-Control", "no-cache")
 	header.Set("Connection", "keep-alive")
 	header.Set("Access-Control-Allow-Origin", "*")
+	header.Set("X-Accel-Buffering", "no") // For nginx
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
