@@ -1,6 +1,7 @@
 *~
 *.exe
 *.db
+*.db-*
 angel-sessions
 node_modules
 /angel

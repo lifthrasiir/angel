@@ -42,16 +42,15 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestOptions):
 
 export async function fetchSessionHistory(
   sessionId: string,
-  primaryBranchId: string,
   beforeMessageId?: string,
   fetchLimit?: number,
 ): Promise<any> {
-  let url = `/api/chat/${sessionId}?primaryBranchId=${primaryBranchId}`;
+  let url = `/api/chat/${sessionId}`;
   if (beforeMessageId) {
-    url += `&beforeMessageId=${beforeMessageId}`;
+    url += `?beforeMessageId=${beforeMessageId}`;
   }
   if (fetchLimit) {
-    url += `&fetchLimit=${fetchLimit}`;
+    url += `${beforeMessageId ? '&' : '?'}fetchLimit=${fetchLimit}`;
   }
 
   const response = await apiFetch(url);

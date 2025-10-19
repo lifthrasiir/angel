@@ -702,6 +702,45 @@ func GetSessionHistoryPaginated(db DbOrTx, sessionID string, primaryBranchID str
 	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, beforeMessageID, fetchLimit)
 }
 
+// GetSessionHistoryPaginatedWithAutoBranch retrieves paginated chat history with automatic branch detection.
+// If beforeMessageID is specified, it automatically uses the branch containing that message.
+// Otherwise, it falls back to the session's primary branch.
+func GetSessionHistoryPaginatedWithAutoBranch(db *sql.DB, sessionID string, beforeMessageID int, fetchLimit int) ([]FrontendMessage, string, error) {
+	var targetBranchID string
+
+	// Get the session's primary branch ID as default
+	err := db.QueryRow("SELECT primary_branch_id FROM sessions WHERE id = ?", sessionID).Scan(&targetBranchID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get primary branch ID for session %s: %w", sessionID, err)
+	}
+
+	// If beforeMessageID is specified, find which branch contains this message
+	if beforeMessageID > 0 {
+		var messageBranchID string
+		err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ? AND session_id = ?", beforeMessageID, sessionID).Scan(&messageBranchID)
+		if err == nil && messageBranchID != "" {
+			// Check if the target branch has any messages before the beforeMessageID
+			var count int
+			err := db.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ? AND branch_id = ? AND id < ?", sessionID, targetBranchID, beforeMessageID).Scan(&count)
+			if err == nil && count == 0 {
+				// Target branch has no messages before this ID, use the message's branch instead
+				targetBranchID = messageBranchID
+			}
+		} else if err != sql.ErrNoRows {
+			// Error occurred (not just "no rows")
+			return nil, "", fmt.Errorf("failed to find branch for message %d: %w", beforeMessageID, err)
+		}
+	}
+
+	// Get the paginated history using the determined branch
+	history, err := GetSessionHistoryPaginated(db, sessionID, targetBranchID, beforeMessageID, fetchLimit)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get session history: %w", err)
+	}
+
+	return history, targetBranchID, nil
+}
+
 // UpdateMessageTokens updates the cumul_token_count for a specific message.
 func UpdateMessageTokens(db DbOrTx, messageID int, cumulTokenCount int) error {
 	_, err := db.Exec("UPDATE messages SET cumul_token_count = ? WHERE id = ?", cumulTokenCount, messageID)

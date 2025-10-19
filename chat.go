@@ -424,8 +424,8 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		fetchLimit = parsedLimit
 	}
 
-	// Use the primary_branch_id from the session to load history with pagination
-	history, err := GetSessionHistoryPaginated(db, sessionId, session.PrimaryBranchID, beforeMessageID, fetchLimit)
+	// Use automatic branch detection to load history with pagination
+	history, actualBranchID, err := GetSessionHistoryPaginatedWithAutoBranch(db, sessionId, beforeMessageID, fetchLimit)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to load session history")
 		return
@@ -483,14 +483,14 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		History:         history,
 		SystemPrompt:    session.SystemPrompt,
 		WorkspaceID:     session.WorkspaceID,
-		PrimaryBranchID: session.PrimaryBranchID,
+		PrimaryBranchID: actualBranchID,
 		Roots:           currentRoots,
 		EnvChanged:      initialStateEnvChanged,
 	}
 
-	branch, err := GetBranch(db, session.PrimaryBranchID)
+	branch, err := GetBranch(db, actualBranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get branch %s", session.PrimaryBranchID))
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get branch %s", actualBranchID))
 		return
 	}
 

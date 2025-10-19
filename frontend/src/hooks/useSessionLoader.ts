@@ -42,13 +42,12 @@ import { useScrollAdjustment } from './useScrollAdjustment';
 
 interface UseSessionLoaderProps {
   chatSessionId: string | null;
-  primaryBranchId: string;
   chatAreaRef: React.RefObject<HTMLDivElement>;
 }
 
 const FETCH_LIMIT = 50;
 
-export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }: UseSessionLoaderProps) => {
+export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoaderProps) => {
   const navigate = useNavigate();
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
     sessionId?: string;
@@ -148,7 +147,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
     isLoadingMoreRef.current = true;
     setIsPriorSessionLoading(true);
     try {
-      const data = await fetchSessionHistory(chatSessionId!, primaryBranchId, firstMessageId, FETCH_LIMIT);
+      const data = await fetchSessionHistory(chatSessionId!, firstMessageId, FETCH_LIMIT);
 
       // Check if the session ID has changed while fetching history
       // If urlSessionId is different from chatSessionId, it means the user navigated to a new session
@@ -185,7 +184,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
     }
   }, [
     chatSessionId,
-    primaryBranchId,
     isPriorSessionLoading,
     hasMoreMessages,
     addErrorMessage,
@@ -276,7 +274,6 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
         try {
           eventSourceRef.current = loadSession(
             currentSessionId,
-            primaryBranchId,
             FETCH_LIMIT,
             (event: MessageEvent) => {
               const [eventType, eventData] = splitOnceByNewline(event.data);
@@ -431,7 +428,7 @@ export const useSessionLoader = ({ chatSessionId, primaryBranchId, chatAreaRef }
     };
 
     loadChatSession();
-  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, primaryBranchId, processingStartTime]);
+  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, processingStartTime]);
 
   return { loadMoreMessages };
 };
