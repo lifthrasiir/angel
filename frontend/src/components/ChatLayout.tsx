@@ -10,6 +10,7 @@ import { useWorkspaces } from '../hooks/WorkspaceContext';
 import ChatArea from './ChatArea';
 import Sidebar from './Sidebar';
 import ToastMessage from './ToastMessage';
+import { isTextInputKey } from '../utils/navigationKeys';
 interface ChatLayoutProps {
   children?: React.ReactNode;
 }
@@ -70,6 +71,34 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     };
     fetchGlobalPrompts();
   }, [chatSessionId, children, chatInputRef, chatAreaRef]);
+
+  // Global keyboard event listener for auto-focusing chat input
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only apply this logic when ChatArea is rendered (not children)
+      if (children) return;
+
+      // Check if the target is not a textarea or input
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
+        return;
+      }
+
+      // Check if this is a text input key (no modifiers)
+      if (isTextInputKey(e)) {
+        // Focus the chat input
+        chatInputRef.current?.focus();
+      }
+    };
+
+    // Add event listener to window
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Clean up
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [children, chatInputRef]);
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>

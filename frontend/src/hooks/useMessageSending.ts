@@ -232,8 +232,9 @@ export const useMessageSending = ({
     },
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() && selectedFiles.length === 0) return;
+  const handleSendMessage = async (message?: string) => {
+    const messageToSend = message || inputMessage;
+    if (!messageToSend.trim() && selectedFiles.length === 0) return;
 
     setProcessingStartTime(performance.now());
 
@@ -243,7 +244,7 @@ export const useMessageSending = ({
       const temporaryUserMessageId = crypto.randomUUID();
       const userMessage: ChatMessage = {
         id: temporaryUserMessageId,
-        parts: [{ text: inputMessage }],
+        parts: [{ text: messageToSend }],
         type: 'user',
         attachments: attachments,
         model: selectedModel?.name,
@@ -258,7 +259,7 @@ export const useMessageSending = ({
       }
 
       const response = await sendMessage(
-        inputMessage,
+        messageToSend,
         attachments,
         chatSessionId,
         systemPrompt,

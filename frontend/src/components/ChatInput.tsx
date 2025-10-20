@@ -12,13 +12,15 @@ import {
 } from '../atoms/chatAtoms';
 import { useCommandProcessor } from '../hooks/useCommandProcessor';
 import { handleEnterKey } from '../utils/enterKeyHandler';
+import { handleNavigationKeys } from '../utils/navigationKeys';
 
 interface ChatInputProps {
-  handleSendMessage: () => void;
+  handleSendMessage: (message?: string) => void;
   onFilesSelected: (files: File[]) => void;
   handleCancelStreaming: () => void;
   inputRef: React.RefObject<HTMLTextAreaElement>;
-  sessionId: string | null; // Add sessionId prop
+  chatAreaRef?: React.RefObject<HTMLDivElement>;
+  sessionId: string | null;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -26,10 +28,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onFilesSelected,
   handleCancelStreaming,
   inputRef,
+  chatAreaRef,
   sessionId,
 }) => {
   const [inputMessage] = useAtom(inputMessageAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
+
+  // Local state for typing performance
+  const [localInput, setLocalInput] = useState(inputMessage);
   const processingStartTime = useAtomValue(processingStartTimeAtom);
   const [availableModels] = useAtom(availableModelsAtom);
   const [selectedModel] = useAtom(selectedModelAtom);
@@ -42,6 +48,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [isCommandMode, setIsCommandMode] = useState(false);
   const [commandPrefix, setCommandPrefix] = useState('');
   const [isMobile, setIsMobile] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -73,19 +80,36 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }, 100), // 100ms debounce delay
   ).current;
 
-  // Adjust textarea height when inputMessage changes (e.g., after sending message)
+  // Sync local input with atom when inputMessage changes (e.g., after sending message)
+  useEffect(() => {
+    setLocalInput(inputMessage);
+  }, [inputMessage]);
+
+  // Adjust textarea height when localInput changes
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
       inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
     }
-  }, [inputMessage]);
+  }, [localInput]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // During IME composition, don't handle navigation keys or special keys
+    // This prevents interference with IME input (Korean, Chinese, Japanese)
+    if (isComposing) {
+      return;
+    }
+
+    // Handle navigation keys first (Home/End/PgUp/PgDown without modifiers)
+    const isNavigationHandled = handleNavigationKeys(e, inputRef, chatAreaRef);
+    if (isNavigationHandled) {
+      return;
+    }
+
     // Use the common Enter key handler
     const isHandled = handleEnterKey(e, {
       onSendOrConfirm: handleSendOrRunCommand,
-      value: inputMessage,
+      value: localInput,
     });
 
     // If Enter key was handled, don't process other key handlers
@@ -104,8 +128,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
       setIsCommandMode(true);
       setCommandPrefix('/');
       const end = inputRef.current?.selectionEnd || 0;
-      const newInputValue = inputMessage.substring(end);
-      setInputMessage(newInputValue);
+      const newInputValue = localInput.substring(end);
+      setLocalInput(newInputValue);
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
@@ -125,7 +149,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       e.preventDefault();
       setIsCommandMode(false);
       setCommandPrefix('');
-      setInputMessage('/' + inputMessage);
+      setLocalInput('/' + localInput);
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
@@ -153,7 +177,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
 
     if (isCommandMode) {
-      const commandText = inputMessage.trim();
+      const commandText = localInput.trim();
       if (commandText) {
         const parts = commandText.split(' ');
         const command = parts[0];
@@ -163,14 +187,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
         setStatusMessage('Please enter a command.');
       }
       setInputMessage('');
+      setLocalInput('');
       setIsCommandMode(false);
       setCommandPrefix('');
     } else {
-      handleSendMessage();
+      // Send message with local input directly
+      handleSendMessage(localInput);
+      setLocalInput('');
     }
   };
 
-  const isSendButtonDisabled = inputMessage.trim() === '' && selectedFiles.length === 0;
+  const isSendButtonDisabled = localInput.trim() === '' && selectedFiles.length === 0;
 
   return (
     <div
@@ -233,13 +260,15 @@ const ChatInput: React.FC<ChatInputProps> = ({
       {/* Main textarea area */}
       <textarea
         ref={inputRef}
-        value={inputMessage}
-        onChange={(e) => setInputMessage(e.target.value)}
+        value={localInput}
+        onChange={(e) => setLocalInput(e.target.value)}
         onInput={(e) => {
           setStatusMessage(null);
           debouncedAdjustTextareaHeight(e.target as HTMLTextAreaElement);
         }}
         onKeyDown={handleKeyDown}
+        onCompositionStart={() => setIsComposing(true)}
+        onCompositionEnd={() => setIsComposing(false)}
         onPaste={(e) => {
           if (e.clipboardData.files && e.clipboardData.files.length > 0) {
             onFilesSelected(Array.from(e.clipboardData.files));

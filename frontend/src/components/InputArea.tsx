@@ -10,6 +10,7 @@ interface InputAreaProps {
   handleRemoveFile: (index: number) => void;
   handleCancelStreaming: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
+  chatAreaRef?: React.RefObject<HTMLDivElement>;
   sessionId: string | null;
   selectedFiles: File[];
 }
@@ -20,6 +21,7 @@ const InputArea: React.FC<InputAreaProps> = ({
   handleRemoveFile,
   handleCancelStreaming,
   chatInputRef,
+  chatAreaRef,
   sessionId,
   selectedFiles,
 }) => {
@@ -104,6 +106,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         onFilesSelected={onFilesSelected}
         handleCancelStreaming={handleCancelStreaming}
         inputRef={chatInputRef}
+        chatAreaRef={chatAreaRef}
         sessionId={sessionId}
       />
     </div>

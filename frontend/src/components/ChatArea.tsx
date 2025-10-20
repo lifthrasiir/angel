@@ -466,6 +466,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               handleRemoveFile={handleRemoveFile}
               handleCancelStreaming={handleCancelStreaming}
               chatInputRef={chatInputRef}
+              chatAreaRef={chatAreaRef}
               sessionId={chatSessionId}
               selectedFiles={selectedFiles}
             />
