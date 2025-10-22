@@ -717,14 +717,19 @@ func GetSessionHistoryPaginatedWithAutoBranch(db *sql.DB, sessionID string, befo
 	// If beforeMessageID is specified, find which branch contains this message
 	if beforeMessageID > 0 {
 		var messageBranchID string
-		err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ? AND session_id = ?", beforeMessageID, sessionID).Scan(&messageBranchID)
+		var parentMessageID sql.NullInt64
+		err := db.QueryRow("SELECT branch_id, parent_message_id FROM messages WHERE id = ? AND session_id = ?", beforeMessageID, sessionID).Scan(&messageBranchID, &parentMessageID)
 		if err == nil && messageBranchID != "" {
-			// Check if the target branch has any messages before the beforeMessageID
-			var count int
-			err := db.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ? AND branch_id = ? AND id < ?", sessionID, targetBranchID, beforeMessageID).Scan(&count)
-			if err == nil && count == 0 {
-				// Target branch has no messages before this ID, use the message's branch instead
-				targetBranchID = messageBranchID
+			// Default to the message's branch
+			targetBranchID = messageBranchID
+
+			// If the message has a parent in a different branch, use the parent's branch instead
+			if parentMessageID.Valid {
+				var parentBranchID string
+				err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ?", parentMessageID.Int64).Scan(&parentBranchID)
+				if err == nil && parentBranchID != messageBranchID {
+					targetBranchID = parentBranchID
+				}
 			}
 		} else if err != sql.ErrNoRows {
 			// Error occurred (not just "no rows")
