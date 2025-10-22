@@ -36,9 +36,45 @@ export function handleNavigationKeys(
     return false;
   }
 
-  // Check if textarea can scroll first (only for PgUp/PgDown)
   const textarea = textareaRef?.current;
-  if (textarea && (e.key === 'PageUp' || e.key === 'PageDown')) {
+  if (!textarea) {
+    return false;
+  }
+
+  // Handle Home/End keys with caret movement detection
+  if (e.key === 'Home' || e.key === 'End') {
+    if (!chatAreaRef?.current) return false;
+
+    const originalSelectionStart = textarea.selectionStart;
+    const originalSelectionEnd = textarea.selectionEnd;
+
+    // Let default behavior happen first, then check if caret moved
+    requestAnimationFrame(() => {
+      const chatArea = chatAreaRef.current;
+      if (!chatArea) return;
+
+      // If caret didn't move, perform navigation
+      if (textarea.selectionStart === originalSelectionStart && textarea.selectionEnd === originalSelectionEnd) {
+        if (e.key === 'Home') {
+          chatArea.scrollTo({
+            top: 0,
+            behavior: 'smooth',
+          });
+        } else {
+          chatArea.scrollTo({
+            top: chatArea.scrollHeight,
+            behavior: 'smooth',
+          });
+        }
+      }
+    });
+
+    // Return false to let default behavior proceed
+    return false;
+  }
+
+  // Check if textarea can scroll first (only for PgUp/PgDown)
+  if (e.key === 'PageUp' || e.key === 'PageDown') {
     const canScrollUp = textarea.scrollTop > 0;
     const canScrollDown = textarea.scrollTop < textarea.scrollHeight - textarea.clientHeight;
 
@@ -46,41 +82,26 @@ export function handleNavigationKeys(
     if ((e.key === 'PageUp' && canScrollUp) || (e.key === 'PageDown' && canScrollDown)) {
       return false;
     }
-  }
 
-  // Otherwise, manually scroll the chat area without losing focus
-  const chatArea = chatAreaRef?.current;
-  if (chatArea) {
-    e.preventDefault();
+    // Otherwise, manually scroll the chat area without losing focus
+    const chatArea = chatAreaRef?.current;
+    if (chatArea) {
+      e.preventDefault();
 
-    switch (e.key) {
-      case 'Home':
-        chatArea.scrollTo({
-          top: 0,
-          behavior: 'smooth',
-        });
-        break;
-      case 'End':
-        chatArea.scrollTo({
-          top: chatArea.scrollHeight,
-          behavior: 'smooth',
-        });
-        break;
-      case 'PageUp':
+      if (e.key === 'PageUp') {
         chatArea.scrollBy({
           top: -chatArea.clientHeight * 0.8,
           behavior: 'smooth',
         });
-        break;
-      case 'PageDown':
+      } else if (e.key === 'PageDown') {
         chatArea.scrollBy({
           top: chatArea.clientHeight * 0.8,
           behavior: 'smooth',
         });
-        break;
-    }
+      }
 
-    return true;
+      return true;
+    }
   }
 
   return false;
