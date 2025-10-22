@@ -37,6 +37,7 @@ import {
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
   preserveSelectedFilesAtom,
+  isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
 import { useScrollAdjustment } from './useScrollAdjustment';
 
@@ -75,6 +76,7 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
   const preserveSelectedFiles = useAtomValue(preserveSelectedFilesAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
+  const setIsModelManuallySelected = useSetAtom(isModelManuallySelectedAtom);
 
   const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
   const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
@@ -258,6 +260,9 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
         latestSessionIdRef.current = currentSessionId;
 
         setChatSessionId(currentSessionId);
+
+        // Reset manual model selection flag when loading a new session
+        setIsModelManuallySelected(false);
 
         // Always preserve selected files during session navigation
         // Don't clear files unless explicitly done by user action

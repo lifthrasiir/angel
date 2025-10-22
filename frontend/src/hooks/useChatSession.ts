@@ -20,6 +20,7 @@ import {
   availableModelsAtom,
   selectedModelAtom,
   pendingConfirmationAtom,
+  isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
@@ -53,6 +54,7 @@ export const useChatSession = () => {
   const selectedModel = useAtomValue(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
+  const isModelManuallySelected = useAtomValue(isModelManuallySelectedAtom);
 
   const { workspaceId: urlWorkspaceId } = useParams<{ workspaceId?: string }>();
 
@@ -84,7 +86,7 @@ export const useChatSession = () => {
   }, [currentWorkspace, error, setWorkspaceName]);
 
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && !isModelManuallySelected) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.model) {
         const modelToSelect = availableModels.get(lastMessage.model);
@@ -93,7 +95,7 @@ export const useChatSession = () => {
         }
       }
     }
-  }, [messages, availableModels, setSelectedModel]);
+  }, [messages, availableModels, setSelectedModel, isModelManuallySelected]);
 
   const handleFilesSelectedWrapper = (files: File[]) => {
     setSelectedFiles(handleFilesSelected(selectedFiles, files));

@@ -31,6 +31,7 @@ export const pendingRootsAtom = atom<string[]>([]);
 export const compressAbortControllerAtom = atom<AbortController | null>(null);
 export const editingMessageIdAtom = atom<string | null>(null);
 export const preserveSelectedFilesAtom = atom<File[]>([]); // Files to preserve during session navigation
+export const isModelManuallySelectedAtom = atom<boolean>(false); // Track if user manually selected a model
 
 // Derived atom for adding messages
 export const addMessageAtom = atom(

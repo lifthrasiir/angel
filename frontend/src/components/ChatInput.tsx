@@ -9,6 +9,7 @@ import {
   selectedModelAtom,
   selectedFilesAtom,
   statusMessageAtom,
+  isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
 import { useCommandProcessor } from '../hooks/useCommandProcessor';
 import { handleEnterKey } from '../utils/enterKeyHandler';
@@ -42,6 +43,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const setSelectedModel = useSetAtom(selectedModelAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [statusMessage, setStatusMessage] = useAtom(statusMessageAtom);
+  const setIsModelManuallySelected = useSetAtom(isModelManuallySelectedAtom);
 
   const { runCommand } = useCommandProcessor(sessionId);
 
@@ -369,6 +371,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             const model = availableModels.get(selectedModelName);
             if (model) {
               setSelectedModel(model);
+              setIsModelManuallySelected(true);
             }
           }}
           style={{

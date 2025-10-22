@@ -238,6 +238,13 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Override the model to use the one specified in the request
+	if requestBody.Model != "" {
+		mc.LastMessageModel = requestBody.Model
+	} else if mc.LastMessageModel == "" {
+		mc.LastMessageModel = DefaultGeminiModel
+	}
+
 	_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
