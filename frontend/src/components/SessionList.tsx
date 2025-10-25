@@ -1,11 +1,11 @@
 import type React from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '../api/apiClient';
-import { FaEdit, FaTrash } from 'react-icons/fa';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Session } from '../types/chat';
 import { sessionsAtom, chatSessionIdAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
 import { extractFilesFromDrop } from '../utils/dragDropUtils';
+import SessionMenu from './SessionMenu';
 
 interface SessionListProps {
   handleDeleteSession: (sessionId: string) => Promise<void>;
@@ -19,9 +19,36 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessio
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const updateSessionState = (sessionId: string, updateFn: (session: Session) => Session) => {
     setSessions(sessions.map((s) => (s.id === sessionId ? updateFn(s) : s)));
+  };
+
+  // Handle rename action from menu
+  const handleRenameSession = (sessionId: string) => {
+    updateSessionState(sessionId, (s) => ({
+      ...s,
+      isEditing: true,
+    }));
+  };
+
+  // Handle delete action from menu
+  const handleDeleteFromMenu = (sessionId: string) => {
+    if (window.confirm('Are you sure you want to delete this session?')) {
+      handleDeleteSession(sessionId);
+    }
   };
 
   // Handle file drop on session button
@@ -77,7 +104,7 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessio
       style={{
         listStyle: 'none',
         margin: '0',
-        padding: '10px 0',
+        padding: '5px 0',
         width: '100%',
       }}
     >
@@ -124,17 +151,6 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessio
                 className="sidebar-session-name-input"
                 aria-label="Edit session name"
               />
-              <button
-                onClick={() => {
-                  if (window.confirm('Are you sure you want to delete this session?')) {
-                    handleDeleteSession(session.id);
-                  }
-                }}
-                className="sidebar-delete-button"
-                aria-label="Delete session"
-              >
-                <FaTrash size={16} />
-              </button>
             </div>
           ) : (
             <button
@@ -192,18 +208,13 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessio
             </button>
           )}
           {!session.isEditing && (
-            <button
-              onClick={() => {
-                updateSessionState(session.id, (s) => ({
-                  ...s,
-                  isEditing: true,
-                }));
-              }}
-              className="sidebar-edit-button"
-              aria-label="Change session name or delete session"
-            >
-              <FaEdit size={16} />
-            </button>
+            <SessionMenu
+              sessionId={session.id}
+              sessionName={session.name || 'New Chat'}
+              onRename={handleRenameSession}
+              onDelete={handleDeleteFromMenu}
+              isMobile={isMobile}
+            />
           )}
         </li>
       ))}
