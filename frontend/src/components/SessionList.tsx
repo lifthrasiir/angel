@@ -2,7 +2,6 @@ import type React from 'react';
 import { useState } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { FaEdit, FaTrash } from 'react-icons/fa';
-import { useNavigate } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Session } from '../types/chat';
 import { sessionsAtom, chatSessionIdAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
@@ -10,10 +9,10 @@ import { extractFilesFromDrop } from '../utils/dragDropUtils';
 
 interface SessionListProps {
   handleDeleteSession: (sessionId: string) => Promise<void>;
+  onSessionSelect: (sessionId: string) => void;
 }
 
-const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
-  const navigate = useNavigate();
+const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessionSelect }) => {
   const [sessions, setSessions] = useAtom(sessionsAtom);
   const [chatSessionId] = useAtom(chatSessionIdAtom);
   const [selectedFiles, setSelectedFiles] = useAtom(selectedFilesAtom);
@@ -44,7 +43,7 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
         setSelectedFiles(filesToAdd);
         // Set preserve files to ensure they survive navigation
         setPreserveSelectedFiles(filesToAdd);
-        navigate(`/${sessionId}`);
+        onSessionSelect(sessionId);
       }
     }
   };
@@ -139,7 +138,7 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession }) => {
             </div>
           ) : (
             <button
-              onClick={() => navigate(`/${session.id}`)}
+              onClick={() => onSessionSelect(session.id)}
               onDrop={(e) => handleFileDrop(e, session.id)}
               onDragOver={handleDragOver}
               onDragEnter={(e) => handleDragEnter(e, session.id)}

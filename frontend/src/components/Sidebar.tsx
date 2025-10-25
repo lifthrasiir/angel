@@ -292,7 +292,10 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
           ) : sessions && sessions.length === 0 ? (
             <p>No sessions yet.</p>
           ) : (
-            <SessionList handleDeleteSession={handleDeleteSession} />
+            <SessionList
+              handleDeleteSession={handleDeleteSession}
+              onSessionSelect={(sessionId) => handleNavigate(`/${sessionId}`)}
+            />
           )}
         </div>
         <hr
