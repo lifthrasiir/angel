@@ -575,10 +575,30 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 	return &wsWithSessions, nil
 }
 
+// getHighestOAuthTokenID returns the highest existing ID in oauth_tokens table
+// Returns 0 if table is empty
+func getHighestOAuthTokenID(db *sql.DB) (int, error) {
+	var highestID int
+	err := db.QueryRow("SELECT COALESCE(MAX(id), 0) FROM oauth_tokens").Scan(&highestID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get highest OAuth token ID: %w", err)
+	}
+	return highestID, nil
+}
+
 func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string) error {
-	_, err := db.Exec(
-		"INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id) VALUES (1, ?, ?, ?)",
-		tokenJSON, userEmail, projectID)
+	// Get the highest existing ID, or use 1 if table is empty
+	highestID, err := getHighestOAuthTokenID(db)
+	if err != nil {
+		return err
+	}
+	if highestID == 0 {
+		highestID = 1
+	}
+
+	_, err = db.Exec(
+		"INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id) VALUES (?, ?, ?, ?)",
+		highestID, tokenJSON, userEmail, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token: %w", err)
 	}
@@ -586,16 +606,22 @@ func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID st
 }
 
 func LoadOAuthToken(db *sql.DB) (string, string, string, error) {
+	// Get the highest existing ID, or return empty if table is empty
+	highestID, err := getHighestOAuthTokenID(db)
+	if err != nil {
+		return "", "", "", err
+	}
+	if highestID == 0 {
+		log.Println("LoadOAuthToken: No existing token found in DB.")
+		return "", "", "", nil // No token found, not an error
+	}
+
 	var tokenJSON string
 	var nullUserEmail sql.NullString
 	var nullProjectID sql.NullString
-	row := db.QueryRow("SELECT token_data, user_email, project_id FROM oauth_tokens WHERE id = 1")
-	err := row.Scan(&tokenJSON, &nullUserEmail, &nullProjectID)
+	row := db.QueryRow("SELECT token_data, user_email, project_id FROM oauth_tokens WHERE id = ?", highestID)
+	err = row.Scan(&tokenJSON, &nullUserEmail, &nullProjectID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Println("LoadOAuthToken: No existing token found in DB.")
-			return "", "", "", nil // No token found, not an error
-		}
 		return "", "", "", fmt.Errorf("failed to load OAuth token: %w", err)
 	}
 	userEmail := nullUserEmail.String
@@ -606,7 +632,16 @@ func LoadOAuthToken(db *sql.DB) (string, string, string, error) {
 
 // DeleteOAuthToken deletes the OAuth token from the database.
 func DeleteOAuthToken(db *sql.DB) error {
-	_, err := db.Exec("DELETE FROM oauth_tokens WHERE id = 1")
+	// Get the highest existing ID, or return if table is empty
+	highestID, err := getHighestOAuthTokenID(db)
+	if err != nil {
+		return err
+	}
+	if highestID == 0 {
+		return nil // Table is empty, nothing to delete
+	}
+
+	_, err = db.Exec("DELETE FROM oauth_tokens WHERE id = ?", highestID)
 	if err != nil {
 		return fmt.Errorf("failed to delete OAuth token: %w", err)
 	}
