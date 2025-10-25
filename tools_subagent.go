@@ -303,8 +303,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 			for _, hash := range inputHashes {
 				attachment, err := GetBlobAsFileAttachment(db, hash)
 				if err != nil {
-					log.Printf("Warning: Failed to create file attachment for hash %s: %v", hash, err)
-					continue
+					return ToolHandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
 				}
 				attachments = append(attachments, attachment)
 			}
@@ -351,8 +350,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		if hash != "" {
 			attachment, err := GetBlobAsFileAttachment(db, hash)
 			if err != nil {
-				log.Printf("Warning: Failed to create file attachment for hash %s: %v", hash, err)
-				continue
+				return ToolHandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
 			}
 			userMessageAttachments = append(userMessageAttachments, attachment)
 		}
@@ -383,8 +381,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 			// Retrieve blob data for the hash
 			blobData, err := GetBlob(db, hash)
 			if err != nil {
-				log.Printf("Warning: Failed to retrieve blob for hash %s: %v", hash, err)
-				continue
+				return ToolHandlerResults{}, fmt.Errorf("failed to retrieve blob for hash %s: %w", hash, err)
 			}
 
 			// Determine MIME type by detecting content type
