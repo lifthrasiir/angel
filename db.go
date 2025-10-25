@@ -524,6 +524,14 @@ func UpdateSessionName(db *sql.DB, sessionID string, name string) error {
 	return nil
 }
 
+func UpdateSessionWorkspace(db *sql.DB, sessionID string, workspaceID string) error {
+	_, err := db.Exec("UPDATE sessions SET workspace_id = ? WHERE id = ?", workspaceID, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update session workspace: %w", err)
+	}
+	return nil
+}
+
 func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSessions, error) {
 	var wsWithSessions WorkspaceWithSessions
 

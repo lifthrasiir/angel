@@ -65,6 +65,53 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Session name updated successfully")
 }
 
+func updateSessionWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	var requestBody struct {
+		WorkspaceID string `json:"workspaceId"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "updateSessionWorkspaceHandler") {
+		return
+	}
+
+	// Verify that the workspace exists (allow empty string for anonymous workspace)
+	if requestBody.WorkspaceID != "" {
+		_, err := GetWorkspace(db, requestBody.WorkspaceID)
+		if err != nil {
+			sendNotFoundError(w, r, "Workspace not found")
+			return
+		}
+	}
+
+	// Verify that the session exists
+	exists, err := SessionExists(db, sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to check session existence")
+		return
+	}
+	if !exists {
+		sendNotFoundError(w, r, "Session not found")
+		return
+	}
+
+	if err := UpdateSessionWorkspace(db, sessionId, requestBody.WorkspaceID); err != nil {
+		sendInternalServerError(w, r, err, "Failed to update session workspace")
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Session workspace updated successfully")
+}
+
 func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	auth := getAuth(w, r)
 

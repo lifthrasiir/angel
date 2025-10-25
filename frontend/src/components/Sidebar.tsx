@@ -28,7 +28,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   const [sessions, setSessions] = useAtom(sessionsAtom);
   const [chatSessionId] = useAtom(chatSessionIdAtom);
   const [workspaceName] = useAtom(workspaceNameAtom);
-  const [workspaceId] = useAtom(workspaceIdAtom);
+  const [workspaceId, setWorkspaceId] = useAtom(workspaceIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const [showWorkspaces, setShowWorkspaces] = useState(false);
@@ -56,6 +56,15 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
     if (isMobile) {
       setIsSidebarOpen(false);
     }
+  };
+
+  // Handle workspace navigation when current session moves to different workspace
+  const handleNavigateToWorkspace = (newWorkspaceId: string) => {
+    // Update workspace state directly without page refresh
+    setWorkspaceId(newWorkspaceId || '');
+
+    // Clear sessions to trigger re-fetch for new workspace
+    setSessions([]);
   };
 
   const handleNewSessionDrop = async (e: React.DragEvent<HTMLButtonElement>) => {
@@ -295,6 +304,12 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             <SessionList
               handleDeleteSession={handleDeleteSession}
               onSessionSelect={(sessionId) => handleNavigate(`/${sessionId}`)}
+              workspaces={workspaces}
+              onSessionMoved={(movedSessionId: string) => {
+                // Remove the moved session from local state for immediate UI update
+                setSessions(sessions.filter((s) => s.id !== movedSessionId));
+              }}
+              onNavigateToWorkspace={handleNavigateToWorkspace}
             />
           )}
         </div>

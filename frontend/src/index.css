@@ -744,7 +744,7 @@ textarea {
 
 .sidebar-session-button {
   flex-grow: 1;
-  padding: 6px 8px;
+  padding: 6px 0 6px 8px;
   text-align: left;
   border: none;
   border-radius: 4px;
@@ -764,33 +764,8 @@ textarea {
   background: rgba(0, 0, 0, 0.05); /* Subtle hover effect */
 }
 
-.sidebar-edit-button {
-  margin-left: 5px;
-  padding: 5px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #555;
-}
-
-.sidebar-edit-button {
-  margin-left: 5px;
-  padding: 5px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #555;
-}
-
 /* Session menu styles */
 .session-menu-trigger {
-  margin-left: 2px;
   padding: 4px;
   background: none;
   border: none;
@@ -1050,7 +1025,7 @@ pre .hljs {
 
   .sidebar-session-button,
   .sidebar-delete-button,
-  .sidebar-edit-button {
+  .sidebar-session-name-input {
     min-height: var(--touch-target-size);
     padding: calc(var(--spacing-unit) * 0.5);
   }

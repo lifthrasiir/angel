@@ -192,6 +192,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/chat/{sessionId}", chatMessage).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}", loadChatSession).Methods("GET")
 	router.HandleFunc("/api/chat/{sessionId}/name", updateSessionNameHandler).Methods("POST")
+	router.HandleFunc("/api/chat/{sessionId}/workspace", updateSessionWorkspaceHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/roots", updateSessionRootsHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/call", handleCall).Methods("GET", "DELETE")
 	router.HandleFunc("/api/chat/{sessionId}", deleteSession).Methods("DELETE")

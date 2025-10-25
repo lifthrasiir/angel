@@ -2,24 +2,41 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
-import type { Session } from '../types/chat';
-import { sessionsAtom, chatSessionIdAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
+import type { Session, Workspace } from '../types/chat';
+import {
+  sessionsAtom,
+  chatSessionIdAtom,
+  selectedFilesAtom,
+  preserveSelectedFilesAtom,
+  workspaceIdAtom,
+} from '../atoms/chatAtoms';
 import { extractFilesFromDrop } from '../utils/dragDropUtils';
 import SessionMenu from './SessionMenu';
 
 interface SessionListProps {
   handleDeleteSession: (sessionId: string) => Promise<void>;
   onSessionSelect: (sessionId: string) => void;
+  workspaces: Workspace[];
+  onSessionMoved?: (sessionId: string) => void;
+  onNavigateToWorkspace?: (workspaceId: string) => void;
 }
 
-const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessionSelect }) => {
+const SessionList: React.FC<SessionListProps> = ({
+  handleDeleteSession,
+  onSessionSelect,
+  workspaces,
+  onSessionMoved,
+  onNavigateToWorkspace,
+}) => {
   const [sessions, setSessions] = useAtom(sessionsAtom);
   const [chatSessionId] = useAtom(chatSessionIdAtom);
+  const [workspaceId] = useAtom(workspaceIdAtom);
   const [selectedFiles, setSelectedFiles] = useAtom(selectedFilesAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -49,6 +66,11 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessio
     if (window.confirm('Are you sure you want to delete this session?')) {
       handleDeleteSession(sessionId);
     }
+  };
+
+  // Handle menu toggle to highlight active session
+  const handleMenuToggle = (sessionId: string, isOpen: boolean) => {
+    setOpenMenuSessionId(isOpen ? sessionId : null);
   };
 
   // Handle file drop on session button
@@ -109,7 +131,16 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessio
       }}
     >
       {sessions.map((session) => (
-        <li key={session.id} className="sidebar-session-item">
+        <li
+          key={session.id}
+          className="sidebar-session-item"
+          style={{
+            backgroundColor: openMenuSessionId === session.id ? '#f0f8ff' : 'transparent',
+            border: openMenuSessionId === session.id ? '1px solid #007bff' : '1px solid transparent',
+            borderRadius: '4px',
+            transition: 'all 0.2s ease',
+          }}
+        >
           {session.isEditing ? (
             <div className="sidebar-session-edit-container">
               <input
@@ -214,6 +245,12 @@ const SessionList: React.FC<SessionListProps> = ({ handleDeleteSession, onSessio
               onRename={handleRenameSession}
               onDelete={handleDeleteFromMenu}
               isMobile={isMobile}
+              currentWorkspaceId={workspaceId || ''}
+              workspaces={workspaces}
+              onSessionMoved={() => onSessionMoved && onSessionMoved(session.id)}
+              isCurrentSession={session.id === chatSessionId}
+              onNavigateToWorkspace={onNavigateToWorkspace}
+              onMenuToggle={handleMenuToggle}
             />
           )}
         </li>
