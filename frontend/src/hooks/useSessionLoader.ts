@@ -11,6 +11,7 @@ import {
   EventInitialStateNoCall,
   EventInlineData,
   EventModelMessage,
+  EventPing,
   EventThought,
   EventPendingConfirmation,
 } from '../utils/messageHandler';
@@ -404,6 +405,9 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
                 closeEventSourceNormally();
               } else if (eventType === EventPendingConfirmation) {
                 setPendingConfirmation(eventData);
+              } else if (eventType === EventPing) {
+                // Ping messages are ignored as they're only for connection keep-alive
+                // No action needed, just continue processing other events
               }
             },
             (errorEvent: Event) => {

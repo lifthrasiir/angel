@@ -21,6 +21,7 @@ export const EventSessionName = 'N';
 export const EventCumulTokenCount = 'C';
 export const EventPendingConfirmation = 'P';
 export const EventGenerationChanged = 'G';
+export const EventPing = '.';
 export const EventError = 'E';
 
 export const sendMessage = async (
@@ -174,6 +175,9 @@ export const processStreamResponse = async (
       } else if (type === EventGenerationChanged) {
         const [messageId, envChangedJson] = splitOnceByNewline(data);
         handlers.onEnvChanged(messageId, envChangedJson);
+      } else if (type === EventPing) {
+        // Ping messages are ignored as they're only for connection keep-alive
+        // No action needed, just continue processing other events
       } else {
         console.warn('Unknown protocol:', data);
       }
