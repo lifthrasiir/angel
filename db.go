@@ -238,6 +238,9 @@ func migrateDB(db *sql.DB) error {
 			SELECT id, replace(replace(text, '<', '\x0e'), '>', '\x0f') as text, session_id,
 			(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
 			FROM messages WHERE type IN ('user', 'model')`,
+
+		// Add missing index for blob ref_count - critical for performance when deleting sessions with many blobs
+		`CREATE INDEX IF NOT EXISTS idx_blobs_ref_count ON blobs(ref_count)`,
 	}
 
 	for _, stmt := range migrationStmts {
