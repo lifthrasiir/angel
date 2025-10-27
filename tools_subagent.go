@@ -9,9 +9,59 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
+
+// addHashWithSpacing adds a hash to the response with appropriate spacing to avoid
+// confusion with adjacent Unicode letters (\pL) or other hashes
+func addHashWithSpacing(response *strings.Builder, hash string) {
+	currentText := response.String()
+
+	// Check if we need to add space before the hash
+	if len(currentText) > 0 {
+		lastChar := rune(currentText[len(currentText)-1])
+		// Add space before if previous character is a Unicode letter or a digit
+		if unicode.IsLetter(lastChar) || unicode.IsDigit(lastChar) {
+			response.WriteString(" ")
+		}
+	}
+
+	// Add the hash
+	response.WriteString(hash)
+}
+
+// addTextWithSpacing adds text to the response with appropriate spacing to avoid
+// confusion with adjacent hashes
+func addTextWithSpacing(response *strings.Builder, text string) {
+	if text == "" {
+		return
+	}
+
+	currentText := response.String()
+
+	// Check if we need to add space before the text
+	if len(currentText) > 0 {
+		lastChar := rune(currentText[len(currentText)-1])
+		// Add space before if previous character looks like it could be part of a hash
+		if unicode.IsLetter(lastChar) || unicode.IsDigit(lastChar) {
+			response.WriteString(" ")
+		}
+	}
+
+	// Add the text
+	response.WriteString(text)
+}
+
+// isHashPattern checks if a string looks like a hash (typically alphanumeric string)
+func isHashPattern(s string) bool {
+	// Hash patterns are typically alphanumeric strings, often with specific lengths
+	// This is a simple check - in practice you might want to be more specific
+	match, _ := regexp.MatchString(`^[a-zA-Z0-9]{8,}$`, s)
+	return match
+}
 
 // SubagentTool handles the subagent tool call, allowing to spawn a new subagent or interact with an existing one.
 func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
@@ -441,8 +491,8 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 						continue
 					}
 
-					// Add hash to response
-					fullResponseText.WriteString(hash)
+					// Add hash to response with proper spacing
+					addHashWithSpacing(&fullResponseText, hash)
 
 					// Generate filename with counter for generated images
 					filename := generateFilenameFromMimeType(part.InlineData.MimeType, imageCounter)
@@ -477,8 +527,8 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 					if textToAdd == "" {
 						textToAdd = "(empty string, typically indicates output was moderated)"
 					}
-					// Add text to response and immediately save to message chain
-					fullResponseText.WriteString(textToAdd)
+					// Add text to response with proper spacing and immediately save to message chain
+					addTextWithSpacing(&fullResponseText, textToAdd)
 					if _, err = mc.Add(ctx, db, Message{
 						Type: TypeModelText,
 						Text: textToAdd,
