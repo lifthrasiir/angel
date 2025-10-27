@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Session, Workspace } from '../types/chat';
@@ -37,6 +37,7 @@ const SessionList: React.FC<SessionListProps> = ({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
+  const inputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
 
   // Detect mobile viewport
   useEffect(() => {
@@ -59,6 +60,14 @@ const SessionList: React.FC<SessionListProps> = ({
       ...s,
       isEditing: true,
     }));
+
+    // Focus the input after the component re-renders
+    queueMicrotask(() => {
+      if (inputRefs.current[sessionId]) {
+        inputRefs.current[sessionId]?.focus();
+        inputRefs.current[sessionId]?.select();
+      }
+    });
   };
 
   // Handle delete action from menu
@@ -144,6 +153,11 @@ const SessionList: React.FC<SessionListProps> = ({
           {session.isEditing ? (
             <div className="sidebar-session-edit-container">
               <input
+                ref={(el) => {
+                  if (el) {
+                    inputRefs.current[session.id] = el;
+                  }
+                }}
                 type="text"
                 value={session.name || ''}
                 onChange={(e) => {
@@ -168,6 +182,8 @@ const SessionList: React.FC<SessionListProps> = ({
                     ...s,
                     isEditing: false,
                   }));
+                  // Clean up the ref
+                  delete inputRefs.current[session.id];
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -177,6 +193,8 @@ const SessionList: React.FC<SessionListProps> = ({
                       ...s,
                       isEditing: false,
                     }));
+                    // Clean up the ref
+                    delete inputRefs.current[session.id];
                   }
                 }}
                 className="sidebar-session-name-input"
