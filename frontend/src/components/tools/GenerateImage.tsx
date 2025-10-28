@@ -27,16 +27,13 @@ const GenerateImageCall: React.FC<FunctionCallMessageProps> = ({ functionCall, m
   // Convert input_hashes to FileAttachment array
   const inputHashes = args.input_hashes || [];
 
-  // Determine title based on want_image parameter
-  const title = args.want_image ? 'generate_image: want_image' : 'generate_image: !want_image';
-
   return (
     <ChatBubble
       messageId={messageId}
       containerClassName="agent-message"
       bubbleClassName="agent-function-call function-message-bubble"
       messageInfo={messageInfo}
-      title={title}
+      title={'Image generation'}
       heighten={false}
     >
       <p>{args.text}</p>
