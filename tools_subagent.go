@@ -65,6 +65,10 @@ func isHashPattern(s string) bool {
 
 // SubagentTool handles the subagent tool call, allowing to spawn a new subagent or interact with an existing one.
 func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+	if err := EnsureKnownKeys("subagent", args, "subagent_id", "system_prompt", "text"); err != nil {
+		return ToolHandlerResults{}, err
+	}
+
 	subagentID, hasSubagentID := args["subagent_id"].(string)
 	systemPrompt, hasSystemPrompt := args["system_prompt"].(string)
 	text, hasText := args["text"].(string)
@@ -314,9 +318,12 @@ func handleSubagentTurn(
 
 // GenerateImageTool handles the generate_image tool call, allowing to generate images using a subagent with image generation capabilities.
 func GenerateImageTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+	if err := EnsureKnownKeys("generate_image", args, "text", "input_hashes"); err != nil {
+		return ToolHandlerResults{}, err
+	}
+
 	text, hasText := args["text"].(string)
 	inputHashesInterface, hasInputHashes := args["input_hashes"].([]interface{})
-	wantImage, hasWantImage := args["want_image"].(bool)
 
 	if !hasText {
 		return ToolHandlerResults{}, fmt.Errorf("generate_image tool: must provide 'text'")
@@ -338,28 +345,6 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	db, err := getDbFromContext(ctx)
 	if err != nil {
 		return ToolHandlerResults{}, err
-	}
-
-	// Edge case: if text is empty, just return the input hashes as response
-	if text == "" {
-		response := strings.Join(inputHashes, " ")
-		result := map[string]interface{}{
-			"response": response,
-		}
-		if hasWantImage && wantImage {
-			// For empty text with want_image=true, we still need to convert hashes to images
-			// The response is just the hashes, but images should be returned as attachments
-			var attachments []FileAttachment
-			for _, hash := range inputHashes {
-				attachment, err := GetBlobAsFileAttachment(db, hash)
-				if err != nil {
-					return ToolHandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
-				}
-				attachments = append(attachments, attachment)
-			}
-			return ToolHandlerResults{Value: result, Attachments: attachments}, nil
-		}
-		return ToolHandlerResults{Value: result}, nil
 	}
 
 	// Create a subsession for image generation
@@ -513,14 +498,12 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 						log.Printf("Warning: Failed to add image response to subsession: %v", err)
 					}
 
-					// Add to attachments if want_image is true
-					if hasWantImage && wantImage {
-						generatedAttachments = append(generatedAttachments, FileAttachment{
-							Hash:     hash,
-							MimeType: part.InlineData.MimeType,
-							FileName: filename,
-						})
-					}
+					// Add to attachments
+					generatedAttachments = append(generatedAttachments, FileAttachment{
+						Hash:     hash,
+						MimeType: part.InlineData.MimeType,
+						FileName: filename,
+					})
 				} else {
 					// Handle text part (could be empty or non-empty)
 					textToAdd := part.Text
@@ -545,12 +528,8 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		"response": fullResponseText.String(),
 	}
 
-	// Return with attachments if want_image is true
-	if hasWantImage && wantImage {
-		return ToolHandlerResults{Value: result, Attachments: generatedAttachments}, nil
-	}
-
-	return ToolHandlerResults{Value: result}, nil
+	// Always return with attachments
+	return ToolHandlerResults{Value: result, Attachments: generatedAttachments}, nil
 }
 
 func init() {
@@ -582,13 +561,13 @@ func init() {
 	// Define generate_image tool
 	generateImageToolDefinition := ToolDefinition{
 		Name:        "generate_image",
-		Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). By default, this tool returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking. If `want_image` is set to `True`, the generated images are returned as attachments so that you can directly assess them.",
+		Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). Returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking, and the generated images are always returned as attachments for direct assessment.",
 		Parameters: &Schema{
 			Type: TypeObject,
 			Properties: map[string]*Schema{
 				"text": {
 					Type:        TypeString,
-					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied. If empty, returns input hashes unchanged (useful for retrieving input images as attachments when want_image=true).",
+					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied.",
 				},
 				"input_hashes": {
 					Type:        TypeArray,
@@ -596,10 +575,6 @@ func init() {
 					Items: &Schema{
 						Type: TypeString,
 					},
-				},
-				"want_image": {
-					Type:        TypeBoolean,
-					Description: "If true, the generated image(s) will be returned directly as attachments. This parameter must be set to `True` if the image has to be assessed for subsequent processing.",
 				},
 			},
 			Required: []string{"text"},
