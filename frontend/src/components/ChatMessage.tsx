@@ -104,6 +104,16 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageInfo={messageInfoComponent}
         />
       );
+    } else if (type === 'command') {
+      // Render command as horizontal rule
+      const commandText = text || '???';
+      return (
+        <div className="command-message">
+          <hr />
+          <div className="command-text">/{commandText}</div>
+          <hr />
+        </div>
+      );
     } else if (type === 'env_changed') {
       try {
         const envChangedData: EnvChanged = JSON.parse(text || '{}');

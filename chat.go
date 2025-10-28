@@ -808,7 +808,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		fm, _, err := createFrontendMessage(*newMessageAsFrontendMessage, sql.NullString{}, nil, false, false)
+		fm, _, err := createFrontendMessage(*newMessageAsFrontendMessage, sql.NullString{}, nil, false, false, false)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to convert new message %d to frontend message: %v", newMessageID, err))
 			return
@@ -1096,6 +1096,11 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 
 	for _, fm := range curatedMessages {
 		var parts []Part
+
+		if fm.Type == TypeCommand {
+			continue // Command messages are only visible to users
+		}
+
 		// Add text part if present
 		if len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
 			parts = append(parts, Part{
@@ -1108,23 +1113,31 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		hasBinaryAttachments := false
 		for _, att := range fm.Attachments {
 			if att.Hash != "" { // Only process if hash exists
-				blobData, err := GetBlob(db, att.Hash)
-				if err != nil {
-					log.Printf("Error retrieving blob data for hash %s: %v", att.Hash, err)
-					// Decide how to handle this error: skip attachment, return error, etc.
-					// For now, we'll skip this attachment to avoid breaking the whole message.
-					continue
-				}
-				hasBinaryAttachments = true
-				parts = append(parts,
-					Part{Text: fmt.Sprintf("[Binary with hash %s follows:]", att.Hash)},
-					Part{
-						InlineData: &InlineData{
-							MimeType: att.MimeType,
-							Data:     base64.StdEncoding.EncodeToString(blobData),
+				if att.Omitted {
+					// Attachment was omitted due to clearblobs command
+					parts = append(parts,
+						Part{Text: fmt.Sprintf("[Binary with hash %s is currently **UNPROCESSED**. You **MUST** use recall(query='%[1]s') to gain access to its content for internal analysis. **Until recalled, you have NO information about this binary's content, and any attempt to describe or act upon it will be pure guesswork.**]", att.Hash)},
+					)
+				} else {
+					// Normal blob processing
+					blobData, err := GetBlob(db, att.Hash)
+					if err != nil {
+						log.Printf("Error retrieving blob data for hash %s: %v", att.Hash, err)
+						// Decide how to handle this error: skip attachment, return error, etc.
+						// For now, we'll skip this attachment to avoid breaking the whole message.
+						continue
+					}
+					hasBinaryAttachments = true
+					parts = append(parts,
+						Part{Text: fmt.Sprintf("[Binary with hash %s follows:]", att.Hash)},
+						Part{
+							InlineData: &InlineData{
+								MimeType: att.MimeType,
+								Data:     base64.StdEncoding.EncodeToString(blobData),
+							},
 						},
-					},
-				)
+					)
+				}
 			}
 		}
 

@@ -166,3 +166,61 @@ func formatCreatedAt(createdAt string) string {
 
 	return t.Format("2006-01-02 15:04:05")
 }
+
+var recallToolDefinition = ToolDefinition{
+	Name:        "recall",
+	Description: "ESSENTIAL TOOL for retrieving unprocessed binary content. When you encounter messages about binary files being unprocessed with hash references (e.g., 'Binary with hash xyz is currently **UNPROCESSED**'), you MUST use this recall tool to access the full content. This tool recovers previously forgotten data from SHA-512/256 hashes and provides it to you as attachments for your *internal analysis and understanding*. This enables you to accurately comprehend the content's details, and thereby formulate a more complete and precise response to the user, or perform further processing, using the actual binary data.",
+	Parameters: &Schema{
+		Type:        TypeObject,
+		Description: "Recall unprocessed binary content for internal AI processing",
+		Properties: map[string]*Schema{
+			"query": {
+				Type:        TypeString,
+				Description: "The SHA-512/256 hash of the unprocessed binary content required for your internal comprehension and subsequent actions.",
+			},
+		},
+		Required: []string{"query"},
+	},
+	Handler: func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+		// Validate arguments
+		if err := EnsureKnownKeys("recall", args, "query"); err != nil {
+			return ToolHandlerResults{}, err
+		}
+
+		query, ok := args["query"].(string)
+		if !ok {
+			return ToolHandlerResults{}, fmt.Errorf("query must be a string")
+		}
+
+		if strings.TrimSpace(query) == "" {
+			return ToolHandlerResults{}, fmt.Errorf("query cannot be empty")
+		}
+
+		// Get database connection from context
+		db, err := getDbFromContext(ctx)
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("failed to get database connection: %w", err)
+		}
+
+		// For now, treat query as a single hash
+		// In the future, this could be expanded to handle multiple hashes or search functionality
+		hash := strings.TrimSpace(query)
+
+		// Try to retrieve the blob as a file attachment
+		attachment, err := GetBlobAsFileAttachment(db, hash)
+		if err != nil {
+			return ToolHandlerResults{}, fmt.Errorf("failed to retrieve content for hash %s: %w", hash, err)
+		}
+
+		// Return the hash as response text and the content as attachment
+		// This matches the generate_image tool response format
+		result := map[string]interface{}{
+			"response": fmt.Sprintf("Recalled content for hash %s follows:", hash),
+		}
+
+		return ToolHandlerResults{
+			Value:       result,
+			Attachments: []FileAttachment{attachment},
+		}, nil
+	},
+}

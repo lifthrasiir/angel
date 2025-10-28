@@ -50,6 +50,7 @@ var availableTools = map[string]ToolDefinition{
 
 	// tools_search_chat.go
 	"search_chat": searchChatToolDefinition,
+	"recall":      recallToolDefinition,
 
 	// tools_subagent.go - Subagent tools (Removed to avoid cyclic dependency)
 }

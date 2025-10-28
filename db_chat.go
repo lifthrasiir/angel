@@ -26,8 +26,9 @@ type Branch struct {
 type FileAttachment struct {
 	FileName string `json:"fileName"`
 	MimeType string `json:"mimeType"`
-	Hash     string `json:"hash"`           // SHA-512/256 hash of the data
-	Data     []byte `json:"data,omitempty"` // Raw binary data, used temporarily for upload/download
+	Hash     string `json:"hash"`              // SHA-512/256 hash of the data
+	Data     []byte `json:"data,omitempty"`    // Raw binary data, used temporarily for upload/download
+	Omitted  bool   `json:"omitted,omitempty"` // Whether attachment was omitted due to clearblobs
 }
 
 // Message struct to hold message data for database interaction
@@ -215,6 +216,7 @@ func createFrontendMessage(
 	possibleBranches []PossibleNextMessage,
 	ignoreBeforeLastCompression bool,
 	includeState bool,
+	clearblobsSeen bool,
 ) (FrontendMessage, *int, error) {
 	if attachmentsJSON.Valid {
 		if err := json.Unmarshal([]byte(attachmentsJSON.String), &m.Attachments); err != nil {
@@ -254,12 +256,25 @@ func createFrontendMessage(
 		}
 	}
 
+	// Process attachments for clearblobs
+	var processedAttachments []FileAttachment
+	if clearblobsSeen {
+		// Mark all attachments as omitted when clearblobs is active
+		for _, att := range m.Attachments {
+			omittedAtt := att
+			omittedAtt.Omitted = true
+			processedAttachments = append(processedAttachments, omittedAtt)
+		}
+	} else {
+		processedAttachments = m.Attachments
+	}
+
 	// Define fm here, before the switch statement
 	fm := FrontendMessage{
 		ID:               fmt.Sprintf("%d", m.ID),
 		Parts:            parts,
 		Type:             m.Type,
-		Attachments:      m.Attachments,
+		Attachments:      processedAttachments,
 		CumulTokenCount:  tokens,
 		SessionID:        m.SessionID,
 		BranchID:         m.BranchID,
@@ -314,6 +329,9 @@ func createFrontendMessage(
 			log.Printf("Warning: Malformed compression message text for message %d: %s", m.ID, m.Text)
 			fm.Parts = []Part{{Text: m.Text, ThoughtSignature: thoughtSignature}} // Fallback to raw text
 		}
+	case TypeCommand:
+		// For command messages, keep the original command text
+		fm.Parts = []Part{{Text: m.Text, ThoughtSignature: thoughtSignature}}
 	default:
 		if m.Text != "" {
 			// Recover length from `<length>,<ThoughtSignature>` if possible.
@@ -389,7 +407,7 @@ func parsePossibleNextIDs(possibleNextIDsAndBranchesStr string) []PossibleNextMe
 
 // getSessionHistoryInternal retrieves the chat history for a given session and its primary branch,
 // recursively fetching messages from parent branches. It allows for discarding thoughts
-// and ignoring messages before the last compression message.
+// and history alteration through compression/clear/clearblobs commands.
 //
 // If fetchLimit is > 0, cursor-based pagination using beforeMessageID and fetchLimit is done.
 // If beforeMessageID is 0, it fetches the latest messages.
@@ -398,7 +416,7 @@ func getSessionHistoryInternal(
 	sessionID string,
 	primaryBranchID string,
 	discardThoughts bool,
-	ignoreBeforeLastCompression bool,
+	canAlterHistory bool,
 	beforeMessageID int, // Cursor: fetch messages with ID less than this
 	fetchLimit int, // Number of messages to fetch
 ) ([]FrontendMessage, error) {
@@ -407,57 +425,10 @@ func getSessionHistoryInternal(
 	branchID := primaryBranchID
 	keepGoing := true
 
-	var lastCompressionMessageID int = -1
-	var lastCompressedUpToMessageID *int
-
-	if ignoreBeforeLastCompression {
-		// Find the ID of the last compression message in the current branch
-		var compressionText string
-		row := db.QueryRow(
-			"SELECT id, text FROM messages WHERE session_id = ? AND branch_id = ? AND type = ? ORDER BY id DESC LIMIT 1",
-			sessionID, primaryBranchID, TypeCompression)
-		err := row.Scan(&lastCompressionMessageID, &compressionText)
-		if err == nil && lastCompressionMessageID != -1 {
-			before, _, found := strings.Cut(compressionText, "\n")
-			if found {
-				parsedID, parseErr := strconv.Atoi(before)
-				if parseErr == nil {
-					lastCompressedUpToMessageID = &parsedID
-				} else {
-					log.Printf("Warning: Failed to parse CompressedUpToMessageId from compression message text %q: %v", before, parseErr)
-				}
-			} else {
-				log.Printf("Warning: Malformed compression message text: %q", compressionText)
-			}
-		}
-		if err != nil && err != sql.ErrNoRows {
-			return nil, fmt.Errorf("failed to find last compression message: %w", err)
-		}
-		// If a compression message is found, parse its text to get the compressedUpToMessageID
-		if lastCompressionMessageID != -1 {
-			var textContent string
-			err := db.QueryRow("SELECT text FROM messages WHERE id = ?", lastCompressionMessageID).Scan(&textContent)
-			if err != nil {
-				log.Printf("Warning: Failed to retrieve text for last compression message %d: %v", lastCompressionMessageID, err)
-				lastCompressedUpToMessageID = nil
-			} else {
-				parts := strings.SplitN(textContent, "\n", 2)
-				if len(parts) == 2 {
-					parsedID, err := strconv.Atoi(parts[0])
-					if err == nil {
-						lastCompressedUpToMessageID = &parsedID
-					} else {
-						log.Printf("Warning: Failed to parse CompressedUpToMessageId from last compression message %d: %v",
-							lastCompressionMessageID, err)
-						lastCompressedUpToMessageID = nil // Treat as if no valid ID was found
-					}
-				} else {
-					log.Printf("Warning: Malformed text in last compression message %d: %s", lastCompressionMessageID, textContent)
-					lastCompressedUpToMessageID = nil // Treat as if no valid ID was found
-				}
-			}
-		}
-	}
+	// History alteration flags
+	var compressUpToID int = 0
+	var clearSeen bool = false
+	var clearblobsSeen bool = false
 
 	// Determine the initial message ID limit for the query
 	messageIdLimit := math.MaxInt
@@ -529,20 +500,12 @@ func getSessionHistoryInternal(
 					return fmt.Errorf("failed to scan message: %w", err)
 				}
 
-				// If ignoring before last compression, and current message is older than or equal to the compressed ID
-				if ignoreBeforeLastCompression &&
-					lastCompressedUpToMessageID != nil &&
-					m.ID <= *lastCompressedUpToMessageID &&
-					m.ID != lastCompressionMessageID {
-					continue // Skip this message, unless it's the compression message itself
-				}
-
 				if discardThoughts && m.Type == TypeThought {
 					continue // Skip thought messages
 				}
 
 				// Create frontend message with possibleBranches from previous iteration
-				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleBranches, ignoreBeforeLastCompression, discardThoughts)
+				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleBranches, canAlterHistory, discardThoughts, clearblobsSeen)
 				if err != nil {
 					return fmt.Errorf("failed to create frontend message: %w", err)
 				}
@@ -566,6 +529,81 @@ func getSessionHistoryInternal(
 				lastBatch := history[len(history)-1]
 				if len(lastBatch) > 0 {
 					lastBatch[0].PossibleBranches = possibleBranches
+				}
+			}
+
+			// Apply history alteration filters if enabled
+			if canAlterHistory {
+				var filteredMessages []FrontendMessage
+
+				// Process messages in reverse chronological order, setting flags and filtering in one pass
+				for i := len(messages) - 1; i >= 0; i-- {
+					msg := messages[i]
+					msgID, err := strconv.Atoi(msg.ID)
+					if err != nil {
+						log.Printf("Warning: Failed to parse message ID %s: %v", msg.ID, err)
+						continue
+					}
+
+					// Check for compression message and set flag
+					if msg.Type == TypeCompression {
+						if len(msg.Parts) > 0 && msg.Parts[0].Text != "" {
+							before, _, found := strings.Cut(msg.Parts[0].Text, "\n")
+							if found {
+								parsedID, err := strconv.Atoi(before)
+								if err == nil {
+									compressUpToID = parsedID
+								} else {
+									log.Printf("Warning: Failed to parse CompressedUpToMessageId from compression message %s: %v", msg.ID, err)
+								}
+							} else {
+								log.Printf("Warning: Malformed compression message text for message %s: %s", msg.ID, msg.Parts[0].Text)
+							}
+						}
+					}
+
+					// Check for command messages and set flags
+					if msg.Type == TypeCommand && len(msg.Parts) > 0 {
+						switch msg.Parts[0].Text {
+						case "clear":
+							clearSeen = true
+						case "clearblobs":
+							clearblobsSeen = true
+						}
+					}
+
+					// Apply filtering based on current flags (processed in reverse order)
+					// Skip messages before compression (except the compression message itself)
+					if msgID <= compressUpToID && msg.Type != TypeCompression {
+						continue
+					}
+
+					// Skip messages before clear command
+					if clearSeen {
+						continue
+					}
+
+					// Process clearblobs (mark attachments as omitted)
+					if clearblobsSeen {
+						for i := range msg.Attachments {
+							msg.Attachments[i].Omitted = true
+						}
+					}
+
+					// Add to filtered list (will be in reverse order)
+					filteredMessages = append(filteredMessages, msg)
+				}
+
+				// Reverse filteredMessages to restore chronological order
+				for i, j := 0, len(filteredMessages)-1; i < j; i, j = i+1, j-1 {
+					filteredMessages[i], filteredMessages[j] = filteredMessages[j], filteredMessages[i]
+				}
+
+				messages = filteredMessages
+
+				// If clear was seen, no need to process parent branches
+				if clearSeen {
+					keepGoing = false
 				}
 			}
 
@@ -687,7 +725,7 @@ func GetSessionHistory(db DbOrTx, sessionID string, primaryBranchID string) ([]F
 }
 
 // GetSessionHistoryContext retrieves the chat history for a given session and its primary branch,
-// discarding thoughts and ignoring messages before the last compression message.
+// discarding thoughts and ignoring messages before the last compression or clear command.
 func GetSessionHistoryContext(db DbOrTx, sessionID string, primaryBranchID string) ([]FrontendMessage, error) {
 	return getSessionHistoryInternal(db, sessionID, primaryBranchID, true, true, 0, 0)
 }

@@ -3,6 +3,7 @@ export interface FileAttachment {
   mimeType: string;
   hash?: string; // SHA-512/256 hash of the data (optional, filled by backend)
   data?: string; // Base64 encoded binary data, used for upload
+  omitted?: boolean; // Whether attachment was omitted due to clearblobs
 }
 
 export interface PossibleNextMessage {
@@ -35,7 +36,8 @@ export interface ChatMessage {
     | 'function_response'
     | 'model_error'
     | 'compression'
-    | 'env_changed';
+    | 'env_changed'
+    | 'command';
   attachments?: FileAttachment[];
   cumulTokenCount?: number | null;
   branchId?: string;

@@ -29,49 +29,67 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const addMessage = useSetAtom(addMessageAtom);
   const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
 
+  // Generic helper to refresh sessions
+  const refreshSessions = async () => {
+    if (workspaceId) {
+      try {
+        const workspaceWithSessions = await fetchSessions(workspaceId);
+        setSessions(workspaceWithSessions.sessions);
+      } catch (refreshError) {
+        console.error('Failed to refresh sessions:', refreshError);
+      }
+    }
+  };
+
+  // Generic helper to add message to chat
+  const addMessageToChat = (messageId: string, type: string, text: string) => {
+    if (sessionId) {
+      const message: ChatMessage = {
+        id: messageId,
+        type: type as any,
+        parts: [{ text }],
+        sessionId: sessionId,
+        branchId: primaryBranchId,
+      };
+      addMessage(message);
+    }
+  };
+
   const runCompress = async () => {
+    if (!sessionId) {
+      setStatusMessage('Error: No active session to run /compress.');
+      return;
+    }
+
     setStatusMessage('Compressing chat history...');
     setProcessingStartTime(Date.now());
     const abortController = new AbortController();
     setCompressAbortController(abortController);
+
     try {
       const response = await apiFetch(`/api/chat/${sessionId}/compress`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
       });
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to compress chat history');
       }
+
       const result = await response.json();
       setStatusMessage(
         `Compression successful! Original tokens: ${result.originalTokenCount}, New tokens: ${result.newTokenCount}`,
       );
 
-      // Add the compression message to the chat history
-      if (sessionId) {
-        const compressionMessage: ChatMessage = {
-          id: String(result.compressionMessageId),
-          type: 'compression',
-          parts: [{ text: `${result.compressedUpToMessageId}\n${result.extractedSummary}` }],
-          sessionId: sessionId,
-          branchId: primaryBranchId,
-        };
-        addMessage(compressionMessage);
-      }
+      addMessageToChat(
+        String(result.compressionMessageId),
+        'compression',
+        `${result.compressedUpToMessageId}\n${result.extractedSummary}`,
+      );
 
-      // Refresh the session list
-      if (workspaceId) {
-        try {
-          const workspaceWithSessions = await fetchSessions(workspaceId);
-          setSessions(workspaceWithSessions.sessions);
-        } catch (refreshError) {
-          console.error('Failed to refresh sessions after compression:', refreshError);
-        }
-      }
+      await refreshSessions();
     } catch (error: any) {
       if (error.name === 'AbortError') {
         setStatusMessage('Compression cancelled by user.');
@@ -245,6 +263,44 @@ export const useCommandProcessor = (sessionId: string | null) => {
     await updateRoots(command, rootsToProcess);
   };
 
+  const runClearCommand = async (commandType: 'clear' | 'clearblobs') => {
+    if (!sessionId) {
+      setStatusMessage(`Error: No active session to run /${commandType}.`);
+      return;
+    }
+
+    const commandName = commandType === 'clear' ? 'Clearing chat' : 'Clearing blobs';
+    const successMessage =
+      commandType === 'clear' ? 'Chat history cleared successfully!' : 'Blobs cleared from chat history successfully!';
+
+    setStatusMessage(`${commandName} history...`);
+
+    try {
+      const response = await apiFetch(`/api/chat/${sessionId}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: commandType }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `Failed to ${commandType} chat history`);
+      }
+
+      const result = await response.json();
+      setStatusMessage(successMessage);
+
+      addMessageToChat(String(result.commandMessageId), 'command', commandType);
+      await refreshSessions();
+    } catch (error: any) {
+      setStatusMessage(`${commandType} failed: ${error.message}`);
+      console.error(`${commandType} failed:`, error);
+    }
+  };
+
+  const runClear = () => runClearCommand('clear');
+  const runClearBlobs = () => runClearCommand('clearblobs');
+
   const runCommand = async (command: string, args: string) => {
     setStatusMessage(null); // Clear previous status messages
     const fullCommand = `/${command}${args ? ` ${args}` : ''}`;
@@ -257,6 +313,12 @@ export const useCommandProcessor = (sessionId: string | null) => {
           return;
         }
         runCompress();
+        break;
+      case 'clear':
+        runClear();
+        break;
+      case 'clearblobs':
+        runClearBlobs();
         break;
       case 'expose':
       case 'unexpose':

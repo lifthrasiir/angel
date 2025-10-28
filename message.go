@@ -25,11 +25,12 @@ const (
 	TypeEnvChanged       MessageType = "env_changed"
 	TypeError            MessageType = "error"
 	TypeModelError       MessageType = "model_error"
+	TypeCommand          MessageType = "command"
 )
 
 func (mt MessageType) Role() string {
 	switch mt {
-	case TypeUserText, TypeFunctionResponse, TypeCompression, TypeSystemPrompt, TypeEnvChanged:
+	case TypeUserText, TypeFunctionResponse, TypeCompression, TypeSystemPrompt, TypeEnvChanged, TypeCommand:
 		return RoleUser
 	case TypeModelText, TypeModelError, TypeFunctionCall, TypeError:
 		return RoleModel
