@@ -168,8 +168,11 @@ func formatCreatedAt(createdAt string) string {
 }
 
 var recallToolDefinition = ToolDefinition{
-	Name:        "recall",
-	Description: "ESSENTIAL TOOL for retrieving unprocessed binary content. When you encounter messages about binary files being unprocessed with hash references (e.g., 'Binary with hash xyz is currently **UNPROCESSED**'), you MUST use this recall tool to access the full content. This tool recovers previously forgotten data from SHA-512/256 hashes and provides it to you as attachments for your *internal analysis and understanding*. This enables you to accurately comprehend the content's details, and thereby formulate a more complete and precise response to the user, or perform further processing, using the actual binary data.",
+	Name: "recall",
+	Description: `**Retrieves content for binary hashes that are NOT directly rendered or explicitly described in the chat.**
+When binary content (e.g., images, audio, PDFs) is provided directly in the chat with a hash reference (e.g., '[Binary with hash ... follows:]' immediately followed by the rendered content), you can directly perceive and understand its details. In such cases, 'recall' is generally NOT required for basic comprehension.
+However, 'recall' is **ESSENTIAL** when you encounter messages explicitly stating that a binary with a given hash is **UNPROCESSED** (e.g., 'Binary with hash xyz is currently **UNPROCESSED**') and its content has not been rendered or described for you. In these situations, you **MUST** use 'recall' to access the content's details for internal analysis and understanding.
+This tool recovers previously un-perceived or raw data from SHA-512/256 hashes, enabling you to accurately comprehend content details, formulate precise responses, or perform further processing.`,
 	Parameters: &Schema{
 		Type:        TypeObject,
 		Description: "Recall unprocessed binary content for internal AI processing",
