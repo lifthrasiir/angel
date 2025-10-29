@@ -306,10 +306,9 @@ func createFrontendMessage(
 		}
 	case TypeCompression:
 		// For compression messages, the text is in the format "ID\nSummary"
-		_, textAfter, found := strings.Cut(m.Text, "\n")
+		before, textAfter, found := strings.Cut(m.Text, "\n")
 		if found {
 			// Parse ID for compressedUpToMessageID
-			before, _, found := strings.Cut(m.Text, "\n")
 			if found {
 				parsedID, err := strconv.Atoi(before)
 				if err != nil {
@@ -504,6 +503,21 @@ func getSessionHistoryInternal(
 					continue // Skip thought messages
 				}
 
+				// Check for compression message and parse ID before processing
+				if m.Type == TypeCompression {
+					before, _, found := strings.Cut(m.Text, "\n")
+					if found {
+						parsedID, err := strconv.Atoi(before)
+						if err == nil {
+							compressUpToID = parsedID
+						} else {
+							log.Printf("Warning: Failed to parse CompressedUpToMessageId from compression message %d: %v", m.ID, err)
+						}
+					} else {
+						log.Printf("Warning: Malformed compression message text for message %d: %s", m.ID, m.Text)
+					}
+				}
+
 				// Create frontend message with possibleBranches from previous iteration
 				fm, _, err := createFrontendMessage(m, attachmentsJSON, possibleBranches, canAlterHistory, discardThoughts, clearblobsSeen)
 				if err != nil {
@@ -543,23 +557,6 @@ func getSessionHistoryInternal(
 					if err != nil {
 						log.Printf("Warning: Failed to parse message ID %s: %v", msg.ID, err)
 						continue
-					}
-
-					// Check for compression message and set flag
-					if msg.Type == TypeCompression {
-						if len(msg.Parts) > 0 && msg.Parts[0].Text != "" {
-							before, _, found := strings.Cut(msg.Parts[0].Text, "\n")
-							if found {
-								parsedID, err := strconv.Atoi(before)
-								if err == nil {
-									compressUpToID = parsedID
-								} else {
-									log.Printf("Warning: Failed to parse CompressedUpToMessageId from compression message %s: %v", msg.ID, err)
-								}
-							} else {
-								log.Printf("Warning: Malformed compression message text for message %s: %s", msg.ID, msg.Parts[0].Text)
-							}
-						}
 					}
 
 					// Check for command messages and set flags
@@ -712,6 +709,23 @@ func getSessionHistoryInternal(
 				}
 			}
 			combinedHistory[0].PossibleBranches = filteredPossibleBranches
+		}
+	}
+
+	// For history context (canAlterHistory=true), move compression summary to first position
+	if canAlterHistory {
+		for i, msg := range combinedHistory {
+			if msg.Type == TypeCompression {
+				if i != 0 {
+					// Move compression message to first position
+					compressionMsg := combinedHistory[i]
+					// Remove from current position
+					combinedHistory = append(combinedHistory[:i], combinedHistory[i+1:]...)
+					// Insert at beginning
+					combinedHistory = append([]FrontendMessage{compressionMsg}, combinedHistory...)
+				}
+				break // Only process first compression message
+			}
 		}
 	}
 
@@ -928,7 +942,7 @@ func GetMessageByID(db *sql.DB, messageID int) (*Message, error) {
 }
 
 // UpdateSessionChosenFirstID updates the chosen_first_id for a specific session.
-func UpdateSessionChosenFirstID(db *sql.DB, sessionID string, chosenFirstID *int) error {
+func UpdateSessionChosenFirstID(db DbOrTx, sessionID string, chosenFirstID *int) error {
 	_, err := db.Exec("UPDATE sessions SET chosen_first_id = ? WHERE id = ?", chosenFirstID, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session chosen_first_id: %w", err)
@@ -1002,4 +1016,66 @@ func GetSessionFirstMessages(db DbOrTx, sessionID string) ([]Message, error) {
 	}
 
 	return messages, nil
+}
+
+// DeleteMessage deletes a message from the database and updates the parent's chosen_next_id.
+// Simplified version to avoid deadlocks in tests.
+func DeleteMessage(db *sql.DB, messageID int) error {
+	// Get the message details first
+	var msg Message
+	var attachments sql.NullString
+	err := db.QueryRow(`
+		SELECT id, session_id, branch_id, parent_message_id, chosen_next_id,
+		       text, type, attachments, cumul_token_count, created_at,
+		       model, generation, state, aux
+		FROM messages
+		WHERE id = ?
+	`, messageID).Scan(
+		&msg.ID, &msg.SessionID, &msg.BranchID, &msg.ParentMessageID, &msg.ChosenNextID,
+		&msg.Text, &msg.Type, &attachments, &msg.CumulTokenCount, &msg.CreatedAt,
+		&msg.Model, &msg.Generation, &msg.State, &msg.Aux,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("message %d not found", messageID)
+		}
+		return fmt.Errorf("failed to get message %d: %w", messageID, err)
+	}
+
+	// Parse attachments if they exist
+	if attachments.Valid {
+		if err := json.Unmarshal([]byte(attachments.String), &msg.Attachments); err != nil {
+			log.Printf("Failed to unmarshal attachments for message %d: %v", msg.ID, err)
+		}
+	}
+
+	// Use a simple transaction for deletion
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Update parent's chosen_next_id if parent exists
+	if msg.ParentMessageID != nil {
+		var nextID *int = msg.ChosenNextID
+		_, err = tx.Exec("UPDATE messages SET chosen_next_id = ? WHERE id = ?", nextID, *msg.ParentMessageID)
+		if err != nil {
+			return fmt.Errorf("failed to update parent message: %w", err)
+		}
+	}
+
+	// Delete the message
+	_, err = tx.Exec("DELETE FROM messages WHERE id = ?", messageID)
+	if err != nil {
+		return fmt.Errorf("failed to delete message: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Printf("Successfully deleted message %d from session %s, branch %s", messageID, msg.SessionID, msg.BranchID)
+	return nil
 }

@@ -533,6 +533,79 @@ export const useMessageSending = ({
     }
   };
 
+  const handleRetryError = async (_errorMessageId: string) => {
+    if (!chatSessionId) {
+      addErrorMessage('Cannot retry error: Session ID is missing.');
+      return;
+    }
+
+    if (!primaryBranchId) {
+      addErrorMessage('Cannot retry error: Branch ID is missing.');
+      return;
+    }
+
+    setProcessingStartTime(performance.now());
+    setEditingMessageId(null); // Exit editing mode if active
+
+    // Remove consecutive error messages from the end of the message list
+    setMessages((prevMessages) => {
+      const updatedMessages = [...prevMessages];
+      let removeCount = 0;
+
+      // Count consecutive error messages from the end
+      for (let i = updatedMessages.length - 1; i >= 0; i--) {
+        const message = updatedMessages[i];
+        if (message.type === 'model_error') {
+          removeCount++;
+        } else {
+          break; // Stop at first non-error message
+        }
+      }
+
+      // Remove the error messages
+      if (removeCount > 0) {
+        console.log(`Removing ${removeCount} error messages before retry`);
+        return updatedMessages.slice(0, -removeCount);
+      }
+
+      return prevMessages;
+    });
+
+    try {
+      const response = await apiFetch(`/api/chat/${chatSessionId}/branch/${primaryBranchId}/retry-error`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}), // Empty body as the endpoint doesn't need additional data
+      });
+
+      if (response.status === 401) {
+        window.location.reload();
+        return;
+      }
+
+      if (!response.ok) {
+        const errorMessage = `Failed to retry error: ${response.status} ${response.statusText}`;
+        addErrorMessage(errorMessage);
+        return;
+      }
+
+      const handlers: StreamEventHandlers = {
+        ...commonHandlers,
+        onAcknowledge: () => {
+          // No user message to acknowledge for retry-error flow
+          // The backend will handle error message deletion
+        },
+      };
+
+      await processStreamResponse(response, handlers);
+    } catch (error) {
+      console.error('Error retrying error message:', error);
+      addErrorMessage('Error retrying error message.');
+    } finally {
+      setProcessingStartTime(null);
+    }
+  };
+
   return {
     handleSendMessage,
     cancelStreamingCall,
@@ -540,5 +613,6 @@ export const useMessageSending = ({
     handleEditMessage,
     handleBranchSwitch,
     handleRetryMessage,
+    handleRetryError,
   };
 };

@@ -15,6 +15,7 @@ interface ModelTextMessageProps {
   messageId?: string;
   attachments?: FileAttachment[];
   sessionId?: string;
+  sideContents?: React.ReactNode;
 }
 
 const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
@@ -25,11 +26,17 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   processingStartTime,
   messageId,
   attachments,
+  sideContents,
 }) => {
   const imageOnly = isImageOnlyMessage(text, attachments);
 
   return (
-    <ChatBubble messageId={messageId} containerClassName={className} messageInfo={messageInfo}>
+    <ChatBubble
+      messageId={messageId}
+      containerClassName={className}
+      messageInfo={messageInfo}
+      sideContents={sideContents}
+    >
       <FileAttachmentList attachments={attachments} isImageOnlyMessage={imageOnly} />
       {!imageOnly && <MarkdownRenderer content={text || ''} />}
       {isLastModelMessage && processingStartTime !== null && (

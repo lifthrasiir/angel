@@ -118,6 +118,7 @@ export const useChatSession = () => {
     handleEditMessage,
     handleBranchSwitch,
     handleRetryMessage,
+    handleRetryError,
   } = useMessageSending({
     inputMessage,
     selectedFiles,
@@ -157,5 +158,6 @@ export const useChatSession = () => {
     handleEditMessage,
     handleBranchSwitch,
     handleRetryMessage,
+    handleRetryError,
   };
 };

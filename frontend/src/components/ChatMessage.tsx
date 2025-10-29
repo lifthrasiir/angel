@@ -9,6 +9,7 @@ import UserTextMessage from './UserTextMessage';
 import MessageInfo from './MessageInfo';
 import CompressionMessage from './CompressionMessage';
 import EnvChangedMessage from './EnvChangedMessage';
+import RetryErrorButton from './RetryErrorButton';
 
 // Helper function to extract text content from a message
 const getMessageText = (message: ChatMessage): string => {
@@ -26,11 +27,21 @@ interface ChatMessageProps {
   processingStartTime?: number | null;
   onSaveEdit?: (messageId: string, editedText: string) => void;
   onRetryClick?: (messageId: string) => void;
+  onRetryError?: (messageId: string) => void;
   onBranchSelect?: (newBranchId: string) => void;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
-  ({ message, maxTokens, isLastModelMessage, processingStartTime, onSaveEdit, onRetryClick, onBranchSelect }) => {
+  ({
+    message,
+    maxTokens,
+    isLastModelMessage,
+    processingStartTime,
+    onSaveEdit,
+    onRetryClick,
+    onRetryError,
+    onBranchSelect,
+  }) => {
     const { type, attachments, cumulTokenCount, model } = message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
 
@@ -95,6 +106,9 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           className="agent-error-message"
           messageInfo={messageInfoComponent}
           messageId={message.id}
+          sideContents={
+            onRetryError && <RetryErrorButton messageId={message.id} onRetryError={onRetryError} isDisabled={false} />
+          }
         />
       );
     } else if (type === 'compression') {

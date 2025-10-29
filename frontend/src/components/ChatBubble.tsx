@@ -20,6 +20,7 @@ interface ChatBubbleProps {
   onEditCancel?: () => void; // Callback when edit is cancelled
   onEditStart?: () => void; // Callback when edit mode should start
   disableEdit?: boolean; // Disable edit functionality
+  sideContents?: React.ReactNode; // Content to display beside the bubble
 }
 
 export interface ChatBubbleRef {
@@ -43,6 +44,7 @@ const ChatBubble = forwardRef<ChatBubbleRef, ChatBubbleProps>(
       isEditing = false,
       onEditSave,
       onEditCancel,
+      sideContents,
     },
     ref,
   ) => {
@@ -228,100 +230,118 @@ const ChatBubble = forwardRef<ChatBubbleRef, ChatBubbleProps>(
       bubbleContentStyle.overflowY = 'auto';
     }
 
-    return (
-      <div id={messageId} className={`chat-message-container ${containerClassName || ''}`}>
-        <div className={`chat-bubble ${bubbleClassName || ''}`}>
-          {(title || (collapsed !== undefined && showHeaderToggle)) && (
-            <div
-              className={`chat-bubble-header ${handleHeaderClick ? 'clickable-header' : ''}`}
-              onClick={handleHeaderClick}
-            >
-              {title && <span className="chat-bubble-title">{title}</span>}
-              {collapsed !== undefined && showHeaderToggle && (
-                <span className="chat-bubble-chevron" onClick={handleContentChevronClick}>
-                  {isContentVisible ? <FaChevronUp /> : <FaChevronDown />}
-                </span>
-              )}
-            </div>
-          )}
+    const bubbleContent = (
+      <>
+        {(title || (collapsed !== undefined && showHeaderToggle)) && (
           <div
-            ref={contentRef}
-            className={`chat-bubble-content ${heighten !== undefined && !isExpanded && showHeightenToggleChevron ? 'collapsed' : 'expanded'}`}
-            style={{
-              ...bubbleContentStyle,
-              // Force maxHeight as a fallback
-              maxHeight: bubbleContentStyle.maxHeight || undefined,
-            }}
+            className={`chat-bubble-header ${handleHeaderClick ? 'clickable-header' : ''}`}
+            onClick={handleHeaderClick}
           >
-            {isContentVisible &&
-              (isEditing ? (
+            {title && <span className="chat-bubble-title">{title}</span>}
+            {collapsed !== undefined && showHeaderToggle && (
+              <span className="chat-bubble-chevron" onClick={handleContentChevronClick}>
+                {isContentVisible ? <FaChevronUp /> : <FaChevronDown />}
+              </span>
+            )}
+          </div>
+        )}
+        <div
+          ref={contentRef}
+          className={`chat-bubble-content ${heighten !== undefined && !isExpanded && showHeightenToggleChevron ? 'collapsed' : 'expanded'}`}
+          style={{
+            ...bubbleContentStyle,
+            // Force maxHeight as a fallback
+            maxHeight: bubbleContentStyle.maxHeight || undefined,
+          }}
+        >
+          {isContentVisible &&
+            (isEditing ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr',
+                  gridTemplateRows: '1fr',
+                  overflow: 'hidden',
+                  maxHeight: '60vh',
+                }}
+              >
+                {/* Original content for size reference - hidden in edit mode */}
                 <div
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr',
-                    gridTemplateRows: '1fr',
-                    overflow: 'hidden',
+                    visibility: 'hidden',
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word',
+                    maxWidth: '100%',
+                    overflow: 'auto',
                     maxHeight: '60vh',
+                    minHeight: '40px',
+                    minWidth: '100px',
+                    gridColumn: '1',
+                    gridRow: '1',
                   }}
                 >
-                  {/* Original content for size reference - hidden in edit mode */}
-                  <div
-                    style={{
-                      visibility: 'hidden',
-                      whiteSpace: 'pre-wrap',
-                      wordWrap: 'break-word',
-                      maxWidth: '100%',
-                      overflow: 'auto',
-                      maxHeight: '60vh',
-                      minHeight: '40px',
-                      minWidth: '100px',
-                      gridColumn: '1',
-                      gridRow: '1',
-                    }}
-                  >
-                    {children}
-                  </div>
-
-                  {/* Textarea overlayed in edit mode */}
-                  <textarea
-                    ref={textareaRef}
-                    style={{
-                      gridColumn: '1',
-                      gridRow: '1',
-                      padding: '0',
-                      border: '1px solid #ccc',
-                      borderRadius: '4px',
-                      resize: 'both',
-                      boxSizing: 'border-box',
-                      fontFamily: 'inherit',
-                      fontSize: 'inherit',
-                      lineHeight: 'inherit',
-                      overflow: 'auto',
-                      minWidth: '400px',
-                      minHeight: '60px',
-                      maxHeight: '60vh',
-                    }}
-                    value={currentEditText}
-                    onChange={(e) => setCurrentEditText(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    onInput={handleInput}
-                    placeholder="Edit your message..."
-                  />
+                  {children}
                 </div>
-              ) : (
-                children
-              ))}
-          </div>
-          {heighten !== undefined &&
-            showHeightenToggleChevron &&
-            !showHeaderToggle &&
-            isContentVisible &&
-            !isEditing && ( // Don't show toggle button when editing
-              <div className="chat-bubble-toggle-button" onClick={handleHeightenChevronClick}>
-                {isExpanded ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
+
+                {/* Textarea overlayed in edit mode */}
+                <textarea
+                  ref={textareaRef}
+                  style={{
+                    gridColumn: '1',
+                    gridRow: '1',
+                    padding: '0',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    resize: 'both',
+                    boxSizing: 'border-box',
+                    fontFamily: 'inherit',
+                    fontSize: 'inherit',
+                    lineHeight: 'inherit',
+                    overflow: 'auto',
+                    minWidth: '400px',
+                    minHeight: '60px',
+                    maxHeight: '60vh',
+                  }}
+                  value={currentEditText}
+                  onChange={(e) => setCurrentEditText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onInput={handleInput}
+                  placeholder="Edit your message..."
+                />
               </div>
-            )}
+            ) : (
+              children
+            ))}
         </div>
+        {heighten !== undefined &&
+          showHeightenToggleChevron &&
+          !showHeaderToggle &&
+          isContentVisible &&
+          !isEditing && ( // Don't show toggle button when editing
+            <div className="chat-bubble-toggle-button" onClick={handleHeightenChevronClick}>
+              {isExpanded ? <FaChevronCircleUp /> : <FaChevronCircleDown />}
+            </div>
+          )}
+      </>
+    );
+
+    const bubbleElement = <div className={`chat-bubble ${bubbleClassName || ''}`}>{bubbleContent}</div>;
+
+    if (sideContents) {
+      return (
+        <div id={messageId} className={`chat-message-container ${containerClassName || ''}`}>
+          <div className="chat-bubble-container">
+            {bubbleElement}
+            {sideContents}
+          </div>
+          {messageInfo}
+        </div>
+      );
+    }
+
+    return (
+      <div id={messageId} className={`chat-message-container ${containerClassName || ''}`}>
+        {bubbleElement}
         {messageInfo}
       </div>
     );

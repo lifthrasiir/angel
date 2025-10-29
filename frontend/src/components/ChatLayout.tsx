@@ -34,6 +34,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     handleEditMessage,
     handleBranchSwitch,
     handleRetryMessage,
+    handleRetryError,
   } = useChatSession();
 
   const { toastMessage, setToastMessage } = useEscToCancel({
@@ -127,6 +128,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
           sendConfirmation={sendConfirmation}
           handleEditMessage={handleEditMessage}
           handleRetryMessage={handleRetryMessage}
+          handleRetryError={handleRetryError}
           handleBranchSwitch={handleBranchSwitch}
         />
       )}

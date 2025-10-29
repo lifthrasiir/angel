@@ -1510,3 +1510,230 @@ func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
 	}
 	return curated
 }
+
+// deleteErrorMessages deletes error messages from the end of a branch starting from the last message.
+// It continues deleting messages backwards until it finds a non-error message.
+func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
+	// Get the last message in the branch
+	lastMessageID, _, _, err := GetLastMessageInBranch(db, sessionID, branchID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// No messages in branch, nothing to delete
+			return nil
+		}
+		return fmt.Errorf("failed to get last message in branch: %w", err)
+	}
+
+	if lastMessageID == 0 {
+		// No messages in branch
+		return nil
+	}
+
+	// Start from the last message and work backwards
+	currentMessageID := lastMessageID
+	deletedCount := 0
+
+	for currentMessageID != 0 {
+		// Get the current message details
+		currentMessage, err := GetMessageByID(db, currentMessageID)
+		if err != nil {
+			return fmt.Errorf("failed to get message %d: %w", currentMessageID, err)
+		}
+
+		// Check if this is an error message
+		if currentMessage.Type != TypeError && currentMessage.Type != TypeModelError {
+			// Found a non-error message, stop deleting
+			break
+		}
+
+		// This is an error message, delete it
+		if err := DeleteMessage(db, currentMessageID); err != nil {
+			return fmt.Errorf("failed to delete error message %d: %w", currentMessageID, err)
+		}
+
+		deletedCount++
+		currentMessageID = *currentMessage.ParentMessageID
+	}
+
+	if deletedCount == 0 {
+		return fmt.Errorf("no error messages found at the end of branch %s", branchID)
+	}
+
+	log.Printf("Deleted %d error messages from branch %s", deletedCount, branchID)
+	return nil
+}
+
+// retryErrorBranchHandler handles retry-error requests for a branch by removing error messages and resuming streaming.
+func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	auth := getAuth(w, r)
+
+	if !auth.Validate("retryErrorBranchHandler", w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	branchId := vars["branchId"]
+
+	if sessionId == "" || branchId == "" {
+		sendBadRequestError(w, r, "Session ID and Branch ID are required")
+		return
+	}
+
+	// Verify that the session exists
+	session, err := GetSession(db, sessionId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			sendNotFoundError(w, r, "Session not found")
+		} else {
+			sendInternalServerError(w, r, err, "Failed to get session")
+		}
+		return
+	}
+
+	// Verify that the branch exists and belongs to the session
+	branch, err := GetBranch(db, branchId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			sendNotFoundError(w, r, "Branch not found")
+		} else {
+			sendInternalServerError(w, r, err, "Failed to get branch")
+		}
+		return
+	}
+
+	if branch.SessionID != sessionId {
+		sendBadRequestError(w, r, "Branch does not belong to the specified session")
+		return
+	}
+
+	// Set up SSE streaming first
+	sseW := newSseWriter(sessionId, w, r)
+	if sseW == nil {
+		return
+	}
+
+	addSseWriter(sessionId, sseW)
+	defer removeSseWriter(sessionId, sseW)
+
+	// First, retrieve the current session history before deleting error messages
+	// Retrieve session history for LLM (full context)
+	historyContext, err := GetSessionHistoryContext(db, sessionId, branchId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to retrieve session history for LLM")
+		return
+	}
+
+	// Retrieve session history for frontend InitialState (paginated)
+	frontendHistory, err := GetSessionHistoryPaginated(db, sessionId, branchId, 0, 20)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
+		return
+	}
+
+	// If history context is empty, try to get context from parent branch
+	if len(historyContext) == 0 {
+		log.Printf("Branch %s is empty, trying parent branch", branchId)
+
+		// Get the current branch to find its parent
+		currentBranch, err := GetBranch(db, branchId)
+		if err != nil {
+			sendInternalServerError(w, r, err, "Failed to get current branch")
+			return
+		}
+
+		// If parent branch exists, get history from parent
+		if currentBranch.ParentBranchID != nil && *currentBranch.ParentBranchID != "" {
+			log.Printf("Getting history context from parent branch %s", *currentBranch.ParentBranchID)
+			historyContext, err = GetSessionHistoryContext(db, sessionId, *currentBranch.ParentBranchID)
+			if err != nil {
+				sendInternalServerError(w, r, err, "Failed to retrieve session history from parent branch")
+				return
+			}
+
+			// Also get frontend history from parent branch
+			frontendHistory, err = GetSessionHistoryPaginated(db, sessionId, *currentBranch.ParentBranchID, 0, 20)
+			if err != nil {
+				sendInternalServerError(w, r, err, "Failed to retrieve paginated session history from parent branch")
+				return
+			}
+		}
+	}
+
+	// Now delete error messages from the end of the branch (if any)
+	if err := deleteErrorMessages(db, sessionId, branchId); err != nil {
+		// If no error messages were found, log but continue with retry
+		// This allows retry even when there are no error messages (e.g., after user cancellation)
+		if strings.Contains(err.Error(), "no error messages found") {
+			log.Printf("No error messages found at end of branch %s, proceeding with retry anyway", branchId)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to delete error messages")
+			return
+		}
+	}
+
+	// Remove error messages from the history context in memory (before LLM call)
+	filteredHistoryContext := make([]FrontendMessage, 0, len(historyContext))
+	errorMessageCount := 0
+	for i := len(historyContext) - 1; i >= 0; i-- {
+		msg := historyContext[i]
+		if msg.Type == TypeError || msg.Type == TypeModelError {
+			errorMessageCount++
+		} else {
+			break // Stop at first non-error message
+		}
+	}
+
+	// Remove the trailing error messages
+	if errorMessageCount > 0 {
+		filteredHistoryContext = historyContext[:len(historyContext)-errorMessageCount]
+		log.Printf("Removed %d error messages from history context", errorMessageCount)
+	} else {
+		filteredHistoryContext = historyContext
+	}
+
+	// Update session last_updated_at
+	if err := UpdateSessionLastUpdated(db, sessionId); err != nil {
+		log.Printf("Failed to update last_updated_at for session %s after retry: %v", sessionId, err)
+		// Non-fatal error, continue
+	}
+
+	// Get latest session environment
+	roots, _, err := GetLatestSessionEnv(db, sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
+		return
+	}
+
+	// Prepare initial state for streaming
+	initialState := InitialState{
+		SessionId:       sessionId,
+		History:         frontendHistory,
+		SystemPrompt:    session.SystemPrompt,
+		WorkspaceID:     session.WorkspaceID,
+		PrimaryBranchID: branchId,
+		Roots:           roots,
+	}
+
+	// Send initial state as a single SSE event
+	initialStateJSON, err := json.Marshal(initialState)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to marshal initial state")
+		return
+	}
+	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
+
+	// Create a new message chain for the branch
+	mc, err := NewMessageChain(r.Context(), db, sessionId, branchId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to create message chain for retry")
+		return
+	}
+
+	// Resume streaming from the cleaned up state
+	if err := streamLLMResponse(db, initialState, sseW, mc, false, time.Now(), filteredHistoryContext); err != nil {
+		sendInternalServerError(w, r, err, "Error streaming LLM response during retry")
+		return
+	}
+}

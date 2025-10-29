@@ -46,6 +46,7 @@ interface ChatAreaProps {
   ) => Promise<void>;
   handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>;
   handleRetryMessage?: (originalMessageId: string) => Promise<void>;
+  handleRetryError?: (errorMessageId: string) => Promise<void>;
   handleBranchSwitch: (newBranchId: string) => Promise<void>;
 }
 
@@ -59,6 +60,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   sendConfirmation,
   handleEditMessage,
   handleRetryMessage,
+  handleRetryError,
   handleBranchSwitch,
 }) => {
   const [workspaceId] = useAtom(workspaceIdAtom);
@@ -180,6 +182,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
+  // Helper function to check if a message is retryable (last consecutive error messages)
+  const isRetryableError = (message: ChatMessageType, allMessages: ChatMessageType[]): boolean => {
+    if (message.type !== 'model_error') return false;
+
+    // Check if this message is part of the last consecutive error messages
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const msg = allMessages[i];
+      if (msg.type === 'model_error') {
+        if (msg.id === message.id) {
+          // Found the message in the consecutive error block
+          return true;
+        }
+      } else {
+        // Found non-error message, stop
+        break;
+      }
+    }
+
+    return false;
+  };
+
   const renderMessageOrGroup = (
     currentMessage: ChatMessageType,
     messages: ChatMessageType[],
@@ -188,6 +211,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     processingStartTime: number | null,
     handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>,
     handleBranchSwitch: (newBranchId: string) => Promise<void>,
+    handleRetryError?: (errorMessageId: string) => Promise<void>,
   ): { element: JSX.Element; messagesConsumed: number } => {
     // Find maxTokens for the current message's model
     const currentModelMaxTokens = currentMessage.model
@@ -295,6 +319,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               processingStartTime={processingStartTime}
               onSaveEdit={handleEditMessage}
               onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
+              onRetryError={
+                handleRetryError && isRetryableError(currentMessage, messages)
+                  ? (errorMessageId) => handleRetryError(errorMessageId)
+                  : undefined
+              }
               onBranchSelect={handleBranchSwitch}
             />
             {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
@@ -351,6 +380,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         processingStartTime,
         handleEditMessage,
         handleBranchSwitch,
+        handleRetryError,
       );
       renderedElements.push(element);
       i += messagesConsumed;
@@ -367,6 +397,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           processingStartTime={null}
           onSaveEdit={() => {}}
           onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
+          onRetryError={handleRetryError ? (errorMessageId) => handleRetryError(errorMessageId) : undefined}
           onBranchSelect={handleBranchSwitch}
         />,
       );
@@ -381,6 +412,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     handleEditMessage,
     handleBranchSwitch,
     handleRetryMessage,
+    handleRetryError,
   ]);
 
   const currentSystemPromptLabel = useMemo(() => {

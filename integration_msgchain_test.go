@@ -1581,3 +1581,165 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 		t.Errorf("CodeExecutionResult in DB mismatch. Expected {OUTCOME_OK, hello}, got {%s, %s}", cer.Outcome, cer.Output)
 	}
 }
+
+func TestRetryErrorBranchHandler(t *testing.T) {
+	router, db, _ := setupTest(t)
+
+	// Step 1: Create session and branch
+	sessionId := generateID()
+	primaryBranchId := generateID()
+
+	_, err := CreateSession(db, sessionId, "You are a helpful assistant", "")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	_, err = CreateBranch(db, primaryBranchId, sessionId, nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create branch: %v", err)
+	}
+
+	// Step 2: Add messages using MessageChain for proper relationships
+	mc, err := NewMessageChain(context.Background(), db, sessionId, primaryBranchId)
+	if err != nil {
+		t.Fatalf("Failed to create message chain: %v", err)
+	}
+
+	// Add user message
+	_, err = mc.Add(context.Background(), db, Message{
+		Text:  "Hello",
+		Type:  TypeUserText,
+		Model: "gemini-2.5-flash",
+	})
+	if err != nil {
+		t.Fatalf("Failed to add user message: %v", err)
+	}
+
+	// Add error message
+	errorMsg, err := mc.Add(context.Background(), db, Message{
+		Text: "Error occurred",
+		Type: TypeError,
+	})
+	if err != nil {
+		t.Fatalf("Failed to add error message: %v", err)
+	}
+
+	errorMsgID := errorMsg.ID
+
+	// Verify error message is the last one
+	lastID, _, _, err := GetLastMessageInBranch(db, sessionId, primaryBranchId)
+	if err != nil {
+		t.Fatalf("Failed to get last message: %v", err)
+	}
+	if lastID != errorMsgID {
+		t.Fatalf("Expected last message ID %d, got %d", errorMsgID, lastID)
+	}
+
+	// Step 3: Test retry with error message
+	replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{Text: "Retry response"}),
+		},
+		Delay: 5 * time.Millisecond,
+	})
+
+	retryRR := testStreamingRequest(t, router, "POST",
+		fmt.Sprintf("/api/chat/%s/branch/%s/retry-error", sessionId, primaryBranchId),
+		nil, http.StatusOK)
+
+	// Collect events
+	var events []string
+	for event := range parseSseStream(t, retryRR) {
+		defer retryRR.Body.Close()
+		events = append(events, string(event.Type)+":"+event.Payload)
+		if event.Type == EventComplete {
+			break
+		}
+	}
+
+	// Verify we got expected events
+	if len(events) == 0 {
+		t.Fatal("No events received from retry")
+	}
+
+	// Check for successful streaming
+	foundInitialState := false
+	foundModelMessage := false
+	for _, event := range events {
+		if strings.HasPrefix(event, "0:") { // EventInitialState
+			foundInitialState = true
+		}
+		// Model message can be various event types, check for the content
+		if strings.Contains(event, "Retry response") {
+			foundModelMessage = true
+		}
+	}
+
+	if !foundInitialState {
+		t.Error("Missing initial state event")
+	}
+	if !foundModelMessage {
+		t.Error("Missing model message event")
+	}
+
+	// Step 4: Verify error message was deleted
+	_, err = GetMessageByID(db, errorMsgID)
+	if err == nil {
+		t.Error("Error message still exists in database")
+	} else if err != sql.ErrNoRows {
+		// err should be "message not found" which is expected
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("Unexpected error checking message: %v", err)
+		}
+	}
+
+	// Step 5: Test retry without errors should succeed (behavior changed after allowing retry without errors)
+	// Wait a bit to ensure the first retry call is completely finished
+	time.Sleep(100 * time.Millisecond)
+
+	replaceProvider(&MockGeminiProvider{
+		Responses: []CaGenerateContentResponse{
+			responseFromPart(Part{Text: "Retry without errors"}),
+		},
+		Delay: 5 * time.Millisecond,
+	})
+
+	retryRR2 := testStreamingRequest(t, router, "POST",
+		fmt.Sprintf("/api/chat/%s/branch/%s/retry-error", sessionId, primaryBranchId),
+		nil, http.StatusOK)
+	defer retryRR2.Body.Close()
+
+	// Collect events to verify successful retry
+	var retry2Events []string
+	for event := range parseSseStream(t, retryRR2) {
+		retry2Events = append(retry2Events, string(event.Type)+":"+event.Payload)
+		if event.Type == EventComplete {
+			break
+		}
+	}
+
+	// Verify we got expected events from retry without errors
+	if len(retry2Events) == 0 {
+		t.Error("No events received from retry without errors")
+	}
+
+	// Check for successful streaming
+	foundRetry2InitialState := false
+	foundRetry2ModelMessage := false
+	for _, event := range retry2Events {
+		if strings.HasPrefix(event, "0:") { // EventInitialState
+			foundRetry2InitialState = true
+		}
+		// Model message can be various event types, check for the content
+		if strings.Contains(event, "Retry without errors") {
+			foundRetry2ModelMessage = true
+		}
+	}
+
+	if !foundRetry2InitialState {
+		t.Error("Missing initial state event in retry without errors")
+	}
+	if !foundRetry2ModelMessage {
+		t.Error("Missing model message event in retry without errors")
+	}
+}

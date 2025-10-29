@@ -470,39 +470,53 @@ textarea {
   border-left: 4px solid #52c41a;
 }
 
-.user-message > .chat-bubble {
+/* The row containing .chat-bubble and sideContents if any */
+.chat-bubble-container {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.user-message > .chat-bubble,
+.user-message > .chat-bubble-container > .chat-bubble {
   background-color: var(--color-user-light);
   color: #333;
   border: 2px solid var(--color-user-dark);
 }
 
-.agent-message > .chat-bubble {
+.agent-message > .chat-bubble,
+.agent-message > .chat-bubble-container > .chat-bubble {
   background-color: var(--color-agent-light);
   color: #333;
   border: 2px solid var(--color-agent-dark);
 }
 
-.agent-error-message > .chat-bubble {
+.agent-error-message > .chat-bubble,
+.agent-error-message > .chat-bubble-container > .chat-bubble {
   background-color: var(--color-agent-dark);
   color: #333;
   border: 2px solid var(--color-agent-dark);
 }
 
-.system-message > .chat-bubble {
+.system-message > .chat-bubble,
+.system-message > .chat-bubble-container > .chat-bubble {
   background-color: var(--color-system-light);
   color: #333;
   border: 2px solid var(--color-system-dark);
 }
 
 /* Specific styles for agent's internal messages */
-.agent-thought > .chat-bubble {
+.agent-thought > .chat-bubble,
+.agent-thought > .chat-bubble-container > .chat-bubble {
   background-color: white;
   border: 2px solid var(--color-agent-dark);
   font-style: italic;
   color: #555;
 }
 
-.function-pair-combined-container > .chat-bubble {
+.function-pair-combined-container > .chat-bubble,
+.function-pair-combined-container > .chat-bubble-container > .chat-bubble {
   background-color: var(--color-combined-light);
   color: #333;
   border: 2px solid var(--color-combined-dark);
