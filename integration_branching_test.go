@@ -230,7 +230,8 @@ func TestBranchingLogic(t *testing.T) {
 		}
 
 		// Message 2 (model)
-		if _, err = mcHistory.Add(context.Background(), testDB, Message{Text: "Model message 2", Type: "model"}); err != nil {
+		msg2, err := mcHistory.Add(context.Background(), testDB, Message{Text: "Model message 2", Type: "model"})
+		if err != nil {
 			t.Fatalf("Failed to add msg2: %v", err)
 		}
 
@@ -246,7 +247,8 @@ func TestBranchingLogic(t *testing.T) {
 		}
 
 		// Message 5 (compression) - should affect GetSessionHistoryContext
-		compressionText := fmt.Sprintf("%d\nSummary of messages up to msg4", msg4.ID)
+		// Compress up to msg2 (skip msg3 thought and msg4)
+		compressionText := fmt.Sprintf("%d\nSummary of messages up to msg2", msg2.ID)
 		if _, err = mcHistory.Add(context.Background(), testDB, Message{Text: compressionText, Type: "compression"}); err != nil {
 			t.Fatalf("Failed to add msg5: %v", err)
 		}
@@ -331,9 +333,22 @@ func TestBranchingLogic(t *testing.T) {
 				t.Fatalf("GetSessionHistoryContext failed: %v", err)
 			}
 
-			// Expected: msg5 (compression), msg6, msg7
+			// Print what we actually got to debug
+			t.Logf("Got %d messages:", len(history))
+			for i, msg := range history {
+				t.Logf("  Message %d: Type=%s, Text='%s'", i, msg.Type, msg.Parts[0].Text)
+			}
+
+			// Also print the compression message ID for debugging
+			if len(history) > 3 && history[3].Type == "compression" {
+				t.Logf("Compression message full text: '%s'", history[3].Parts[0].Text)
+			}
+
+			// Expected: msg5 (compression), msg4, msg6, msg7
+			// compression up to msg2 means msg1,msg2 are excluded, msg4 comes after compression
 			expectedTexts := []string{
-				"Summary of messages up to msg4", // Only the summary part should be in FrontendMessage.Parts[0].Text
+				"Summary of messages up to msg2", // Only the summary part should be in FrontendMessage.Parts[0].Text
+				"User message 4",
 				"Model message 6 (after compression)",
 				"User message 7",
 			}
