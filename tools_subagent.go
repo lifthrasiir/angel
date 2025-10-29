@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -53,14 +52,6 @@ func addTextWithSpacing(response *strings.Builder, text string) {
 
 	// Add the text
 	response.WriteString(text)
-}
-
-// isHashPattern checks if a string looks like a hash (typically alphanumeric string)
-func isHashPattern(s string) bool {
-	// Hash patterns are typically alphanumeric strings, often with specific lengths
-	// This is a simple check - in practice you might want to be more specific
-	match, _ := regexp.MatchString(`^[a-zA-Z0-9]{8,}$`, s)
-	return match
 }
 
 // SubagentTool handles the subagent tool call, allowing to spawn a new subagent or interact with an existing one.
@@ -318,7 +309,8 @@ func handleSubagentTurn(
 
 // GenerateImageTool handles the generate_image tool call, allowing to generate images using a subagent with image generation capabilities.
 func GenerateImageTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("generate_image", args, "text", "input_hashes"); err != nil {
+	// Accept and discard want_image for backward compatibility
+	if err := EnsureKnownKeys("generate_image", args, "text", "input_hashes", "want_image"); err != nil {
 		return ToolHandlerResults{}, err
 	}
 
@@ -567,7 +559,7 @@ func init() {
 			Properties: map[string]*Schema{
 				"text": {
 					Type:        TypeString,
-					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied.",
+					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied. Do not include image hashes in the text; use the input_hashes parameter instead.",
 				},
 				"input_hashes": {
 					Type:        TypeArray,
