@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
+import { useAttachmentResize } from './useAttachmentResize';
 
 import {
   userEmailAtom,
@@ -101,8 +102,17 @@ export const useChatSession = () => {
     setSelectedFiles(handleFilesSelected(selectedFiles, files));
   };
 
+  // Use the dedicated attachment resize hook
+  const attachmentResize = useAttachmentResize(selectedFiles);
+
   const handleRemoveFileWrapper = (index: number) => {
+    const removedFile = selectedFiles[index];
     setSelectedFiles(handleRemoveFile(selectedFiles, index));
+
+    // Clean up attachment resize state when file is removed
+    if (removedFile) {
+      attachmentResize.handleFileRemoved(removedFile);
+    }
   };
 
   useDocumentTitle(sessions);
@@ -121,7 +131,7 @@ export const useChatSession = () => {
     handleRetryError,
   } = useMessageSending({
     inputMessage,
-    selectedFiles,
+    selectedFiles: attachmentResize.getFilesForSending(),
     chatSessionId,
     systemPrompt,
     primaryBranchId,
@@ -151,6 +161,11 @@ export const useChatSession = () => {
     pendingConfirmation,
     handleFilesSelected: handleFilesSelectedWrapper,
     handleRemoveFile: handleRemoveFileWrapper,
+    handleFileResizeStateChange: attachmentResize.handleFileResizeStateChange,
+    handleFileProcessingStateChange: attachmentResize.handleFileProcessingStateChange,
+    handleFileResized: attachmentResize.handleResizedFileAvailable,
+    isSendDisabledByResizing: attachmentResize.isSendDisabledByResizing,
+    getFilesForSending: attachmentResize.getFilesForSending,
     handleSendMessage,
     cancelStreamingCall,
     handleSetSelectedModel,

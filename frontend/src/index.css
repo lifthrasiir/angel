@@ -619,6 +619,75 @@ textarea {
   color: red;
 }
 
+/* Enhanced file attachment layout for resize functionality */
+.file-attachment-preview .file-info {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-attachment-preview .file-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85em;
+  color: #666;
+}
+
+.file-attachment-preview .file-dimensions {
+  font-size: 0.9em;
+  color: #555;
+}
+
+.file-attachment-preview .file-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* Resize toggle button styles */
+.file-attachment-preview .resize-toggle-button {
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 0.8em;
+  color: #0066cc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  transition: all 0.2s ease;
+}
+
+.file-attachment-preview .resize-toggle-button:hover:not(:disabled) {
+  background-color: #f0f8ff;
+  border-color: #0066cc;
+}
+
+.file-attachment-preview .resize-toggle-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.file-attachment-preview .resize-toggle-button svg {
+  font-size: 1em;
+}
+
+/* Responsive adjustments for file attachments */
+@media (max-width: 768px) {
+  .file-attachment-preview {
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .file-attachment-preview .file-details {
+    font-size: 0.8em;
+  }
+}
+
 @keyframes logoAnimation {
   0% {
     transform: scaleX(1);

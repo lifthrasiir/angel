@@ -27,6 +27,9 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
   const {
     handleFilesSelected,
     handleRemoveFile,
+    handleFileResizeStateChange,
+    handleFileProcessingStateChange,
+    handleFileResized,
     handleSendMessage,
     cancelStreamingCall,
     sendConfirmation,
@@ -35,6 +38,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     handleBranchSwitch,
     handleRetryMessage,
     handleRetryError,
+    isSendDisabledByResizing,
   } = useChatSession();
 
   const { toastMessage, setToastMessage } = useEscToCancel({
@@ -122,6 +126,9 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
           handleSendMessage={handleSendMessage}
           onFilesSelected={handleFilesSelected}
           handleRemoveFile={handleRemoveFile}
+          handleFileResizeStateChange={handleFileResizeStateChange}
+          handleFileProcessingStateChange={handleFileProcessingStateChange}
+          handleFileResized={handleFileResized}
           handleCancelStreaming={cancelStreamingCall}
           chatInputRef={chatInputRef}
           chatAreaRef={chatAreaRef}
@@ -130,6 +137,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
           handleRetryMessage={handleRetryMessage}
           handleRetryError={handleRetryError}
           handleBranchSwitch={handleBranchSwitch}
+          isSendDisabledByResizing={isSendDisabledByResizing}
         />
       )}
       <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />

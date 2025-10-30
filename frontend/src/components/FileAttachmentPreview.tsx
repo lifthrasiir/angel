@@ -1,11 +1,23 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import { FaDownload, FaFile, FaTimes } from 'react-icons/fa';
+import { FaDownload, FaFile, FaTimes, FaCompress, FaExpand } from 'react-icons/fa';
 import type { FileAttachment } from '../types/chat';
+import {
+  getImageDimensions,
+  shouldResizeImage,
+  resizeImage,
+  calculateTileConstrainedDimensions,
+  resizedBlobToFile,
+  type ImageDimensions,
+  type ImageResizeResult,
+} from '../utils/imageResize';
 
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;
   onRemove?: (file: File) => void;
+  onResize?: (originalFile: File, resizedFile: File) => void;
+  onResizeStateChange?: (file: File, shouldResize: boolean) => void;
+  onProcessingStateChange?: (file: File, isProcessing: boolean) => void;
   isImageOnlyMessage?: boolean;
   draggable?: boolean;
 }
@@ -13,10 +25,18 @@ interface FileAttachmentPreviewProps {
 const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
   file,
   onRemove,
+  onResize,
+  onResizeStateChange,
+  onProcessingStateChange,
   isImageOnlyMessage = false,
   draggable = true,
 }) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [imageDimensions, setImageDimensions] = useState<ImageDimensions | null>(null);
+  const [shouldResize, setShouldResize] = useState(false);
+
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeResult, setResizeResult] = useState<ImageResizeResult | null>(null);
   const fileName = file instanceof File ? file.name : file.fileName;
   const mimeType = file instanceof File ? file.type : file.mimeType;
   const isImage = mimeType.startsWith('image/');
@@ -33,6 +53,66 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
           setPreviewUrl(reader.result as string);
         };
         reader.readAsDataURL(file);
+
+        // Get image dimensions for resize functionality
+        if (isImage) {
+          try {
+            const dimensions = await getImageDimensions(file);
+            setImageDimensions(dimensions);
+
+            // Check if image needs resizing
+            const needsResize = shouldResizeImage(dimensions);
+
+            if (needsResize) {
+              setShouldResize(true);
+
+              // Notify parent of resize state change
+              if (onResizeStateChange) {
+                onResizeStateChange(file, true);
+              }
+
+              // Start processing immediately if resize is needed
+              if (onResize) {
+                setIsResizing(true);
+                if (onProcessingStateChange) {
+                  onProcessingStateChange(file, true);
+                }
+
+                resizeImage(file)
+                  .then((result) => {
+                    setResizeResult(result);
+                    // Store the resized file in the parent component's map
+                    if (onResize) {
+                      const resizedFile = resizedBlobToFile(result.blob, file);
+                      onResize(file, resizedFile);
+                    }
+                  })
+                  .catch((error) => {
+                    console.error('Failed to resize image:', error);
+                    setShouldResize(false);
+                    // Notify parent component of resize state change (failed)
+                    if (onResizeStateChange) {
+                      onResizeStateChange(file, false);
+                    }
+                  })
+                  .finally(() => {
+                    setIsResizing(false);
+                    // Notify parent component of processing state change (completed)
+                    if (onProcessingStateChange) {
+                      onProcessingStateChange(file, false);
+                    }
+                  });
+              }
+            } else {
+              // If resize is not needed, ensure parent knows
+              if (onResizeStateChange) {
+                onResizeStateChange(file, false);
+              }
+            }
+          } catch (error) {
+            console.error('Failed to get image dimensions:', error);
+          }
+        }
       } else if (isImage && fileAttachment && fileAttachment.hash) {
         // For FileAttachment objects (from messages), use direct URL for image preview
         setPreviewUrl(`/api/blob/${fileAttachment.hash}`);
@@ -107,6 +187,51 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
     // Clean up any drag-related state if needed
   };
 
+  const handleResizeToggle = async () => {
+    if (!(file instanceof File)) return;
+
+    const newCheckedState = !shouldResize;
+    setShouldResize(newCheckedState);
+
+    // Notify parent component of resize state change
+    if (onResizeStateChange) {
+      onResizeStateChange(file, newCheckedState);
+    }
+
+    // If toggling to compress state and we don't have a resized version yet, start resizing
+    if (newCheckedState && !resizeResult) {
+      setIsResizing(true);
+      // Notify parent component of processing state change
+      if (onProcessingStateChange) {
+        onProcessingStateChange(file, true);
+      }
+
+      try {
+        const result = await resizeImage(file);
+        setResizeResult(result);
+        // Store the resized file in the parent component's map
+        if (onResize) {
+          const resizedFile = resizedBlobToFile(result.blob, file);
+          onResize(file, resizedFile);
+        }
+      } catch (error) {
+        console.error('Failed to resize image:', error);
+        setShouldResize(false);
+        // Notify parent component of resize state change (failed)
+        if (onResizeStateChange) {
+          onResizeStateChange(file, false);
+        }
+      } finally {
+        setIsResizing(false);
+        // Notify parent component of processing state change (completed)
+        if (onProcessingStateChange) {
+          onProcessingStateChange(file, false);
+        }
+      }
+    }
+    // If toggling to expand state, don't clear the resize result - keep it for later use
+  };
+
   const previewClassName =
     isImageOnlyMessage && isImage ? 'file-attachment-preview-image-only' : 'file-attachment-preview';
 
@@ -131,15 +256,43 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
       )}
       {!isImageOnlyMessage && (
         <>
-          <span className="file-name">{fileName}</span>
-          <button onClick={handleDownload}>
-            <FaDownload />
-          </button>
-          {onRemove && (
-            <button onClick={() => onRemove(file as File)} className="remove-button">
-              <FaTimes />
+          <div className="file-info">
+            <span className="file-name">{fileName}</span>
+          </div>
+          <div className="file-actions">
+            {file instanceof File &&
+              isImage &&
+              imageDimensions &&
+              shouldResizeImage(imageDimensions) &&
+              onResize &&
+              (() => {
+                const constrainedDimensions = calculateTileConstrainedDimensions(imageDimensions);
+                return (
+                  <button
+                    onClick={handleResizeToggle}
+                    disabled={isResizing}
+                    title={
+                      isResizing
+                        ? 'Processing image resize...'
+                        : shouldResize
+                          ? `Click to enlarge from ${constrainedDimensions.width}×${constrainedDimensions.height} to ${imageDimensions.width}×${imageDimensions.height}`
+                          : `Click to resize from ${imageDimensions.width}×${imageDimensions.height} to ${constrainedDimensions.width}×${constrainedDimensions.height}`
+                    }
+                    className="resize-toggle-button"
+                  >
+                    {shouldResize ? <FaCompress /> : <FaExpand />}
+                  </button>
+                );
+              })()}
+            <button onClick={handleDownload} title="Download">
+              <FaDownload />
             </button>
-          )}
+            {onRemove && (
+              <button onClick={() => onRemove(file as File)} className="remove-button" title="Remove">
+                <FaTimes />
+              </button>
+            )}
+          </div>
         </>
       )}
     </div>

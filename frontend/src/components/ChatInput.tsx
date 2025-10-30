@@ -22,6 +22,7 @@ interface ChatInputProps {
   inputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef?: React.RefObject<HTMLDivElement>;
   sessionId: string | null;
+  isSendDisabledByResizing?: () => boolean;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -31,6 +32,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   inputRef,
   chatAreaRef,
   sessionId,
+  isSendDisabledByResizing,
 }) => {
   const [inputMessage] = useAtom(inputMessageAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
@@ -199,7 +201,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const isSendButtonDisabled = localInput.trim() === '' && selectedFiles.length === 0;
+  const isSendButtonDisabled =
+    (localInput.trim() === '' && selectedFiles.length === 0) ||
+    (isSendDisabledByResizing && isSendDisabledByResizing());
 
   return (
     <div

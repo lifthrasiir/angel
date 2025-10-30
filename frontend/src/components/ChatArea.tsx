@@ -35,6 +35,9 @@ interface ChatAreaProps {
   handleSendMessage: () => void;
   onFilesSelected: (files: File[]) => void;
   handleRemoveFile: (index: number) => void;
+  handleFileResizeStateChange?: (file: File, shouldResize: boolean) => void;
+  handleFileProcessingStateChange?: (file: File, isProcessing: boolean) => void;
+  handleFileResized?: (originalFile: File, resizedFile: File) => void;
   handleCancelStreaming: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef: React.RefObject<HTMLDivElement>;
@@ -48,12 +51,16 @@ interface ChatAreaProps {
   handleRetryMessage?: (originalMessageId: string) => Promise<void>;
   handleRetryError?: (errorMessageId: string) => Promise<void>;
   handleBranchSwitch: (newBranchId: string) => Promise<void>;
+  isSendDisabledByResizing?: () => boolean;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
   handleSendMessage,
   onFilesSelected,
   handleRemoveFile,
+  handleFileResizeStateChange,
+  handleFileProcessingStateChange,
+  handleFileResized,
   handleCancelStreaming,
   chatInputRef,
   chatAreaRef,
@@ -62,6 +69,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleRetryMessage,
   handleRetryError,
   handleBranchSwitch,
+  isSendDisabledByResizing,
 }) => {
   const [workspaceId] = useAtom(workspaceIdAtom);
   const [messages] = useAtom(messagesAtom);
@@ -496,11 +504,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               handleSendMessage={handleSendMessage}
               onFilesSelected={onFilesSelected}
               handleRemoveFile={handleRemoveFile}
+              handleFileResizeStateChange={handleFileResizeStateChange}
+              handleFileProcessingStateChange={handleFileProcessingStateChange}
+              handleFileResized={handleFileResized}
               handleCancelStreaming={handleCancelStreaming}
               chatInputRef={chatInputRef}
               chatAreaRef={chatAreaRef}
               sessionId={chatSessionId}
               selectedFiles={selectedFiles}
+              isSendDisabledByResizing={isSendDisabledByResizing}
             />
           )}
         </>

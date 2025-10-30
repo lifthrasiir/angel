@@ -8,22 +8,30 @@ interface InputAreaProps {
   handleSendMessage: () => void;
   onFilesSelected: (files: File[]) => void;
   handleRemoveFile: (index: number) => void;
+  handleFileResizeStateChange?: (file: File, shouldResize: boolean) => void;
+  handleFileProcessingStateChange?: (file: File, isProcessing: boolean) => void;
+  handleFileResized?: (originalFile: File, resizedFile: File) => void;
   handleCancelStreaming: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef?: React.RefObject<HTMLDivElement>;
   sessionId: string | null;
   selectedFiles: File[];
+  isSendDisabledByResizing?: () => boolean;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
   handleSendMessage,
   onFilesSelected,
   handleRemoveFile,
+  handleFileResizeStateChange,
+  handleFileProcessingStateChange,
+  handleFileResized,
   handleCancelStreaming,
   chatInputRef,
   chatAreaRef,
   sessionId,
   selectedFiles,
+  isSendDisabledByResizing,
 }) => {
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -96,7 +104,15 @@ const InputArea: React.FC<InputAreaProps> = ({
           }}
         >
           {selectedFiles.map((file, index) => (
-            <FileAttachmentPreview key={index} file={file} onRemove={() => handleRemoveFile(index)} draggable={false} />
+            <FileAttachmentPreview
+              key={index}
+              file={file}
+              onRemove={() => handleRemoveFile(index)}
+              onResize={handleFileResized}
+              onResizeStateChange={handleFileResizeStateChange}
+              onProcessingStateChange={handleFileProcessingStateChange}
+              draggable={false}
+            />
           ))}
         </div>
       )}
@@ -108,6 +124,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         inputRef={chatInputRef}
         chatAreaRef={chatAreaRef}
         sessionId={sessionId}
+        isSendDisabledByResizing={isSendDisabledByResizing}
       />
     </div>
   );
