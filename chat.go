@@ -1674,7 +1674,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove error messages from the history context in memory (before LLM call)
-	filteredHistoryContext := make([]FrontendMessage, 0, len(historyContext))
+	var filteredHistoryContext []FrontendMessage
 	errorMessageCount := 0
 	for i := len(historyContext) - 1; i >= 0; i-- {
 		msg := historyContext[i]

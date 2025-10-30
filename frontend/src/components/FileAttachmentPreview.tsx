@@ -44,6 +44,18 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
   // For display/download, we use the hash and fetch from the backend.
   const fileAttachment = file instanceof File ? null : file;
 
+  // Helper function to get URL for FileAttachment
+  const getFileAttachmentUrl = (): string | null => {
+    if (!fileAttachment) return null;
+
+    if (fileAttachment.data) {
+      return `data:${fileAttachment.mimeType};base64,${fileAttachment.data}`;
+    } else if (fileAttachment.hash) {
+      return `/api/blob/${fileAttachment.hash}`;
+    }
+    return null;
+  };
+
   useEffect(() => {
     const loadPreview = async () => {
       if (file instanceof File) {
@@ -113,9 +125,9 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
             console.error('Failed to get image dimensions:', error);
           }
         }
-      } else if (isImage && fileAttachment && fileAttachment.hash) {
-        // For FileAttachment objects (from messages), use direct URL for image preview
-        setPreviewUrl(`/api/blob/${fileAttachment.hash}`);
+      } else if (fileAttachment && isImage) {
+        // For FileAttachment objects (from messages)
+        setPreviewUrl(getFileAttachmentUrl());
       } else {
         setPreviewUrl(null); // No preview for non-image FileAttachment or missing info
       }
@@ -139,15 +151,17 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url); // Clean up
-    } else if (fileAttachment && fileAttachment.hash) {
-      // For attached files (FileAttachment), use the backend endpoint with hash
-      const downloadUrl = `/api/blob/${fileAttachment.hash}`;
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = fileName; // Suggest download filename
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+    } else if (fileAttachment) {
+      // For attached files (FileAttachment)
+      const downloadUrl = getFileAttachmentUrl();
+      if (downloadUrl) {
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = fileName; // Suggest download filename
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
     }
   };
 
