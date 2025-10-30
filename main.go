@@ -13,10 +13,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/csrf"
@@ -62,6 +65,9 @@ func main() {
 
 	// Start the shell command manager
 	StartShellCommandManager(db) // Pass the database connection
+
+	// Start WAL checkpoint manager
+	StartWALCheckpointManager(db)
 
 	// Retrieve or generate CSRF key
 	csrfKey, err := GetAppConfig(db, CSRFKeyName)
@@ -136,8 +142,42 @@ func main() {
 
 	InitRouter(router)
 
-	fmt.Printf("Server started at http://localhost:%d\n", port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), router))
+	// Setup graceful shutdown
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: router,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		fmt.Printf("Server started at http://localhost:%d\n", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	// Stop WAL checkpoint manager
+	StopWALCheckpointManager()
+
+	// Perform final WAL checkpoint before shutdown
+	if err := PerformWALCheckpoint(db); err != nil {
+		log.Printf("Final WAL checkpoint failed: %v", err)
+	}
+
+	// Shutdown server with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
 }
 
 func checkNetworkFilesystem(dbPath string) {

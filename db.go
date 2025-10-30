@@ -10,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
@@ -17,8 +19,57 @@ import (
 	"github.com/lifthrasiir/angel/fs"
 )
 
+var (
+	walCheckpointTicker *time.Ticker
+	walCheckpointMutex  sync.Mutex
+)
+
 func init() {
 	sqlite_vec.Auto()
+}
+
+// StartWALCheckpointManager starts a background goroutine to periodically run WAL checkpoints
+func StartWALCheckpointManager(db *sql.DB) {
+	walCheckpointMutex.Lock()
+	defer walCheckpointMutex.Unlock()
+
+	// Stop existing ticker if running
+	if walCheckpointTicker != nil {
+		walCheckpointTicker.Stop()
+	}
+
+	// Create ticker to run checkpoint every 10 minutes
+	walCheckpointTicker = time.NewTicker(10 * time.Minute)
+
+	go func() {
+		defer walCheckpointTicker.Stop()
+		for range walCheckpointTicker.C {
+			if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+				log.Printf("WAL checkpoint failed: %v", err)
+			}
+		}
+	}()
+}
+
+// StopWALCheckpointManager stops the WAL checkpoint ticker
+func StopWALCheckpointManager() {
+	walCheckpointMutex.Lock()
+	defer walCheckpointMutex.Unlock()
+
+	if walCheckpointTicker != nil {
+		walCheckpointTicker.Stop()
+		walCheckpointTicker = nil
+		log.Println("WAL checkpoint manager stopped")
+	}
+}
+
+// PerformWALCheckpoint manually triggers a WAL checkpoint
+func PerformWALCheckpoint(db *sql.DB) error {
+	if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		return fmt.Errorf("failed to perform WAL checkpoint: %w", err)
+	}
+	log.Println("Manual WAL checkpoint completed successfully")
+	return nil
 }
 
 // createTables creates the necessary tables in the database.
@@ -332,7 +383,7 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	// Configure connection pool for SQLite (especially important for :memory: databases)
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0) // No connection lifetime limit
+	db.SetConnMaxLifetime(30 * time.Minute) // Should be far longer than typical test runs
 
 	// SQLite performance and concurrency optimizations
 	pragmas := []string{
