@@ -22,7 +22,8 @@ const (
 	//
 	// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
 	// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
-	// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
+	// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
+	EventWorkspaceHint       EventType = 'W' // Workspace ID hint (sent before initial state)
 	EventInitialState        EventType = '0' // Initial state with history (for active call)
 	EventInitialStateNoCall  EventType = '1' // Initial state with history (for load session when no active call)
 	EventAcknowledge         EventType = 'A' // Acknowledge message ID

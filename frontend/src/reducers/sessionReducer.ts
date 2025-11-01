@@ -119,6 +119,17 @@ export const sessionReducer = (state: SessionState, action: SessionAction): Sess
       };
     }
 
+    case 'WORKSPACE_ID_HINT': {
+      // Only update workspaceId if it's currently undefined or null
+      if (state.workspaceId === undefined || state.workspaceId === null) {
+        return {
+          ...state,
+          workspaceId: action.workspaceId,
+        };
+      }
+      return state;
+    }
+
     default:
       return state;
   }

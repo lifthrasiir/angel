@@ -33,7 +33,8 @@ export type SessionAction =
   | { type: 'EARLIER_MESSAGES_LOADING' }
   | { type: 'EARLIER_MESSAGES_LOADED'; hasMore: boolean }
   | { type: 'ERROR_OCCURRED'; error: string }
-  | { type: 'RESET_SESSION' };
+  | { type: 'RESET_SESSION' }
+  | { type: 'WORKSPACE_ID_HINT'; workspaceId: string };
 
 // SSE Event Types (from server)
 export interface EventModelMessage {

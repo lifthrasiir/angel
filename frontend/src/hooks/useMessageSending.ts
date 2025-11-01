@@ -230,6 +230,9 @@ export const useMessageSending = ({
       } as ChatMessage);
       setTemporaryEnvChangeMessage(null);
     },
+    onWorkspaceHint: (_workspaceId: string) => {
+      // No action needed in useMessageSending, as workspaceId is managed by FSM
+    },
   };
 
   const handleSendMessage = async (message?: string) => {

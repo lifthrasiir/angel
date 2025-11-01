@@ -37,7 +37,8 @@ export interface ChatMessage {
     | 'model_error'
     | 'compression'
     | 'env_changed'
-    | 'command';
+    | 'command'
+    | 'workspace_hint';
   attachments?: FileAttachment[];
   cumulTokenCount?: number | null;
   branchId?: string;

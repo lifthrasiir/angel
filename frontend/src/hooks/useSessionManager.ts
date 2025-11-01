@@ -34,8 +34,9 @@ export interface SessionManager {
   completeLoadingEarlier: (hasMore: boolean) => void;
   handleError: (error: string) => void;
   resetSession: () => void;
-  navigateToNewSession: () => void;
+  navigateToNewSession: (workspaceId?: string) => void;
   navigateToSession: (sessionId: string) => void;
+  setSessionWorkspaceId: (workspaceId: string) => void;
 
   // Global stream management
   closeAllStreams: () => void;
@@ -158,6 +159,11 @@ export const useSessionManager = () => {
     [navigate],
   );
 
+  // Set session workspace ID
+  const setSessionWorkspaceId = useCallback((workspaceId: string) => {
+    dispatch({ type: 'WORKSPACE_ID_HINT', workspaceId });
+  }, []);
+
   // Get computed values using helper functions
   const sessionId = getSessionId(sessionState);
   const workspaceId = getWorkspaceId(sessionState);
@@ -191,6 +197,7 @@ export const useSessionManager = () => {
     resetSession,
     navigateToNewSession,
     navigateToSession,
+    setSessionWorkspaceId,
 
     // Global stream management
     closeAllStreams: globalStreamRegistry.closeAllStreams.bind(globalStreamRegistry),

@@ -431,6 +431,21 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		fetchLimit = parsedLimit
 	}
 
+	// Check if it's an SSE request and initialize sseW early
+	var sseW *sseWriter
+	if r.Header.Get("Accept") == "text/event-stream" {
+		sseW = newSseWriter(sessionId, w, r)
+		if sseW == nil {
+			return
+		}
+
+		// Send WorkspaceID hint to frontend as early as possible
+		sseW.sendServerEvent(EventWorkspaceHint, session.WorkspaceID)
+
+		addSseWriter(sessionId, sseW)
+		defer removeSseWriter(sessionId, sseW)
+	}
+
 	// Use automatic branch detection to load history with pagination
 	history, actualBranchID, err := GetSessionHistoryPaginatedWithAutoBranch(db, sessionId, beforeMessageID, fetchLimit)
 	if err != nil {
@@ -505,16 +520,8 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		initialState.PendingConfirmation = *branch.PendingConfirmation
 	}
 
-	// Check if it's an SSE request
-	if r.Header.Get("Accept") == "text/event-stream" {
-		sseW := newSseWriter(sessionId, w, r)
-		if sseW == nil {
-			return
-		}
-
-		addSseWriter(sessionId, sseW)
-		defer removeSseWriter(sessionId, sseW)
-
+	// If it's an SSE request, handle streaming. Otherwise, send regular JSON response.
+	if sseW != nil {
 		if hasActiveCall(sessionId) {
 			callStartTime, ok := GetCallStartTime(sessionId)
 			if ok {
@@ -860,6 +867,9 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		PrimaryBranchID: primaryBranchID,
 		Roots:           roots,
 	}
+
+	// Send WorkspaceID hint to frontend
+	sseW.sendServerEvent(EventWorkspaceHint, session.WorkspaceID)
 
 	// Send initial state - common for both paths
 	initialStateJSON, err := json.Marshal(initialState)
@@ -1424,6 +1434,9 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	formattedData := fmt.Sprintf("%d\n%s\n%s", functionResponseMsg.ID, fc.Name, string(functionResponseValueJson))
 	sseW.sendServerEvent(EventFunctionResponse, formattedData)
 
+	// Send WorkspaceID hint to frontend
+	sseW.sendServerEvent(EventWorkspaceHint, session.WorkspaceID)
+
 	// Retrieve session history from DB for LLM (full context)
 	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, branchId)
 	if err != nil {
@@ -1715,6 +1728,9 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 		PrimaryBranchID: branchId,
 		Roots:           roots,
 	}
+
+	// Send WorkspaceID hint to frontend
+	sseW.sendServerEvent(EventWorkspaceHint, session.WorkspaceID)
 
 	// Send initial state as a single SSE event
 	initialStateJSON, err := json.Marshal(initialState)

@@ -14,6 +14,7 @@ import {
   EventPing,
   EventThought,
   EventPendingConfirmation,
+  EventWorkspaceHint,
 } from '../utils/messageHandler';
 import { loadSession } from '../utils/sessionManager';
 import { splitOnceByNewline } from '../utils/stringUtils';
@@ -436,6 +437,13 @@ export const useSessionLoader = ({
               } else if (eventType === EventPing) {
                 // Ping messages are ignored as they're only for connection keep-alive
                 // No action needed, just continue processing other events
+              } else if (eventType === EventWorkspaceHint) {
+                // Handle workspace hint
+                sessionManager.setSessionWorkspaceId(eventData);
+              } else if (eventType === 'W') {
+                // EventWorkspaceHint
+                const workspaceId = eventData;
+                sessionManager.setSessionWorkspaceId(workspaceId);
               }
             },
             (errorEvent: Event) => {

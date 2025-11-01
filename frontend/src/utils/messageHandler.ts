@@ -6,8 +6,9 @@ import { splitOnceByNewline } from './stringUtils';
 //
 // Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
 // Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
-// Loading messages and streaming current call: 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
+// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
 
+export const EventWorkspaceHint = 'W';
 export const EventInitialState = '0';
 export const EventInitialStateNoCall = '1';
 export const EventAcknowledge = 'A';
@@ -85,6 +86,7 @@ export interface StreamEventHandlers {
   ) => void;
   onInlineData: (messageId: string, attachments: FileAttachment[]) => void;
   onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => void;
+  onWorkspaceHint: (workspaceId: string) => void;
   onSessionNameUpdate: (sessionId: string, newName: string) => void;
   onEnd: () => void;
   onError: (errorData: string) => void;
@@ -157,6 +159,8 @@ export const processStreamResponse = async (
         // New: Handle EventInitialState
         const { sessionId, systemPrompt, primaryBranchId } = JSON.parse(data);
         handlers.onSessionStart(sessionId, systemPrompt, primaryBranchId);
+      } else if (type === EventWorkspaceHint) {
+        handlers.onWorkspaceHint(data);
       } else if (type === EventSessionName) {
         const [sessionIdToUpdate, newName] = splitOnceByNewline(data);
         handlers.onSessionNameUpdate(sessionIdToUpdate, newName);
