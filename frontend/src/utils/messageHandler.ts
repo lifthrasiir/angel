@@ -97,6 +97,7 @@ export interface StreamEventHandlers {
 export const processStreamResponse = async (
   response: Response,
   handlers: StreamEventHandlers,
+  abortSignal?: AbortSignal,
 ): Promise<{ qReceived: boolean; nReceived: boolean }> => {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -110,6 +111,13 @@ export const processStreamResponse = async (
   let nReceived = false;
 
   while (true) {
+    // Check if the operation was aborted
+    if (abortSignal?.aborted) {
+      console.log('🚫 Stream processing aborted, cancelling reader');
+      reader.cancel();
+      throw new DOMException('Stream processing was aborted', 'AbortError');
+    }
+
     const { done, value } = await reader.read();
     if (done) {
       break; // Exit loop immediately if stream is done

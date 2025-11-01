@@ -1,10 +1,12 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { chatSessionIdAtom, globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/chatAtoms';
+import { useSetAtom } from 'jotai';
+import { globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/chatAtoms';
 import { PredefinedPrompt } from './SystemPromptEditor';
 import { useChatSession } from '../hooks/useChatSession';
+import { useSessionManagerContext } from '../hooks/SessionManagerContext';
+import { getSessionId } from '../utils/sessionStateHelpers';
 import useEscToCancel from '../hooks/useEscToCancel';
 import { useWorkspaces } from '../hooks/WorkspaceContext';
 import ChatArea from './ChatArea';
@@ -16,7 +18,9 @@ interface ChatLayoutProps {
 }
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
-  const chatSessionId = useAtomValue(chatSessionIdAtom);
+  // Use shared sessionManager from context
+  const sessionManager = useSessionManagerContext();
+  const chatSessionId = getSessionId(sessionManager.sessionState);
 
   const setGlobalPrompts = useSetAtom(globalPromptsAtom);
   const setSelectedGlobalPrompt = useSetAtom(selectedGlobalPromptAtom);
@@ -32,6 +36,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     handleFileResized,
     handleSendMessage,
     cancelStreamingCall,
+    cancelActiveStreams,
     sendConfirmation,
     isProcessing,
     handleEditMessage,
@@ -130,6 +135,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
           handleFileProcessingStateChange={handleFileProcessingStateChange}
           handleFileResized={handleFileResized}
           handleCancelStreaming={cancelStreamingCall}
+          handleCancelMessageStreams={cancelActiveStreams}
           chatInputRef={chatInputRef}
           chatAreaRef={chatAreaRef}
           sendConfirmation={sendConfirmation}

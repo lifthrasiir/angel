@@ -1,12 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+// useParams no longer needed since workspaceId is managed by FSM
 import { useAtomValue, useSetAtom } from 'jotai';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
 import { useAttachmentResize } from './useAttachmentResize';
+import { useSessionManagerContext } from './SessionManagerContext';
+import { getSessionId, getWorkspaceId } from '../utils/sessionStateHelpers';
 
 import {
   userEmailAtom,
-  chatSessionIdAtom,
   messagesAtom,
   inputMessageAtom,
   sessionsAtom,
@@ -15,7 +16,6 @@ import {
   systemPromptAtom,
   isSystemPromptEditingAtom,
   selectedFilesAtom,
-  workspaceIdAtom,
   workspaceNameAtom,
   primaryBranchIdAtom,
   availableModelsAtom,
@@ -25,12 +25,16 @@ import {
 } from '../atoms/chatAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
-import { useWorkspaceAndSessions } from './useWorkspaceAndSessions';
 import { getAvailableModels, ModelInfo } from '../api/models';
 
 export const useChatSession = () => {
   const userEmail = useAtomValue(userEmailAtom);
-  const chatSessionId = useAtomValue(chatSessionIdAtom);
+
+  // Use sessionManager for sessionId and workspaceId
+  const sessionManager = useSessionManagerContext();
+  const chatSessionId = getSessionId(sessionManager.sessionState);
+  const stateWorkspaceId = getWorkspaceId(sessionManager.sessionState);
+
   const messages = useAtomValue(messagesAtom);
   const inputMessageRef = useRef('');
   const inputMessage = useAtomValue(inputMessageAtom);
@@ -45,10 +49,8 @@ export const useChatSession = () => {
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const selectedFiles = useAtomValue(selectedFilesAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
-  const stateWorkspaceId = useAtomValue(workspaceIdAtom);
-  const setWorkspaceId = useSetAtom(workspaceIdAtom);
   const workspaceName = useAtomValue(workspaceNameAtom);
-  const setWorkspaceName = useSetAtom(workspaceNameAtom);
+  // workspaceName is now set by Sidebar component
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
   const availableModels = useAtomValue(availableModelsAtom);
   const setAvailableModels = useSetAtom(availableModelsAtom);
@@ -57,9 +59,8 @@ export const useChatSession = () => {
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
   const isModelManuallySelected = useAtomValue(isModelManuallySelectedAtom);
 
-  const { workspaceId: urlWorkspaceId } = useParams<{ workspaceId?: string }>();
-
-  const { currentWorkspace, error } = useWorkspaceAndSessions(stateWorkspaceId);
+  // workspaceId is now managed by FSM, no need to get from URL params
+  // Session list loading is now handled by Sidebar component
 
   useEffect(() => {
     const fetchModels = async () => {
@@ -76,15 +77,6 @@ export const useChatSession = () => {
     };
     fetchModels();
   }, [setAvailableModels, setSelectedModel]);
-
-  useEffect(() => {
-    if (currentWorkspace) {
-      setWorkspaceName(currentWorkspace.name);
-    }
-    if (error) {
-      console.error('Failed to load sessions:', error);
-    }
-  }, [currentWorkspace, error, setWorkspaceName]);
 
   useEffect(() => {
     if (messages.length > 0 && !isModelManuallySelected) {
@@ -117,13 +109,12 @@ export const useChatSession = () => {
 
   useDocumentTitle(sessions);
 
-  useEffect(() => {
-    setWorkspaceId(urlWorkspaceId);
-  }, [urlWorkspaceId, setWorkspaceId]);
+  // workspaceId is now managed by FSM - no need to set it here
 
   const {
     handleSendMessage,
     cancelStreamingCall,
+    cancelActiveStreams,
     sendConfirmation,
     handleEditMessage,
     handleBranchSwitch,
@@ -136,6 +127,7 @@ export const useChatSession = () => {
     systemPrompt,
     primaryBranchId,
     selectedModel,
+    sessionManager,
   });
 
   const handleSetSelectedModel = (model: ModelInfo) => {
@@ -168,6 +160,7 @@ export const useChatSession = () => {
     getFilesForSending: attachmentResize.getFilesForSending,
     handleSendMessage,
     cancelStreamingCall,
+    cancelActiveStreams,
     handleSetSelectedModel,
     sendConfirmation,
     handleEditMessage,

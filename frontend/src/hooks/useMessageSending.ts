@@ -8,7 +8,6 @@ import { processStreamResponse, type StreamEventHandlers, sendMessage } from '..
 import {
   addErrorMessageAtom,
   addMessageAtom,
-  chatSessionIdAtom,
   inputMessageAtom,
   processingStartTimeAtom,
   isSystemPromptEditingAtom,
@@ -29,6 +28,7 @@ import {
   messagesAtom,
 } from '../atoms/chatAtoms';
 import { ModelInfo } from '../api/models';
+import { SessionManager } from './useSessionManager';
 
 interface UseMessageSendingProps {
   inputMessage: string;
@@ -37,6 +37,7 @@ interface UseMessageSendingProps {
   systemPrompt: string;
   primaryBranchId: string;
   selectedModel: ModelInfo | null;
+  sessionManager: SessionManager;
 }
 
 export const useMessageSending = ({
@@ -46,11 +47,12 @@ export const useMessageSending = ({
   systemPrompt,
   primaryBranchId,
   selectedModel,
+  sessionManager,
 }: UseMessageSendingProps) => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
 
-  const setChatSessionId = useSetAtom(chatSessionIdAtom);
+  // sessionId is now managed by FSM
   const setInputMessage = useSetAtom(inputMessageAtom);
   const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
@@ -73,14 +75,17 @@ export const useMessageSending = ({
   const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
   const setEditingMessageId = useSetAtom(editingMessageIdAtom);
   const setMessages = useSetAtom(messagesAtom);
-  const currentChatSessionId = useAtomValue(chatSessionIdAtom);
+  // sessionId is now managed by FSM - use chatSessionId prop instead
 
   // Store the sessionId from onSessionStart for immediate use in onInlineData
   const latestSessionIdRef = useRef<string | null>(null);
 
-  // Update messages without sessionId when they exist and currentChatSessionId is available
+  // Store AbortController to cancel active streams when switching sessions
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
+
+  // Update messages without sessionId when they exist and chatSessionId is available
   useEffect(() => {
-    if (currentChatSessionId) {
+    if (chatSessionId) {
       setMessages((prevMessages) => {
         // Check if there are any messages without sessionId
         const needsUpdate = prevMessages.some((message) => !message.sessionId);
@@ -91,19 +96,14 @@ export const useMessageSending = ({
         console.log('useEffect: Found messages without sessionId, updating them');
         return prevMessages.map((message) => {
           if (!message.sessionId) {
-            console.log(
-              'useEffect: Updating sessionId for message:',
-              message.id,
-              '-> sessionId:',
-              currentChatSessionId,
-            );
-            return { ...message, sessionId: currentChatSessionId };
+            console.log('useEffect: Updating sessionId for message:', message.id, '-> sessionId:', chatSessionId);
+            return { ...message, sessionId: chatSessionId };
           }
           return message;
         });
       });
     }
-  }, [currentChatSessionId, setMessages]);
+  }, [chatSessionId, setMessages]);
 
   const commonHandlers = {
     onMessage: (messageId: string, text: string) => {
@@ -159,7 +159,7 @@ export const useMessageSending = ({
       // Store sessionId immediately for use in other handlers in the same stream
       latestSessionIdRef.current = sessionId;
 
-      setChatSessionId(sessionId);
+      // sessionId is now managed by FSM
       setSystemPrompt(systemPrompt);
       setPrimaryBranchId(primaryBranchId);
 
@@ -288,14 +288,43 @@ export const useMessageSending = ({
         },
       };
 
-      await processStreamResponse(response, handlers);
+      // Create new AbortController for this stream
+      streamAbortControllerRef.current = new AbortController();
+      // Register with global stream registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(streamAbortControllerRef.current);
+      }
+      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      // Clear from global registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(null);
+      }
+      streamAbortControllerRef.current = null;
     } catch (error) {
       console.error('Error sending message or receiving stream:', error);
-      addErrorMessage('Error sending message or receiving stream.');
+      // Don't show error message if the stream was intentionally aborted
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log('🚫 Stream was intentionally aborted (normal behavior)');
+        // Re-throw to ensure proper stream termination
+        throw error;
+      } else {
+        addErrorMessage('Error sending message or receiving stream.');
+      }
     } finally {
       setProcessingStartTime(null);
       setPendingRoots([]);
     }
+  };
+
+  const cancelActiveStreams = () => {
+    // Force abort any active stream immediately
+    if (streamAbortControllerRef.current) {
+      streamAbortControllerRef.current.abort();
+      streamAbortControllerRef.current = null;
+    }
+
+    // Reset processing state immediately
+    setProcessingStartTime(null);
   };
 
   const cancelStreamingCall = async () => {
@@ -370,10 +399,28 @@ export const useMessageSending = ({
         },
       };
 
-      await processStreamResponse(response, handlers);
+      // Create new AbortController for this stream
+      streamAbortControllerRef.current = new AbortController();
+      // Register with global stream registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(streamAbortControllerRef.current);
+      }
+      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      // Clear from global registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(null);
+      }
+      streamAbortControllerRef.current = null;
     } catch (error) {
       console.error('Error sending confirmation:', error);
-      addErrorMessage('Error sending confirmation.');
+      // Don't show error message if the stream was intentionally aborted
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log('🚫 Confirmation stream was intentionally aborted (normal behavior)');
+        // Re-throw to ensure proper stream termination
+        throw error;
+      } else {
+        addErrorMessage('Error sending confirmation.');
+      }
     } finally {
       setProcessingStartTime(null);
     }
@@ -440,10 +487,28 @@ export const useMessageSending = ({
         },
       };
 
-      await processStreamResponse(response, handlers);
+      // Create new AbortController for this stream
+      streamAbortControllerRef.current = new AbortController();
+      // Register with global stream registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(streamAbortControllerRef.current);
+      }
+      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      // Clear from global registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(null);
+      }
+      streamAbortControllerRef.current = null;
     } catch (error) {
       console.error('Error editing message:', error);
-      addErrorMessage('Error editing message.');
+      // Don't show error message if the stream was intentionally aborted
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log('🚫 Edit message stream was intentionally aborted (normal behavior)');
+        // Re-throw to ensure proper stream termination
+        throw error;
+      } else {
+        addErrorMessage('Error editing message.');
+      }
     } finally {
       setProcessingStartTime(null);
     }
@@ -524,10 +589,28 @@ export const useMessageSending = ({
         },
       };
 
-      await processStreamResponse(response, handlers);
+      // Create new AbortController for this stream
+      streamAbortControllerRef.current = new AbortController();
+      // Register with global stream registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(streamAbortControllerRef.current);
+      }
+      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      // Clear from global registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(null);
+      }
+      streamAbortControllerRef.current = null;
     } catch (error) {
       console.error('Error retrying message:', error);
-      addErrorMessage('Error retrying message.');
+      // Don't show error message if the stream was intentionally aborted
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log('🚫 Retry message stream was intentionally aborted (normal behavior)');
+        // Re-throw to ensure proper stream termination
+        throw error;
+      } else {
+        addErrorMessage('Error retrying message.');
+      }
     } finally {
       setProcessingStartTime(null);
     }
@@ -597,10 +680,28 @@ export const useMessageSending = ({
         },
       };
 
-      await processStreamResponse(response, handlers);
+      // Create new AbortController for this stream
+      streamAbortControllerRef.current = new AbortController();
+      // Register with global stream registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(streamAbortControllerRef.current);
+      }
+      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      // Clear from global registry
+      if (streamAbortControllerRef.current && sessionManager) {
+        sessionManager.setActiveAbortController(null);
+      }
+      streamAbortControllerRef.current = null;
     } catch (error) {
       console.error('Error retrying error message:', error);
-      addErrorMessage('Error retrying error message.');
+      // Don't show error message if the stream was intentionally aborted
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log('🚫 Retry error stream was intentionally aborted (normal behavior)');
+        // Re-throw to ensure proper stream termination
+        throw error;
+      } else {
+        addErrorMessage('Error retrying error message.');
+      }
     } finally {
       setProcessingStartTime(null);
     }
@@ -609,6 +710,7 @@ export const useMessageSending = ({
   return {
     handleSendMessage,
     cancelStreamingCall,
+    cancelActiveStreams,
     sendConfirmation,
     handleEditMessage,
     handleBranchSwitch,

@@ -1,18 +1,15 @@
 import type React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { FaArrowLeft, FaCog, FaFolder, FaPlus, FaBars, FaTimes, FaSearch } from 'react-icons/fa';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Workspace } from '../types/chat';
-import {
-  sessionsAtom,
-  chatSessionIdAtom,
-  workspaceNameAtom,
-  workspaceIdAtom,
-  selectedFilesAtom,
-  preserveSelectedFilesAtom,
-} from '../atoms/chatAtoms';
+import { sessionsAtom, workspaceNameAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
+import { useSessionManagerContext } from '../hooks/SessionManagerContext';
+import { getSessionId } from '../utils/sessionStateHelpers';
+import { extractWorkspaceId } from '../utils/urlSessionMapping';
+import { fetchSessions } from '../utils/sessionManager';
 import LogoAnimation from './LogoAnimation';
 import SessionList from './SessionList';
 import WorkspaceList from './WorkspaceList';
@@ -25,16 +22,124 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [sessions, setSessions] = useAtom(sessionsAtom);
-  const [chatSessionId] = useAtom(chatSessionIdAtom);
-  const [workspaceName] = useAtom(workspaceNameAtom);
-  const [workspaceId, setWorkspaceId] = useAtom(workspaceIdAtom);
+
+  // Use shared sessionManager from context
+  const sessionManager = useSessionManagerContext();
+  const chatSessionId = getSessionId(sessionManager.sessionState);
+  // Use sessionManager.workspaceId to ensure reactivity
+  // Convert null to undefined for consistency
+  const sessionWorkspaceId = sessionManager.workspaceId ?? undefined;
+
+  const [workspaceName, setWorkspaceName] = useAtom(workspaceNameAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDraggingOverNewSession, setIsDraggingOverNewSession] = useState(false);
+
+  // Separate state for UI active workspace (decoupled from session's workspace)
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | undefined>(undefined);
+  const isInitializedRef = useRef(false);
+  const lastSessionIdRef = useRef<string | null>(null);
+
+  // Initialize active workspace ONLY on first load
+  useEffect(() => {
+    if (isInitializedRef.current) {
+      return;
+    }
+
+    // Try to get workspace from URL first
+    const urlWorkspaceId = extractWorkspaceId(location.pathname);
+
+    if (urlWorkspaceId !== undefined) {
+      // URL has workspace info (/w/:workspaceId/new)
+      setActiveWorkspaceId(urlWorkspaceId);
+      isInitializedRef.current = true;
+    } else if (location.pathname === '/new' || location.pathname === '/') {
+      // Explicitly on global/anonymous workspace
+      setActiveWorkspaceId(undefined);
+      isInitializedRef.current = true;
+    } else if (sessionWorkspaceId !== undefined) {
+      // No URL workspace, but session has loaded with workspace (/:sessionId case)
+      setActiveWorkspaceId(sessionWorkspaceId);
+      isInitializedRef.current = true;
+    }
+    // For /:sessionId path, wait until sessionWorkspaceId is available
+  }, [location.pathname, sessionWorkspaceId]);
+
+  // Handle URL workspace changes (after initialization)
+  useEffect(() => {
+    if (!isInitializedRef.current) {
+      return;
+    }
+
+    const urlWorkspaceId = extractWorkspaceId(location.pathname);
+
+    // Update activeWorkspaceId when URL workspace changes
+    if (location.pathname === '/new' || location.pathname === '/') {
+      // Navigated to anonymous workspace
+      if (activeWorkspaceId !== undefined) {
+        setActiveWorkspaceId(undefined);
+      }
+    } else if (urlWorkspaceId !== undefined && urlWorkspaceId !== activeWorkspaceId) {
+      // Navigated to a different workspace via URL
+      setActiveWorkspaceId(urlWorkspaceId);
+    }
+  }, [location.pathname, activeWorkspaceId]);
+
+  // Handle navigation to existing session (/:sessionId)
+  // When navigating to a different session, update activeWorkspaceId from that session's workspace
+  useEffect(() => {
+    if (!isInitializedRef.current) {
+      return;
+    }
+    if (chatSessionId === lastSessionIdRef.current) {
+      return;
+    }
+
+    // Check if we're on a /:sessionId path (not /w/:workspaceId/new or /new)
+    const urlWorkspaceId = extractWorkspaceId(location.pathname);
+    const isSessionPath = chatSessionId && urlWorkspaceId === undefined && location.pathname !== '/new';
+
+    if (isSessionPath && sessionWorkspaceId !== undefined) {
+      // We navigated to a different session - update activeWorkspaceId from session's workspace
+      // Only update if workspace actually changed to avoid unnecessary re-renders
+      if (activeWorkspaceId !== sessionWorkspaceId) {
+        setActiveWorkspaceId(sessionWorkspaceId);
+      }
+      lastSessionIdRef.current = chatSessionId;
+    } else if (!isSessionPath) {
+      // Update last session ID when leaving session view
+      lastSessionIdRef.current = chatSessionId;
+    }
+  }, [chatSessionId, sessionWorkspaceId, location.pathname, activeWorkspaceId]);
+
+  // Load sessions when activeWorkspaceId changes
+  // This is the ONLY place where session list should be loaded
+  useEffect(() => {
+    if (!isInitializedRef.current) {
+      return;
+    }
+
+    const loadSessionsForWorkspace = async () => {
+      try {
+        const result = await fetchSessions(activeWorkspaceId);
+        setSessions(result.sessions);
+        if (result.workspace) {
+          setWorkspaceName(result.workspace.name);
+        } else {
+          setWorkspaceName('');
+        }
+      } catch (error) {
+        console.error('Failed to load sessions for workspace:', error);
+      }
+    };
+
+    loadSessionsForWorkspace();
+  }, [activeWorkspaceId, setSessions, setWorkspaceName]);
 
   // Detect mobile screen size
   useEffect(() => {
@@ -60,11 +165,20 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
 
   // Handle workspace navigation when current session moves to different workspace
   const handleNavigateToWorkspace = (newWorkspaceId: string) => {
-    // Update workspace state directly without page refresh
-    setWorkspaceId(newWorkspaceId || '');
+    // Update active workspace explicitly (this will trigger session reload via useEffect)
+    setActiveWorkspaceId(newWorkspaceId);
+    navigate(`/w/${newWorkspaceId}/new`);
+  };
 
-    // Clear sessions to trigger re-fetch for new workspace
-    setSessions([]);
+  // Handle workspace selection from WorkspaceList
+  const handleSelectWorkspace = (workspaceId: string) => {
+    // Update active workspace explicitly
+    setActiveWorkspaceId(workspaceId || undefined);
+    navigate(workspaceId ? `/w/${workspaceId}/new` : '/new');
+    setShowWorkspaces(false);
+    if (isMobile) {
+      setIsSidebarOpen(false);
+    }
   };
 
   const handleNewSessionDrop = async (e: React.DragEvent<HTMLButtonElement>) => {
@@ -80,7 +194,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       setPreserveSelectedFiles(filesToAdd);
 
       // Navigate to new session
-      const newPath = showWorkspaces ? '/w/new' : workspaceId ? `/w/${workspaceId}/new` : '/new';
+      const newPath = showWorkspaces ? '/w/new' : activeWorkspaceId ? `/w/${activeWorkspaceId}/new` : '/new';
       handleNavigate(newPath);
     }
   };
@@ -105,7 +219,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       });
       setSessions(sessions.filter((s) => s.id !== sessionId));
       if (chatSessionId === sessionId) {
-        navigate(workspaceId ? `/w/${workspaceId}/new` : '/new');
+        navigate(activeWorkspaceId ? `/w/${activeWorkspaceId}/new` : '/new');
       }
     } catch (error) {
       console.error('Error deleting session:', error);
@@ -191,7 +305,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             color: 'black',
             textDecoration: 'none',
             textAlign: 'left',
-            fontWeight: !showWorkspaces && workspaceId ? 'bold' : '',
+            fontWeight: !showWorkspaces && activeWorkspaceId ? 'bold' : '',
             display: 'flex',
             alignItems: 'center',
             border: '0',
@@ -202,7 +316,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
           aria-label={
             showWorkspaces
               ? 'Back to Sessions'
-              : workspaceId
+              : activeWorkspaceId
                 ? `Current Workspace: ${workspaceName || 'New Workspace'}`
                 : 'Show Workspaces'
           }
@@ -212,7 +326,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
               <FaArrowLeft style={{ marginRight: '5px' }} />
               Back to Sessions
             </>
-          ) : workspaceId ? (
+          ) : activeWorkspaceId ? (
             <>
               <FaFolder style={{ marginRight: '5px' }} />
               {workspaceName || 'New Workspace'}
@@ -250,7 +364,9 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             />
           )}
           <button
-            onClick={() => handleNavigate(showWorkspaces ? '/w/new' : workspaceId ? `/w/${workspaceId}/new` : '/new')}
+            onClick={() =>
+              handleNavigate(showWorkspaces ? '/w/new' : activeWorkspaceId ? `/w/${activeWorkspaceId}/new` : '/new')
+            }
             onDrop={handleNewSessionDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -290,11 +406,8 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
         >
           {showWorkspaces ? (
             <WorkspaceList
-              currentWorkspaceId={workspaceId}
-              onSelectWorkspace={(id) => {
-                handleNavigate(id ? `/w/${id}/new` : '/new');
-                setShowWorkspaces(false);
-              }}
+              currentWorkspaceId={activeWorkspaceId}
+              onSelectWorkspace={handleSelectWorkspace}
               workspaces={workspaces}
               refreshWorkspaces={refreshWorkspaces}
             />
@@ -310,6 +423,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
                 setSessions(sessions.filter((s) => s.id !== movedSessionId));
               }}
               onNavigateToWorkspace={handleNavigateToWorkspace}
+              activeWorkspaceId={activeWorkspaceId}
             />
           )}
         </div>

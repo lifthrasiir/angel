@@ -4,7 +4,6 @@ import { ModelInfo } from '../api/models';
 import { PredefinedPrompt } from '../components/SystemPromptEditor';
 
 export const userEmailAtom = atom<string | null>(null);
-export const chatSessionIdAtom = atom<string | null>(null);
 export const messagesAtom = atom<ChatMessage[]>([]);
 export const inputMessageAtom = atom<string>('');
 export const sessionsAtom = atom<Session[]>([]);
@@ -14,8 +13,9 @@ export const statusMessageAtom = atom<string | null>(null);
 export const systemPromptAtom = atom<string>('{{.Builtin.SystemPrompt}}');
 export const isSystemPromptEditingAtom = atom<boolean>(false);
 export const selectedFilesAtom = atom<File[]>([]);
-export const workspaceIdAtom = atom<string | undefined>(undefined);
 export const workspaceNameAtom = atom<string | undefined>(undefined);
+// Session's workspace ID from FSM (synced across all hook instances)
+export const sessionWorkspaceIdAtom = atom<string | undefined>(undefined);
 export const primaryBranchIdAtom = atom<string>('');
 export const availableModelsAtom = atom<Map<string, ModelInfo>>(new Map());
 export const selectedModelAtom = atom<ModelInfo | null>(null);
@@ -91,7 +91,6 @@ export const addErrorMessageAtom = atom(null, (_get, set, errorMessageText: stri
 
 // Derived atom for resetting chat session state
 export const resetChatSessionStateAtom = atom(null, (_get, set) => {
-  set(chatSessionIdAtom, null);
   set(messagesAtom, []);
   set(systemPromptAtom, '');
   set(isSystemPromptEditingAtom, true);
@@ -101,6 +100,7 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(pendingConfirmationAtom, null);
   set(temporaryEnvChangeMessageAtom, null);
   set(pendingRootsAtom, []);
+  set(processingStartTimeAtom, null);
 });
 
 // Derived atom for setting session name

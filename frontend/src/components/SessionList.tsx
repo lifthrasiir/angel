@@ -3,13 +3,9 @@ import { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Session, Workspace } from '../types/chat';
-import {
-  sessionsAtom,
-  chatSessionIdAtom,
-  selectedFilesAtom,
-  preserveSelectedFilesAtom,
-  workspaceIdAtom,
-} from '../atoms/chatAtoms';
+import { sessionsAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
+import { useSessionManagerContext } from '../hooks/SessionManagerContext';
+import { getSessionId } from '../utils/sessionStateHelpers';
 import { extractFilesFromDrop } from '../utils/dragDropUtils';
 import SessionMenu from './SessionMenu';
 
@@ -19,6 +15,7 @@ interface SessionListProps {
   workspaces: Workspace[];
   onSessionMoved?: (sessionId: string) => void;
   onNavigateToWorkspace?: (workspaceId: string) => void;
+  activeWorkspaceId?: string; // UI active workspace (for SessionMenu)
 }
 
 const SessionList: React.FC<SessionListProps> = ({
@@ -27,10 +24,12 @@ const SessionList: React.FC<SessionListProps> = ({
   workspaces,
   onSessionMoved,
   onNavigateToWorkspace,
+  activeWorkspaceId,
 }) => {
   const [sessions, setSessions] = useAtom(sessionsAtom);
-  const [chatSessionId] = useAtom(chatSessionIdAtom);
-  const [workspaceId] = useAtom(workspaceIdAtom);
+  // Use sessionManager for current session ID
+  const sessionManager = useSessionManagerContext();
+  const chatSessionId = getSessionId(sessionManager.sessionState);
   const [selectedFiles, setSelectedFiles] = useAtom(selectedFilesAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
@@ -263,7 +262,7 @@ const SessionList: React.FC<SessionListProps> = ({
               onRename={handleRenameSession}
               onDelete={handleDeleteFromMenu}
               isMobile={isMobile}
-              currentWorkspaceId={workspaceId || ''}
+              currentWorkspaceId={activeWorkspaceId || ''}
               workspaces={workspaces}
               onSessionMoved={() => onSessionMoved && onSessionMoved(session.id)}
               isCurrentSession={session.id === chatSessionId}

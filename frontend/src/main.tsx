@@ -1,6 +1,6 @@
 import React, { lazy, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, Navigate, RouterProvider, Routes, Route } from 'react-router-dom';
 import { Provider } from 'jotai';
 import './index.css';
 
@@ -10,6 +10,7 @@ import SessionRedirector from './components/SessionRedirector';
 import ToastMessage from './components/ToastMessage.tsx';
 import { WorkspaceProvider } from './hooks/WorkspaceContext';
 import { DirectoryPickerManager } from './components/DirectoryPickerManager';
+import { SessionManagerProvider } from './hooks/SessionManagerContext';
 
 import './components/tools/index.ts';
 
@@ -18,54 +19,45 @@ const SearchPage = lazy(() => import('./pages/SearchPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
+const AppRoutes = () => (
+  <SessionManagerProvider>
+    <WorkspaceProvider>
+      <React.Suspense fallback={<div>Loading...</div>}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/new" replace />} />
+          <Route path="/new" element={<SessionPage />} />
+          <Route
+            path="/w/new"
+            element={
+              <ChatLayout>
+                <NewWorkspacePage />
+              </ChatLayout>
+            }
+          />
+          <Route path="/w/:workspaceId" element={<Navigate to="new" replace />} />
+          <Route path="/w/:workspaceId/new" element={<SessionPage />} />
+          <Route path="/w/:workspaceId/:sessionId" element={<SessionRedirector />} />
+          <Route path="/:sessionId" element={<SessionPage />} />
+          <Route
+            path="/search"
+            element={
+              <ChatLayout>
+                <SearchPage />
+              </ChatLayout>
+            }
+          />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </React.Suspense>
+    </WorkspaceProvider>
+  </SessionManagerProvider>
+);
+
 const router = createBrowserRouter([
   {
-    path: '/',
-    element: <Navigate to="/new" replace />,
-  },
-  {
-    path: '/new',
-    element: <SessionPage />,
-  },
-  {
-    path: '/w/new',
-    element: (
-      <ChatLayout>
-        <NewWorkspacePage />
-      </ChatLayout>
-    ),
-  },
-  {
-    path: '/w/:workspaceId',
-    element: <Navigate to="new" replace />,
-  },
-  {
-    path: '/w/:workspaceId/new',
-    element: <SessionPage />,
-  },
-  {
-    path: '/w/:workspaceId/:sessionId',
-    element: <SessionRedirector />,
-  },
-  {
-    path: '/:sessionId',
-    element: <SessionPage />,
-  },
-  {
-    path: '/search',
-    element: (
-      <ChatLayout>
-        <SearchPage />
-      </ChatLayout>
-    ),
-  },
-  {
-    path: '/settings',
-    element: <SettingsPage />,
-  },
-  {
     path: '*',
-    element: <NotFoundPage />,
+    element: <AppRoutes />,
   },
 ]);
 
@@ -100,9 +92,7 @@ const Root = () => {
   return (
     <React.StrictMode>
       <Provider>
-        <WorkspaceProvider>
-          <RouterProvider router={router} />
-        </WorkspaceProvider>
+        <RouterProvider router={router} />
         <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />
         <DirectoryPickerManager />
       </Provider>

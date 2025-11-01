@@ -22,7 +22,6 @@ import {
   addErrorMessageAtom,
   addMessageAtom,
   resetChatSessionStateAtom,
-  chatSessionIdAtom,
   inputMessageAtom,
   processingStartTimeAtom,
   isSystemPromptEditingAtom,
@@ -30,9 +29,7 @@ import {
   primaryBranchIdAtom,
   selectedFilesAtom,
   systemPromptAtom,
-  workspaceIdAtom,
   updateAgentMessageAtom,
-  isPriorSessionLoadingAtom,
   hasMoreMessagesAtom,
   isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
@@ -41,15 +38,24 @@ import {
   isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
 import { useScrollAdjustment } from './useScrollAdjustment';
+import { isLoading, hasMoreMessages } from '../utils/sessionStateHelpers';
+import { SessionManager } from './useSessionManager';
 
 interface UseSessionLoaderProps {
   chatSessionId: string | null;
   chatAreaRef: React.RefObject<HTMLDivElement>;
+  sessionManager: SessionManager; // sessionManager is now required for FSM integration
+  onSessionSwitch?: () => void; // Callback to notify when session switches
 }
 
 const FETCH_LIMIT = 50;
 
-export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoaderProps) => {
+export const useSessionLoader = ({
+  chatSessionId,
+  chatAreaRef,
+  sessionManager,
+  onSessionSwitch,
+}: UseSessionLoaderProps) => {
   const navigate = useNavigate();
   const { sessionId: urlSessionId, workspaceId: urlWorkspaceId } = useParams<{
     sessionId?: string;
@@ -57,17 +63,14 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
   }>();
   const location = useLocation();
 
-  const setChatSessionId = useSetAtom(chatSessionIdAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
   const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
-  const setIsPriorSessionLoading = useSetAtom(isPriorSessionLoadingAtom);
   const setHasMoreMessages = useSetAtom(hasMoreMessagesAtom);
   const setMessages = useSetAtom(messagesAtom);
   const setPrimaryBranchId = useSetAtom(primaryBranchIdAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
   const setSystemPrompt = useSetAtom(systemPromptAtom);
-  const setWorkspaceId = useSetAtom(workspaceIdAtom);
   const addMessage = useSetAtom(addMessageAtom);
   const updateAgentMessage = useSetAtom(updateAgentMessageAtom);
   const addErrorMessage = useSetAtom(addErrorMessageAtom);
@@ -78,9 +81,6 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
   const preserveSelectedFiles = useAtomValue(preserveSelectedFilesAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const setIsModelManuallySelected = useSetAtom(isModelManuallySelectedAtom);
-
-  const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
-  const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
   const messages = useAtomValue(messagesAtom);
   const processingStartTime = useAtomValue(processingStartTimeAtom);
 
@@ -88,15 +88,39 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
   const isStreamEndedNormallyRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
   const latestSessionIdRef = useRef<string | null>(null);
+  const sessionLoadAbortControllerRef = useRef<AbortController | null>(null);
+  const activeEventSourceRef = useRef<EventSource | null>(null);
 
   const { adjustScroll } = useScrollAdjustment({ chatAreaRef });
 
   const closeEventSourceNormally = () => {
+    // Force close ALL EventSources and clear all references first
+    // This prevents any race conditions during rapid session switching
     if (eventSourceRef.current) {
       isStreamEndedNormallyRef.current = true;
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+
+    // Clear the active reference to prevent any handler execution
+    activeEventSourceRef.current = null;
+
+    // Abort session loading if in progress
+    if (sessionLoadAbortControllerRef.current) {
+      sessionLoadAbortControllerRef.current.abort();
+      sessionLoadAbortControllerRef.current = null;
+    }
+
+    // Close ALL streams globally before notifying about session switch
+    sessionManager.closeAllStreams();
+
+    // Notify about session switch to cancel message streams
+    if (onSessionSwitch) {
+      onSessionSwitch();
+    }
+
+    // Reset processing state when closing EventSource
+    setProcessingStartTime(null);
   };
 
   const mapToChatMessages = (rawMessages: any[]): ChatMessage[] => {
@@ -135,9 +159,12 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
       return;
     }
 
-    // Use the values from the top-level
-    // Don't load more messages while streaming is in progress
-    if (messages.length === 0 || isPriorSessionLoading || !hasMoreMessages || processingStartTime !== null) {
+    // Use FSM state for loading status
+    const isPriorSessionLoadingFromFS = isLoading(sessionManager.sessionState);
+    const hasMoreMessagesFromFS = hasMoreMessages(sessionManager.sessionState);
+
+    // Don't load more messages while loading is in progress (but allow during streaming)
+    if (messages.length === 0 || isPriorSessionLoadingFromFS || !hasMoreMessagesFromFS) {
       return;
     }
 
@@ -148,7 +175,9 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
     }
 
     isLoadingMoreRef.current = true;
-    setIsPriorSessionLoading(true);
+
+    // Update loading state using sessionManager
+    sessionManager.startLoadingEarlier();
     try {
       const data = await fetchSessionHistory(chatSessionId!, firstMessageId, FETCH_LIMIT);
 
@@ -162,7 +191,9 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
       }
 
       // Check if it's the last page
-      setHasMoreMessages(data.history.length >= FETCH_LIMIT);
+      const hasMore = data.history.length >= FETCH_LIMIT;
+      // FSM will manage hasMoreMessages state through sessionManager
+      sessionManager.completeLoadingEarlier(hasMore);
 
       // Prepend new messages to the existing ones
       const chatAreaElement = chatAreaRef.current;
@@ -181,17 +212,13 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
     } catch (error) {
       console.error('Failed to load more session history:', error);
       addErrorMessage('Failed to load more session history.');
+      sessionManager.completeLoadingEarlier(false);
     } finally {
       isLoadingMoreRef.current = false;
-      setIsPriorSessionLoading(false);
     }
   }, [
     chatSessionId,
-    isPriorSessionLoading,
-    hasMoreMessages,
     addErrorMessage,
-    setIsPriorSessionLoading,
-    setHasMoreMessages,
     setMessages,
     messages,
     processingStartTime,
@@ -199,6 +226,7 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
     chatAreaRef,
     adjustScroll,
     urlSessionId,
+    sessionManager,
   ]);
 
   useEffect(() => {
@@ -224,11 +252,6 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
     const loadChatSession = async () => {
       const currentSessionId = urlSessionId;
 
-      // If a message is currently being processed, do not load the session history again.
-      if (processingStartTime !== null) {
-        return;
-      }
-
       if (location.pathname.endsWith('/new') && !currentSessionId) {
         // Handle preserveSelectedFiles before resetting state
         if (preserveSelectedFiles.length > 0) {
@@ -237,11 +260,7 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
         }
 
         resetChatSessionState();
-        if (urlWorkspaceId) {
-          setWorkspaceId(urlWorkspaceId);
-        } else {
-          setWorkspaceId('');
-        }
+        // workspaceId is now managed by FSM
         const defaultPrompt = `{{.Builtin.SystemPrompt}}`;
         setSystemPrompt(defaultPrompt);
         // Close existing EventSource if any, and mark as normally ended
@@ -255,12 +274,17 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
       }
 
       if (currentSessionId && currentSessionId !== chatSessionId) {
+        // Close any existing EventSource to stop streaming
         closeEventSourceNormally();
+
+        // Complete streaming state in FSM
+        sessionManager.completeStreaming();
 
         // Store sessionId immediately for use in EventInlineData handlers
         latestSessionIdRef.current = currentSessionId;
 
-        setChatSessionId(currentSessionId);
+        // Start FSM session loading
+        sessionManager.startSessionLoading(currentSessionId, urlWorkspaceId);
 
         // Reset manual model selection flag when loading a new session
         setIsModelManuallySelected(false);
@@ -282,41 +306,37 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
             currentSessionId,
             FETCH_LIMIT,
             (event: MessageEvent) => {
-              const [eventType, eventData] = splitOnceByNewline(event.data);
-
-              // Check if the current URL's session ID matches the session ID this EventSource was started with.
-              // urlSessionId is the latest URL session ID captured in the useEffect's closure.
-              // currentSessionId is the session ID at the time this loadChatSession call was made.
-              // Additionally, check if the current active chat session ID (from Jotai atom) matches.
-              if (urlSessionId !== currentSessionId) {
-                console.log(
-                  `Ignoring SSE event for old session ID: ${currentSessionId}. Current URL session ID: ${urlSessionId}`,
-                );
-                // Close this EventSource as it's no longer valid.
-                eventSourceRef.current?.close();
-                eventSourceRef.current = null;
+              // First check: Is this EventSource still active?
+              if (eventSourceRef.current !== activeEventSourceRef.current) {
+                // This EventSource is no longer active, close it immediately
+                const currentEventSource = event.target as EventSource;
+                if (currentEventSource && currentEventSource.readyState !== EventSource.CLOSED) {
+                  currentEventSource.close();
+                }
                 return;
               }
 
+              const [eventType, eventData] = splitOnceByNewline(event.data);
+
               if (eventType === EventInitialState || eventType === EventInitialStateNoCall) {
                 const data: InitialState = JSON.parse(eventData);
-                // Before setting messages, ensure the session ID is still valid
-                if (urlSessionId !== data.sessionId) {
-                  console.log(
-                    `Ignoring InitialState for old session ID: ${data.sessionId}. Current URL session ID: ${urlSessionId}`,
-                  );
-                  return;
-                }
-                setChatSessionId(data.sessionId);
+
+                // sessionId is now managed by FSM
                 setSystemPrompt(data.systemPrompt);
                 setIsSystemPromptEditing(false);
 
                 setMessages(mapToChatMessages(data.history || []));
-                setWorkspaceId(data.workspaceId);
+                // workspaceId is now managed by FSM
                 setPrimaryBranchId(data.primaryBranchId);
                 setPendingConfirmation(data.pendingConfirmation || null);
 
-                setHasMoreMessages(data.history && data.history.length >= FETCH_LIMIT);
+                const hasMore = data.history && data.history.length >= FETCH_LIMIT;
+                setHasMoreMessages(hasMore);
+
+                // Update FSM state to mark session as loaded
+                // Convert empty string to undefined
+                const workspaceId = data.workspaceId || undefined;
+                sessionManager.completeSessionLoading(data.sessionId, workspaceId, hasMore);
 
                 // Handle initial envChanged message
                 if (data.envChanged) {
@@ -341,6 +361,8 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
 
                 if (eventType === EventInitialState && data.callElapsedTimeSeconds !== undefined) {
                   setProcessingStartTime(performance.now() - data.callElapsedTimeSeconds * 1000);
+                  // Start streaming if we have elapsed time
+                  sessionManager.startStreaming();
                 } else {
                   setProcessingStartTime(null);
                 }
@@ -349,9 +371,13 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
                 }
               } else if (eventType === EventModelMessage) {
                 const [messageId, text] = splitOnceByNewline(eventData);
-                // Before updating, ensure the message belongs to the current active session
-                // Assuming messageId can be used to infer session or message object has sessionId
-                // For now, relying on the outer check. If issues persist, might need to pass sessionId in payload.
+                // Check if this message is for the current session
+                if (urlSessionId !== currentSessionId) {
+                  console.log(
+                    `Ignoring ModelMessage for old session. Current URL session ID: ${urlSessionId}, expected: ${currentSessionId}`,
+                  );
+                  return;
+                }
                 updateAgentMessage({ messageId, text });
               } else if (eventType === EventFunctionCall) {
                 const [messageId, rest] = splitOnceByNewline(eventData);
@@ -402,6 +428,8 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
               } else if (eventType === EventComplete) {
                 isStreamEndedNormallyRef.current = true; // Mark as normally ended
                 setProcessingStartTime(null);
+                // Complete streaming
+                sessionManager.completeStreaming();
                 closeEventSourceNormally();
               } else if (eventType === EventPendingConfirmation) {
                 setPendingConfirmation(eventData);
@@ -422,6 +450,14 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
               setProcessingStartTime(null);
             },
           );
+
+          // Set this as the active EventSource after successful creation
+          activeEventSourceRef.current = eventSourceRef.current;
+
+          // Set as the globally active EventSource
+          if (eventSourceRef.current) {
+            sessionManager.setActiveEventSource(eventSourceRef.current);
+          }
         } catch (error) {
           console.error('Failed to load session via SSE:', error);
           resetChatSessionState();
@@ -437,7 +473,7 @@ export const useSessionLoader = ({ chatSessionId, chatAreaRef }: UseSessionLoade
     };
 
     loadChatSession();
-  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, processingStartTime]);
+  }, [urlSessionId, urlWorkspaceId, navigate, location.pathname, processingStartTime, chatSessionId, sessionManager]);
 
   return { loadMoreMessages };
 };

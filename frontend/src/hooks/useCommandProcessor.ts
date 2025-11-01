@@ -2,7 +2,6 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { apiFetch } from '../api/apiClient';
 import {
   statusMessageAtom,
-  workspaceIdAtom,
   sessionsAtom,
   isPickingDirectoryAtom,
   temporaryEnvChangeMessageAtom,
@@ -15,10 +14,15 @@ import {
 import type { ChatMessage, RootsChanged, EnvChanged } from '../types/chat';
 import { fetchSessions } from '../utils/sessionManager';
 import { callDirectoryPicker } from '../utils/dialogHelpers';
+import { useSessionManagerContext } from './SessionManagerContext';
+import { getWorkspaceId } from '../utils/sessionStateHelpers';
 
 export const useCommandProcessor = (sessionId: string | null) => {
   const setStatusMessage = useSetAtom(statusMessageAtom);
-  const workspaceId = useAtomValue(workspaceIdAtom);
+
+  // Use sessionManager for workspaceId
+  const sessionManager = useSessionManagerContext();
+  const workspaceId = getWorkspaceId(sessionManager.sessionState);
   const setSessions = useSetAtom(sessionsAtom);
   const setIsPickingDirectory = useSetAtom(isPickingDirectoryAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);

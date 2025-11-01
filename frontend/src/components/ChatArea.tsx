@@ -10,26 +10,23 @@ import FunctionPairMessage from './FunctionPairMessage';
 import ConfirmationDialog from './ConfirmationDialog';
 import {
   messagesAtom,
-  chatSessionIdAtom,
   selectedFilesAtom,
   availableModelsAtom,
   userEmailAtom,
   systemPromptAtom,
   isSystemPromptEditingAtom,
   globalPromptsAtom,
-  workspaceIdAtom,
   processingStartTimeAtom,
   primaryBranchIdAtom,
-  isPriorSessionLoadingAtom,
-  hasMoreMessagesAtom,
-  isPriorSessionLoadCompleteAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
 import { useSessionLoader } from '../hooks/useSessionLoader';
+import { useSessionManagerContext } from '../hooks/SessionManagerContext';
 import { useScrollAdjustment } from '../hooks/useScrollAdjustment';
+import { getSessionId, getWorkspaceId, isLoading, hasMoreMessages, isLoadComplete } from '../utils/sessionStateHelpers';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -39,6 +36,7 @@ interface ChatAreaProps {
   handleFileProcessingStateChange?: (file: File, isProcessing: boolean) => void;
   handleFileResized?: (originalFile: File, resizedFile: File) => void;
   handleCancelStreaming: () => void;
+  handleCancelMessageStreams: () => void;
   chatInputRef: React.RefObject<HTMLTextAreaElement>;
   chatAreaRef: React.RefObject<HTMLDivElement>;
   sendConfirmation: (
@@ -62,6 +60,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleFileProcessingStateChange,
   handleFileResized,
   handleCancelStreaming,
+  handleCancelMessageStreams,
   chatInputRef,
   chatAreaRef,
   sendConfirmation,
@@ -71,9 +70,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleBranchSwitch,
   isSendDisabledByResizing,
 }) => {
-  const [workspaceId] = useAtom(workspaceIdAtom);
   const [messages] = useAtom(messagesAtom);
-  const [chatSessionId] = useAtom(chatSessionIdAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [availableModels] = useAtom(availableModelsAtom);
   const [userEmail] = useAtom(userEmailAtom);
@@ -82,11 +79,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [globalPrompts] = useAtom(globalPromptsAtom);
   const processingStartTime = useAtomValue(processingStartTimeAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
-  const { loadMoreMessages } = useSessionLoader({ chatSessionId, chatAreaRef });
+
+  // Use FSM for session management - sessionId and workspaceId come from FSM
+  const sessionManager = useSessionManagerContext();
+  const sessionId = getSessionId(sessionManager.sessionState);
+  const workspaceId = getWorkspaceId(sessionManager.sessionState);
+  const isLoadingState = isLoading(sessionManager.sessionState);
+  const hasMoreMessagesState = hasMoreMessages(sessionManager.sessionState);
+
+  const { loadMoreMessages } = useSessionLoader({
+    chatSessionId: sessionId,
+    chatAreaRef,
+    sessionManager,
+    onSessionSwitch: handleCancelMessageStreams,
+  });
   const { scrollToBottom, handleContentLoad } = useScrollAdjustment({ chatAreaRef });
-  const hasMoreMessages = useAtomValue(hasMoreMessagesAtom);
-  const isPriorSessionLoading = useAtomValue(isPriorSessionLoadingAtom);
-  const isPriorSessionLoadComplete = useAtomValue(isPriorSessionLoadCompleteAtom);
+
+  // Use FSM values instead of legacy atoms for consistency
+  const isPriorSessionLoading = isLoadingState;
+  const isPriorSessionLoadComplete = isLoadComplete(sessionManager.sessionState);
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
   const temporaryEnvChangeMessage = useAtomValue(temporaryEnvChangeMessageAtom);
@@ -129,7 +140,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
 
     const handleScroll = () => {
-      if (chatAreaElement.scrollTop === 0 && !isPriorSessionLoading && hasMoreMessages && isPriorSessionLoadComplete) {
+      if (
+        chatAreaElement.scrollTop === 0 &&
+        !isPriorSessionLoading &&
+        hasMoreMessagesState &&
+        isPriorSessionLoadComplete
+      ) {
         loadMoreMessages();
       }
     };
@@ -139,11 +155,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     return () => {
       chatAreaElement.removeEventListener('scroll', handleScroll);
     };
-  }, [chatAreaRef, isPriorSessionLoading, loadMoreMessages, isPriorSessionLoadComplete]);
+  }, [chatAreaRef, isPriorSessionLoading, loadMoreMessages, isPriorSessionLoadComplete, hasMoreMessagesState]);
 
   useEffect(() => {
     const chatAreaElement = chatAreaRef.current;
-    if (chatAreaElement && hasMoreMessages && !isPriorSessionLoading) {
+    if (chatAreaElement && hasMoreMessagesState && !isPriorSessionLoading) {
       // Check if the content height is less than the visible height (no scrollbar)
       // This indicates that all available messages might not have been loaded yet,
       // especially in short sessions where initial messages don't fill the viewport.
@@ -151,7 +167,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         loadMoreMessages();
       }
     }
-  }, [chatAreaRef, hasMoreMessages, isPriorSessionLoading, loadMoreMessages]);
+  }, [chatAreaRef, hasMoreMessagesState, isPriorSessionLoading, loadMoreMessages]);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -472,9 +488,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 padding: 'var(--spacing-unit)',
               }}
             >
-              {!hasMoreMessages && (
+              {!hasMoreMessagesState && (
                 <SystemPromptEditor
-                  key={chatSessionId}
+                  key={sessionId || 'new'}
                   initialPrompt={systemPrompt}
                   currentLabel={currentSystemPromptLabel}
                   onPromptUpdate={(updatedPrompt) => {
@@ -495,8 +511,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
           {pendingConfirmation ? (
             <ConfirmationDialog
-              onConfirm={(modifiedData) => sendConfirmation(true, chatSessionId!, primaryBranchId!, modifiedData)}
-              onDeny={() => sendConfirmation(false, chatSessionId!, primaryBranchId!)}
+              onConfirm={(modifiedData) => sendConfirmation(true, sessionId!, primaryBranchId!, modifiedData)}
+              onDeny={() => sendConfirmation(false, sessionId!, primaryBranchId!)}
               confirmationData={JSON.parse(pendingConfirmation)}
             />
           ) : (
@@ -510,7 +526,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               handleCancelStreaming={handleCancelStreaming}
               chatInputRef={chatInputRef}
               chatAreaRef={chatAreaRef}
-              sessionId={chatSessionId}
+              sessionId={sessionId}
               selectedFiles={selectedFiles}
               isSendDisabledByResizing={isSendDisabledByResizing}
             />
