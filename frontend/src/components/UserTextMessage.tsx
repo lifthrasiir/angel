@@ -18,6 +18,7 @@ interface UserTextMessageProps {
   onSaveEdit: (messageId: string, editedText: string) => void;
   onRetryClick?: (messageId: string) => void;
   isMobile?: boolean;
+  isMostRecentUserMessage?: boolean;
 }
 
 const UserTextMessage: React.FC<UserTextMessageProps> = ({
@@ -29,6 +30,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   onSaveEdit,
   onRetryClick,
   isMobile = false,
+  isMostRecentUserMessage = false,
 }) => {
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
   const [processingStartTime] = useAtom(processingStartTimeAtom);
@@ -81,6 +83,8 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
               onEditCancel: handleEditCancel,
               message: message,
               isMobile: isMobile,
+              editAccessKey: isMostRecentUserMessage ? 'e' : undefined,
+              retryAccessKey: isMostRecentUserMessage ? 'r' : undefined,
             } as Partial<MessageInfoProps>) // Cast to Partial<MessageInfoProps>
           : messageInfo
       }

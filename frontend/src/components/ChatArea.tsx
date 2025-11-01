@@ -236,6 +236,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>,
     handleBranchSwitch: (newBranchId: string) => Promise<void>,
     handleRetryError?: (errorMessageId: string) => Promise<void>,
+    mostRecentUserMessageId?: string | null,
   ): { element: JSX.Element; messagesConsumed: number } => {
     // Find maxTokens for the current message's model
     const currentModelMaxTokens = currentMessage.model
@@ -349,6 +350,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   : undefined
               }
               onBranchSelect={handleBranchSwitch}
+              isMostRecentUserMessage={currentMessage.id === mostRecentUserMessageId}
             />
             {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
               <ProcessingIndicator
@@ -369,6 +371,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const renderedMessages = useMemo(() => {
     const renderedElements: JSX.Element[] = [];
     let i = 0; // This will become our startIndex
+
+    // Find the most recent user message ID for accesskey shortcuts
+    let mostRecentUserMessageId: string | null = null;
+    for (let j = messages.length - 1; j >= 0; j--) {
+      if (messages[j].type === 'user') {
+        mostRecentUserMessageId = messages[j].id;
+        break;
+      }
+    }
 
     // Calculate the starting index, skipping incomplete groups at the beginning
     while (i < messages.length) {
@@ -405,6 +416,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         handleEditMessage,
         handleBranchSwitch,
         handleRetryError,
+        mostRecentUserMessageId,
       );
       renderedElements.push(element);
       i += messagesConsumed;
@@ -423,6 +435,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
           onRetryError={handleRetryError ? (errorMessageId) => handleRetryError(errorMessageId) : undefined}
           onBranchSelect={handleBranchSwitch}
+          isMostRecentUserMessage={false}
         />,
       );
     }

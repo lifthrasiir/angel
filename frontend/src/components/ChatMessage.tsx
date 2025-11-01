@@ -30,6 +30,7 @@ interface ChatMessageProps {
   onRetryError?: (messageId: string) => void;
   onBranchSelect?: (newBranchId: string) => void;
   isMobile?: boolean;
+  isMostRecentUserMessage?: boolean;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
@@ -43,6 +44,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
     onRetryError,
     onBranchSelect,
     isMobile = false,
+    isMostRecentUserMessage = false,
   }) => {
     const { type, attachments, cumulTokenCount, model } = message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
@@ -81,6 +83,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           onSaveEdit={onSaveEdit!}
           onRetryClick={onRetryClick}
           isMobile={isMobile}
+          isMostRecentUserMessage={isMostRecentUserMessage}
         />
       );
     } else if (type === 'thought') {

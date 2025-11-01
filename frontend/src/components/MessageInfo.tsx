@@ -21,6 +21,8 @@ export interface MessageInfoProps {
   onEditCancel?: () => void; // Callback for edit cancel
   message?: ChatMessage; // Full message object for menu
   isMobile?: boolean;
+  editAccessKey?: string; // Access key for edit button
+  retryAccessKey?: string; // Access key for retry button
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = React.memo(
@@ -39,6 +41,8 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     onEditCancel,
     message,
     isMobile = false,
+    editAccessKey,
+    retryAccessKey,
   }) => {
     const [processingStartTime] = useAtom(processingStartTimeAtom);
     const isProcessing = processingStartTime !== null;
@@ -94,12 +98,12 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
         ) : (
           <>
             {onEditClick && (
-              <button onClick={onEditClick} disabled={isProcessing} title="Edit message">
+              <button onClick={onEditClick} disabled={isProcessing} title="Edit message" accessKey={editAccessKey}>
                 <FaEdit size={16} />
               </button>
             )}
             {onRetryClick && (
-              <button onClick={onRetryClick} disabled={isProcessing} title="Retry message">
+              <button onClick={onRetryClick} disabled={isProcessing} title="Retry message" accessKey={retryAccessKey}>
                 <FaRedo size={16} />
               </button>
             )}
@@ -113,7 +117,9 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
             disabled={isProcessing}
           />
         )}
-        {message && sessionId && <MessageMenu message={message} sessionId={sessionId} isMobile={isMobile} />}
+        {message && sessionId && (message.type === 'model' || message.type === 'user') && (
+          <MessageMenu message={message} sessionId={sessionId} isMobile={isMobile} />
+        )}
       </div>
     );
   },

@@ -54,12 +54,14 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
   useEffect(() => {
     // Apply focus logic only when ChatArea is rendered directly
     if (!children) {
-      if (chatSessionId === null || chatSessionId === undefined) {
-        // For /new or /w/:workspaceId/new paths
-        chatInputRef.current?.focus();
+      // Always focus on chat input for all sessions
+      if (chatInputRef.current) {
+        chatInputRef.current.focus();
       } else {
-        // For other paths (existing sessions)
-        chatAreaRef.current?.focus();
+        // If ref is not ready, wait a bit and try again
+        setTimeout(() => {
+          chatInputRef.current?.focus();
+        }, 100);
       }
     }
 
