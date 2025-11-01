@@ -241,6 +241,7 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/chat/{sessionId}/branch/{branchId}/confirm", confirmBranchHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/branch/{branchId}/retry-error", retryErrorBranchHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/compress", compressSessionHandler).Methods("POST")
+	router.HandleFunc("/api/chat/{sessionId}/extract", extractSessionHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/command", commandHandler).Methods("POST")
 
 	router.HandleFunc("/api/blob/{blobHash}", handleDownloadBlobByHash).Methods("GET")

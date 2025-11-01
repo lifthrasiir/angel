@@ -75,3 +75,29 @@ export async function switchBranch(sessionId: string, newPrimaryBranchId: string
     throw new Error(`Failed to switch branch: ${response.status} ${response.statusText}`);
   }
 }
+
+export interface ExtractResponse {
+  status: string;
+  sessionId: string;
+  sessionName: string;
+  link: string;
+  message: string;
+}
+
+export async function extractSession(sessionId: string, messageId: string): Promise<ExtractResponse> {
+  const response = await apiFetch(`/api/chat/${sessionId}/extract`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messageId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to extract session: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}

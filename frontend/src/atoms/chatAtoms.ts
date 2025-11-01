@@ -103,6 +103,12 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(processingStartTimeAtom, null);
 });
 
+// Derived atom for adding a new session
+export const addSessionAtom = atom(null, (_get, set, newSession: Session) => {
+  const currentSessions = _get(sessionsAtom);
+  set(sessionsAtom, [newSession, ...currentSessions]);
+});
+
 // Derived atom for setting session name
 export const setSessionNameAtom = atom(null, (_get, set, payload: { sessionId: string; name: string }) => {
   const currentSessions = _get(sessionsAtom);

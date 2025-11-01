@@ -272,7 +272,7 @@ body {
 
 .chat-bubble {
   max-width: var(--chat-bubble-max-width);
-  min-width: 180px; /* Minimum width to accommodate 3 buttons */
+  min-width: 200px; /* Minimum width to accommodate 4 buttons */
   padding: calc(var(--spacing-unit) * 0.6) calc(var(--spacing-unit) * 0.9); /* Restore padding-top */
   border-radius: var(--border-radius);
   line-height: 1.4;

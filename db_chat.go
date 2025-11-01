@@ -48,6 +48,7 @@ type Message struct {
 	Generation              int              `json:"generation"`
 	State                   string           `json:"state,omitempty"`
 	Aux                     string           `json:"aux,omitempty"`
+	Indexed                 int              `json:"indexed"`
 }
 
 // DbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
@@ -915,12 +916,13 @@ func GetMessageByID(db *sql.DB, messageID int) (*Message, error) {
 	err := db.QueryRow(`
 		SELECT
 			id, session_id, branch_id, parent_message_id, chosen_next_id,
-			text, type, attachments, cumul_token_count, created_at, model, generation
+			text, type, attachments, cumul_token_count, created_at, model, generation, state, aux, indexed
 		FROM messages
 		WHERE id = ?
 	`, messageID).Scan(
 		&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
 		&m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model, &m.Generation,
+		&m.State, &m.Aux, &m.Indexed,
 	)
 
 	if err != nil {
@@ -1078,4 +1080,83 @@ func DeleteMessage(db *sql.DB, messageID int) error {
 
 	log.Printf("Successfully deleted message %d from session %s, branch %s", messageID, msg.SessionID, msg.BranchID)
 	return nil
+}
+
+// processCompressionRemapping processes compression messages and remaps their content
+func processCompressionRemapping(db *sql.DB, messages []FrontendMessage) ([]FrontendMessage, error) {
+	var processed []FrontendMessage
+
+	for _, msg := range messages {
+		if msg.Type == TypeCompression {
+			// Handle compression message remapping
+			if len(msg.Parts) > 0 && msg.Parts[0].Text != "" {
+				// Parse compression data and remap if needed
+				var compressionData map[string]interface{}
+				if err := json.Unmarshal([]byte(msg.Parts[0].Text), &compressionData); err != nil {
+					log.Printf("Failed to parse compression data: %v", err)
+					processed = append(processed, msg)
+					continue
+				}
+
+				// Remap compression content as needed
+				remappedText, err := remapCompressionContent(db, compressionData)
+				if err != nil {
+					log.Printf("Failed to remap compression content: %v", err)
+					processed = append(processed, msg)
+					continue
+				}
+
+				// Create a new message with remapped content
+				remappedMsg := msg
+				if len(remappedMsg.Parts) > 0 {
+					remappedMsg.Parts[0].Text = remappedText
+				}
+				processed = append(processed, remappedMsg)
+			} else {
+				processed = append(processed, msg)
+			}
+		} else {
+			processed = append(processed, msg)
+		}
+	}
+
+	return processed, nil
+}
+
+// remapCompressionContent remaps the content of a compression message based on the actual messages
+func remapCompressionContent(db *sql.DB, compressionData map[string]interface{}) (string, error) {
+	// Extract the original message IDs from compression data
+	messageIDs, ok := compressionData["messageIds"].([]interface{})
+	if !ok {
+		return "", fmt.Errorf("invalid compression data format")
+	}
+
+	var remappedContent []string
+	for _, msgID := range messageIDs {
+		id, ok := msgID.(float64)
+		if !ok {
+			continue
+		}
+
+		// Get the actual message content
+		msg, err := GetMessageByID(db, int(id))
+		if err != nil {
+			log.Printf("Failed to get message %d for compression remapping: %v", int(id), err)
+			continue
+		}
+
+		remappedContent = append(remappedContent, fmt.Sprintf("Message %d: %s", msg.ID, msg.Text))
+	}
+
+	return strings.Join(remappedContent, "\n\n"), nil
+}
+
+// GetSessionPrimaryBranchID retrieves the primary branch ID for a given session.
+func GetSessionPrimaryBranchID(db *sql.DB, sessionID string) (string, error) {
+	var primaryBranchID string
+	err := db.QueryRow("SELECT primary_branch_id FROM sessions WHERE id = ?", sessionID).Scan(&primaryBranchID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get primary branch ID for session %s: %w", sessionID, err)
+	}
+	return primaryBranchID, nil
 }

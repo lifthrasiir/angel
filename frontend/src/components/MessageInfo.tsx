@@ -32,6 +32,7 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     onEditClick,
     onRetryClick,
     onBranchSelect,
+    sessionId,
     currentMessageText,
     isEditing = false,
     onEditSave,
@@ -112,7 +113,7 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
             disabled={isProcessing}
           />
         )}
-        {message && <MessageMenu message={message} isMobile={isMobile} />}
+        {message && sessionId && <MessageMenu message={message} sessionId={sessionId} isMobile={isMobile} />}
       </div>
     );
   },
