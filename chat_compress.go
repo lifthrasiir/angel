@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/gorilla/mux"
 )
 
 // Constants for compression logic (from gemini-cli/packages/core/src/core/client.ts)
@@ -24,6 +27,38 @@ type CompressResult struct {
 	CompressionMsgID        int
 	CompressedUpToMessageID int
 	ExtractedSummary        string
+}
+
+func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	auth := getAuth(w, r)
+
+	if !auth.Validate("compressSessionHandler", w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionID := vars["sessionId"]
+	if sessionID == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	result, err := CompressSession(r.Context(), db, sessionID, DefaultGeminiModel)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to compress session")
+		return
+	}
+
+	sendJSONResponse(w, map[string]interface{}{
+		"status":                  "success",
+		"message":                 "Chat history compressed successfully",
+		"originalTokenCount":      result.OriginalTokenCount,
+		"newTokenCount":           result.NewTokenCount,
+		"compressionMessageId":    result.CompressionMsgID,
+		"compressedUpToMessageId": result.CompressedUpToMessageID,
+		"extractedSummary":        result.ExtractedSummary,
+	})
 }
 
 var stateSnapshotPattern = regexp.MustCompile(`(?s)<state_snapshot>(.*?)</state_snapshot>`)

@@ -401,38 +401,6 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "MCP config deleted successfully"})
 }
 
-func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("compressSessionHandler", w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	sessionID := vars["sessionId"]
-	if sessionID == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	result, err := CompressSession(r.Context(), db, sessionID, DefaultGeminiModel)
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to compress session")
-		return
-	}
-
-	sendJSONResponse(w, map[string]interface{}{
-		"status":                  "success",
-		"message":                 "Chat history compressed successfully",
-		"originalTokenCount":      result.OriginalTokenCount,
-		"newTokenCount":           result.NewTokenCount,
-		"compressionMessageId":    result.CompressionMsgID,
-		"compressedUpToMessageId": result.CompressedUpToMessageID,
-		"extractedSummary":        result.ExtractedSummary,
-	})
-}
-
 // sendInternalServerError logs the error and sends a 500 Internal Server Error response.
 func sendInternalServerError(w http.ResponseWriter, _ *http.Request, err error, msg string) {
 	log.Printf("%s: %v", msg, err)
@@ -826,56 +794,4 @@ func refreshOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, models)
-}
-
-// commandHandler handles POST requests for /api/chat/{sessionId}/command
-func commandHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	auth := getAuth(w, r)
-	if !auth.Validate("commandHandler", w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	sessionID := vars["sessionId"]
-	if sessionID == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	var requestBody struct {
-		Command string `json:"command"`
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "commandHandler") {
-		return
-	}
-
-	if requestBody.Command == "" {
-		sendBadRequestError(w, r, "Command is required")
-		return
-	}
-
-	// Execute the command
-	var commandMessageID int
-	var err error
-
-	switch requestBody.Command {
-	case "clear", "clearblobs":
-		commandMessageID, err = ExecuteClearCommand(r.Context(), db, sessionID, requestBody.Command)
-	default:
-		sendBadRequestError(w, r, fmt.Sprintf("Unknown command: %s", requestBody.Command))
-		return
-	}
-
-	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to execute command: %s", requestBody.Command))
-		return
-	}
-
-	sendJSONResponse(w, map[string]interface{}{
-		"status":           "success",
-		"message":          fmt.Sprintf("Command %s executed successfully", requestBody.Command),
-		"commandMessageId": commandMessageID,
-	})
 }
