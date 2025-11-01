@@ -29,6 +29,7 @@ interface ChatMessageProps {
   onRetryClick?: (messageId: string) => void;
   onRetryError?: (messageId: string) => void;
   onBranchSelect?: (newBranchId: string) => void;
+  isMobile?: boolean;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
@@ -41,6 +42,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
     onRetryClick,
     onRetryError,
     onBranchSelect,
+    isMobile = false,
   }) => {
     const { type, attachments, cumulTokenCount, model } = message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
@@ -75,8 +77,10 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageInfo={messageInfoComponent}
           messageId={message.id}
           sessionId={message.sessionId}
+          message={message}
           onSaveEdit={onSaveEdit!}
           onRetryClick={onRetryClick}
+          isMobile={isMobile}
         />
       );
     } else if (type === 'thought') {
@@ -88,6 +92,8 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           className="agent-thought"
           messageInfo={messageInfoComponent}
           messageId={message.id}
+          message={message}
+          isMobile={isMobile}
         />
       );
     } else if (type === 'function_call') {
@@ -106,6 +112,8 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           className="agent-error-message"
           messageInfo={messageInfoComponent}
           messageId={message.id}
+          message={message}
+          isMobile={isMobile}
           sideContents={
             onRetryError && <RetryErrorButton messageId={message.id} onRetryError={onRetryError} isDisabled={false} />
           }
@@ -153,6 +161,8 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           sessionId={message.sessionId}
           messageId={message.id}
           attachments={attachments}
+          message={message}
+          isMobile={isMobile}
         />
       );
     }

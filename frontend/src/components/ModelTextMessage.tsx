@@ -1,9 +1,10 @@
-import type React from 'react';
+import React from 'react';
 import MarkdownRenderer from './MarkdownRenderer';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import ChatBubble from './ChatBubble';
-import { FileAttachment } from '../types/chat';
+import { FileAttachment, ChatMessage } from '../types/chat';
 import FileAttachmentList from './FileAttachmentList';
+import MessageInfo from './MessageInfo';
 import { isImageOnlyMessage } from '../utils/messageUtils';
 
 interface ModelTextMessageProps {
@@ -16,6 +17,8 @@ interface ModelTextMessageProps {
   attachments?: FileAttachment[];
   sessionId?: string;
   sideContents?: React.ReactNode;
+  message?: ChatMessage;
+  isMobile?: boolean;
 }
 
 const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
@@ -27,6 +30,8 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   messageId,
   attachments,
   sideContents,
+  message,
+  isMobile = false,
 }) => {
   const imageOnly = isImageOnlyMessage(text, attachments);
 
@@ -34,7 +39,14 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
     <ChatBubble
       messageId={messageId}
       containerClassName={className}
-      messageInfo={messageInfo}
+      messageInfo={
+        React.isValidElement(messageInfo) && messageInfo.type === MessageInfo
+          ? React.cloneElement(messageInfo, {
+              message: message,
+              isMobile: isMobile,
+            } as any)
+          : messageInfo
+      }
       sideContents={sideContents}
     >
       <FileAttachmentList attachments={attachments} isImageOnlyMessage={imageOnly} />

@@ -112,7 +112,8 @@ body {
 }
 
 /* MessageInfo button styles with accent colors */
-.message-info > button {
+.message-info > button,
+.message-info > .dropdown > .dropdown-trigger > button {
   padding: 4px 10px;
   cursor: pointer;
   font-size: 1.1em;
@@ -129,13 +130,15 @@ body {
   backdrop-filter: blur(4px);
 }
 
-.message-info > button:hover:not(:disabled) {
+.message-info > button:hover:not(:disabled),
+.message-info > .dropdown > .dropdown-trigger > button:hover:not(:disabled) {
   filter: brightness(0.9);
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
-.message-info > button:disabled {
+.message-info > button:disabled,
+.message-info > .dropdown > .dropdown-trigger > button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -161,43 +164,36 @@ body {
 
 /* Set background colors based on message type */
 .user-message > .message-info > button,
+.user-message > .message-info > .dropdown > .dropdown-trigger > button,
 .agent-function-response > .message-info > button {
   background: var(--color-user-dark);
-}
-
-.agent-message > .message-info > button,
-.agent-error-message > .message-info > button,
-.agent-thought > .message-info > button,
-.agent-function-call > .message-info > button {
-  background: var(--color-agent-dark);
-}
-
-.system-message > .message-info > button {
-  background: var(--color-system-dark);
-}
-
-.function-pair-combined-container > .message-info > button {
-  background: var(--color-combined-dark);
-}
-
-/* Set foreground colors based on message type */
-.user-message > .message-info > button,
-.agent-function-response > .message-info > button {
   color: var(--color-user-verydark);
 }
 
 .agent-message > .message-info > button,
+.agent-message > .message-info > .dropdown > .dropdown-trigger > button,
 .agent-error-message > .message-info > button,
 .agent-thought > .message-info > button,
 .agent-function-call > .message-info > button {
+  background: var(--color-agent-dark);
   color: var(--color-agent-verydark);
 }
 
+.agent-message > .message-info > button,
+.agent-message > .message-info > .dropdown,
+.agent-error-message > .message-info > button,
+.agent-thought > .message-info > button,
+.agent-function-call > .message-info > button {
+  order: -1;
+}
+
 .system-message > .message-info > button {
+  background: var(--color-system-dark);
   color: var(--color-system-verydark);
 }
 
 .function-pair-combined-container > .message-info > button {
+  background: var(--color-combined-dark);
   color: var(--color-combined-verydark);
 }
 
@@ -884,6 +880,85 @@ textarea {
 
 .session-menu-item:hover {
   background-color: #f8f9fa;
+}
+
+/* Generic dropdown styles */
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dropdown-trigger-disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  gap: 12px;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+  color: #333;
+}
+
+.dropdown-item:hover:not(.dropdown-item-disabled):not(.dropdown-item-danger) {
+  background-color: #f8f9fa;
+}
+
+.dropdown-item:active:not(.dropdown-item-disabled) {
+  background-color: #e9ecef;
+}
+
+.dropdown-item-disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+  color: #999 !important;
+}
+
+.dropdown-item-danger {
+  color: #dc3545 !important;
+}
+
+.dropdown-item-danger:hover:not(.dropdown-item-disabled) {
+  background-color: #f8d7da;
+}
+
+.dropdown-item-active {
+  background-color: #f0f8ff !important;
+  color: #007bff !important;
+}
+
+.dropdown-menu {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans",
+    "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.dropdown-submenu {
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .thought-group-container {

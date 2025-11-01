@@ -1,9 +1,10 @@
 import React from 'react';
-import type { PossibleNextMessage } from '../types/chat';
+import type { PossibleNextMessage, ChatMessage } from '../types/chat';
 import { useAtom } from 'jotai';
 import { processingStartTimeAtom } from '../atoms/chatAtoms';
 import { FaEdit, FaRedo, FaTimes, FaPaperPlane } from 'react-icons/fa';
 import BranchDropdown from './BranchDropdown';
+import MessageMenu from './MessageMenu';
 
 export interface MessageInfoProps {
   cumulTokenCount?: number | null;
@@ -18,6 +19,8 @@ export interface MessageInfoProps {
   isEditing?: boolean; // Whether the message is currently being edited
   onEditSave?: () => void; // Callback for edit save
   onEditCancel?: () => void; // Callback for edit cancel
+  message?: ChatMessage; // Full message object for menu
+  isMobile?: boolean;
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = React.memo(
@@ -33,6 +36,8 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     isEditing = false,
     onEditSave,
     onEditCancel,
+    message,
+    isMobile = false,
   }) => {
     const [processingStartTime] = useAtom(processingStartTimeAtom);
     const isProcessing = processingStartTime !== null;
@@ -107,6 +112,7 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
             disabled={isProcessing}
           />
         )}
+        {message && <MessageMenu message={message} isMobile={isMobile} />}
       </div>
     );
   },

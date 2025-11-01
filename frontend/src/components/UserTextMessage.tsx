@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useAtom } from 'jotai';
-import type { FileAttachment } from '../types/chat';
+import type { FileAttachment, ChatMessage } from '../types/chat';
 import FileAttachmentList from './FileAttachmentList';
 import ChatBubble, { type ChatBubbleRef } from './ChatBubble';
 import { editingMessageIdAtom, processingStartTimeAtom } from '../atoms/chatAtoms';
@@ -14,8 +14,10 @@ interface UserTextMessageProps {
   messageInfo?: React.ReactElement<MessageInfoProps>; // Change type here
   messageId?: string;
   sessionId?: string;
+  message?: ChatMessage;
   onSaveEdit: (messageId: string, editedText: string) => void;
   onRetryClick?: (messageId: string) => void;
+  isMobile?: boolean;
 }
 
 const UserTextMessage: React.FC<UserTextMessageProps> = ({
@@ -23,8 +25,10 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   attachments,
   messageInfo,
   messageId,
+  message,
   onSaveEdit,
   onRetryClick,
+  isMobile = false,
 }) => {
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
   const [processingStartTime] = useAtom(processingStartTimeAtom);
@@ -75,6 +79,8 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
                 }
               },
               onEditCancel: handleEditCancel,
+              message: message,
+              isMobile: isMobile,
             } as Partial<MessageInfoProps>) // Cast to Partial<MessageInfoProps>
           : messageInfo
       }
