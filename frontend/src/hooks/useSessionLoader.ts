@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSetAtom, useAtomValue } from 'jotai';
-import type { ChatMessage, InitialState } from '../types/chat';
+import type { ChatMessage } from '../types/chat';
 import {
   EventComplete,
   EventError,
@@ -15,9 +15,9 @@ import {
   EventThought,
   EventPendingConfirmation,
   EventWorkspaceHint,
-} from '../utils/messageHandler';
+  parseSseEvent,
+} from '../types/events';
 import { loadSession } from '../utils/sessionManager';
-import { splitOnceByNewline } from '../utils/stringUtils';
 import { fetchSessionHistory } from '../api/apiClient';
 import {
   addErrorMessageAtom,
@@ -317,133 +317,144 @@ export const useSessionLoader = ({
                 return;
               }
 
-              const [eventType, eventData] = splitOnceByNewline(event.data);
+              const sseEvent = parseSseEvent(event.data);
 
-              if (eventType === EventInitialState || eventType === EventInitialStateNoCall) {
-                const data: InitialState = JSON.parse(eventData);
+              switch (sseEvent.type) {
+                case EventInitialState:
+                case EventInitialStateNoCall:
+                  const data = sseEvent.initialState;
 
-                // sessionId is now managed by FSM
-                setSystemPrompt(data.systemPrompt);
-                setIsSystemPromptEditing(false);
+                  // sessionId is now managed by FSM
+                  setSystemPrompt(data.systemPrompt);
+                  setIsSystemPromptEditing(false);
 
-                setMessages(mapToChatMessages(data.history || []));
-                // workspaceId is now managed by FSM
-                setPrimaryBranchId(data.primaryBranchId);
-                setPendingConfirmation(data.pendingConfirmation || null);
+                  setMessages(mapToChatMessages(data.history || []));
+                  // workspaceId is now managed by FSM
+                  setPrimaryBranchId(data.primaryBranchId);
+                  setPendingConfirmation(data.pendingConfirmation || null);
 
-                const hasMore = data.history && data.history.length >= FETCH_LIMIT;
-                setHasMoreMessages(hasMore);
+                  const hasMore = data.history && data.history.length >= FETCH_LIMIT;
+                  setHasMoreMessages(hasMore);
 
-                // Update FSM state to mark session as loaded
-                // Convert empty string to undefined
-                const workspaceId = data.workspaceId || undefined;
-                sessionManager.completeSessionLoading(data.sessionId, workspaceId, hasMore);
+                  // Update FSM state to mark session as loaded
+                  // Convert empty string to undefined
+                  const workspaceId = data.workspaceId || undefined;
+                  sessionManager.completeSessionLoading(data.sessionId, workspaceId, hasMore);
 
-                // Handle initial envChanged message
-                if (data.envChanged) {
-                  const envChangedJsonString = JSON.stringify(data.envChanged);
-                  const envChangedMessage: ChatMessage = {
-                    id: crypto.randomUUID(),
-                    type: 'env_changed',
-                    parts: [{ text: envChangedJsonString }],
-                    sessionId: data.sessionId,
-                    branchId: data.primaryBranchId,
-                  };
-                  setTemporaryEnvChangeMessage(envChangedMessage);
-                }
-
-                // Scroll to bottom after initial messages are loaded
-                requestAnimationFrame(() => {
-                  if (chatAreaRef.current) {
-                    chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+                  // Handle initial envChanged message
+                  if (data.envChanged) {
+                    const envChangedJsonString = JSON.stringify(data.envChanged);
+                    const envChangedMessage: ChatMessage = {
+                      id: crypto.randomUUID(),
+                      type: 'env_changed',
+                      parts: [{ text: envChangedJsonString }],
+                      sessionId: data.sessionId,
+                      branchId: data.primaryBranchId,
+                    };
+                    setTemporaryEnvChangeMessage(envChangedMessage);
                   }
-                  setIsPriorSessionLoadComplete(true); // Set to true after initial load and scroll adjustment
-                });
 
-                if (eventType === EventInitialState && data.callElapsedTimeSeconds !== undefined) {
-                  setProcessingStartTime(performance.now() - data.callElapsedTimeSeconds * 1000);
-                  // Start streaming if we have elapsed time
-                  sessionManager.startStreaming();
-                } else {
-                  setProcessingStartTime(null);
-                }
-                if (eventType === EventInitialStateNoCall) {
-                  closeEventSourceNormally();
-                }
-              } else if (eventType === EventModelMessage) {
-                const [messageId, text] = splitOnceByNewline(eventData);
-                // Check if this message is for the current session
-                if (urlSessionId !== currentSessionId) {
-                  console.log(
-                    `Ignoring ModelMessage for old session. Current URL session ID: ${urlSessionId}, expected: ${currentSessionId}`,
-                  );
-                  return;
-                }
-                updateAgentMessage({ messageId, text });
-              } else if (eventType === EventFunctionCall) {
-                const [messageId, rest] = splitOnceByNewline(eventData);
-                const [functionName, argsJson] = splitOnceByNewline(rest);
-                addMessage({
-                  id: messageId,
-                  parts: [
-                    {
-                      functionCall: {
-                        name: functionName,
-                        args: JSON.parse(argsJson),
+                  // Scroll to bottom after initial messages are loaded
+                  requestAnimationFrame(() => {
+                    if (chatAreaRef.current) {
+                      chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+                    }
+                    setIsPriorSessionLoadComplete(true); // Set to true after initial load and scroll adjustment
+                  });
+
+                  if (sseEvent.type === EventInitialState && data.callElapsedTimeSeconds !== undefined) {
+                    setProcessingStartTime(performance.now() - data.callElapsedTimeSeconds * 1000);
+                    // Start streaming if we have elapsed time
+                    sessionManager.startStreaming();
+                  } else {
+                    setProcessingStartTime(null);
+                  }
+                  if (sseEvent.type === EventInitialStateNoCall) {
+                    closeEventSourceNormally();
+                  }
+                  break;
+
+                case EventModelMessage:
+                  // Check if this message is for the current session
+                  if (urlSessionId !== currentSessionId) {
+                    console.log(
+                      `Ignoring ModelMessage for old session. Current URL session ID: ${urlSessionId}, expected: ${currentSessionId}`,
+                    );
+                    return;
+                  }
+                  updateAgentMessage({ messageId: sseEvent.messageId, text: sseEvent.text });
+                  break;
+
+                case EventFunctionCall:
+                  addMessage({
+                    id: sseEvent.messageId,
+                    parts: [
+                      {
+                        functionCall: {
+                          name: sseEvent.functionName,
+                          args: sseEvent.functionArgs,
+                        },
                       },
-                    },
-                  ],
-                  type: 'function_call',
-                });
-              } else if (eventType === EventFunctionResponse) {
-                const [messageId, rest] = splitOnceByNewline(eventData);
-                const [name, payloadJson] = splitOnceByNewline(rest);
-                const { response, attachments } = JSON.parse(payloadJson);
-                addMessage({
-                  id: messageId,
-                  parts: [{ functionResponse: { name, response } }],
-                  type: 'function_response',
-                  attachments,
-                });
-              } else if (eventType === EventInlineData) {
-                const { messageId, attachments } = JSON.parse(eventData);
-                addMessage({
-                  id: messageId,
-                  parts: [], // Empty parts for inline data messages
-                  type: 'model',
-                  attachments,
-                  sessionId: latestSessionIdRef.current || undefined,
-                });
-              } else if (eventType === EventThought) {
-                const [messageId, thoughtText] = splitOnceByNewline(eventData);
-                addMessage({
-                  id: messageId,
-                  parts: [{ text: thoughtText }],
-                  type: 'thought',
-                });
-              } else if (eventType === EventError) {
-                console.error('SSE Error:', eventData);
-                setProcessingStartTime(null);
-                closeEventSourceNormally();
-                addErrorMessage(eventData);
-              } else if (eventType === EventComplete) {
-                isStreamEndedNormallyRef.current = true; // Mark as normally ended
-                setProcessingStartTime(null);
-                // Complete streaming
-                sessionManager.completeStreaming();
-                closeEventSourceNormally();
-              } else if (eventType === EventPendingConfirmation) {
-                setPendingConfirmation(eventData);
-              } else if (eventType === EventPing) {
-                // Ping messages are ignored as they're only for connection keep-alive
-                // No action needed, just continue processing other events
-              } else if (eventType === EventWorkspaceHint) {
-                // Handle workspace hint
-                sessionManager.setSessionWorkspaceId(eventData);
-              } else if (eventType === 'W') {
-                // EventWorkspaceHint
-                const workspaceId = eventData;
-                sessionManager.setSessionWorkspaceId(workspaceId);
+                    ],
+                    type: 'function_call',
+                  });
+                  break;
+
+                case EventFunctionResponse:
+                  addMessage({
+                    id: sseEvent.messageId,
+                    parts: [{ functionResponse: { name: sseEvent.functionName, response: sseEvent.response } }],
+                    type: 'function_response',
+                    attachments: sseEvent.attachments,
+                  });
+                  break;
+
+                case EventInlineData:
+                  addMessage({
+                    id: sseEvent.messageId,
+                    parts: [], // Empty parts for inline data messages
+                    type: 'model',
+                    attachments: sseEvent.attachments,
+                    sessionId: latestSessionIdRef.current || undefined,
+                  });
+                  break;
+
+                case EventThought:
+                  addMessage({
+                    id: sseEvent.messageId,
+                    parts: [{ text: sseEvent.thoughtText }],
+                    type: 'thought',
+                  });
+                  break;
+
+                case EventError:
+                  console.error('SSE Error:', sseEvent.error);
+                  setProcessingStartTime(null);
+                  closeEventSourceNormally();
+                  addErrorMessage(sseEvent.error);
+                  break;
+
+                case EventComplete:
+                  isStreamEndedNormallyRef.current = true; // Mark as normally ended
+                  setProcessingStartTime(null);
+                  // Complete streaming
+                  sessionManager.completeStreaming();
+                  closeEventSourceNormally();
+                  break;
+
+                case EventPendingConfirmation:
+                  setPendingConfirmation(sseEvent.data);
+                  break;
+
+                case EventPing:
+                  // Ping messages are ignored as they're only for connection keep-alive
+                  // No action needed, just continue processing other events
+                  break;
+
+                case EventWorkspaceHint:
+                  // Handle workspace hint
+                  sessionManager.setSessionWorkspaceId(sseEvent.workspaceId);
+                  break;
               }
             },
             (errorEvent: Event) => {

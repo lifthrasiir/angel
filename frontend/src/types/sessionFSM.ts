@@ -36,46 +36,11 @@ export type SessionAction =
   | { type: 'RESET_SESSION' }
   | { type: 'WORKSPACE_ID_HINT'; workspaceId: string };
 
-// SSE Event Types (from server)
-export interface EventModelMessage {
+// SSE Event Types (from server) - Import from events.ts
+export type SseModelMessage = {
   type: 'M';
   messageId: string;
   modelName?: string;
   text?: string;
   cumulTokenCount?: number;
-}
-
-export interface EventFunctionCall {
-  type: 'C';
-  functionName: string;
-  args: string;
-}
-
-export interface EventFunctionResponse {
-  type: 'F';
-  response: string;
-}
-
-export interface EventThought {
-  type: 'T';
-  text: string;
-}
-
-export interface EventConfirmation {
-  type: 'R';
-  id: string;
-  data: string;
-}
-
-export interface EventInfo {
-  type: 'I';
-  data: string;
-}
-
-export type SSEEvent =
-  | EventModelMessage
-  | EventFunctionCall
-  | EventFunctionResponse
-  | EventThought
-  | EventConfirmation
-  | EventInfo;
+};

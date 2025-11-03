@@ -4,7 +4,26 @@ import { apiFetch, switchBranch } from '../api/apiClient';
 import { useSetAtom, useAtomValue } from 'jotai';
 import type { ChatMessage, FileAttachment } from '../types/chat';
 import { convertFilesToAttachments } from '../utils/fileHandler';
-import { processStreamResponse, type StreamEventHandlers, sendMessage } from '../utils/messageHandler';
+import { processStreamResponse, type SseEventHandler, sendMessage } from '../utils/messageHandler';
+import {
+  EventWorkspaceHint,
+  EventInitialState,
+  EventInitialStateNoCall,
+  EventAcknowledge,
+  EventThought,
+  EventModelMessage,
+  EventFunctionCall,
+  EventFunctionResponse,
+  EventInlineData,
+  EventComplete,
+  EventSessionName,
+  EventCumulTokenCount,
+  EventPendingConfirmation,
+  EventGenerationChanged,
+  EventPing,
+  EventError,
+  type SseEvent,
+} from '../types/events';
 import {
   addErrorMessageAtom,
   addMessageAtom,
@@ -105,135 +124,163 @@ export const useMessageSending = ({
     }
   }, [chatSessionId, setMessages]);
 
-  const commonHandlers = {
-    onMessage: (messageId: string, text: string) => {
-      updateAgentMessage({ messageId, text, modelName: selectedModel?.name });
-      setLastAutoDisplayedThoughtId(null);
-    },
-    onThought: (messageId: string, thoughtText: string) => {
-      addMessage({
-        id: messageId,
-        parts: [{ text: thoughtText }],
-        type: 'thought',
-      } as ChatMessage);
-      setLastAutoDisplayedThoughtId(messageId);
-    },
-    onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => {
-      const message: ChatMessage = {
-        id: messageId,
-        parts: [{ functionCall: { name: functionName, args: functionArgs } }],
-        type: 'function_call',
-      };
-      addMessage(message);
-      setLastAutoDisplayedThoughtId(null);
-    },
-    onFunctionResponse: (
-      messageId: string,
-      functionName: string,
-      functionResponse: any,
-      attachments: FileAttachment[],
-    ) => {
-      const message: ChatMessage = {
-        id: messageId,
-        parts: [{ functionResponse: { name: functionName, response: functionResponse } }],
-        type: 'function_response',
-        model: selectedModel?.name,
-        attachments: attachments,
-      };
-      addMessage(message);
-      setLastAutoDisplayedThoughtId(null);
-    },
-    onInlineData: (messageId: string, attachments: FileAttachment[]) => {
-      const message: ChatMessage = {
-        id: messageId,
-        parts: [], // Empty parts for inline data messages
-        type: 'model',
-        model: selectedModel?.name,
-        attachments: attachments,
-        sessionId: latestSessionIdRef.current || undefined,
-      };
-      addMessage(message);
-      setLastAutoDisplayedThoughtId(null);
-    },
-    onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => {
-      // Store sessionId immediately for use in other handlers in the same stream
-      latestSessionIdRef.current = sessionId;
+  const createEventHandler =
+    (userMessageId?: string, originalMessageId?: string): SseEventHandler =>
+    (event: SseEvent) => {
+      switch (event.type) {
+        case EventModelMessage:
+          updateAgentMessage({ messageId: event.messageId, text: event.text, modelName: selectedModel?.name });
+          setLastAutoDisplayedThoughtId(null);
+          break;
 
-      // sessionId is now managed by FSM
-      setSystemPrompt(systemPrompt);
-      setPrimaryBranchId(primaryBranchId);
+        case EventThought:
+          addMessage({
+            id: event.messageId,
+            parts: [{ text: event.thoughtText }],
+            type: 'thought',
+          } as ChatMessage);
+          setLastAutoDisplayedThoughtId(event.messageId);
+          break;
 
-      // Update existing messages that don't have sessionId yet (for new sessions)
-      setMessages((prevMessages) => {
-        // Check if there are any messages without sessionId
-        const needsUpdate = prevMessages.some((message) => !message.sessionId);
-        if (!needsUpdate) {
-          return prevMessages;
-        }
+        case EventFunctionCall:
+          addMessage({
+            id: event.messageId,
+            parts: [{ functionCall: { name: event.functionName, args: event.functionArgs } }],
+            type: 'function_call',
+          });
+          setLastAutoDisplayedThoughtId(null);
+          break;
 
-        return prevMessages.map((message) => {
-          if (!message.sessionId) {
-            return { ...message, sessionId };
+        case EventFunctionResponse:
+          addMessage({
+            id: event.messageId,
+            parts: [{ functionResponse: { name: event.functionName, response: event.response } }],
+            type: 'function_response',
+            model: selectedModel?.name,
+            attachments: event.attachments,
+          });
+          setLastAutoDisplayedThoughtId(null);
+          break;
+
+        case EventInlineData:
+          addMessage({
+            id: event.messageId,
+            parts: [], // Empty parts for inline data messages
+            type: 'model',
+            model: selectedModel?.name,
+            attachments: event.attachments,
+            sessionId: latestSessionIdRef.current || undefined,
+          });
+          setLastAutoDisplayedThoughtId(null);
+          break;
+
+        case EventInitialState:
+        case EventInitialStateNoCall:
+          // Store sessionId immediately for use in other handlers in the same stream
+          latestSessionIdRef.current = event.initialState.sessionId;
+
+          // sessionId is now managed by FSM
+          setSystemPrompt(event.initialState.systemPrompt);
+          setPrimaryBranchId(event.initialState.primaryBranchId);
+
+          // Update existing messages that don't have sessionId yet (for new sessions)
+          setMessages((prevMessages) => {
+            // Check if there are any messages without sessionId
+            const needsUpdate = prevMessages.some((message) => !message.sessionId);
+            if (!needsUpdate) {
+              return prevMessages;
+            }
+
+            return prevMessages.map((message) => {
+              if (!message.sessionId) {
+                return { ...message, sessionId: event.initialState.sessionId };
+              }
+              return message;
+            });
+          });
+
+          setSessions((prevSessions) => {
+            // Check if the session already exists
+            const existingSessionIndex = prevSessions.findIndex((s) => s.id === event.initialState.sessionId);
+
+            if (existingSessionIndex !== -1) {
+              // If it exists, update it (e.g., last_updated_at)
+              const updatedSessions = [...prevSessions];
+              updatedSessions[existingSessionIndex] = {
+                ...updatedSessions[existingSessionIndex],
+                last_updated_at: new Date().toISOString(),
+                name: updatedSessions[existingSessionIndex].name || '',
+              };
+              return updatedSessions;
+            } else {
+              // If it doesn't exist, add it
+              return [
+                {
+                  id: event.initialState.sessionId,
+                  name: '',
+                  isEditing: false,
+                  last_updated_at: new Date().toISOString(),
+                },
+                ...prevSessions,
+              ];
+            }
+          });
+          navigate(
+            workspaceId ? `/w/${workspaceId}/${event.initialState.sessionId}` : `/${event.initialState.sessionId}`,
+            { replace: true },
+          );
+          break;
+
+        case EventSessionName:
+          setSessionName({ sessionId: event.sessionId, name: event.newName });
+          break;
+
+        case EventComplete:
+          setLastAutoDisplayedThoughtId(null);
+          setProcessingStartTime(null);
+          break;
+
+        case EventError:
+          addErrorMessage(event.error);
+          setLastAutoDisplayedThoughtId(null);
+          break;
+
+        case EventAcknowledge:
+          if (userMessageId) {
+            updateUserMessageId({ temporaryId: userMessageId, newId: event.messageId });
+          } else if (originalMessageId) {
+            // For edit message flow
+            updateUserMessageId({ temporaryId: originalMessageId, newId: event.messageId });
           }
-          return message;
-        });
-      });
+          break;
 
-      setSessions((prevSessions) => {
-        // Check if the session already exists
-        const existingSessionIndex = prevSessions.findIndex((s) => s.id === sessionId);
+        case EventCumulTokenCount:
+          updateMessageTokenCount({ messageId: event.messageId, cumulTokenCount: event.cumulTokenCount });
+          break;
 
-        if (existingSessionIndex !== -1) {
-          // If it exists, update it (e.g., last_updated_at)
-          const updatedSessions = [...prevSessions];
-          updatedSessions[existingSessionIndex] = {
-            ...updatedSessions[existingSessionIndex],
-            last_updated_at: new Date().toISOString(),
-            name: updatedSessions[existingSessionIndex].name || '',
-          };
-          return updatedSessions;
-        } else {
-          // If it doesn't exist, add it
-          return [
-            { id: sessionId, name: '', isEditing: false, last_updated_at: new Date().toISOString() },
-            ...prevSessions,
-          ];
-        }
-      });
-      navigate(workspaceId ? `/w/${workspaceId}/${sessionId}` : `/${sessionId}`, { replace: true });
-    },
-    onSessionNameUpdate: (sessionId: string, newName: string) => {
-      setSessionName({ sessionId, name: newName });
-    },
-    onEnd: () => {
-      setLastAutoDisplayedThoughtId(null);
-      setProcessingStartTime(null);
-    },
-    onError: (errorData: string) => {
-      addErrorMessage(errorData);
-      setLastAutoDisplayedThoughtId(null);
-    },
-    // onAcknowledge is handled separately as it depends on userMessage.id
-    onAcknowledge: () => {},
-    onTokenCount: (messageId: string, cumulTokenCount: number) => {
-      updateMessageTokenCount({ messageId, cumulTokenCount });
-    },
-    onPendingConfirmation: (data: string) => {
-      setPendingConfirmation(data);
-      setProcessingStartTime(null);
-    },
-    onEnvChanged: (messageId: string, envChanged: string) => {
-      addMessage({
-        id: messageId,
-        parts: [{ text: envChanged }],
-        type: 'env_changed',
-      } as ChatMessage);
-      setTemporaryEnvChangeMessage(null);
-    },
-    onWorkspaceHint: (_workspaceId: string) => {
-      // No action needed in useMessageSending, as workspaceId is managed by FSM
-    },
-  };
+        case EventPendingConfirmation:
+          setPendingConfirmation(event.data);
+          setProcessingStartTime(null);
+          break;
+
+        case EventGenerationChanged:
+          addMessage({
+            id: event.messageId,
+            parts: [{ text: event.envChangedJson }],
+            type: 'env_changed',
+          } as ChatMessage);
+          setTemporaryEnvChangeMessage(null);
+          break;
+
+        case EventWorkspaceHint:
+          // No action needed in useMessageSending, as workspaceId is managed by FSM
+          break;
+
+        case EventPing:
+          // Ping messages are ignored as they're only for connection keep-alive
+          break;
+      }
+    };
 
   const handleSendMessage = async (message?: string) => {
     const messageToSend = message || inputMessage;
@@ -284,20 +331,17 @@ export const useMessageSending = ({
         return;
       }
 
-      const handlers: StreamEventHandlers = {
-        ...commonHandlers,
-        onAcknowledge: (messageId: string) => {
-          updateUserMessageId({ temporaryId: userMessage.id, newId: messageId });
-        },
-      };
-
       // Create new AbortController for this stream
       streamAbortControllerRef.current = new AbortController();
       // Register with global stream registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(streamAbortControllerRef.current);
       }
-      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      await processStreamResponse(
+        response,
+        createEventHandler(userMessage.id),
+        streamAbortControllerRef.current.signal,
+      );
       // Clear from global registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(null);
@@ -395,20 +439,13 @@ export const useMessageSending = ({
         return;
       }
 
-      const handlers: StreamEventHandlers = {
-        ...commonHandlers,
-        onAcknowledge: () => {
-          // No user message to acknowledge for confirmation flow
-        },
-      };
-
       // Create new AbortController for this stream
       streamAbortControllerRef.current = new AbortController();
       // Register with global stream registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(streamAbortControllerRef.current);
       }
-      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      await processStreamResponse(response, createEventHandler(), streamAbortControllerRef.current.signal);
       // Clear from global registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(null);
@@ -478,25 +515,17 @@ export const useMessageSending = ({
         return;
       }
 
-      const handlers: StreamEventHandlers = {
-        ...commonHandlers,
-        onAcknowledge: (messageId: string) => {
-          // When a message is edited, the backend might send an acknowledge with the new message ID.
-          // We need to update the original message's ID to the new one.
-          // This assumes the backend sends the new ID via onAcknowledge.
-          // The originalMessageId is captured in the closure.
-          // This will update the ID of the message that was just edited.
-          updateUserMessageId({ temporaryId: originalMessageId, newId: messageId });
-        },
-      };
-
       // Create new AbortController for this stream
       streamAbortControllerRef.current = new AbortController();
       // Register with global stream registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(streamAbortControllerRef.current);
       }
-      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      await processStreamResponse(
+        response,
+        createEventHandler(undefined, originalMessageId),
+        streamAbortControllerRef.current.signal,
+      );
       // Clear from global registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(null);
@@ -583,22 +612,17 @@ export const useMessageSending = ({
         return;
       }
 
-      const handlers: StreamEventHandlers = {
-        ...commonHandlers,
-        onAcknowledge: (messageId: string) => {
-          // When a message is retried, the backend might send an acknowledge with the new message ID.
-          // We need to update the original message's ID to the new one.
-          updateUserMessageId({ temporaryId: originalMessageId, newId: messageId });
-        },
-      };
-
       // Create new AbortController for this stream
       streamAbortControllerRef.current = new AbortController();
       // Register with global stream registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(streamAbortControllerRef.current);
       }
-      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      await processStreamResponse(
+        response,
+        createEventHandler(undefined, originalMessageId),
+        streamAbortControllerRef.current.signal,
+      );
       // Clear from global registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(null);
@@ -675,21 +699,13 @@ export const useMessageSending = ({
         return;
       }
 
-      const handlers: StreamEventHandlers = {
-        ...commonHandlers,
-        onAcknowledge: () => {
-          // No user message to acknowledge for retry-error flow
-          // The backend will handle error message deletion
-        },
-      };
-
       // Create new AbortController for this stream
       streamAbortControllerRef.current = new AbortController();
       // Register with global stream registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(streamAbortControllerRef.current);
       }
-      await processStreamResponse(response, handlers, streamAbortControllerRef.current.signal);
+      await processStreamResponse(response, createEventHandler(), streamAbortControllerRef.current.signal);
       // Clear from global registry
       if (streamAbortControllerRef.current && sessionManager) {
         sessionManager.setActiveAbortController(null);

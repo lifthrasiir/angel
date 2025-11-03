@@ -1,29 +1,13 @@
 import type { FileAttachment } from '../types/chat';
 import { apiFetch } from '../api/apiClient';
-import { splitOnceByNewline } from './stringUtils';
-
-// SSE Event Types
-//
-// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
-// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
-// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
-
-export const EventWorkspaceHint = 'W';
-export const EventInitialState = '0';
-export const EventInitialStateNoCall = '1';
-export const EventAcknowledge = 'A';
-export const EventThought = 'T';
-export const EventModelMessage = 'M';
-export const EventFunctionCall = 'F';
-export const EventFunctionResponse = 'R';
-export const EventInlineData = 'I';
-export const EventComplete = 'Q';
-export const EventSessionName = 'N';
-export const EventCumulTokenCount = 'C';
-export const EventPendingConfirmation = 'P';
-export const EventGenerationChanged = 'G';
-export const EventPing = '.';
-export const EventError = 'E';
+import {
+  EventComplete,
+  EventSessionName,
+  EventPendingConfirmation,
+  EventError,
+  parseSseEvent,
+  type SseEvent,
+} from '../types/events';
 
 export const sendMessage = async (
   inputMessage: string,
@@ -74,31 +58,11 @@ export const sendMessage = async (
   return response;
 };
 
-export interface StreamEventHandlers {
-  onMessage: (messageId: string, text: string) => void;
-  onThought: (messageId: string, thoughtText: string) => void;
-  onFunctionCall: (messageId: string, functionName: string, functionArgs: any) => void;
-  onFunctionResponse: (
-    messageId: string,
-    functionName: string,
-    functionResponse: any,
-    attachments: FileAttachment[],
-  ) => void;
-  onInlineData: (messageId: string, attachments: FileAttachment[]) => void;
-  onSessionStart: (sessionId: string, systemPrompt: string, primaryBranchId: string) => void;
-  onWorkspaceHint: (workspaceId: string) => void;
-  onSessionNameUpdate: (sessionId: string, newName: string) => void;
-  onEnd: () => void;
-  onError: (errorData: string) => void;
-  onAcknowledge: (messageId: string) => void;
-  onTokenCount: (messageId: string, cumulTokenCount: number) => void;
-  onPendingConfirmation: (data: string) => void;
-  onEnvChanged: (messageId: string, envChangedJson: string) => void;
-}
+export type SseEventHandler = (event: SseEvent) => void;
 
 export const processStreamResponse = async (
   response: Response,
-  handlers: StreamEventHandlers,
+  handleEvent: SseEventHandler,
   abortSignal?: AbortSignal,
 ): Promise<{ qReceived: boolean; nReceived: boolean }> => {
   const reader = response.body?.getReader();
@@ -112,7 +76,7 @@ export const processStreamResponse = async (
   let qReceived = false;
   let nReceived = false;
 
-  while (true) {
+  streamLoop: while (true) {
     // Check if the operation was aborted
     if (abortSignal?.aborted) {
       console.log('🚫 Stream processing aborted, cancelling reader');
@@ -134,65 +98,27 @@ export const processStreamResponse = async (
         .replace(/\ndata: /g, '\n');
       buffer = buffer.substring(newlineIndex + 2);
 
-      const [type, data] = splitOnceByNewline(eventString);
+      const sseEvent = parseSseEvent(eventString);
 
-      if (type === EventModelMessage) {
-        const [messageId, text] = splitOnceByNewline(data);
-        handlers.onMessage(messageId, text);
-      } else if (type === EventThought) {
-        const [messageId, thoughtText] = splitOnceByNewline(data);
-        handlers.onThought(messageId, thoughtText);
-      } else if (type === EventFunctionCall) {
-        const [messageId, rest] = splitOnceByNewline(data);
-        const [functionName, functionArgsJson] = splitOnceByNewline(rest);
-        const functionArgs = JSON.parse(functionArgsJson);
-        handlers.onFunctionCall(messageId, functionName, functionArgs);
-      } else if (type === EventFunctionResponse) {
-        const [messageId, rest] = splitOnceByNewline(data);
-        const [functionName, payloadJsonString] = splitOnceByNewline(rest);
-        const { response, attachments } = JSON.parse(payloadJsonString);
-        handlers.onFunctionResponse(messageId, functionName, response, attachments);
-      } else if (type === EventInlineData) {
-        const { messageId, attachments } = JSON.parse(data);
-        handlers.onInlineData(messageId, attachments);
-      } else if (type === EventInitialState) {
-        // New: Handle EventInitialState
-        const { sessionId, systemPrompt, primaryBranchId } = JSON.parse(data);
-        handlers.onSessionStart(sessionId, systemPrompt, primaryBranchId);
-      } else if (type === EventWorkspaceHint) {
-        handlers.onWorkspaceHint(data);
-      } else if (type === EventSessionName) {
-        const [sessionIdToUpdate, newName] = splitOnceByNewline(data);
-        handlers.onSessionNameUpdate(sessionIdToUpdate, newName);
-        nReceived = true;
-      } else if (type === EventError) {
-        console.error('Stream Error:', data); // Log the error data
-        handlers.onError(data); // Call onError handler
-        break; // Break the loop on error
-      } else if (type === EventComplete) {
-        handlers.onEnd();
-        qReceived = true;
-      } else if (type === EventAcknowledge) {
-        handlers.onAcknowledge(data);
-      } else if (type === EventCumulTokenCount) {
-        const [messageId, cumulTokenCountStr] = splitOnceByNewline(data);
-        handlers.onTokenCount(messageId, parseInt(cumulTokenCountStr, 10));
-      } else if (type === EventPendingConfirmation) {
-        // New event type
-        handlers.onPendingConfirmation(data);
-        // When a pending confirmation event is received, the stream is paused on the backend.
-        // We should not expect EventComplete or other events until confirmation is sent.
-        // So, we can break the loop here.
-        break;
-      } else if (type === EventGenerationChanged) {
-        const [messageId, envChangedJson] = splitOnceByNewline(data);
-        handlers.onEnvChanged(messageId, envChangedJson);
-      } else if (type === EventPing) {
-        // Ping messages are ignored as they're only for connection keep-alive
-        // No action needed, just continue processing other events
-      } else {
-        console.warn('Unknown protocol:', data);
+      // Handle special events that affect the stream state
+      switch (sseEvent.type) {
+        case EventComplete:
+          qReceived = true;
+          break;
+        case EventSessionName:
+          nReceived = true;
+          break;
+        case EventPendingConfirmation:
+          // When a pending confirmation event is received, the stream is paused on the backend.
+          // We should not expect EventComplete or other events until confirmation is sent.
+          break streamLoop;
+        case EventError:
+          console.error('Stream Error:', sseEvent.error); // Log the error data
+          break streamLoop; // Break the loop on error
       }
+
+      // Call the event handler for all events
+      handleEvent(sseEvent);
     }
   }
   return { qReceived, nReceived };
