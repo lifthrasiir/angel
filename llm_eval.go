@@ -148,7 +148,7 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, modelName str
 		})
 		if err != nil {
 			yield(CaGenerateContentResponse{
-				Response: VertexGenerateContentResponse{
+				Response: GenerateContentResponse{
 					Candidates: []Candidate{{
 						Content: Content{
 							Parts: []Part{
@@ -283,7 +283,7 @@ func parseAndExecute(ctx context.Context, input string, savedState *EvalState, y
 	// Create yieldPart wrapper function
 	yieldPart := func(part Part) bool {
 		return yield(CaGenerateContentResponse{
-			Response: VertexGenerateContentResponse{
+			Response: GenerateContentResponse{
 				Candidates: []Candidate{{
 					Content: Content{
 						Parts: []Part{part},

@@ -144,7 +144,7 @@ func printMessages(t *testing.T, db *sql.DB, testName string) {
 
 func responseFromPart(part Part) CaGenerateContentResponse {
 	return CaGenerateContentResponse{
-		Response: VertexGenerateContentResponse{
+		Response: GenerateContentResponse{
 			Candidates: []Candidate{
 				{
 					Content: Content{

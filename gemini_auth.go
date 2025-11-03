@@ -27,6 +27,16 @@ func (d *defaultHTTPClientProvider) Client(ctx context.Context) *http.Client {
 	return &http.Client{}
 }
 
+// AuthType enum definition (matches AuthType in TypeScript)
+type AuthType string
+
+const (
+	AuthTypeLoginWithGoogle AuthType = "oauth-personal"
+	AuthTypeUseGemini       AuthType = "gemini-api-key"
+	AuthTypeUseVertexAI     AuthType = "vertex-ai"
+	AuthTypeCloudShell      AuthType = "cloud-shell"
+)
+
 // GeminiAuth encapsulates the global state related to Gemini client and authentication.
 type GeminiAuth struct {
 	GoogleOauthConfig *oauth2.Config

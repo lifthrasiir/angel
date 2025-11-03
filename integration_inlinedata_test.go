@@ -26,7 +26,7 @@ func TestInlineDataStreaming(t *testing.T) {
 		// Create a mock response with text and inlineData
 		responses := []CaGenerateContentResponse{
 			{
-				Response: VertexGenerateContentResponse{
+				Response: GenerateContentResponse{
 					Candidates: []Candidate{
 						{
 							Content: Content{
@@ -39,7 +39,7 @@ func TestInlineDataStreaming(t *testing.T) {
 				},
 			},
 			{
-				Response: VertexGenerateContentResponse{
+				Response: GenerateContentResponse{
 					Candidates: []Candidate{
 						{
 							Content: Content{
@@ -57,7 +57,7 @@ func TestInlineDataStreaming(t *testing.T) {
 				},
 			},
 			{
-				Response: VertexGenerateContentResponse{
+				Response: GenerateContentResponse{
 					Candidates: []Candidate{
 						{
 							Content: Content{
@@ -70,7 +70,7 @@ func TestInlineDataStreaming(t *testing.T) {
 				},
 			},
 			{
-				Response: VertexGenerateContentResponse{
+				Response: GenerateContentResponse{
 					Candidates: []Candidate{
 						{
 							Content: Content{
@@ -215,7 +215,7 @@ func TestInlineDataCounterReset(t *testing.T) {
 
 		responses := []CaGenerateContentResponse{
 			{
-				Response: VertexGenerateContentResponse{
+				Response: GenerateContentResponse{
 					Candidates: []Candidate{
 						{
 							Content: Content{

@@ -61,7 +61,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 	responses := []CaGenerateContentResponse{
 		// Thought 1
 		{
-			Response: VertexGenerateContentResponse{
+			Response: GenerateContentResponse{
 				Candidates: []Candidate{
 					{
 						Content: Content{
@@ -75,7 +75,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 		},
 		// Thought 2 + Model Message with ThoughtSignature
 		{
-			Response: VertexGenerateContentResponse{
+			Response: GenerateContentResponse{
 				Candidates: []Candidate{
 					{
 						Content: Content{
@@ -90,7 +90,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 		},
 		// Continued Model Message
 		{
-			Response: VertexGenerateContentResponse{
+			Response: GenerateContentResponse{
 				Candidates: []Candidate{
 					{
 						Content: Content{
@@ -215,7 +215,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 	var capturedSessionParams SessionParams
 	secondResponses := []CaGenerateContentResponse{
 		{
-			Response: VertexGenerateContentResponse{
+			Response: GenerateContentResponse{
 				Candidates: []Candidate{
 					{
 						Content: Content{

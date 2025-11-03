@@ -114,7 +114,7 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 }
 
 // StreamGenerateContent calls the StreamGenerateContent of Code Assist API.
-func (c *CodeAssistClient) StreamGenerateContent(ctx context.Context, modelName string, request VertexGenerateContentRequest) (io.ReadCloser, error) {
+func (c *CodeAssistClient) StreamGenerateContent(ctx context.Context, modelName string, request GenerateContentRequest) (io.ReadCloser, error) {
 	// Validate model
 	if GeminiModelInfo(modelName) == nil {
 		return nil, fmt.Errorf("unsupported model: %s", modelName)
@@ -146,7 +146,7 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, modelName string, co
 	}
 
 	reqBody := CaCountTokenRequest{
-		Request: VertexCountTokenRequest{
+		Request: CountTokenRequest{
 			Model:    modelName,
 			Contents: contents,
 		},

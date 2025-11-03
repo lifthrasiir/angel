@@ -679,7 +679,7 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, 
 				// Only yield if we have parts to send
 				if len(parts) > 0 {
 					caResp := CaGenerateContentResponse{
-						Response: VertexGenerateContentResponse{
+						Response: GenerateContentResponse{
 							Candidates: []Candidate{
 								{
 									Content: Content{

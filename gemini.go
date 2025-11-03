@@ -59,7 +59,7 @@ const (
 )
 
 // sessionParamsToVertexRequest converts SessionParams to VertexGenerateContentRequest (private)
-func (cap *CodeAssistProvider) sessionParamsToVertexRequest(modelInfo *GeminiModel, params SessionParams) VertexGenerateContentRequest {
+func (cap *CodeAssistProvider) sessionParamsToVertexRequest(modelInfo *GeminiModel, params SessionParams) GenerateContentRequest {
 	var systemInstruction *Content
 	if params.SystemPrompt != "" {
 		systemInstruction = &Content{
@@ -104,7 +104,7 @@ func (cap *CodeAssistProvider) sessionParamsToVertexRequest(modelInfo *GeminiMod
 		}
 	}
 
-	return VertexGenerateContentRequest{
+	return GenerateContentRequest{
 		Contents:          params.Contents,
 		SystemInstruction: systemInstruction,
 		Tools:             tools,
