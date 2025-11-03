@@ -214,6 +214,16 @@ func createTables(db *sql.DB) error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS gemini_api_configs (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		api_key TEXT,
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		last_used_by_model TEXT DEFAULT '{}',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS shell_commands (
 		id TEXT PRIMARY KEY,
 		branch_id TEXT NOT NULL,
@@ -1222,6 +1232,17 @@ type OpenAIConfig struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// GeminiAPIConfig represents a Gemini API configuration
+type GeminiAPIConfig struct {
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	APIKey          string               `json:"api_key"`
+	Enabled         bool                 `json:"enabled"`
+	LastUsedByModel map[string]time.Time `json:"last_used_by_model"`
+	CreatedAt       string               `json:"created_at"`
+	UpdatedAt       string               `json:"updated_at"`
+}
+
 // SearchResult represents a single search result
 type SearchResult struct {
 	MessageID   int    `json:"message_id"`
@@ -1379,6 +1400,220 @@ func GetOpenAIConfigs(db *sql.DB) ([]OpenAIConfig, error) {
 		return []OpenAIConfig{}, nil
 	}
 	return configs, nil
+}
+
+// MarshalTimeMap time.Time 맵을 JSON으로 변환 (기본 직렬화 사용)
+func MarshalTimeMap(m map[string]time.Time) ([]byte, error) {
+	return json.Marshal(m)
+}
+
+// UnmarshalTimeMap JSON을 time.Time 맵으로 변환
+func UnmarshalTimeMap(data string) (map[string]time.Time, error) {
+	var result map[string]time.Time
+	if data == "" || data == "null" {
+		return make(map[string]time.Time), nil
+	}
+
+	err := json.Unmarshal([]byte(data), &result)
+	if err != nil {
+		log.Printf("Failed to unmarshal time map: %v, data: %s", err, data)
+		return make(map[string]time.Time), nil
+	}
+	return result, nil
+}
+
+// GetGeminiAPIConfigs retrieves all Gemini API configurations from the database.
+func GetGeminiAPIConfigs(db *sql.DB) ([]GeminiAPIConfig, error) {
+	rows, err := db.Query("SELECT id, name, api_key, enabled, last_used_by_model, created_at, updated_at FROM gemini_api_configs ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query Gemini API configs: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []GeminiAPIConfig
+	for rows.Next() {
+		var config GeminiAPIConfig
+		var lastUsedByModelStr sql.NullString
+
+		err := rows.Scan(&config.ID, &config.Name, &config.APIKey, &config.Enabled, &lastUsedByModelStr, &config.CreatedAt, &config.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan Gemini API config: %w", err)
+		}
+
+		// JSON field deserialization - handle NULL
+		var jsonStr string
+		if lastUsedByModelStr.Valid {
+			jsonStr = lastUsedByModelStr.String
+		} else {
+			jsonStr = "{}"
+		}
+		config.LastUsedByModel, err = UnmarshalTimeMap(jsonStr)
+		if err != nil {
+			log.Printf("Failed to unmarshal last_used_by_model for config %s: %v", config.ID, err)
+			config.LastUsedByModel = make(map[string]time.Time)
+		}
+
+		configs = append(configs, config)
+	}
+	if configs == nil {
+		return []GeminiAPIConfig{}, nil
+	}
+	return configs, nil
+}
+
+// GetNextGeminiAPIConfig 모델별로 다음 API key 선택
+func GetNextGeminiAPIConfig(db *sql.DB, modelName string) (*GeminiAPIConfig, error) {
+	configs, err := GetGeminiAPIConfigs(db)
+	if err != nil {
+		return nil, err
+	}
+
+	var selectedConfig *GeminiAPIConfig
+	var oldestTime time.Time = time.Now() // 현재 시간으로 초기화
+
+	for _, config := range configs {
+		if !config.Enabled {
+			continue
+		}
+
+		// 해당 모델의 last_used 시간 가져오기
+		lastUsed := config.LastUsedByModel[modelName]
+
+		// 사용 기록이 없으면 zero time으로 취급 (가장 오래된 것)
+		if lastUsed.IsZero() {
+			lastUsed = time.Time{}
+		}
+
+		// 가장 오래된 것 선택
+		if lastUsed.Before(oldestTime) {
+			oldestTime = lastUsed
+			selectedConfig = &config
+		}
+	}
+
+	return selectedConfig, nil
+}
+
+// UpdateModelLastUsed 특정 모델의 마지막 사용 시간 업데이트
+func UpdateModelLastUsed(db *sql.DB, id, modelName string) error {
+	// 현재 설정 가져오기
+	config, err := GetGeminiAPIConfig(db, id)
+	if err != nil {
+		return err
+	}
+
+	// 맵 초기화 및 업데이트
+	if config.LastUsedByModel == nil {
+		config.LastUsedByModel = make(map[string]time.Time)
+	}
+	config.LastUsedByModel[modelName] = time.Now()
+
+	// JSON으로 변환 (time.Time이 자동으로 RFC3339로 serialize됨)
+	lastUsedJSON, err := MarshalTimeMap(config.LastUsedByModel)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		UPDATE gemini_api_configs
+		SET last_used_by_model = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, string(lastUsedJSON), id)
+
+	return err
+}
+
+// HandleModelRateLimit 특정 모델의 rate limit 처리
+func HandleModelRateLimit(db *sql.DB, id, modelName string, retryAfter time.Duration) error {
+	// 현재 시간 + retryAfter + 버퍼(30초) 로 설정
+	futureTime := time.Now().Add(retryAfter).Add(30 * time.Second)
+
+	// 현재 설정 가져오기
+	config, err := GetGeminiAPIConfig(db, id)
+	if err != nil {
+		return err
+	}
+
+	// 맵 초기화 및 업데이트
+	if config.LastUsedByModel == nil {
+		config.LastUsedByModel = make(map[string]time.Time)
+	}
+	config.LastUsedByModel[modelName] = futureTime
+
+	// JSON으로 변환
+	lastUsedJSON, err := MarshalTimeMap(config.LastUsedByModel)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		UPDATE gemini_api_configs
+		SET last_used_by_model = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, string(lastUsedJSON), id)
+
+	return err
+}
+
+// SaveGeminiAPIConfig saves a Gemini API configuration to the database.
+func SaveGeminiAPIConfig(db *sql.DB, config GeminiAPIConfig) error {
+	_, err := db.Exec(`
+		INSERT OR REPLACE INTO gemini_api_configs (id, name, api_key, enabled, updated_at)
+		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+	`, config.ID, config.Name, config.APIKey, config.Enabled)
+	if err != nil {
+		return fmt.Errorf("failed to save Gemini API config: %w", err)
+	}
+	return nil
+}
+
+// GetGeminiAPIConfig retrieves a single Gemini API configuration by its ID.
+func GetGeminiAPIConfig(db *sql.DB, id string) (*GeminiAPIConfig, error) {
+	var config GeminiAPIConfig
+	var lastUsedByModelStr sql.NullString
+	err := db.QueryRow("SELECT id, name, api_key, enabled, last_used_by_model, created_at, updated_at FROM gemini_api_configs WHERE id = ?", id).
+		Scan(&config.ID, &config.Name, &config.APIKey, &config.Enabled, &lastUsedByModelStr, &config.CreatedAt, &config.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			//lint:ignore ST1005 Gemini is a proper noun
+			return nil, fmt.Errorf("Gemini API config with id %s not found", id)
+		}
+		return nil, fmt.Errorf("failed to get Gemini API config: %w", err)
+	}
+
+	// JSON field deserialization - handle NULL
+	var jsonStr string
+	if lastUsedByModelStr.Valid {
+		jsonStr = lastUsedByModelStr.String
+	} else {
+		jsonStr = "{}"
+	}
+	config.LastUsedByModel, err = UnmarshalTimeMap(jsonStr)
+	if err != nil {
+		log.Printf("Failed to unmarshal last_used_by_model for config %s: %v", config.ID, err)
+		config.LastUsedByModel = make(map[string]time.Time)
+	}
+
+	return &config, nil
+}
+
+// DeleteGeminiAPIConfig deletes a Gemini API configuration from the database.
+func DeleteGeminiAPIConfig(db *sql.DB, id string) error {
+	result, err := db.Exec("DELETE FROM gemini_api_configs WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete Gemini API config: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		//lint:ignore ST1005 Gemini is a proper noun
+		return fmt.Errorf("Gemini API config with id %s not found", id)
+	}
+	return nil
 }
 
 // GetOpenAIConfig retrieves a single OpenAI configuration by its ID.

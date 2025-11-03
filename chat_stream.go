@@ -584,7 +584,9 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		"AgentMessage": "",
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Create new context with database connection for subagent (no auth needed)
+	subagentCtx := contextWithGlobals(context.Background(), db, nil)
+	ctx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
 	provider, returnModelName, sessionNameGenParams := CurrentProviders[modelToUse].SubagentProviderAndParams(modelToUse, SubagentSessionNameTask)

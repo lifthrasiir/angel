@@ -8,7 +8,9 @@ import (
 	"iter"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 
@@ -44,6 +46,14 @@ func (ts *tokenSaverSource) Client(ctx context.Context) *http.Client {
 type CodeAssistProvider struct {
 	client *CodeAssistClient
 }
+
+// APIType defines which API to use
+type APIType string
+
+const (
+	APITypeCodeAssist APIType = "codeassist"
+	APITypeGemini     APIType = "gemini"
+)
 
 // geminiDefaultGenerationParams holds the default generation parameters for Gemini models
 var geminiDefaultGenerationParams = SessionGenerationParams{
@@ -126,41 +136,118 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
 
-	request := cap.sessionParamsToVertexRequest(modelInfo, params)
-	respBody, err := cap.client.StreamGenerateContent(ctx, modelName, request)
+	// Determine which API to use
+	apiType, err := cap.selectAPIType(ctx, modelName)
 	if err != nil {
-		log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
-		return nil, nil, err
+		log.Printf("SendMessageStream: Failed to select API type: %v", err)
+		// Fall back to Code Assist
+		apiType = APITypeCodeAssist
 	}
 
-	dec := json.NewDecoder(respBody)
+	switch apiType {
+	case APITypeGemini:
+		// Use Gemini API
+		geminiClient, config, err := cap.createGeminiAPIClient(ctx, modelName)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create Gemini API client: %w", err)
+		}
 
-	// NOTE: This function is intentionally designed to parse a specific JSON stream format,
-	// not standard SSE. Do not modify without understanding its purpose.
+		// Convert SessionParams to GenerateContentRequest
+		request := convertSessionParamsToGenerateRequest(modelInfo, params)
 
-	// Read the opening bracket of the JSON array
-	_, err = dec.Token()
-	if err != nil {
-		respBody.Close()
-		log.Printf("SendMessageStream: Expected opening bracket '[', but got %v", err)
-		return nil, nil, fmt.Errorf("expected opening bracket '[', but got %w", err)
-	}
-
-	// Create an iter.Seq that yields CaGenerateContentResponse
-	seq := func(yield func(CaGenerateContentResponse) bool) {
-		for dec.More() {
-			var caResp CaGenerateContentResponse
-			if err := dec.Decode(&caResp); err != nil {
-				log.Printf("SendMessageStream: Failed to decode JSON object from stream: %v", err)
-				return // Or handle error more robustly
+		respBody, err := geminiClient.StreamGenerateContent(ctx, modelName, request)
+		if err != nil {
+			// Check rate limit
+			if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
+				// Handle rate limit
+				go func() {
+					retryAfter := parseRetryAfter("")
+					db, _ := getDbFromContext(ctx)
+					HandleModelRateLimit(db, config.ID, modelName, retryAfter)
+					log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, modelName)
+				}()
+				return nil, nil, fmt.Errorf("rate limited for model %s", modelName)
 			}
-			if !yield(caResp) {
-				return
+			return nil, nil, fmt.Errorf("failed to call Gemini API: %w", err)
+		}
+
+		dec := json.NewDecoder(respBody)
+
+		// Gemini API returns a JSON array of responses
+		// Read the opening bracket of the JSON array
+		_, err = dec.Token()
+		if err != nil {
+			respBody.Close()
+			log.Printf("GeminiAPIProvider.SendMessageStream: Expected opening bracket '[', but got %v", err)
+			return nil, nil, fmt.Errorf("expected opening bracket '[', but got %w", err)
+		}
+
+		// Create an iter.Seq that yields CaGenerateContentResponse
+		seq := func(yield func(CaGenerateContentResponse) bool) {
+			for dec.More() {
+				var geminiResp GenerateContentResponse
+				if err := dec.Decode(&geminiResp); err != nil {
+					log.Printf("GeminiAPIProvider.SendMessageStream: Failed to decode JSON object from stream: %v", err)
+					return
+				}
+
+				// Wrap Gemini response in CaGenerateContentResponse
+				caResp := CaGenerateContentResponse{
+					Response: geminiResp,
+				}
+
+				if !yield(caResp) {
+					return
+				}
 			}
 		}
-	}
 
-	return seq, respBody, nil
+		return seq, respBody, nil
+
+	case APITypeCodeAssist:
+		// Use Code Assist API (existing logic)
+		request := cap.sessionParamsToVertexRequest(modelInfo, params)
+		respBody, err := cap.client.StreamGenerateContent(ctx, modelName, request)
+		if err != nil {
+			log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
+			return nil, nil, err
+		}
+
+		dec := json.NewDecoder(respBody)
+
+		// Code Assist returns a JSON array of responses
+		_, err = dec.Token()
+		if err != nil {
+			respBody.Close()
+			log.Printf("SendMessageStream: Expected opening bracket '[', but got %v", err)
+			return nil, nil, fmt.Errorf("expected opening bracket '[', but got %w", err)
+		}
+
+		// Create an iter.Seq that yields CaGenerateContentResponse
+		seq := func(yield func(CaGenerateContentResponse) bool) {
+			for dec.More() {
+				var geminiResp GenerateContentResponse
+				if err := dec.Decode(&geminiResp); err != nil {
+					log.Printf("SendMessageStream: Failed to decode JSON object from stream: %v", err)
+					return
+				}
+
+				// Wrap Gemini response in CaGenerateContentResponse
+				caResp := CaGenerateContentResponse{
+					Response: geminiResp,
+				}
+
+				if !yield(caResp) {
+					return
+				}
+			}
+		}
+
+		return seq, respBody, nil
+
+	default:
+		return nil, nil, fmt.Errorf("unsupported API type: %s", apiType)
+	}
 }
 
 // GenerateContentOneShot calls the streamGenerateContent of Code Assist API and returns a single response.
@@ -209,7 +296,60 @@ func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, model
 }
 
 func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
-	return cap.client.CountTokens(ctx, modelName, contents)
+	// Get database from context
+	db, err := getDbFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database from context: %w", err)
+	}
+
+	// Check if Gemini API is available
+	configs, err := GetGeminiAPIConfigs(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Gemini API configs: %w", err)
+	}
+
+	if len(configs) == 0 {
+		// Use Code Assist API
+		return cap.client.CountTokens(ctx, modelName, contents)
+	}
+
+	// Use Gemini API
+	// Get next available API key for the model
+	config, err := GetNextGeminiAPIConfig(db, modelName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Gemini API config: %w", err)
+	}
+	if config == nil {
+		// No available configs, fallback to Code Assist API
+		log.Printf("No available Gemini API configs, falling back to Code Assist API for model %s", modelName)
+		return cap.client.CountTokens(ctx, modelName, contents)
+	}
+
+	// Update last_used timestamp
+	defer UpdateModelLastUsed(db, config.ID, modelName)
+
+	// Create Gemini API client
+	clientProvider := NewGeminiAPIHTTPClientProvider(config.APIKey)
+	client := NewGeminiAPIClient(clientProvider, config.APIKey)
+
+	// Call Gemini API
+	response, err := client.CountTokens(ctx, modelName, contents)
+	if err != nil {
+		// Check rate limit
+		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
+			// Handle rate limit
+			go func() {
+				retryAfter := parseRetryAfter("")
+				HandleModelRateLimit(db, config.ID, modelName, retryAfter)
+				log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, modelName)
+			}()
+		}
+		// Fallback to Code Assist API
+		log.Printf("Gemini API CountTokens failed for model %s, falling back to Code Assist API: %v", modelName, err)
+		return cap.client.CountTokens(ctx, modelName, contents)
+	}
+
+	return response, nil
 }
 
 // MaxTokens implements the LLMProvider interface for CodeAssistProvider.
@@ -264,4 +404,155 @@ func (cap *CodeAssistProvider) SubagentProviderAndParams(modelName string, task 
 	}
 
 	return
+}
+
+// parseRetryAfter parses Retry-After header
+func parseRetryAfter(retryAfter string) time.Duration {
+	if retryAfter == "" {
+		return 60 * time.Second // default 60 seconds
+	}
+
+	// Try to parse as seconds
+	if seconds, err := strconv.Atoi(retryAfter); err == nil {
+		return time.Duration(seconds) * time.Second
+	}
+
+	// Try to parse as HTTP date
+	if t, err := http.ParseTime(retryAfter); err == nil {
+		return time.Until(t)
+	}
+
+	// Fallback to 60 seconds
+	return 60 * time.Second
+}
+
+// selectAPIType determines which API to use based on available configurations
+func (cap *CodeAssistProvider) selectAPIType(ctx context.Context, modelName string) (APIType, error) {
+	// Get database from context
+	db, err := getDbFromContext(ctx)
+	if err != nil {
+		return APITypeCodeAssist, fmt.Errorf("failed to get database from context: %w", err)
+	}
+
+	// Check if Gemini API configs are available
+	configs, err := GetGeminiAPIConfigs(db)
+	if err != nil {
+		log.Printf("Failed to load Gemini API configs, falling back to Code Assist: %v", err)
+		return APITypeCodeAssist, nil
+	}
+
+	// Check if there are enabled Gemini API configs
+	for _, config := range configs {
+		if config.Enabled {
+			log.Printf("Using Gemini API for model %s", modelName)
+			return APITypeGemini, nil
+		}
+	}
+
+	// No Gemini API configs available, use Code Assist
+	log.Printf("No enabled Gemini API configs found, using Code Assist for model %s", modelName)
+	return APITypeCodeAssist, nil
+}
+
+// createGeminiAPIClient creates a Gemini API client with appropriate API key selection
+func (cap *CodeAssistProvider) createGeminiAPIClient(ctx context.Context, modelName string) (*GeminiAPIClient, *GeminiAPIConfig, error) {
+	// Get database from context
+	db, err := getDbFromContext(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get database from context: %w", err)
+	}
+
+	// Select API key for this model
+	config, err := GetNextGeminiAPIConfig(db, modelName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get Gemini API config: %w", err)
+	}
+	if config == nil {
+		return nil, nil, fmt.Errorf("no enabled Gemini API config found")
+	}
+
+	// Create client
+	clientProvider := NewGeminiAPIHTTPClientProvider(config.APIKey)
+	client := NewGeminiAPIClient(clientProvider, config.APIKey)
+
+	// Update last_used for this model
+	UpdateModelLastUsed(db, config.ID, modelName)
+
+	return client, config, nil
+}
+
+// NewGeminiAPIHTTPClientProvider creates a simple HTTP client provider for Gemini API
+func NewGeminiAPIHTTPClientProvider(apiKey string) HTTPClientProvider {
+	return &geminiAPIHTTPClientProvider{apiKey: apiKey}
+}
+
+type geminiAPIHTTPClientProvider struct {
+	apiKey string
+}
+
+func (p *geminiAPIHTTPClientProvider) Client(ctx context.Context) *http.Client {
+	// For Gemini API, we just need a basic HTTP client
+	// The API key is added to the URL
+	return &http.Client{}
+}
+
+// convertSessionParamsToGenerateRequest converts SessionParams to GenerateContentRequest
+func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params SessionParams) GenerateContentRequest {
+	var systemInstruction *Content
+	if params.SystemPrompt != "" {
+		systemInstruction = &Content{
+			Parts: []Part{
+				{Text: params.SystemPrompt},
+			},
+		}
+	}
+
+	var tools []Tool
+	if modelInfo.ToolSupported {
+		tools = GetToolsForGemini()
+		if params.ToolConfig != nil {
+			if _, ok := params.ToolConfig[""]; ok {
+				// Remove the default tool list
+				tools = nil
+			}
+			if _, ok := params.ToolConfig[GeminiUrlContextToolName]; ok {
+				// Add a new Tool with URLContext
+				tools = append(tools, Tool{URLContext: &URLContext{}})
+			}
+			if _, ok := params.ToolConfig[GeminiCodeExecutionToolName]; ok {
+				// Add a new Tool with CodeExecution
+				tools = append(tools, Tool{CodeExecution: &CodeExecution{}})
+			}
+		}
+	}
+
+	includeThoughts := params.IncludeThoughts && modelInfo.ThoughtEnabled
+
+	// Determine final generation parameters, prioritizing SessionParams
+	genParams := geminiDefaultGenerationParams
+	if params.GenerationParams != nil {
+		if params.GenerationParams.Temperature >= 0 { // Assuming >=0 means set
+			genParams.Temperature = params.GenerationParams.Temperature
+		}
+		if params.GenerationParams.TopP >= 0 { // Assuming >=0 means set
+			genParams.TopP = params.GenerationParams.TopP
+		}
+		if params.GenerationParams.TopK >= 0 { // Assuming >=0 means set
+			genParams.TopK = params.GenerationParams.TopK
+		}
+	}
+
+	return GenerateContentRequest{
+		Contents:          params.Contents,
+		SystemInstruction: systemInstruction,
+		Tools:             tools,
+		GenerationConfig: &GenerationConfig{
+			ThinkingConfig: &ThinkingConfig{
+				IncludeThoughts: includeThoughts,
+			},
+			Temperature: &genParams.Temperature,
+			TopP:        &genParams.TopP,
+			TopK:        &genParams.TopK,
+		},
+	}
 }

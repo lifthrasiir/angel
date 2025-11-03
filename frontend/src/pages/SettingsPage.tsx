@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAtom } from 'jotai';
 import MCPSettings from '../components/MCPSettings'; // Import the new component
 import OpenAISettings from '../components/OpenAISettings'; // Import OpenAI settings component
+import GeminiAPISettings from '../components/GeminiAPISettings'; // Import Gemini API settings component
 import SystemPromptEditor, { PredefinedPrompt } from '../components/SystemPromptEditor'; // Import SystemPromptEditor and PredefinedPrompt type
 
 import { globalPromptsAtom } from '../atoms/chatAtoms';
@@ -238,6 +239,10 @@ const SettingsPage: React.FC = () => {
             </button>
           </p>
         )}
+
+        <hr style={{ margin: '30px 0', border: 'none', borderTop: '1px solid #eee' }} />
+
+        <GeminiAPISettings />
       </div>
     );
   };

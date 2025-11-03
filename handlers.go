@@ -797,3 +797,56 @@ func refreshOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 
 	sendJSONResponse(w, models)
 }
+
+// getGeminiAPIConfigsHandler handles GET requests for /api/gemini-api-configs
+func getGeminiAPIConfigsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	configs, err := GetGeminiAPIConfigs(db)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to retrieve Gemini API configs")
+		return
+	}
+
+	sendJSONResponse(w, configs)
+}
+
+// saveGeminiAPIConfigHandler handles POST requests for /api/gemini-api-configs
+func saveGeminiAPIConfigHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	var config GeminiAPIConfig
+	if !decodeJSONRequest(r, w, &config, "saveGeminiAPIConfigHandler") {
+		return
+	}
+
+	// Generate ID if not provided
+	if config.ID == "" {
+		config.ID = generateID()
+	}
+
+	if err := SaveGeminiAPIConfig(db, config); err != nil {
+		sendInternalServerError(w, r, err, "Failed to save Gemini API config")
+		return
+	}
+
+	sendJSONResponse(w, config)
+}
+
+// deleteGeminiAPIConfigHandler handles DELETE requests for /api/gemini-api-configs/{id}
+func deleteGeminiAPIConfigHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		sendBadRequestError(w, r, "Gemini API config ID is required")
+		return
+	}
+
+	if err := DeleteGeminiAPIConfig(db, id); err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete Gemini API config %s", id))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}

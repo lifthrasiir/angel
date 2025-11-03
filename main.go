@@ -265,6 +265,12 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/openai-configs/{id}", deleteOpenAIConfigHandler).Methods("DELETE")
 	router.HandleFunc("/api/openai-configs/{id}/models", getOpenAIModelsHandler).Methods("GET")
 	router.HandleFunc("/api/openai-configs/{id}/models/refresh", refreshOpenAIModelsHandler).Methods("POST")
+
+	// Gemini API configuration endpoints
+	router.HandleFunc("/api/gemini-api-configs", getGeminiAPIConfigsHandler).Methods("GET")
+	router.HandleFunc("/api/gemini-api-configs", saveGeminiAPIConfigHandler).Methods("POST")
+	router.HandleFunc("/api/gemini-api-configs/{id}", deleteGeminiAPIConfigHandler).Methods("DELETE")
+
 	router.HandleFunc("/api/ui/directory", handleDirectoryNavigation).Methods("GET")
 	router.HandleFunc("/api/ui/directory", handlePickDirectory).Methods("POST")
 	router.HandleFunc("/api", handleNotFound)
@@ -427,7 +433,9 @@ const (
 
 func contextWithGlobals(ctx context.Context, db *sql.DB, auth Auth) context.Context {
 	ctx = context.WithValue(ctx, dbKey, db)
-	ctx = auth.SetAuthContext(ctx, auth) // Use the Auth interface's SetAuthContext method
+	if auth != nil {
+		ctx = auth.SetAuthContext(ctx, auth) // Use the Auth interface's SetAuthContext method
+	}
 	return ctx
 }
 
