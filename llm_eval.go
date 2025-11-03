@@ -24,7 +24,7 @@ func (p *AngelEvalProvider) ModelName() string {
 }
 
 // SendMessageStream processes the Forth-like language and streams responses.
-func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	// Find the last user message with actual text content and check for saved state
 	var input string
 	var savedState *EvalState
@@ -115,7 +115,7 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 	}
 
 	// Calculate initial prompt token count (fixed)
-	initialPromptTokenCountResp, err := p.CountTokens(ctx, params.Contents)
+	initialPromptTokenCountResp, err := p.CountTokens(ctx, modelName, params.Contents)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to count tokens for angel-eval prompt: %w", err)
 	}
@@ -130,7 +130,7 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 			currentResponsePartTokens := 0
 			if len(resp.Response.Candidates) > 0 && resp.Response.Candidates[0].Content.Parts != nil {
 				// Use the placeholder CountTokens for the current response part
-				partTokenResp, err := p.CountTokens(ctx, []Content{resp.Response.Candidates[0].Content})
+				partTokenResp, err := p.CountTokens(ctx, modelName, []Content{resp.Response.Candidates[0].Content})
 				if err == nil {
 					currentResponsePartTokens = partTokenResp.TotalTokens
 				}
@@ -163,12 +163,12 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, params Sessio
 }
 
 // GenerateContentOneShot is not fully supported for angel-eval, as it's stream-based.
-func (p *AngelEvalProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
+func (p *AngelEvalProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
 	return OneShotResult{}, fmt.Errorf("GenerateContentOneShot not supported for angel-eval, use SendMessageStream")
 }
 
 // CountTokens is a placeholder for angel-eval.
-func (p *AngelEvalProvider) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
+func (p *AngelEvalProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 	totalTokens := 0
 	for _, content := range contents {
 		for _, part := range content.Parts {
@@ -180,22 +180,22 @@ func (p *AngelEvalProvider) CountTokens(ctx context.Context, contents []Content)
 }
 
 // MaxTokens is a placeholder for angel-eval.
-func (p *AngelEvalProvider) MaxTokens() int {
+func (p *AngelEvalProvider) MaxTokens(modelName string) int {
 	return 1024 // A reasonable default for a simple eval model
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface for AngelEvalProvider.
-func (p *AngelEvalProvider) RelativeDisplayOrder() int {
+func (p *AngelEvalProvider) RelativeDisplayOrder(modelName string) int {
 	return -100
 }
 
-func (p *AngelEvalProvider) DefaultGenerationParams() SessionGenerationParams {
+func (p *AngelEvalProvider) DefaultGenerationParams(modelName string) SessionGenerationParams {
 	return SessionGenerationParams{}
 }
 
 // SubagentProviderAndParams implements the LLMProvider interface for AngelEvalProvider.
-func (p *AngelEvalProvider) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
-	return p, SessionGenerationParams{
+func (p *AngelEvalProvider) SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
+	return p, modelName, SessionGenerationParams{
 		Temperature: 0.0,
 		TopK:        -1,
 		TopP:        1.0,

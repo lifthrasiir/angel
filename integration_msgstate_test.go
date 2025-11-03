@@ -24,37 +24,33 @@ type testProviderWrapper struct {
 	captureParams *SessionParams
 }
 
-func (w *testProviderWrapper) ModelName() string {
-	return w.original.ModelName()
-}
-
-func (w *testProviderWrapper) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (w *testProviderWrapper) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	*w.captureParams = params // Capture the SessionParams
-	return w.original.SendMessageStream(ctx, params)
+	return w.original.SendMessageStream(ctx, modelName, params)
 }
 
-func (w *testProviderWrapper) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
-	return w.original.GenerateContentOneShot(ctx, params)
+func (w *testProviderWrapper) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
+	return w.original.GenerateContentOneShot(ctx, modelName, params)
 }
 
-func (w *testProviderWrapper) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
-	return w.original.CountTokens(ctx, contents)
+func (w *testProviderWrapper) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
+	return w.original.CountTokens(ctx, modelName, contents)
 }
 
-func (w *testProviderWrapper) MaxTokens() int {
-	return w.original.MaxTokens()
+func (w *testProviderWrapper) MaxTokens(modelName string) int {
+	return w.original.MaxTokens(modelName)
 }
 
-func (w *testProviderWrapper) RelativeDisplayOrder() int {
-	return w.original.RelativeDisplayOrder()
+func (w *testProviderWrapper) RelativeDisplayOrder(modelName string) int {
+	return w.original.RelativeDisplayOrder(modelName)
 }
 
-func (w *testProviderWrapper) DefaultGenerationParams() SessionGenerationParams {
-	return w.original.DefaultGenerationParams()
+func (w *testProviderWrapper) DefaultGenerationParams(modelName string) SessionGenerationParams {
+	return w.original.DefaultGenerationParams(modelName)
 }
 
-func (w *testProviderWrapper) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
-	return w.original.SubagentProviderAndParams(task)
+func (w *testProviderWrapper) SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
+	return w.original.SubagentProviderAndParams(modelName, task)
 }
 
 func TestThoughtSignatureHandling(t *testing.T) {

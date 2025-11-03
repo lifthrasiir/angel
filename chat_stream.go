@@ -62,7 +62,7 @@ func streamLLMResponse(
 			return err
 		}
 
-		seq, closer, err := provider.SendMessageStream(ctx, SessionParams{
+		seq, closer, err := provider.SendMessageStream(ctx, mc.LastMessageModel, SessionParams{
 			Contents:        currentHistory,
 			SystemPrompt:    initialState.SystemPrompt,
 			IncludeThoughts: true,
@@ -587,13 +587,13 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	provider, sessionNameGenParams := CurrentProviders[modelToUse].SubagentProviderAndParams(SubagentSessionNameTask)
+	provider, returnModelName, sessionNameGenParams := CurrentProviders[modelToUse].SubagentProviderAndParams(modelToUse, SubagentSessionNameTask)
 	if provider == nil {
 		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return
 	}
 
-	oneShotResult, err := provider.GenerateContentOneShot(ctx, SessionParams{
+	oneShotResult, err := provider.GenerateContentOneShot(ctx, returnModelName, SessionParams{
 		Contents: []Content{
 			{
 				Role:  RoleUser,

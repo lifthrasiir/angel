@@ -22,7 +22,7 @@ func TestInlineDataStreaming(t *testing.T) {
 
 	// Mock the SendMessageStream method to simulate inlineData response
 	mockLLMProvider := CurrentProviders[DefaultGeminiModel].(*MockLLMProvider)
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 		// Create a mock response with text and inlineData
 		responses := []CaGenerateContentResponse{
 			{
@@ -210,7 +210,7 @@ func TestInlineDataCounterReset(t *testing.T) {
 	mockLLMProvider := CurrentProviders[DefaultGeminiModel].(*MockLLMProvider)
 
 	var callCount int = 0
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 		callCount++
 
 		responses := []CaGenerateContentResponse{

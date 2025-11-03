@@ -27,11 +27,7 @@ type MockGeminiProvider struct {
 }
 
 // ModelName implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) ModelName() string {
-	return "gemini-2.5-flash"
-}
-
-func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	if m.Err != nil {
 		return nil, nil, m.Err
 	}
@@ -73,32 +69,32 @@ func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, params Sessi
 	return seq, &mockCloser{}, nil // Return a mock io.Closer
 }
 
-func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
+func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
 	return OneShotResult{Text: "inferred name"}, nil
 }
 
-func (m *MockGeminiProvider) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
+func (m *MockGeminiProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 	return &CaCountTokenResponse{TotalTokens: 10}, nil
 }
 
 // MaxTokens is a placeholder for angel-eval.
-func (m *MockGeminiProvider) MaxTokens() int {
+func (m *MockGeminiProvider) MaxTokens(modelName string) int {
 	return 1024 // A reasonable default for a simple eval model
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) RelativeDisplayOrder() int {
+func (m *MockGeminiProvider) RelativeDisplayOrder(modelName string) int {
 	return 0
 }
 
 // DefaultGenerationParams implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) DefaultGenerationParams() SessionGenerationParams {
+func (m *MockGeminiProvider) DefaultGenerationParams(modelName string) SessionGenerationParams {
 	return SessionGenerationParams{}
 }
 
 // SubagentProviderAndParams implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) SubagentProviderAndParams(task string) (LLMProvider, SessionGenerationParams) {
-	return m, SessionGenerationParams{}
+func (m *MockGeminiProvider) SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
+	return m, modelName, SessionGenerationParams{}
 }
 
 // mockCloser implements io.Closer for testing purposes
@@ -833,6 +829,9 @@ func TestSyncDuringThought(t *testing.T) {
 					receivedModelMessage2 += message.Parts[0].Text
 				}
 			}
+		case EventWorkspaceHint:
+			// Expected but do nothing
+			continue
 		case EventInitialStateNoCall:
 			err := json.Unmarshal([]byte(event.Payload), &initialState2)
 			if err != nil {
@@ -1017,7 +1016,7 @@ func TestSyncDuringResponse(t *testing.T) {
 				t.Errorf("Second client did not receive model F. Got: %s", receivedModelMessage2)
 			}
 			return
-		case EventSessionName:
+		case EventSessionName, EventWorkspaceHint:
 			// Expected but do nothing
 		default:
 			t.Errorf("Unexpected event type: %c", event.Type)
@@ -1171,7 +1170,7 @@ func TestCancelDuringSync(t *testing.T) {
 			case EventComplete:
 				close(stream2Finished)
 				return // Exit the goroutine
-			case EventSessionName:
+			case EventSessionName, EventWorkspaceHint:
 				// Expected but do nothing
 			default:
 				t.Errorf("Unexpected event type: %c", event.Type)
@@ -1244,6 +1243,8 @@ func TestCancelDuringSync(t *testing.T) {
 			if len(initialState3.History) >= 6 && initialState3.History[5].Type != "model_error" {
 				errorInInitialState = true
 			}
+		case EventWorkspaceHint:
+			// Expected but do nothing
 		default:
 			t.Errorf("Unexpected event type: %c", event.Type)
 			return

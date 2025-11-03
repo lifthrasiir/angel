@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
@@ -24,12 +25,12 @@ var _ LLMProvider = (*OpenAIClient)(nil)
 
 // OpenAIClient implements the LLMProvider interface for OpenAI-compatible APIs
 type OpenAIClient struct {
-	config        *OpenAIConfig
-	modelName     string
-	httpClient    *http.Client
-	modelsCache   map[string][]OpenAIModel
-	cacheTime     time.Time
-	contextLength int // 0 means unknown/not probed yet
+	config           *OpenAIConfig
+	httpClient       *http.Client
+	modelsCache      map[string][]OpenAIModel
+	cacheTime        time.Time
+	contextLengths   map[string]int
+	contextLengthsMu sync.RWMutex
 }
 
 // OpenAIModel represents a model from OpenAI-compatible API
@@ -39,6 +40,9 @@ type OpenAIModel struct {
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
 }
+
+// Global cache for OpenAI clients to avoid duplication
+var openaiClients = make(map[string]*OpenAIClient)
 
 // OpenAIModelsResponse represents the response from /v1/models endpoint
 type OpenAIModelsResponse struct {
@@ -330,23 +334,47 @@ func convertGeminiSchemaToJSONSchema(geminiSchema *Schema) map[string]interface{
 	return jsonSchema
 }
 
-// NewOpenAIClient creates a new OpenAI-compatible client
+// NewOpenAIClient creates a new OpenAI-compatible client with shared instances
 func NewOpenAIClient(config *OpenAIConfig, modelName string) *OpenAIClient {
-	client := &OpenAIClient{
-		config:      config,
-		modelName:   modelName,
-		httpClient:  &http.Client{Timeout: 60 * time.Second},
-		modelsCache: make(map[string][]OpenAIModel),
-		cacheTime:   time.Time{},
+	// Create a unique key for this config
+	configKey := fmt.Sprintf("%s|%s", config.Endpoint, config.APIKey)
+
+	// Check if we already have a client for this config
+	if client, exists := openaiClients[configKey]; exists {
+		return client
 	}
+
+	// Create new client
+	client := &OpenAIClient{
+		config:         config,
+		httpClient:     &http.Client{Timeout: 60 * time.Second},
+		modelsCache:    make(map[string][]OpenAIModel),
+		cacheTime:      time.Time{},
+		contextLengths: make(map[string]int),
+	}
+
+	// Cache the client
+	openaiClients[configKey] = client
 
 	return client
 }
 
 // probeContextLength tries to detect context length for known OpenAI-compatible APIs
-func (c *OpenAIClient) probeContextLength() int {
+func (c *OpenAIClient) probeContextLength(modelName string) int {
+	// Check cache first
+	c.contextLengthsMu.RLock()
+	if length, exists := c.contextLengths[modelName]; exists {
+		c.contextLengthsMu.RUnlock()
+		return length
+	}
+	c.contextLengthsMu.RUnlock()
+
 	// Try Ollama API first
-	if length := c.probeOllamaContextLength(); length > 0 {
+	if length := c.probeOllamaContextLength(modelName); length > 0 {
+		// Cache the result
+		c.contextLengthsMu.Lock()
+		c.contextLengths[modelName] = length
+		c.contextLengthsMu.Unlock()
 		return length
 	}
 
@@ -355,10 +383,10 @@ func (c *OpenAIClient) probeContextLength() int {
 }
 
 // probeOllamaContextLength uses ../api/show endpoint to get model details
-func (c *OpenAIClient) probeOllamaContextLength() int {
+func (c *OpenAIClient) probeOllamaContextLength(modelName string) int {
 	apiURL, _ := url.JoinPath(c.config.Endpoint, "../api/show")
 
-	reqBody := OllamaShowRequest{Model: c.modelName}
+	reqBody := OllamaShowRequest{Model: modelName}
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		log.Printf("Failed to marshal Ollama show request: %v", err)
@@ -395,7 +423,7 @@ func (c *OpenAIClient) probeOllamaContextLength() int {
 		for key, value := range modelInfo.ModelInfo {
 			if strings.HasSuffix(key, ".context_length") {
 				if contextLength, ok := value.(float64); ok && contextLength > 0 {
-					log.Printf("Detected context length for %s: %d", c.modelName, int(contextLength))
+					log.Printf("Detected context length for %s: %d", modelName, int(contextLength))
 					return int(contextLength)
 				}
 			}
@@ -403,11 +431,6 @@ func (c *OpenAIClient) probeOllamaContextLength() int {
 	}
 
 	return 0
-}
-
-// ModelName implements the LLMProvider interface
-func (c *OpenAIClient) ModelName() string {
-	return c.modelName
 }
 
 // GetModels retrieves available models from the API with 24-hour caching
@@ -465,12 +488,12 @@ func (c *OpenAIClient) RefreshModels(ctx context.Context) ([]OpenAIModel, error)
 }
 
 // SendMessageStream implements the LLMProvider interface for streaming chat completions
-func (c *OpenAIClient) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 	// Convert contents to OpenAI chat messages
 	messages := convertGeminiToOpenAIContent(params.Contents)
 
 	// Get default generation parameters
-	genParams := c.DefaultGenerationParams()
+	genParams := c.DefaultGenerationParams(modelName)
 
 	// Apply session-specific parameters if provided
 	if params.GenerationParams != nil {
@@ -495,7 +518,7 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, params SessionPara
 
 	// Prepare request
 	req := OpenAIChatRequest{
-		Model:       c.modelName,
+		Model:       modelName,
 		Messages:    messages,
 		Temperature: &genParams.Temperature,
 		TopP:        &genParams.TopP,
@@ -688,8 +711,8 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, params SessionPara
 }
 
 // GenerateContentOneShot implements the LLMProvider interface for non-streaming completion
-func (c *OpenAIClient) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
-	seq, closer, err := c.SendMessageStream(ctx, params)
+func (c *OpenAIClient) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
+	seq, closer, err := c.SendMessageStream(ctx, modelName, params)
 	if err != nil {
 		return OneShotResult{}, err
 	}
@@ -727,7 +750,7 @@ func (c *OpenAIClient) GenerateContentOneShot(ctx context.Context, params Sessio
 
 // CountTokens implements the LLMProvider interface
 // Note: OpenAI-compatible APIs may not support token counting, so we'll estimate
-func (c *OpenAIClient) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
+func (c *OpenAIClient) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 	// Simple token estimation (rough approximation: 1 token ≈ 4 characters)
 	totalChars := 0
 	for _, content := range contents {
@@ -749,9 +772,9 @@ func (c *OpenAIClient) CountTokens(ctx context.Context, contents []Content) (*Ca
 }
 
 // MaxTokens implements the LLMProvider interface
-func (c *OpenAIClient) MaxTokens() int {
+func (c *OpenAIClient) MaxTokens(modelName string) int {
 	// First check known model context lengths
-	switch c.modelName {
+	switch modelName {
 	// All public OpenAI models as of 2025-10-15
 	case "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-codex", "gpt-5-pro":
 		return 400000
@@ -798,29 +821,21 @@ func (c *OpenAIClient) MaxTokens() int {
 		return 131072
 	}
 
-	// If we have already probed context length and it's available, use it
-	if c.contextLength > 0 {
-		return c.contextLength
-	}
-
-	// For unknown models, try to probe context length (cached)
-	if c.contextLength == 0 && c.modelName != "" {
-		c.contextLength = c.probeContextLength()
-		if c.contextLength > 0 {
-			return c.contextLength
-		}
+	// Check cache for probed context length
+	if length := c.probeContextLength(modelName); length > 0 {
+		return length
 	}
 
 	return 4096 // Safe default
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface
-func (c *OpenAIClient) RelativeDisplayOrder() int {
+func (c *OpenAIClient) RelativeDisplayOrder(modelName string) int {
 	return 5 // Lower priority than Gemini models
 }
 
 // DefaultGenerationParams implements the LLMProvider interface
-func (c *OpenAIClient) DefaultGenerationParams() SessionGenerationParams {
+func (c *OpenAIClient) DefaultGenerationParams(modelName string) SessionGenerationParams {
 	return SessionGenerationParams{
 		Temperature: 0.7,
 		TopK:        -1, // Not supported by OpenAI
@@ -829,15 +844,25 @@ func (c *OpenAIClient) DefaultGenerationParams() SessionGenerationParams {
 }
 
 // SubagentProviderAndParams implements the LLMProvider interface
-func (c *OpenAIClient) SubagentProviderAndParams(task string) (provider LLMProvider, params SessionGenerationParams) {
+func (c *OpenAIClient) SubagentProviderAndParams(modelName string, task string) (provider LLMProvider, returnModelName string, params SessionGenerationParams) {
 	provider = c
+	returnModelName = modelName
 	params = SessionGenerationParams{
 		Temperature: 0.0,
 		TopK:        -1,
 		TopP:        1.0,
 	}
 	if task == SubagentImageGenerationTask {
-		provider = geminiFlashImageClient
+		// For image generation, always use gemini-2.5-flash-image-preview
+		const geminiModelName = "gemini-2.5-flash-image-preview"
+		if fallbackProvider, ok := CurrentProviders[geminiModelName]; ok {
+			provider = fallbackProvider
+			returnModelName = geminiModelName
+			return
+		} else {
+			// If no Gemini provider is available, log the error
+			log.Printf("Image generation task requested but no Gemini provider available")
+		}
 	}
 	return
 }
@@ -868,6 +893,11 @@ func InitOpenAIProviders(db *sql.DB) {
 			modelClient := NewOpenAIClient(&config, model.ID)
 			CurrentProviders[model.ID] = modelClient
 			log.Printf("Registered OpenAI model: %s (from config: %s)", model.ID, config.Name)
+
+			// Pre-warm MaxTokens cache asynchronously
+			go func(modelName string, provider LLMProvider) {
+				_ = provider.MaxTokens(modelName)
+			}(model.ID, modelClient)
 		}
 	}
 }
@@ -928,6 +958,11 @@ func ReloadOpenAIProviders(db *sql.DB) {
 				modelClient := NewOpenAIClient(&config, model.ID)
 				CurrentProviders[model.ID] = modelClient
 				log.Printf("Registered/updated OpenAI model: %s (from config: %s)", model.ID, config.Name)
+
+				// Pre-warm MaxTokens cache asynchronously
+				go func(modelName string, provider LLMProvider) {
+					_ = provider.MaxTokens(modelName)
+				}(model.ID, modelClient)
 			}
 		}
 	}

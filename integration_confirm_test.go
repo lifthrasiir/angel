@@ -214,6 +214,8 @@ func TestConfirmationApproval(t *testing.T) {
 			receivedCompleteAfterApproval = true
 		case EventError:
 			t.Fatalf("Received EventError during approval: %s", event.Payload)
+		case EventWorkspaceHint:
+			// Expected but do nothing
 		default:
 			t.Errorf("Unexpected event type during approval: %c", event.Type)
 		}

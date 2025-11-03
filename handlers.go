@@ -217,7 +217,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp, err := provider.CountTokens(context.Background(), contents)
+	resp, err := provider.CountTokens(context.Background(), modelName, contents)
 	if err != nil {
 		if apiErr, ok := err.(*APIError); ok {
 			http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", apiErr.Message), apiErr.StatusCode)
@@ -442,8 +442,8 @@ func listModelsHandler(w http.ResponseWriter, r *http.Request) {
 	for modelName, provider := range CurrentProviders {
 		sortableModels = append(sortableModels, sortableModelInfo{
 			Name:                 modelName,
-			MaxTokens:            provider.MaxTokens(),
-			RelativeDisplayOrder: provider.RelativeDisplayOrder(),
+			MaxTokens:            provider.MaxTokens(modelName),
+			RelativeDisplayOrder: provider.RelativeDisplayOrder(modelName),
 		})
 	}
 

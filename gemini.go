@@ -45,13 +45,11 @@ type CodeAssistProvider struct {
 	client *CodeAssistClient
 }
 
-var geminiFlashClient *CodeAssistProvider
-var geminiFlashLiteClient *CodeAssistProvider
-var geminiFlashImageClient *CodeAssistProvider
-
-// ModelName implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) ModelName() string {
-	return cap.client.ModelName
+// geminiDefaultGenerationParams holds the default generation parameters for Gemini models
+var geminiDefaultGenerationParams = SessionGenerationParams{
+	Temperature: 1.0,
+	TopK:        64,
+	TopP:        0.95,
 }
 
 // Reserved names for Gemini's internal tools.
@@ -60,8 +58,8 @@ const (
 	GeminiCodeExecutionToolName = ".code_execution"
 )
 
-// SessionParamsToVertexRequest converts SessionParams to VertexGenerateContentRequest
-func (cap *CodeAssistProvider) SessionParamsToVertexRequest(params SessionParams) VertexGenerateContentRequest {
+// sessionParamsToVertexRequest converts SessionParams to VertexGenerateContentRequest (private)
+func (cap *CodeAssistProvider) sessionParamsToVertexRequest(modelInfo *GeminiModel, params SessionParams) VertexGenerateContentRequest {
 	var systemInstruction *Content
 	if params.SystemPrompt != "" {
 		systemInstruction = &Content{
@@ -72,7 +70,7 @@ func (cap *CodeAssistProvider) SessionParamsToVertexRequest(params SessionParams
 	}
 
 	var tools []Tool
-	if cap.client.ToolSupported {
+	if modelInfo.ToolSupported {
 		tools = GetToolsForGemini()
 		if params.ToolConfig != nil {
 			if _, ok := params.ToolConfig[""]; ok {
@@ -90,15 +88,10 @@ func (cap *CodeAssistProvider) SessionParamsToVertexRequest(params SessionParams
 		}
 	}
 
-	includeThoughts := params.IncludeThoughts
-	if !cap.client.ThoughtEnabled {
-		includeThoughts = false
-	}
-
-	// Get default generation parameters
-	genParams := cap.DefaultGenerationParams()
+	includeThoughts := params.IncludeThoughts && modelInfo.ThoughtEnabled
 
 	// Determine final generation parameters, prioritizing SessionParams
+	genParams := geminiDefaultGenerationParams
 	if params.GenerationParams != nil {
 		if params.GenerationParams.Temperature >= 0 { // Assuming >=0 means set
 			genParams.Temperature = params.GenerationParams.Temperature
@@ -127,9 +120,14 @@ func (cap *CodeAssistProvider) SessionParamsToVertexRequest(params SessionParams
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
-func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
-	request := cap.SessionParamsToVertexRequest(params)
-	respBody, err := cap.client.StreamGenerateContent(ctx, request)
+func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	modelInfo := GeminiModelInfo(modelName)
+	if modelInfo == nil {
+		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
+	}
+
+	request := cap.sessionParamsToVertexRequest(modelInfo, params)
+	respBody, err := cap.client.StreamGenerateContent(ctx, modelName, request)
 	if err != nil {
 		log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
 		return nil, nil, err
@@ -166,8 +164,8 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, params Ses
 }
 
 // GenerateContentOneShot calls the streamGenerateContent of Code Assist API and returns a single response.
-func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
-	seq, closer, err := cap.SendMessageStream(ctx, params)
+func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
+	seq, closer, err := cap.SendMessageStream(ctx, modelName, params)
 	if err != nil {
 		log.Printf("GenerateContentOneShot: SendMessageStream failed: %v", err)
 		return OneShotResult{}, err
@@ -210,13 +208,13 @@ func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, param
 	return OneShotResult{}, fmt.Errorf("no text content found in LLM response")
 }
 
-func (cap *CodeAssistProvider) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
-	return cap.client.CountTokens(ctx, contents)
+func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
+	return cap.client.CountTokens(ctx, modelName, contents)
 }
 
 // MaxTokens implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) MaxTokens() int {
-	switch cap.client.ModelName {
+func (cap *CodeAssistProvider) MaxTokens(modelName string) int {
+	switch modelName {
 	case "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
 		return 1048576
 	case "gemini-2.5-flash-image-preview":
@@ -227,8 +225,8 @@ func (cap *CodeAssistProvider) MaxTokens() int {
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) RelativeDisplayOrder() int {
-	switch cap.client.ModelName {
+func (cap *CodeAssistProvider) RelativeDisplayOrder(modelName string) int {
+	switch modelName {
 	case "gemini-2.5-flash":
 		return 10
 	case "gemini-2.5-pro":
@@ -243,29 +241,26 @@ func (cap *CodeAssistProvider) RelativeDisplayOrder() int {
 }
 
 // DefaultGenerationParams implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) DefaultGenerationParams() SessionGenerationParams {
-	// For gemini-2.5-flash and gemini-2.5-pro
-	return SessionGenerationParams{
-		Temperature: 1.0,
-		TopK:        64,
-		TopP:        0.95,
-	}
+func (cap *CodeAssistProvider) DefaultGenerationParams(modelName string) SessionGenerationParams {
+	return geminiDefaultGenerationParams
 }
 
 // SubagentProviderAndParams implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) SubagentProviderAndParams(task string) (provider LLMProvider, params SessionGenerationParams) {
+func (cap *CodeAssistProvider) SubagentProviderAndParams(modelName string, task string) (provider LLMProvider, returnModelName string, params SessionGenerationParams) {
 	params = SessionGenerationParams{
 		Temperature: 0.0,
 		TopK:        -1,
 		TopP:        1.0,
 	}
 
+	provider = cap // Return self as provider
+
 	if task == SubagentImageGenerationTask {
-		provider = geminiFlashImageClient
-	} else if cap.client.ModelName == "gemini-2.5-pro" {
-		provider = geminiFlashClient
+		returnModelName = "gemini-2.5-flash-image-preview"
+	} else if modelName == "gemini-2.5-pro" {
+		returnModelName = "gemini-2.5-flash"
 	} else {
-		provider = geminiFlashLiteClient
+		returnModelName = "gemini-2.5-flash-lite"
 	}
 
 	return

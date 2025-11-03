@@ -57,19 +57,38 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 	ga.InitCurrentProvider()
 
 	// Override CurrentProvider with MockLLMProvider for testing
-	mockLLMProvider := &MockLLMProvider{
-		SendMessageStreamFunc: func(ctx context.Context, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	var mockLLMProvider *MockLLMProvider
+	mockLLMProvider = &MockLLMProvider{
+		SendMessageStreamFunc: func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
 			// Default mock implementation: return an empty sequence
 			return iter.Seq[CaGenerateContentResponse](func(yield func(CaGenerateContentResponse) bool) {}), io.NopCloser(nil), nil
 		},
-		GenerateContentOneShotFunc: func(ctx context.Context, params SessionParams) (OneShotResult, error) {
+		GenerateContentOneShotFunc: func(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
 			return OneShotResult{Text: "Mocked one-shot response"}, nil
 		},
-		CountTokensFunc: func(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
+		CountTokensFunc: func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 			return &CaCountTokenResponse{TotalTokens: 10}, nil
 		},
-		MaxTokensValue:            1048576, // Mocked max tokens
-		RelativeDisplayOrderValue: 0,       // Mocked relative display order
+		MaxTokensFunc: func(modelName string) int {
+			return 1048576 // Mocked max tokens
+		},
+		RelativeDisplayOrderFunc: func(modelName string) int {
+			return 0 // Mocked relative display order
+		},
+		DefaultGenerationParamsFunc: func(modelName string) SessionGenerationParams {
+			return SessionGenerationParams{
+				Temperature: 0.7,
+				TopK:        64,
+				TopP:        0.95,
+			}
+		},
+		SubagentProviderAndParamsFunc: func(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
+			return mockLLMProvider, modelName, SessionGenerationParams{
+				Temperature: 0.0,
+				TopK:        -1,
+				TopP:        1.0,
+			}
+		},
 	}
 	CurrentProviders[DefaultGeminiModel] = mockLLMProvider
 
