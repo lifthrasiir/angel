@@ -13,13 +13,19 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
 	. "github.com/lifthrasiir/angel/gemini"
 )
+
+// defaultHTTPClientProvider implements HTTPClientProvider for non-OAuth cases.
+type defaultHTTPClientProvider struct{}
+
+func (d *defaultHTTPClientProvider) Client(ctx context.Context) *http.Client {
+	return &http.Client{}
+}
 
 // GeminiAuth encapsulates the global state related to Gemini client and authentication.
 type GeminiAuth struct {
@@ -164,10 +170,13 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 
 		// If ProjectID is not set, try to get it and/or perform onboarding
 		if ga.ProjectID == "" {
-			if err := ga.initWithGoogle(ctx, clientProvider); err != nil {
+			var projectID string
+			if projectID, err = LoginWithGoogle(ctx, clientProvider, ga.ProjectID); err != nil {
 				log.Printf("InitCurrentProvider: initWithGoogle failed: %v. ProjectID not set.", err)
 				ga.ProjectID = ""
 				return
+			} else {
+				ga.ProjectID = projectID
 			}
 		}
 
@@ -195,17 +204,24 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 
 	// Centralized CurrentProviders population
 	if ga.TokenSource != nil {
-		geminiFlashClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash", true, true)
-		CurrentProviders["gemini-2.5-flash"] = geminiFlashClient
+		makeAndRegisterCodeAssistProvider := func(modelName string, thoughtEnabled, toolSupported bool) *CodeAssistProvider {
+			provider := &CodeAssistProvider{
+				client: &CodeAssistClient{
+					ClientProvider: ga.TokenSource,
+					ProjectID:      ga.ProjectID,
+					ModelName:      modelName,
+					ThoughtEnabled: thoughtEnabled,
+					ToolSupported:  toolSupported,
+				},
+			}
+			CurrentProviders[modelName] = provider
+			return provider
+		}
 
-		geminiProClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-pro", true, true)
-		CurrentProviders["gemini-2.5-pro"] = geminiProClient
-
-		geminiFlashLiteClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash-lite", false, true)
-		CurrentProviders["gemini-2.5-flash-lite"] = geminiFlashLiteClient
-
-		geminiFlashImageClient = NewCodeAssistClient(ga.TokenSource, ga.ProjectID, "gemini-2.5-flash-image-preview", false, false)
-		CurrentProviders["gemini-2.5-flash-image-preview"] = geminiFlashImageClient
+		geminiFlashClient = makeAndRegisterCodeAssistProvider("gemini-2.5-flash", true, true)
+		_ = makeAndRegisterCodeAssistProvider("gemini-2.5-pro", true, true)
+		geminiFlashLiteClient = makeAndRegisterCodeAssistProvider("gemini-2.5-flash-lite", false, true)
+		geminiFlashImageClient = makeAndRegisterCodeAssistProvider("gemini-2.5-flash-image-preview", false, false)
 	} else {
 		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")
 	}
@@ -366,152 +382,6 @@ func (ga *GeminiAuth) GetAuthContext(ctx context.Context) Auth {
 // SetAuthContext sets the Auth implementation into the request context.
 func (ga *GeminiAuth) SetAuthContext(ctx context.Context, auth Auth) context.Context {
 	return context.WithValue(ctx, authContextKey, auth)
-}
-
-// initWithGoogle handles Google OAuth authentication flow including onboarding
-func (ga *GeminiAuth) initWithGoogle(ctx context.Context, clientProvider HTTPClientProvider) error {
-	// Create a temporary client to get ProjectID
-	tempCaClient := NewCodeAssistClient(clientProvider, "", "", false, false)
-	loadReq := LoadCodeAssistRequest{
-		CloudaicompanionProject: ga.ProjectID, // Will be empty initially
-		Metadata: &ClientMetadata{
-			IdeType:     "IDE_UNSPECIFIED",
-			Platform:    "PLATFORM_UNSPECIFIED",
-			PluginType:  "GEMINI",
-			DuetProject: ga.ProjectID,
-		},
-	}
-
-	loadRes, loadErr := tempCaClient.LoadCodeAssist(ctx, loadReq)
-	if loadErr != nil {
-		log.Printf("initWithGoogle: LoadCodeAssist failed: %v", loadErr)
-		return loadErr
-	}
-
-	// If currentTier exists, user is already onboarded
-	if loadRes.CurrentTier != nil {
-		log.Printf("initWithGoogle: User already onboarded with tier %s", loadRes.CurrentTier.ID)
-
-		if loadRes.CloudaicompanionProject != "" {
-			ga.ProjectID = loadRes.CloudaicompanionProject
-		} else if ga.ProjectID != "" {
-			// Use existing project ID
-		} else {
-			return fmt.Errorf("no project ID available for onboarded user")
-		}
-
-		// Set freeTierDataCollectionOptin to false for free tier users
-		if loadRes.CurrentTier.ID == UserTierIDFree {
-			if err := ga.setFreeTierDataCollectionOptin(ctx, tempCaClient, ga.ProjectID); err != nil {
-				log.Printf("initWithGoogle: Failed to set freeTierDataCollectionOptin: %v", err)
-				// Don't fail the entire process for this
-			}
-		}
-
-		return nil
-	}
-
-	// User needs onboarding - proceed with onboarding flow
-	return ga.performOnboarding(ctx, tempCaClient, loadRes)
-}
-
-// performOnboarding handles the onboarding process for new users
-func (ga *GeminiAuth) performOnboarding(ctx context.Context, tempCaClient *CodeAssistClient, loadRes *LoadCodeAssistResponse) error {
-	// Determine user tier for onboarding
-	userTierID := ga.determineUserTier(loadRes)
-
-	onboardReq := OnboardUserRequest{
-		TierID: &userTierID,
-		Metadata: &ClientMetadata{
-			IdeType:    "IDE_UNSPECIFIED",
-			Platform:   "PLATFORM_UNSPECIFIED",
-			PluginType: "GEMINI",
-		},
-	}
-	if userTierID != UserTierIDFree {
-		// The free tier uses a managed google cloud project.
-		// Setting a project in the `onboardUser` request causes a `Precondition Failed` error.
-		onboardReq.CloudaicompanionProject = ga.ProjectID
-		onboardReq.Metadata.DuetProject = ga.ProjectID
-	}
-
-	// Perform onboarding with LRO polling
-	lroRes, err := ga.performOnboardUserWithPolling(ctx, tempCaClient, onboardReq)
-	if err != nil {
-		log.Printf("performOnboarding: OnboardUser failed: %v", err)
-		return err
-	}
-
-	if lroRes.Response != nil && lroRes.Response.CloudaicompanionProject != nil && lroRes.Response.CloudaicompanionProject.ID != "" {
-		ga.ProjectID = lroRes.Response.CloudaicompanionProject.ID
-		log.Printf("performOnboarding: Successfully onboarded with project ID: %s", ga.ProjectID)
-
-		// Set freeTierDataCollectionOptin to false for free tier users
-		if userTierID == UserTierIDFree {
-			if err := ga.setFreeTierDataCollectionOptin(ctx, tempCaClient, ga.ProjectID); err != nil {
-				log.Printf("performOnboarding: Failed to set freeTierDataCollectionOptin: %v", err)
-				// Don't fail the entire process for this
-			}
-		}
-
-		return nil
-	} else {
-		return fmt.Errorf("onboardUser succeeded but returned empty or invalid project ID - user may be ineligible for service")
-	}
-}
-
-// determineUserTier determines the user tier from LoadCodeAssist response
-func (ga *GeminiAuth) determineUserTier(loadRes *LoadCodeAssistResponse) UserTierID {
-	for _, tier := range loadRes.AllowedTiers {
-		if tier.IsDefault != nil && *tier.IsDefault {
-			return tier.ID
-		}
-	}
-	return UserTierIDLegacy
-}
-
-// performOnboardUserWithPolling handles the LRO polling for onboardUser
-func (ga *GeminiAuth) performOnboardUserWithPolling(ctx context.Context, tempCaClient *CodeAssistClient, onboardReq OnboardUserRequest) (*LongRunningOperationResponse, error) {
-	lroRes, err := tempCaClient.OnboardUser(ctx, onboardReq)
-	if err != nil {
-		return nil, fmt.Errorf("initial onboardUser call failed: %w", err)
-	}
-
-	// Poll until LRO is complete
-	for lroRes.Done == nil || !*lroRes.Done {
-		log.Printf("performOnboardUserWithPolling: OnboardUser in progress, waiting 5 seconds...")
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(5 * time.Second):
-			// Continue polling
-		}
-
-		lroRes, err = tempCaClient.OnboardUser(ctx, onboardReq)
-		if err != nil {
-			return nil, fmt.Errorf("polling onboardUser failed: %w", err)
-		}
-	}
-
-	log.Printf("performOnboardUserWithPolling: OnboardUser completed successfully")
-	return lroRes, nil
-}
-
-// setFreeTierDataCollectionOptin sets freeTierDataCollectionOptin to false for free tier users
-func (ga *GeminiAuth) setFreeTierDataCollectionOptin(ctx context.Context, tempCaClient *CodeAssistClient, projectID string) error {
-	settingReq := SetCodeAssistGlobalUserSettingRequest{
-		CloudaicompanionProject:     projectID,
-		FreeTierDataCollectionOptin: false,
-	}
-
-	_, err := tempCaClient.SetCodeAssistGlobalUserSetting(ctx, settingReq)
-	if err != nil {
-		return fmt.Errorf("failed to set freeTierDataCollectionOptin to false: %w", err)
-	}
-
-	log.Printf("setFreeTierDataCollectionOptin: Successfully set freeTierDataCollectionOptin to false for project %s", projectID)
-	return nil
 }
 
 // Validate performs common auth and project validation for handlers
