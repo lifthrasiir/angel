@@ -215,10 +215,7 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 	// Centralized CurrentProviders population
 	if ga.TokenSource != nil {
 		provider := &CodeAssistProvider{
-			client: &CodeAssistClient{
-				ClientProvider: ga.TokenSource,
-				ProjectID:      ga.ProjectID,
-			},
+			client: NewCodeAssistClient(ga.TokenSource, ga.ProjectID),
 		}
 
 		CurrentProviders["gemini-2.5-flash"] = provider

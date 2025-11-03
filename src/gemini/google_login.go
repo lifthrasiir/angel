@@ -10,7 +10,7 @@ import (
 // LoginWithGoogle handles Google OAuth authentication flow including onboarding
 func LoginWithGoogle(ctx context.Context, clientProvider HTTPClientProvider, projectID string) (outProjectID string, err error) {
 	// Create a temporary client to get ProjectID
-	tempCaClient := &CodeAssistClient{ClientProvider: clientProvider}
+	tempCaClient := NewCodeAssistClient(clientProvider, "")
 	loadReq := LoadCodeAssistRequest{
 		CloudaicompanionProject: projectID, // Will be empty initially
 		Metadata: &ClientMetadata{
