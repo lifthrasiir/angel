@@ -1,0 +1,16 @@
+{
+    "go.buildFlags": [
+        "-tags=sqlite_fts5"
+    ],
+    "go.testFlags": [
+        "-tags=sqlite_fts5"
+    ],
+    "go.vetFlags": [
+        "-tags=sqlite_fts5"
+    ],
+    "go.lintFlags": [
+        "-tags=sqlite_fts5"
+    ],
+    "go.buildTags": "sqlite_fts5",
+    "go.testTags": "sqlite_fts5"
+}

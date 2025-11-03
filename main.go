@@ -46,6 +46,9 @@ func getExecutableName() string {
 }
 
 func main() {
+	// Fail early if not compiled with sqlite_fts5 tag
+	You_Are_Required_To_Compile_With__sqlite_fts5__Tag()
+
 	// Parse port from command line argument (default: 8080)
 	port := 8080
 	if len(os.Args) > 1 {
