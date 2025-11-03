@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // MockGeminiProvider for testing streamGeminiResponse

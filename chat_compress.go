@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Constants for compression logic (from gemini-cli/packages/core/src/core/client.ts)

@@ -26,6 +26,7 @@ import (
 	"github.com/gorilla/mux"
 
 	fsPkg "github.com/lifthrasiir/angel/fs"
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 const dbPath = "angel.db"

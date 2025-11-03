@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // TestInlineDataStreaming tests inlineData streaming functionality with proper SSE parsing

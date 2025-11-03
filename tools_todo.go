@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	fsPkg "github.com/lifthrasiir/angel/fs"
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 const todoFilePath = "TODO.json"

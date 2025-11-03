@@ -5,3 +5,5 @@ use .
 use ./src/fs
 
 use ./src/editor
+
+use ./src/gemini

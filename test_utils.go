@@ -17,6 +17,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"golang.org/x/oauth2"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Helper function to set up the test environment

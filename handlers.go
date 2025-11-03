@@ -11,6 +11,8 @@ import (
 
 	"github.com/fvbommel/sortorder"
 	"github.com/gorilla/mux"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 func handleSessionPage(w http.ResponseWriter, r *http.Request) {

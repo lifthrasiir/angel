@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)

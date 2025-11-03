@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // createBranchHandler creates a new branch from a given parent message.

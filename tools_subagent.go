@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // addHashWithSpacing adds a hash to the response with appropriate spacing to avoid

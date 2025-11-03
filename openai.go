@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Ensure OpenAIClient implements LLMProvider

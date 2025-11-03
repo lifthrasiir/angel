@@ -17,6 +17,8 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // GeminiAuth encapsulates the global state related to Gemini client and authentication.

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // TestCountTokensHandler tests the countTokensHandler function

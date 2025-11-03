@@ -13,6 +13,8 @@ import (
 	"time"
 
 	html2text "github.com/k3a/html2text"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 const (

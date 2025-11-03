@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // ChatSearchResult represents a single chat search result

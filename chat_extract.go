@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // extractSessionHandler extracts messages from a specific branch up to a given message and creates a new session.

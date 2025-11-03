@@ -5,11 +5,13 @@ go 1.24.4
 require (
 	github.com/lifthrasiir/angel/editor v0.0.0-00010101000000-000000000000
 	github.com/lifthrasiir/angel/fs v0.0.0-00010101000000-000000000000
+	github.com/lifthrasiir/angel/gemini v0.0.0-00010101000000-000000000000
 )
 
 replace (
 	github.com/lifthrasiir/angel/editor => ./src/editor
 	github.com/lifthrasiir/angel/fs => ./src/fs
+	github.com/lifthrasiir/angel/gemini => ./src/gemini
 )
 
 require (

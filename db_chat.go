@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Branch struct to hold branch data

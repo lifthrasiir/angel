@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"iter"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 const DefaultGeminiModel = "gemini-2.5-flash"

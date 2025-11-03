@@ -12,6 +12,7 @@ import (
 
 	"github.com/lifthrasiir/angel/editor"
 	fsPkg "github.com/lifthrasiir/angel/fs"
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // PendingConfirmation is a special error type used to signal that user confirmation is required.

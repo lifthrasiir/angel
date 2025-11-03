@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // AngelEvalProvider implements the LLMProvider interface for the angel-eval model.

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/gorilla/mux"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Helper to create a session with a pending confirmation

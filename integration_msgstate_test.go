@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // mockCloser is already defined in integration_msgchain_test.go

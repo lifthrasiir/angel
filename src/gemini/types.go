@@ -1,4 +1,4 @@
-package main
+package gemini
 
 // AuthType enum definition (matches AuthType in TypeScript)
 type AuthType string

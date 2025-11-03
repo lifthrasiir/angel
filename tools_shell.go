@@ -8,7 +8,8 @@ import (
 	"sync"
 	"time"
 
-	fsPkg "github.com/lifthrasiir/angel/fs" // Import the fs package
+	fsPkg "github.com/lifthrasiir/angel/fs"
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // runningProcessInfo stores details of a running command and its completion channel.

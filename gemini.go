@@ -13,6 +13,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/oauth2"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Ensure CodeAssistClient implements LLMProvider
