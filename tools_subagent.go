@@ -231,8 +231,8 @@ func handleSubagentTurn(
 		hasFunctionCall := false // Track if a function call occurred in this turn
 
 		for caResp := range seq {
-			if len(caResp.Response.Candidates) > 0 {
-				candidate := caResp.Response.Candidates[0]
+			if len(caResp.Candidates) > 0 {
+				candidate := caResp.Candidates[0]
 				for _, part := range candidate.Content.Parts {
 					if part.Text != "" {
 						fullResponseText.WriteString(part.Text)
@@ -453,8 +453,8 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 
 	// Process the response
 	for caResp := range seq {
-		if len(caResp.Response.Candidates) > 0 {
-			candidate := caResp.Response.Candidates[0]
+		if len(caResp.Candidates) > 0 {
+			candidate := caResp.Candidates[0]
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil {
 					// Convert generated image data to blob and get hash

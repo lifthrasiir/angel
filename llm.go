@@ -39,7 +39,7 @@ type OneShotResult struct {
 
 // LLMProvider defines the interface for interacting with an LLM.
 type LLMProvider interface {
-	SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
+	SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error)
 	GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error)
 	CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error)
 	MaxTokens(modelName string) int
@@ -59,7 +59,7 @@ const (
 
 // MockLLMProvider is a mock implementation of the LLMProvider interface for testing.
 type MockLLMProvider struct {
-	SendMessageStreamFunc         func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error)
+	SendMessageStreamFunc         func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error)
 	GenerateContentOneShotFunc    func(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error)
 	CountTokensFunc               func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error)
 	MaxTokensFunc                 func(modelName string) int
@@ -69,7 +69,7 @@ type MockLLMProvider struct {
 }
 
 // SendMessageStream implements the LLMProvider interface for MockLLMProvider.
-func (m *MockLLMProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (m *MockLLMProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	if m.SendMessageStreamFunc != nil {
 		return m.SendMessageStreamFunc(ctx, modelName, params)
 	}

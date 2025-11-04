@@ -130,7 +130,7 @@ func (cap *CodeAssistProvider) sessionParamsToVertexRequest(modelInfo *GeminiMod
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
-func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	modelInfo := GeminiModelInfo(modelName)
 	if modelInfo == nil {
 		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
@@ -182,8 +182,8 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 			return nil, nil, fmt.Errorf("expected opening bracket '[', but got %w", err)
 		}
 
-		// Create an iter.Seq that yields CaGenerateContentResponse
-		seq := func(yield func(CaGenerateContentResponse) bool) {
+		// Create an iter.Seq that yields GenerateContentResponse
+		seq := func(yield func(GenerateContentResponse) bool) {
 			for dec.More() {
 				var geminiResp GenerateContentResponse
 				if err := dec.Decode(&geminiResp); err != nil {
@@ -191,12 +191,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 					return
 				}
 
-				// Wrap Gemini response in CaGenerateContentResponse
-				caResp := CaGenerateContentResponse{
-					Response: geminiResp,
-				}
-
-				if !yield(caResp) {
+				if !yield(geminiResp) {
 					return
 				}
 			}
@@ -223,21 +218,16 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 			return nil, nil, fmt.Errorf("expected opening bracket '[', but got %w", err)
 		}
 
-		// Create an iter.Seq that yields CaGenerateContentResponse
-		seq := func(yield func(CaGenerateContentResponse) bool) {
+		// Create an iter.Seq that yields GenerateContentResponse
+		seq := func(yield func(GenerateContentResponse) bool) {
 			for dec.More() {
-				var geminiResp GenerateContentResponse
-				if err := dec.Decode(&geminiResp); err != nil {
+				var caResp CaGenerateContentResponse
+				if err := dec.Decode(&caResp); err != nil {
 					log.Printf("SendMessageStream: Failed to decode JSON object from stream: %v", err)
 					return
 				}
 
-				// Wrap Gemini response in CaGenerateContentResponse
-				caResp := CaGenerateContentResponse{
-					Response: geminiResp,
-				}
-
-				if !yield(caResp) {
+				if !yield(caResp.Response) {
 					return
 				}
 			}
@@ -263,9 +253,9 @@ func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, model
 	var urlContextMeta *URLContextMetadata
 	var groundingMetadata *GroundingMetadata
 
-	for caResp := range seq {
-		if len(caResp.Response.Candidates) > 0 {
-			candidate := caResp.Response.Candidates[0]
+	for resp := range seq {
+		if len(resp.Candidates) > 0 {
+			candidate := resp.Candidates[0]
 			if len(candidate.Content.Parts) > 0 {
 				for _, part := range candidate.Content.Parts {
 					if part.Text != "" { // Check if it's a text part

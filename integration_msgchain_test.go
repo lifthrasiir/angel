@@ -19,7 +19,7 @@ import (
 
 // MockGeminiProvider for testing streamGeminiResponse
 type MockGeminiProvider struct {
-	Responses        []CaGenerateContentResponse
+	Responses        []GenerateContentResponse
 	Err              error
 	Delay            time.Duration
 	ExtraDelayIndex  int           // Index at which to apply extra delay
@@ -27,15 +27,15 @@ type MockGeminiProvider struct {
 }
 
 // ModelName implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	if m.Err != nil {
 		return nil, nil, m.Err
 	}
 
-	ch := make(chan CaGenerateContentResponse)
+	ch := make(chan GenerateContentResponse)
 	closer := func() { close(ch) }
 
-	seq := func(yield func(CaGenerateContentResponse) bool) {
+	seq := func(yield func(GenerateContentResponse) bool) {
 		defer closer()
 		for i, resp := range m.Responses {
 			// Simulate streaming delay before sending each response (except the first)
@@ -142,14 +142,12 @@ func printMessages(t *testing.T, db *sql.DB, testName string) {
 	t.Log("------------------------------------")
 }
 
-func responseFromPart(part Part) CaGenerateContentResponse {
-	return CaGenerateContentResponse{
-		Response: GenerateContentResponse{
-			Candidates: []Candidate{
-				{
-					Content: Content{
-						Parts: []Part{part},
-					},
+func responseFromPart(part Part) GenerateContentResponse {
+	return GenerateContentResponse{
+		Candidates: []Candidate{
+			{
+				Content: Content{
+					Parts: []Part{part},
 				},
 			},
 		},
@@ -168,7 +166,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 
 	// Setup Mock Gemini Provider
 	provider := replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "**Thinking**\nThis is a thought.", Thought: true}),
 			responseFromPart(Part{Text: "This is the model's response."}),
@@ -327,7 +325,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	// i) Create three messages: A-B-C
 	// 1. Send initial user message (A)
 	provider := replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "B's thought", Thought: true}),
 			responseFromPart(Part{Text: "B's response"}),
@@ -378,7 +376,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// 2. Send second user message (C)
 	replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "B's thought", Thought: true}),
 			responseFromPart(Part{Text: "B's response"}),
@@ -446,7 +444,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	// ii) Create a new branch C1-C2-C3 after A3 (Model A)
 	// Create a new branch from message A3 (Model A)
 	replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
 			responseFromPart(Part{Text: "C's response"}),
@@ -504,7 +502,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// Simulate streaming response for Message C (thought and model)
 	replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
 			responseFromPart(Part{Text: "C's response"}),
@@ -634,7 +632,7 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 
 	// Setup Mock Gemini Provider to stream "A", "B", "C" and then complete
 	provider := replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B"}),
 			responseFromPart(Part{Text: "C"}),
@@ -716,7 +714,7 @@ func TestSyncDuringThought(t *testing.T) {
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
 	provider := replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
 			responseFromPart(Part{Text: "C", Thought: true}),
@@ -882,7 +880,7 @@ func TestSyncDuringResponse(t *testing.T) {
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
 	provider := replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
 			responseFromPart(Part{Text: "C", Thought: true}),
@@ -1037,7 +1035,7 @@ func TestCancelDuringSync(t *testing.T) {
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
 	provider := replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
 			responseFromPart(Part{Text: "C", Thought: true}),
@@ -1431,7 +1429,7 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 
 	// Mock Gemini Provider to return ExecutableCode and CodeExecutionResult
 	provider := replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			responseFromPart(Part{ExecutableCode: &ExecutableCode{Language: "python", Code: "print('hello')"}}),
 			responseFromPart(Part{CodeExecutionResult: &CodeExecutionResult{Outcome: "OUTCOME_OK", Output: "hello"}}),
 		},
@@ -1640,7 +1638,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 
 	// Step 3: Test retry with error message
 	replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry response"}),
 		},
 		Delay: 5 * time.Millisecond,
@@ -1701,7 +1699,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	replaceProvider(&MockGeminiProvider{
-		Responses: []CaGenerateContentResponse{
+		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry without errors"}),
 		},
 		Delay: 5 * time.Millisecond,

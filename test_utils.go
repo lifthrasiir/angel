@@ -59,9 +59,9 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 	// Override CurrentProvider with MockLLMProvider for testing
 	var mockLLMProvider *MockLLMProvider
 	mockLLMProvider = &MockLLMProvider{
-		SendMessageStreamFunc: func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+		SendMessageStreamFunc: func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 			// Default mock implementation: return an empty sequence
-			return iter.Seq[CaGenerateContentResponse](func(yield func(CaGenerateContentResponse) bool) {}), io.NopCloser(nil), nil
+			return iter.Seq[GenerateContentResponse](func(yield func(GenerateContentResponse) bool) {}), io.NopCloser(nil), nil
 		},
 		GenerateContentOneShotFunc: func(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
 			return OneShotResult{Text: "Mocked one-shot response"}, nil

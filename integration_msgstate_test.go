@@ -24,7 +24,7 @@ type testProviderWrapper struct {
 	captureParams *SessionParams
 }
 
-func (w *testProviderWrapper) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (w *testProviderWrapper) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	*w.captureParams = params // Capture the SessionParams
 	return w.original.SendMessageStream(ctx, modelName, params)
 }
@@ -58,16 +58,14 @@ func TestThoughtSignatureHandling(t *testing.T) {
 	router, db, _ := setupTest(t)
 
 	// Create responses slice like the working integration tests
-	responses := []CaGenerateContentResponse{
+	responses := []GenerateContentResponse{
 		// Thought 1
 		{
-			Response: GenerateContentResponse{
-				Candidates: []Candidate{
-					{
-						Content: Content{
-							Parts: []Part{
-								{Thought: true, Text: "Thinking about a good story..."},
-							},
+			Candidates: []Candidate{
+				{
+					Content: Content{
+						Parts: []Part{
+							{Thought: true, Text: "Thinking about a good story..."},
 						},
 					},
 				},
@@ -75,14 +73,12 @@ func TestThoughtSignatureHandling(t *testing.T) {
 		},
 		// Thought 2 + Model Message with ThoughtSignature
 		{
-			Response: GenerateContentResponse{
-				Candidates: []Candidate{
-					{
-						Content: Content{
-							Parts: []Part{
-								{Thought: true, Text: "Almost there..."},
-								{Text: "Once upon a time, in a land far, far away...", ThoughtSignature: "test_thought_signature_123"},
-							},
+			Candidates: []Candidate{
+				{
+					Content: Content{
+						Parts: []Part{
+							{Thought: true, Text: "Almost there..."},
+							{Text: "Once upon a time, in a land far, far away...", ThoughtSignature: "test_thought_signature_123"},
 						},
 					},
 				},
@@ -90,13 +86,11 @@ func TestThoughtSignatureHandling(t *testing.T) {
 		},
 		// Continued Model Message
 		{
-			Response: GenerateContentResponse{
-				Candidates: []Candidate{
-					{
-						Content: Content{
-							Parts: []Part{
-								{Text: "lived a brave knight."},
-							},
+			Candidates: []Candidate{
+				{
+					Content: Content{
+						Parts: []Part{
+							{Text: "lived a brave knight."},
 						},
 					},
 				},
@@ -213,14 +207,12 @@ func TestThoughtSignatureHandling(t *testing.T) {
 
 	// Create a new mock for the second request
 	var capturedSessionParams SessionParams
-	secondResponses := []CaGenerateContentResponse{
+	secondResponses := []GenerateContentResponse{
 		{
-			Response: GenerateContentResponse{
-				Candidates: []Candidate{
-					{
-						Content: Content{
-							Parts: []Part{{Text: "Dummy response."}},
-						},
+			Candidates: []Candidate{
+				{
+					Content: Content{
+						Parts: []Part{{Text: "Dummy response."}},
 					},
 				},
 			},
@@ -229,7 +221,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 
 	// Create a custom mock that captures the params
 	customMockLLM := &struct {
-		responses []CaGenerateContentResponse
+		responses []GenerateContentResponse
 	}{
 		responses: secondResponses,
 	}

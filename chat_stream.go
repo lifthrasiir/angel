@@ -94,8 +94,8 @@ func streamLLMResponse(
 
 		for caResp := range seq {
 			// Log UsageMetadata if available
-			if caResp.Response.UsageMetadata != nil {
-				lastUsageMetadata = caResp.Response.UsageMetadata
+			if caResp.UsageMetadata != nil {
+				lastUsageMetadata = caResp.UsageMetadata
 
 				// Update last user message's cumul_token_count with PromptTokenCount
 				if lastUsageMetadata.PromptTokenCount > 0 && mc.LastMessageID != 0 {
@@ -113,13 +113,13 @@ func streamLLMResponse(
 				return err
 			}
 
-			if len(caResp.Response.Candidates) == 0 {
+			if len(caResp.Candidates) == 0 {
 				continue
 			}
-			if len(caResp.Response.Candidates[0].Content.Parts) == 0 {
+			if len(caResp.Candidates[0].Content.Parts) == 0 {
 				continue
 			}
-			for _, part := range caResp.Response.Candidates[0].Content.Parts {
+			for _, part := range caResp.Candidates[0].Content.Parts {
 				// ThoughtSignature should be retained in order to correctly reconstruct the original Parts
 				state := part.ThoughtSignature
 

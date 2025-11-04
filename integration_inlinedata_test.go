@@ -22,33 +22,29 @@ func TestInlineDataStreaming(t *testing.T) {
 
 	// Mock the SendMessageStream method to simulate inlineData response
 	mockLLMProvider := CurrentProviders[DefaultGeminiModel].(*MockLLMProvider)
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 		// Create a mock response with text and inlineData
-		responses := []CaGenerateContentResponse{
+		responses := []GenerateContentResponse{
 			{
-				Response: GenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "Here's your first image:"},
-								},
+				Candidates: []Candidate{
+					{
+						Content: Content{
+							Parts: []Part{
+								{Text: "Here's your first image:"},
 							},
 						},
 					},
 				},
 			},
 			{
-				Response: GenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{
-										InlineData: &InlineData{
-											MimeType: "image/png",
-											Data:     pngData,
-										},
+				Candidates: []Candidate{
+					{
+						Content: Content{
+							Parts: []Part{
+								{
+									InlineData: &InlineData{
+										MimeType: "image/png",
+										Data:     pngData,
 									},
 								},
 							},
@@ -57,29 +53,25 @@ func TestInlineDataStreaming(t *testing.T) {
 				},
 			},
 			{
-				Response: GenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{Text: "And here's a second image:"},
-								},
+				Candidates: []Candidate{
+					{
+						Content: Content{
+							Parts: []Part{
+								{Text: "And here's a second image:"},
 							},
 						},
 					},
 				},
 			},
 			{
-				Response: GenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{
-										InlineData: &InlineData{
-											MimeType: "image/png",
-											Data:     pngData,
-										},
+				Candidates: []Candidate{
+					{
+						Content: Content{
+							Parts: []Part{
+								{
+									InlineData: &InlineData{
+										MimeType: "image/png",
+										Data:     pngData,
 									},
 								},
 							},
@@ -89,7 +81,7 @@ func TestInlineDataStreaming(t *testing.T) {
 			},
 		}
 
-		seq := func(yield func(CaGenerateContentResponse) bool) {
+		seq := func(yield func(GenerateContentResponse) bool) {
 			for _, resp := range responses {
 				if !yield(resp) {
 					return
@@ -210,21 +202,19 @@ func TestInlineDataCounterReset(t *testing.T) {
 	mockLLMProvider := CurrentProviders[DefaultGeminiModel].(*MockLLMProvider)
 
 	var callCount int = 0
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 		callCount++
 
-		responses := []CaGenerateContentResponse{
+		responses := []GenerateContentResponse{
 			{
-				Response: GenerateContentResponse{
-					Candidates: []Candidate{
-						{
-							Content: Content{
-								Parts: []Part{
-									{
-										InlineData: &InlineData{
-											MimeType: "image/png",
-											Data:     pngData,
-										},
+				Candidates: []Candidate{
+					{
+						Content: Content{
+							Parts: []Part{
+								{
+									InlineData: &InlineData{
+										MimeType: "image/png",
+										Data:     pngData,
 									},
 								},
 							},
@@ -234,7 +224,7 @@ func TestInlineDataCounterReset(t *testing.T) {
 			},
 		}
 
-		seq := func(yield func(CaGenerateContentResponse) bool) {
+		seq := func(yield func(GenerateContentResponse) bool) {
 			for _, resp := range responses {
 				if !yield(resp) {
 					return

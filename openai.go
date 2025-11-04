@@ -488,7 +488,7 @@ func (c *OpenAIClient) RefreshModels(ctx context.Context) ([]OpenAIModel, error)
 }
 
 // SendMessageStream implements the LLMProvider interface for streaming chat completions
-func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	// Convert contents to OpenAI chat messages
 	messages := convertGeminiToOpenAIContent(params.Contents)
 
@@ -564,7 +564,7 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, 
 	}
 
 	// Create streaming response
-	seq := func(yield func(CaGenerateContentResponse) bool) {
+	seq := func(yield func(GenerateContentResponse) bool) {
 		scanner := bufio.NewScanner(resp.Body)
 
 		// Track ongoing function calls to accumulate arguments
@@ -678,19 +678,17 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, 
 
 				// Only yield if we have parts to send
 				if len(parts) > 0 {
-					caResp := CaGenerateContentResponse{
-						Response: GenerateContentResponse{
-							Candidates: []Candidate{
-								{
-									Content: Content{
-										Parts: parts,
-										Role:  "model",
-									},
+					resp := GenerateContentResponse{
+						Candidates: []Candidate{
+							{
+								Content: Content{
+									Parts: parts,
+									Role:  "model",
 								},
 							},
 						},
 					}
-					if !yield(caResp) {
+					if !yield(resp) {
 						return
 					}
 				}
@@ -721,8 +719,8 @@ func (c *OpenAIClient) GenerateContentOneShot(ctx context.Context, modelName str
 	var fullResponse strings.Builder
 	var hasContent bool
 	for caResp := range seq {
-		if len(caResp.Response.Candidates) > 0 {
-			candidate := caResp.Response.Candidates[0]
+		if len(caResp.Candidates) > 0 {
+			candidate := caResp.Candidates[0]
 			if len(candidate.Content.Parts) > 0 {
 				for _, part := range candidate.Content.Parts {
 					if part.Text != "" {

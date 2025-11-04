@@ -24,7 +24,7 @@ func (p *AngelEvalProvider) ModelName() string {
 }
 
 // SendMessageStream processes the Forth-like language and streams responses.
-func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[CaGenerateContentResponse], io.Closer, error) {
+func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	// Find the last user message with actual text content and check for saved state
 	var input string
 	var savedState *EvalState
@@ -124,13 +124,13 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, modelName str
 	// Initialize cumulative total token count with the prompt tokens
 	cumulativeTotalTokenCount := initialPromptTokenCount
 
-	return func(yield func(CaGenerateContentResponse) bool) {
-		err := parseAndExecute(ctx, input, savedState, func(resp CaGenerateContentResponse) bool {
+	return func(yield func(GenerateContentResponse) bool) {
+		err := parseAndExecute(ctx, input, savedState, func(resp GenerateContentResponse) bool {
 			// Calculate tokens for the current response part
 			currentResponsePartTokens := 0
-			if len(resp.Response.Candidates) > 0 && resp.Response.Candidates[0].Content.Parts != nil {
+			if len(resp.Candidates) > 0 && resp.Candidates[0].Content.Parts != nil {
 				// Use the placeholder CountTokens for the current response part
-				partTokenResp, err := p.CountTokens(ctx, modelName, []Content{resp.Response.Candidates[0].Content})
+				partTokenResp, err := p.CountTokens(ctx, modelName, []Content{resp.Candidates[0].Content})
 				if err == nil {
 					currentResponsePartTokens = partTokenResp.TotalTokens
 				}
@@ -138,25 +138,23 @@ func (p *AngelEvalProvider) SendMessageStream(ctx context.Context, modelName str
 			cumulativeTotalTokenCount += currentResponsePartTokens
 
 			// Attach UsageMetadata to every response
-			if resp.Response.UsageMetadata == nil {
-				resp.Response.UsageMetadata = &UsageMetadata{}
+			if resp.UsageMetadata == nil {
+				resp.UsageMetadata = &UsageMetadata{}
 			}
-			resp.Response.UsageMetadata.PromptTokenCount = initialPromptTokenCount
-			resp.Response.UsageMetadata.TotalTokenCount = cumulativeTotalTokenCount
+			resp.UsageMetadata.PromptTokenCount = initialPromptTokenCount
+			resp.UsageMetadata.TotalTokenCount = cumulativeTotalTokenCount
 
 			return yield(resp)
 		})
 		if err != nil {
-			yield(CaGenerateContentResponse{
-				Response: GenerateContentResponse{
-					Candidates: []Candidate{{
-						Content: Content{
-							Parts: []Part{
-								{Text: fmt.Sprintf("Error: %v", err)},
-							},
+			yield(GenerateContentResponse{
+				Candidates: []Candidate{{
+					Content: Content{
+						Parts: []Part{
+							{Text: fmt.Sprintf("Error: %v", err)},
 						},
-					}},
-				},
+					},
+				}},
 			})
 		}
 	}, io.NopCloser(nil), nil
@@ -263,7 +261,7 @@ func (s *stack) pop() (interface{}, error) {
 }
 
 // parseAndExecute parses the input and executes Forth-like operations with state management.
-func parseAndExecute(ctx context.Context, input string, savedState *EvalState, yield func(CaGenerateContentResponse) bool) error {
+func parseAndExecute(ctx context.Context, input string, savedState *EvalState, yield func(GenerateContentResponse) bool) error {
 	var st stack
 	var tokens []string
 	var startIndex int
@@ -282,14 +280,12 @@ func parseAndExecute(ctx context.Context, input string, savedState *EvalState, y
 
 	// Create yieldPart wrapper function
 	yieldPart := func(part Part) bool {
-		return yield(CaGenerateContentResponse{
-			Response: GenerateContentResponse{
-				Candidates: []Candidate{{
-					Content: Content{
-						Parts: []Part{part},
-					},
-				}},
-			},
+		return yield(GenerateContentResponse{
+			Candidates: []Candidate{{
+				Content: Content{
+					Parts: []Part{part},
+				},
+			}},
 		})
 	}
 
