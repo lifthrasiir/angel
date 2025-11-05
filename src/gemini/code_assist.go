@@ -11,23 +11,15 @@ import (
 
 // GeminiModel holds information about a specific Gemini model and its capabilities
 type GeminiModel struct {
-	ThoughtEnabled bool
-	ToolSupported  bool
+	IgnoreSystemPrompt bool
+	ThoughtEnabled     bool
+	ToolSupported      bool
+	ResponseModalities []string
 }
 
 // HTTPClientProvider defines an interface for providing an *http.Client.
 type HTTPClientProvider interface {
 	Client(ctx context.Context) *http.Client
-}
-
-type APIError struct {
-	StatusCode int
-	Message    string
-	Response   string
-}
-
-func (e *APIError) Error() string {
-	return fmt.Sprintf("API response error: %d %s, response: %s", e.StatusCode, e.Message, e.Response)
 }
 
 // geminiModels holds information about all supported Gemini models and their capabilities
@@ -45,8 +37,16 @@ var geminiModels = map[string]*GeminiModel{
 		ToolSupported:  true,
 	},
 	"gemini-2.5-flash-image-preview": {
-		ThoughtEnabled: false,
-		ToolSupported:  false,
+		IgnoreSystemPrompt: true,
+		ThoughtEnabled:     false,
+		ToolSupported:      false,
+		ResponseModalities: []string{ModalityText, ModalityImage},
+	},
+	"gemini-2.0-flash-preview-image-generation": {
+		IgnoreSystemPrompt: true,
+		ThoughtEnabled:     false,
+		ToolSupported:      false,
+		ResponseModalities: []string{ModalityText, ModalityImage},
 	},
 }
 

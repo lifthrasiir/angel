@@ -222,6 +222,7 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 		CurrentProviders["gemini-2.5-pro"] = provider
 		CurrentProviders["gemini-2.5-flash-lite"] = provider
 		CurrentProviders["gemini-2.5-flash-image-preview"] = provider
+		CurrentProviders["gemini-2.0-flash-preview-image-generation"] = provider
 	} else {
 		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")
 	}

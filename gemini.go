@@ -68,67 +68,6 @@ const (
 	GeminiCodeExecutionToolName = ".code_execution"
 )
 
-// sessionParamsToVertexRequest converts SessionParams to VertexGenerateContentRequest (private)
-func (cap *CodeAssistProvider) sessionParamsToVertexRequest(modelInfo *GeminiModel, params SessionParams) GenerateContentRequest {
-	var systemInstruction *Content
-	if params.SystemPrompt != "" {
-		systemInstruction = &Content{
-			Parts: []Part{
-				{Text: params.SystemPrompt},
-			},
-		}
-	}
-
-	var tools []Tool
-	if modelInfo.ToolSupported {
-		tools = GetToolsForGemini()
-		if params.ToolConfig != nil {
-			if _, ok := params.ToolConfig[""]; ok {
-				// Remove the default tool list
-				tools = nil
-			}
-			if _, ok := params.ToolConfig[GeminiUrlContextToolName]; ok {
-				// Add a new Tool with URLContext
-				tools = append(tools, Tool{URLContext: &URLContext{}})
-			}
-			if _, ok := params.ToolConfig[GeminiCodeExecutionToolName]; ok {
-				// Add a new Tool with CodeExecution
-				tools = append(tools, Tool{CodeExecution: &CodeExecution{}})
-			}
-		}
-	}
-
-	includeThoughts := params.IncludeThoughts && modelInfo.ThoughtEnabled
-
-	// Determine final generation parameters, prioritizing SessionParams
-	genParams := geminiDefaultGenerationParams
-	if params.GenerationParams != nil {
-		if params.GenerationParams.Temperature >= 0 { // Assuming >=0 means set
-			genParams.Temperature = params.GenerationParams.Temperature
-		}
-		if params.GenerationParams.TopP >= 0 { // Assuming >=0 means set
-			genParams.TopP = params.GenerationParams.TopP
-		}
-		if params.GenerationParams.TopK >= 0 { // Assuming >=0 means set
-			genParams.TopK = params.GenerationParams.TopK
-		}
-	}
-
-	return GenerateContentRequest{
-		Contents:          params.Contents,
-		SystemInstruction: systemInstruction,
-		Tools:             tools,
-		GenerationConfig: &GenerationConfig{
-			ThinkingConfig: &ThinkingConfig{
-				IncludeThoughts: includeThoughts,
-			},
-			Temperature: &genParams.Temperature,
-			TopP:        &genParams.TopP,
-			TopK:        &genParams.TopK,
-		},
-	}
-}
-
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
 func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	modelInfo := GeminiModelInfo(modelName)
@@ -201,7 +140,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 
 	case APITypeCodeAssist:
 		// Use Code Assist API (existing logic)
-		request := cap.sessionParamsToVertexRequest(modelInfo, params)
+		request := convertSessionParamsToGenerateRequest(modelInfo, params)
 		respBody, err := cap.client.StreamGenerateContent(ctx, modelName, request)
 		if err != nil {
 			log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
@@ -347,7 +286,7 @@ func (cap *CodeAssistProvider) MaxTokens(modelName string) int {
 	switch modelName {
 	case "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
 		return 1048576
-	case "gemini-2.5-flash-image-preview":
+	case "gemini-2.5-flash-image-preview", "gemini-2.0-flash-preview-image-generation":
 		return 32768
 	default:
 		return 1048576
@@ -386,7 +325,8 @@ func (cap *CodeAssistProvider) SubagentProviderAndParams(modelName string, task 
 	provider = cap // Return self as provider
 
 	if task == SubagentImageGenerationTask {
-		returnModelName = "gemini-2.5-flash-image-preview"
+		//returnModelName = "gemini-2.5-flash-image-preview"
+		returnModelName = "gemini-2.0-flash-preview-image-generation"
 	} else if modelName == "gemini-2.5-pro" {
 		returnModelName = "gemini-2.5-flash"
 	} else {
@@ -489,7 +429,7 @@ func (p *geminiAPIHTTPClientProvider) Client(ctx context.Context) *http.Client {
 // convertSessionParamsToGenerateRequest converts SessionParams to GenerateContentRequest
 func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params SessionParams) GenerateContentRequest {
 	var systemInstruction *Content
-	if params.SystemPrompt != "" {
+	if params.SystemPrompt != "" && !modelInfo.IgnoreSystemPrompt {
 		systemInstruction = &Content{
 			Parts: []Part{
 				{Text: params.SystemPrompt},
@@ -516,7 +456,12 @@ func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params Sessio
 		}
 	}
 
-	includeThoughts := params.IncludeThoughts && modelInfo.ThoughtEnabled
+	var thinkingConfig *ThinkingConfig
+	if params.IncludeThoughts && modelInfo.ThoughtEnabled {
+		thinkingConfig = &ThinkingConfig{
+			IncludeThoughts: true,
+		}
+	}
 
 	// Determine final generation parameters, prioritizing SessionParams
 	genParams := geminiDefaultGenerationParams
@@ -537,12 +482,11 @@ func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params Sessio
 		SystemInstruction: systemInstruction,
 		Tools:             tools,
 		GenerationConfig: &GenerationConfig{
-			ThinkingConfig: &ThinkingConfig{
-				IncludeThoughts: includeThoughts,
-			},
-			Temperature: &genParams.Temperature,
-			TopP:        &genParams.TopP,
-			TopK:        &genParams.TopK,
+			ThinkingConfig:     thinkingConfig,
+			Temperature:        &genParams.Temperature,
+			TopP:               &genParams.TopP,
+			TopK:               &genParams.TopK,
+			ResponseModalities: modelInfo.ResponseModalities,
 		},
 	}
 }
