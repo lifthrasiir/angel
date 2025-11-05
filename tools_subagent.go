@@ -208,6 +208,7 @@ func handleSubagentTurn(
 	mc.LastMessageModel = subagentModelName
 
 	var fullResponseText strings.Builder
+	var firstFinishReason string
 
 	// Loop to continue LLM calls after tool execution
 	for {
@@ -233,6 +234,10 @@ func handleSubagentTurn(
 		for caResp := range seq {
 			if len(caResp.Candidates) > 0 {
 				candidate := caResp.Candidates[0]
+				// Capture the first finish reason (like in chat_stream.go)
+				if firstFinishReason == "" && candidate.FinishReason != "" {
+					firstFinishReason = candidate.FinishReason
+				}
 				for _, part := range candidate.Content.Parts {
 					if part.Text != "" {
 						fullResponseText.WriteString(part.Text)
@@ -306,6 +311,12 @@ func handleSubagentTurn(
 	if agentID != "" {
 		result["subagent_id"] = agentID
 	}
+
+	// Handle finish reason errors
+	if firstFinishReason != "" && firstFinishReason != FinishReasonStop {
+		result["error"] = FinishReasonMessage(firstFinishReason)
+	}
+
 	return ToolHandlerResults{Value: result}, nil
 }
 
@@ -449,12 +460,17 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 
 	var fullResponseText strings.Builder
 	var generatedAttachments []FileAttachment
+	var firstFinishReason string
 	imageCounter := 1
 
 	// Process the response
 	for caResp := range seq {
 		if len(caResp.Candidates) > 0 {
 			candidate := caResp.Candidates[0]
+			// Capture the first finish reason (like in chat_stream.go)
+			if firstFinishReason == "" && candidate.FinishReason != "" {
+				firstFinishReason = candidate.FinishReason
+			}
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil {
 					// Convert generated image data to blob and get hash
@@ -499,16 +515,11 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 						FileName: filename,
 					})
 				} else {
-					// Handle text part (could be empty or non-empty)
-					textToAdd := part.Text
-					if textToAdd == "" {
-						textToAdd = "(empty string, typically indicates output was moderated)"
-					}
 					// Add text to response with proper spacing and immediately save to message chain
-					addTextWithSpacing(&fullResponseText, textToAdd)
+					addTextWithSpacing(&fullResponseText, part.Text)
 					if _, err = mc.Add(ctx, db, Message{
 						Type: TypeModelText,
-						Text: textToAdd,
+						Text: part.Text,
 					}); err != nil {
 						log.Printf("Warning: Failed to add text response to subsession: %v", err)
 					}
@@ -520,6 +531,11 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	// Prepare result
 	result := map[string]interface{}{
 		"response": fullResponseText.String(),
+	}
+
+	// Handle finish reason errors
+	if firstFinishReason != "" && firstFinishReason != FinishReasonStop {
+		result["error"] = FinishReasonMessage(firstFinishReason)
 	}
 
 	// Always return with attachments

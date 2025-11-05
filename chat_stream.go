@@ -57,6 +57,7 @@ func streamLLMResponse(
 		return fmt.Errorf("unsupported model: %s", mc.LastMessageModel)
 	}
 
+	var firstFinishReason string
 	for {
 		if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, func() {}); err != nil {
 			return err
@@ -116,6 +117,10 @@ func streamLLMResponse(
 			if len(caResp.Candidates) == 0 {
 				continue
 			}
+			if firstFinishReason == "" && caResp.Candidates[0].FinishReason != "" {
+				firstFinishReason = caResp.Candidates[0].FinishReason
+			}
+
 			if len(caResp.Candidates[0].Content.Parts) == 0 {
 				continue
 			}
@@ -396,9 +401,23 @@ func streamLLMResponse(
 		}
 	}
 
-	broadcastToSession(initialState.SessionId, EventComplete, "")
+	// Send final event based on whether there was a FinishReason error
+	if firstFinishReason != "" && firstFinishReason != FinishReasonStop {
+		// Create error message based on FinishReason
+		errorMessage := FinishReasonMessage(firstFinishReason)
 
-	// Small delay to allow all clients to receive EventComplete before removeCall is executed
+		// Add error message to database
+		if _, err := mc.Add(ctx, db, Message{Type: TypeModelError, Text: errorMessage}); err != nil {
+			log.Printf("Failed to add error message to DB: %v", err)
+		}
+
+		// Send error completion instead of normal completion
+		broadcastToSession(initialState.SessionId, EventError, errorMessage)
+	} else {
+		broadcastToSession(initialState.SessionId, EventComplete, "")
+	}
+
+	// Small delay to allow all clients to receive the final event before removeCall is executed
 	time.Sleep(50 * time.Millisecond)
 
 	// Finalize the last model message if any text was streamed (sync FTS)

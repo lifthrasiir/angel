@@ -51,6 +51,7 @@ const GenerateImageCall: React.FC<FunctionCallMessageProps> = ({ functionCall, m
 // Define the expected response for the generate_image tool
 const responseKeys = {
   response: 'string',
+  error: 'string?',
 } as const;
 
 const GenerateImageResponse: React.FC<FunctionResponseMessageProps> = ({
@@ -88,7 +89,8 @@ const GenerateImageResponse: React.FC<FunctionResponseMessageProps> = ({
       title="Generated Images"
       heighten={false}
     >
-      <div className="generate-image-response">{renderHashesAsImages(response.response)}</div>
+      {response.response && <div className="generate-image-response">{renderHashesAsImages(response.response)}</div>}
+      {response.error && <div className="subagent-error">{response.error}</div>}
     </ChatBubble>
   );
 };
@@ -146,9 +148,21 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
           </div>
         )}
       </ChatBubble>
-      <ChatBubble messageId={`${responseMessageId}.model`} containerClassName="agent-message">
-        <div className="generate-image-response">{renderHashesAsImages(response.response)}</div>
-      </ChatBubble>
+      {response.response && (
+        <ChatBubble messageId={`${responseMessageId}.model`} containerClassName="agent-message">
+          <div className="generate-image-response">{renderHashesAsImages(response.response)}</div>
+        </ChatBubble>
+      )}
+      {response.error && (
+        <ChatBubble
+          messageId={`${responseMessageId}.error`}
+          containerClassName="agent-error-message"
+          bubbleClassName="function-message-bubble"
+          heighten={false}
+        >
+          {response.error}
+        </ChatBubble>
+      )}
     </ChatBubble>
   );
 };

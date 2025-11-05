@@ -100,6 +100,9 @@ export const processStreamResponse = async (
 
       const sseEvent = parseSseEvent(eventString);
 
+      // Call the event handler for all events
+      handleEvent(sseEvent);
+
       // Handle special events that affect the stream state
       switch (sseEvent.type) {
         case EventComplete:
@@ -116,9 +119,6 @@ export const processStreamResponse = async (
           console.error('Stream Error:', sseEvent.error); // Log the error data
           break streamLoop; // Break the loop on error
       }
-
-      // Call the event handler for all events
-      handleEvent(sseEvent);
     }
   }
   return { qReceived, nReceived };

@@ -56,6 +56,7 @@ const SubagentCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messag
 const responseKeys = {
   subagent_id: 'string?',
   response_text: 'string',
+  error: 'string?',
 } as const;
 
 const SubagentResponse: React.FC<FunctionResponseMessageProps> = ({
@@ -79,6 +80,7 @@ const SubagentResponse: React.FC<FunctionResponseMessageProps> = ({
       heighten={false}
     >
       <MarkdownRenderer content={response.response_text} />
+      {response.error && <div className="subagent-error">{response.error}</div>}
     </ChatBubble>
   );
 };
@@ -129,6 +131,16 @@ const SubagentPair: React.FC<FunctionPairComponentProps> = ({
       <ChatBubble messageId={`${responseMessageId}.model`} containerClassName="agent-message" heighten={false}>
         <MarkdownRenderer content={response.response_text} />
       </ChatBubble>
+      {response.error && (
+        <ChatBubble
+          messageId={`${responseMessageId}.error`}
+          containerClassName="agent-error-message"
+          bubbleClassName="function-message-bubble"
+          heighten={false}
+        >
+          {response.error}
+        </ChatBubble>
+      )}
     </ChatBubble>
   );
 };
