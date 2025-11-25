@@ -88,10 +88,13 @@ type Part struct {
 	ExecutableCode      *ExecutableCode      `json:"executableCode,omitempty"`
 	CodeExecutionResult *CodeExecutionResult `json:"codeExecutionResult,omitempty"`
 	VideoMetadata       *VideoMetadata       `json:"videoMetadata,omitempty"`
+	MediaResolution     string               `json:"mediaResolution,omitempty"`
 
 	// Only in Gemini API:
 	PartMetadata map[string]interface{} `json:"partMetadata,omitempty"`
 }
+
+const PlaceholderThoughtSignature = "context_engineering_is_the_way_to_go"
 
 type Content struct {
 	Role  string `json:"role"`
@@ -99,9 +102,16 @@ type Content struct {
 }
 
 type ThinkingConfig struct {
-	IncludeThoughts bool `json:"includeThoughts,omitempty"`
-	ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+	IncludeThoughts bool   `json:"includeThoughts,omitempty"`
+	ThinkingBudget  int    `json:"thinkingBudget,omitempty"` // Gemini 2.5
+	ThinkingLevel   string `json:"thinkingLevel,omitempty"`  // Gemini 3
 }
+
+const (
+	ThinkingLevelLow    = "low"
+	ThinkingLevelMedium = "medium"
+	ThinkingLevelHigh   = "high"
+)
 
 type Type string
 

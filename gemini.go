@@ -284,9 +284,11 @@ func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string
 // MaxTokens implements the LLMProvider interface for CodeAssistProvider.
 func (cap *CodeAssistProvider) MaxTokens(modelName string) int {
 	switch modelName {
-	case "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
+	case "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
 		return 1048576
-	case "gemini-2.5-flash-image-preview", "gemini-2.0-flash-preview-image-generation":
+	case "gemini-3-pro-image-preview", "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
+		return 65536
+	case "gemini-2.0-flash-preview-image-generation":
 		return 32768
 	default:
 		return 1048576
@@ -298,12 +300,16 @@ func (cap *CodeAssistProvider) RelativeDisplayOrder(modelName string) int {
 	switch modelName {
 	case "gemini-2.5-flash":
 		return 10
-	case "gemini-2.5-pro":
+	case "gemini-3-pro-preview":
 		return 9
-	case "gemini-2.5-flash-image-preview":
+	case "gemini-2.5-pro":
 		return 8
-	case "gemini-2.5-flash-lite":
+	case "gemini-3-pro-image-preview":
 		return 7
+	case "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
+		return 6
+	case "gemini-2.5-flash-lite":
+		return 5
 	default:
 		return 0
 	}

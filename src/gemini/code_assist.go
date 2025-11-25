@@ -24,6 +24,10 @@ type HTTPClientProvider interface {
 
 // geminiModels holds information about all supported Gemini models and their capabilities
 var geminiModels = map[string]*GeminiModel{
+	"gemini-3-pro-preview": {
+		ThoughtEnabled: true,
+		ToolSupported:  true,
+	},
 	"gemini-2.5-flash": {
 		ThoughtEnabled: true,
 		ToolSupported:  true,
@@ -35,6 +39,18 @@ var geminiModels = map[string]*GeminiModel{
 	"gemini-2.5-flash-lite": {
 		ThoughtEnabled: false,
 		ToolSupported:  true,
+	},
+	"gemini-3-pro-image-preview": {
+		IgnoreSystemPrompt: true,
+		ThoughtEnabled:     true,
+		ToolSupported:      false,
+		ResponseModalities: []string{ModalityText, ModalityImage},
+	},
+	"gemini-2.5-flash-image": {
+		IgnoreSystemPrompt: true,
+		ThoughtEnabled:     false,
+		ToolSupported:      false,
+		ResponseModalities: []string{ModalityText, ModalityImage},
 	},
 	"gemini-2.5-flash-image-preview": {
 		IgnoreSystemPrompt: true,
