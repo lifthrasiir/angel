@@ -1,0 +1,151 @@
+{
+    "genParams": {
+        "@chat": {
+            "temperature": 1.0,
+            "topK": 64,
+            "topP": 0.95
+        },
+        "@subagent": {
+            "temperature": 0.0,
+            "topK": -1,
+            "topP": 0.0
+        }
+    },
+    "models": {
+        "$base": {
+            "providers": [
+                "codeassist",
+                "antigravity",
+                "api"
+            ],
+            "genParams": "@chat",
+            "fallback": ""
+        },
+        "$chat": {
+            "extends": "$base",
+            "subagents": {
+                "": "/subagent",
+                "compression": "/subagent",
+                "session_name": "/subagent",
+                "web_fetch": "/subagent",
+                "web_fetch_fallback": "/subagent",
+                "image_generation": "gemini-2.5-flash-image"
+            },
+            "ignoreSystemPrompt": false,
+            "thoughtEnabled": false,
+            "toolSupported": false,
+            "responseModalities": [
+                "TEXT"
+            ]
+        },
+        "$image": {
+            "extends": "$base",
+            "genParams": "@subagent",
+            "subagents": {
+                "session_name": "gemini-2.5-flash"
+            },
+            "ignoreSystemPrompt": true,
+            "thoughtEnabled": false,
+            "toolSupported": false,
+            "responseModalities": [
+                "TEXT",
+                "IMAGE"
+            ]
+        },
+        "gemini-2.5-flash-lite": {
+            "extends": "$chat",
+            "modelName": "gemini-2.5-flash-lite",
+            "toolSupported": true
+        },
+        "gemini-2.5-flash-lite/subagent": {
+            "extends": "gemini-2.5-flash-lite",
+            "genParams": "@subagent"
+        },
+        "gemini-2.5-flash": {
+            "extends": "$chat",
+            "modelName": "gemini-2.5-flash",
+            "fallback": "gemini-2.5-flash-lite",
+            "thoughtEnabled": true,
+            "toolSupported": true
+        },
+        "gemini-2.5-flash/subagent": {
+            "extends": "gemini-2.5-flash-lite",
+            "genParams": "@subagent"
+        },
+        "gemini-2.5-pro": {
+            "extends": "$chat",
+            "modelName": "gemini-2.5-pro",
+            "fallback": "gemini-2.5-flash",
+            "thoughtEnabled": true,
+            "toolSupported": true
+        },
+        "gemini-2.5-pro/subagent": {
+            "extends": "gemini-2.5-flash",
+            "genParams": "@subagent"
+        },
+        "gemini-3-pro": {
+            "extends": "$chat",
+            "providers": [
+                "antigravity",
+                "api"
+            ],
+            "modelName": "gemini-3-pro-preview",
+            "fallback": "gemini-2.5-pro",
+            "subagents": {
+                "image_generation": "gemini-3-pro-image"
+            },
+            "thoughtEnabled": true,
+            "toolSupported": true
+        },
+        "gemini-3-pro/subagent": {
+            "extends": "gemini-2.5-flash",
+            "genParams": "@subagent"
+        },
+        "gemini-3-pro+low": {
+            "extends": "gemini-3-pro",
+            "genParams": {
+                "thinking": "low"
+            }
+        },
+        "gemini-3-pro+high": {
+            "extends": "gemini-3-pro",
+            "genParams": {
+                "thinking": "high"
+            }
+        },
+        "gemini-2.0-flash-preview-image-generation": {
+            "extends": "$image",
+            "providers": [
+                "api"
+            ],
+            "modelName": "gemini-2.0-flash-preview-image-generation"
+        },
+        "gemini-2.5-flash-image": {
+            "extends": "$image",
+            "providers": [
+                "antigravity",
+                "api"
+            ],
+            "modelName": "gemini-2.5-flash-image",
+            "fallback": "gemini-2.0-flash-preview-image-generation"
+        },
+        "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image",
+        "gemini-3-pro-image": {
+            "extends": "$image",
+            "providers": [
+                "api"
+            ],
+            "modelName": "gemini-3-pro-image-preview",
+            "fallback": "gemini-2.5-flash-image",
+            "thoughtEnabled": true
+        },
+        "gemini-3-pro-image-preview": "gemini-3-pro-image"
+    },
+    "displayOrder": [
+        "gemini-2.5-flash",
+        "gemini-3-pro+low",
+        "gemini-3-pro+high",
+        "gemini-3-pro-image",
+        "gemini-2.5-flash-image"
+    ]
+}

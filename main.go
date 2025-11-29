@@ -36,6 +36,9 @@ var embeddedFiles embed.FS
 //go:embed frontend/login-unavailable.html
 var loginUnavailableHTML []byte
 
+//go:embed models.json
+var modelsJSON []byte
+
 // getExecutableName returns the appropriate executable name for the current platform
 func getExecutableName() string {
 	if runtime.GOOS == "windows" {
@@ -47,6 +50,13 @@ func getExecutableName() string {
 func main() {
 	// Fail early if not compiled with sqlite_fts5 tag
 	You_Are_Required_To_Compile_With__sqlite_fts5__Tag()
+
+	modelRegistry, err := LoadModels(modelsJSON)
+	if err != nil {
+		log.Fatalf("Failed to load models.json: %v", err)
+	}
+
+	_ = modelRegistry
 
 	// Parse port from command line argument (default: 8080)
 	port := 8080
