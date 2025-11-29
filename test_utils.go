@@ -43,8 +43,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 
 	// Reset GlobalGeminiAuth for each test
 	ga := NewGeminiAuth(testDB)
-	// Explicitly set auth type and ProjectID for testing
-	ga.SelectedAuthType = AuthTypeLoginWithGoogle
+	// Explicitly set ProjectID for testing
 	ga.ProjectID = "test-project"
 
 	// Set a dummy token for testing to allow InitCurrentProvider to proceed

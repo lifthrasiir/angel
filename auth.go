@@ -15,8 +15,6 @@ type Auth interface {
 	GetUserEmail(r *http.Request) (string, error)
 	// IsAuthenticated checks if the current request is authenticated.
 	IsAuthenticated(r *http.Request) bool
-	// GetCurrentProvider returns the currently used authentication provider.
-	GetCurrentProvider() string
 	// GetAuthHandler returns the HTTP handler for authentication.
 	GetAuthHandler() http.Handler
 	// GetAuthCallbackHandler returns the HTTP handler for authentication callbacks.

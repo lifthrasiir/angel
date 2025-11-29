@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 
@@ -20,33 +19,15 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
-// defaultHTTPClientProvider implements HTTPClientProvider for non-OAuth cases.
-type defaultHTTPClientProvider struct{}
-
-func (d *defaultHTTPClientProvider) Client(ctx context.Context) *http.Client {
-	return &http.Client{}
-}
-
-// AuthType enum definition (matches AuthType in TypeScript)
-type AuthType string
-
-const (
-	AuthTypeLoginWithGoogle AuthType = "oauth-personal"
-	AuthTypeUseGemini       AuthType = "gemini-api-key"
-	AuthTypeUseVertexAI     AuthType = "vertex-ai"
-	AuthTypeCloudShell      AuthType = "cloud-shell"
-)
-
 // GeminiAuth encapsulates the global state related to Gemini client and authentication.
 type GeminiAuth struct {
 	GoogleOauthConfig *oauth2.Config
 	Token             *oauth2.Token
 	TokenSource       HTTPClientProvider
 	ProjectID         string
-	SelectedAuthType  AuthType
 	UserEmail         string
 	initMutex         sync.Mutex
-	db                *sql.DB           // Add db field
+	db                *sql.DB
 	oauthStates       map[string]string // Stores randomState -> originalQueryString
 }
 
@@ -102,46 +83,25 @@ func (ga *GeminiAuth) Init() {
 	defer ga.initMutex.Unlock()
 
 	ga.LoadToken(ga.db)
-	// Select authentication method from environment variables
-	if os.Getenv("GEMINI_API_KEY") != "" {
-		ga.SelectedAuthType = AuthTypeUseGemini
-		log.Println("Authentication method: Using Gemini API Key")
-	} else if os.Getenv("GOOGLE_API_KEY") != "" || (os.Getenv("GOOGLE_CLOUD_PROJECT") != "" && os.Getenv("GOOGLE_CLOUD_LOCATION") != "") {
-		ga.SelectedAuthType = AuthTypeUseVertexAI
-		log.Println("Authentication method: Using Vertex AI")
-	} else {
-		ga.SelectedAuthType = AuthTypeLoginWithGoogle
-		log.Println("Authentication method: Using Google Login (OAuth)")
+
+	// THIS IS INTENTIONALLY HARD-CODED TO MATCH GEMINI-CLI!
+	ga.GoogleOauthConfig = &oauth2.Config{
+		ClientID:     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+		ClientSecret: "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",
+		RedirectURL:  "http://localhost:8080/oauth2callback", // Web app redirect URI
+		Scopes: []string{
+			"https://www.googleapis.com/auth/cloud-platform",
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile",
+		},
+		Endpoint: google.Endpoint,
 	}
 
-	// Branch initialization logic based on authentication method
-	switch ga.SelectedAuthType {
-	case AuthTypeLoginWithGoogle:
-		// THIS IS INTENTIONALLY HARD-CODED TO MATCH GEMINI-CLI!
-		ga.GoogleOauthConfig = &oauth2.Config{
-			ClientID:     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-			ClientSecret: "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",
-			RedirectURL:  "http://localhost:8080/oauth2callback", // Web app redirect URI
-			Scopes: []string{
-				"https://www.googleapis.com/auth/cloud-platform",
-				"https://www.googleapis.com/auth/userinfo.email",
-				"https://www.googleapis.com/auth/userinfo.profile",
-			},
-			Endpoint: google.Endpoint,
-		}
+	// Attempt to load existing token on startup
+	ga.LoadToken(ga.db)
 
-		// Attempt to load existing token on startup
-		ga.LoadToken(ga.db)
-
-		// Initialize GenAI service
-		ga.InitCurrentProvider()
-	case AuthTypeUseGemini:
-		ga.InitCurrentProvider()
-	case AuthTypeUseVertexAI:
-		ga.InitCurrentProvider()
-	case AuthTypeCloudShell:
-		ga.InitCurrentProvider()
-	}
+	// Initialize GenAI service
+	ga.InitCurrentProvider()
 }
 
 // InitCurrentProvider initializes the TokenSource and ProjectID based on GeminiAuth state.
@@ -153,64 +113,43 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 	// to ensure a clean state before re-populating.
 	CurrentProviders = make(map[string]LLMProvider)
 
-	switch ga.SelectedAuthType {
-	case AuthTypeLoginWithGoogle:
-		if ga.Token == nil {
-			log.Println("InitCurrentProvider: OAuth token is nil. Cannot initialize client.")
-			ga.TokenSource = nil // Ensure TokenSource is nil if token is not available
-			ga.ProjectID = ""
-			return
-		}
-		// Always create a new token source to ensure it's up-to-date with the current token
-		ga.TokenSource = &tokenSaverSource{
-			TokenSource: ga.GoogleOauthConfig.TokenSource(ctx, ga.Token),
-			ga:          ga,
-		}
-		clientProvider = ga.TokenSource
-
-		// Proactively refresh token on startup if expired
-		// This will also save the new token via tokenSaverSource.Token()
-		_, err := ga.TokenSource.(*tokenSaverSource).Token() // This call will trigger refresh if needed
-		if err != nil {
-			log.Printf("InitCurrentProvider: Failed to proactively refresh token on startup: %v. Client not initialized.", err)
-			ga.TokenSource = nil // Ensure TokenSource is nil on error
-			ga.ProjectID = ""
-			return
-		}
-
-		// If ProjectID is not set, try to get it and/or perform onboarding
-		if ga.ProjectID == "" {
-			var projectID string
-			if projectID, err = LoginWithGoogle(ctx, clientProvider, ga.ProjectID); err != nil {
-				log.Printf("InitCurrentProvider: initWithGoogle failed: %v. ProjectID not set.", err)
-				ga.ProjectID = ""
-				return
-			} else {
-				ga.ProjectID = projectID
-			}
-		}
-
-		// Ensure the final ProjectID is saved to the database
-		ga.SaveToken(ga.db, ga.Token)
-
-	case AuthTypeUseGemini:
-		clientProvider = &defaultHTTPClientProvider{}
-		ga.TokenSource = clientProvider
-		// ProjectID is not needed for Gemini API Key
+	if ga.Token == nil {
+		log.Println("InitCurrentProvider: OAuth token is nil. Cannot initialize client.")
+		ga.TokenSource = nil // Ensure TokenSource is nil if token is not available
 		ga.ProjectID = ""
-	case AuthTypeUseVertexAI:
-		clientProvider = &defaultHTTPClientProvider{}
-		ga.TokenSource = clientProvider
-		// ProjectID should be set from env for Vertex AI
-		ga.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
-	case AuthTypeCloudShell:
-		clientProvider = &defaultHTTPClientProvider{}
-		ga.TokenSource = clientProvider
-		// ProjectID should be set from env for Cloud Shell
-		ga.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
-	default:
-		log.Fatalf("InitCurrentProvider: Unsupported authentication type: %s", ga.SelectedAuthType)
+		return
 	}
+	// Always create a new token source to ensure it's up-to-date with the current token
+	ga.TokenSource = &tokenSaverSource{
+		TokenSource: ga.GoogleOauthConfig.TokenSource(ctx, ga.Token),
+		ga:          ga,
+	}
+	clientProvider = ga.TokenSource
+
+	// Proactively refresh token on startup if expired
+	// This will also save the new token via tokenSaverSource.Token()
+	_, err := ga.TokenSource.(*tokenSaverSource).Token() // This call will trigger refresh if needed
+	if err != nil {
+		log.Printf("InitCurrentProvider: Failed to proactively refresh token on startup: %v. Client not initialized.", err)
+		ga.TokenSource = nil // Ensure TokenSource is nil on error
+		ga.ProjectID = ""
+		return
+	}
+
+	// If ProjectID is not set, try to get it and/or perform onboarding
+	if ga.ProjectID == "" {
+		var projectID string
+		if projectID, err = LoginWithGoogle(ctx, clientProvider, ga.ProjectID); err != nil {
+			log.Printf("InitCurrentProvider: initWithGoogle failed: %v. ProjectID not set.", err)
+			ga.ProjectID = ""
+			return
+		} else {
+			ga.ProjectID = projectID
+		}
+	}
+
+	// Ensure the final ProjectID is saved to the database
+	ga.SaveToken(ga.db, ga.Token)
 
 	// Centralized CurrentProviders population
 	if ga.TokenSource != nil {
@@ -242,11 +181,6 @@ func (ga *GeminiAuth) GetUserEmail(r *http.Request) (string, error) {
 // IsAuthenticated checks if the current request is authenticated.
 func (ga *GeminiAuth) IsAuthenticated(r *http.Request) bool {
 	return ga.Token != nil && ga.Token.Valid() && ga.UserEmail != ""
-}
-
-// GetCurrentProvider returns the currently used authentication provider.
-func (ga *GeminiAuth) GetCurrentProvider() string {
-	return string(ga.SelectedAuthType)
 }
 
 // GetAuthHandler returns the HTTP handler for authentication.
@@ -397,7 +331,7 @@ func (ga *GeminiAuth) Validate(handlerName string, w http.ResponseWriter, r *htt
 	// Check if any provider is initialized and attempt to re-initialize if needed
 	if len(CurrentProviders) == 0 {
 		log.Printf("%s: No GeminiClient initialized, attempting to re-initialize...", handlerName)
-		if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil {
+		if ga.Token != nil {
 			// Attempt to re-initialize, which includes token refresh if needed
 			ga.InitCurrentProvider()
 			log.Printf("%s: CurrentProviders state after InitCurrentProvider: %t, ProjectID: %s", handlerName, len(CurrentProviders) == 0, ga.ProjectID)
@@ -407,20 +341,20 @@ func (ga *GeminiAuth) Validate(handlerName string, w http.ResponseWriter, r *htt
 			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
 			// If CurrentProviders is still empty, it means token refresh failed or no token exists.
 			// Provide a more user-friendly message.
-			if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil && ga.Token.RefreshToken == "" {
+			if ga.Token != nil && ga.Token.RefreshToken == "" {
 				http.Error(w, "Session expired. Please log in again (no refresh token).", http.StatusUnauthorized)
-			} else if ga.SelectedAuthType == AuthTypeLoginWithGoogle && ga.Token != nil {
+			} else if ga.Token != nil {
 				http.Error(w, "Session expired. Please log in again (token refresh failed).", http.StatusUnauthorized)
 			} else {
-				http.Error(w, "CodeAssist client not initialized. Check authentication method or log in.", http.StatusUnauthorized)
+				http.Error(w, "CodeAssist client not initialized. Please log in.", http.StatusUnauthorized)
 			}
 			return false
 		}
 	}
 
-	if (ga.SelectedAuthType == AuthTypeLoginWithGoogle || ga.SelectedAuthType == AuthTypeUseGemini || ga.SelectedAuthType == AuthTypeUseVertexAI) && ga.ProjectID == "" {
-		log.Printf("%s: Project ID is not set. Please log in again or set GOOGLE_CLOUD_PROJECT.", handlerName)
-		http.Error(w, "Project ID is not set. Please log in again or set GOOGLE_CLOUD_PROJECT.", http.StatusUnauthorized)
+	if ga.ProjectID == "" {
+		log.Printf("%s: Project ID is not set. Please log in again.", handlerName)
+		http.Error(w, "Project ID is not set. Please log in again.", http.StatusUnauthorized)
 		return false
 	}
 	return true

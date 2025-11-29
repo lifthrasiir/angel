@@ -127,29 +127,27 @@ func main() {
 	)
 	router.Use(csrfMiddleware)
 
-	// OAuth2 handler is only active for LOGIN_WITH_GOOGLE method and only on default port 8080
-	if ga.GetCurrentProvider() == string(AuthTypeLoginWithGoogle) {
-		if port == 8080 {
-			router.HandleFunc("/login", http.HandlerFunc(ga.GetAuthHandler().ServeHTTP)).Methods("GET")
-			router.HandleFunc("/oauth2callback", http.HandlerFunc(ga.GetAuthCallbackHandler().ServeHTTP)).Methods("GET")
-		} else {
-			// Add /login handler that shows error message when not on port 8080
-			router.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusServiceUnavailable)
+	// OAuth2 handler is only active on default port 8080
+	if port == 8080 {
+		router.HandleFunc("/login", http.HandlerFunc(ga.GetAuthHandler().ServeHTTP)).Methods("GET")
+		router.HandleFunc("/oauth2callback", http.HandlerFunc(ga.GetAuthCallbackHandler().ServeHTTP)).Methods("GET")
+	} else {
+		// Add /login handler that shows error message when not on port 8080
+		router.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
 
-				// Read and modify the embedded HTML template
-				htmlContent := string(loginUnavailableHTML)
-				htmlContent = strings.ReplaceAll(htmlContent, "{{PORT}}", fmt.Sprintf("%d", port))
-				htmlContent = strings.ReplaceAll(htmlContent, "{{EXECUTABLE}}", getExecutableName())
+			// Read and modify the embedded HTML template
+			htmlContent := string(loginUnavailableHTML)
+			htmlContent = strings.ReplaceAll(htmlContent, "{{PORT}}", fmt.Sprintf("%d", port))
+			htmlContent = strings.ReplaceAll(htmlContent, "{{EXECUTABLE}}", getExecutableName())
 
-				w.Write([]byte(htmlContent))
-			}).Methods("GET")
+			w.Write([]byte(htmlContent))
+		}).Methods("GET")
 
-			log.Printf("WARNING: OAuth2 login is disabled when running on port %d.", port)
-			log.Printf("OAuth2 callback URL is hardcoded to http://localhost:8080/oauth2callback and cannot be changed.")
-			log.Printf("To use login functionality, please run the server on port 8080 or authenticate first on port 8080 and then copy the configuration.")
-		}
+		log.Printf("WARNING: OAuth2 login is disabled when running on port %d.", port)
+		log.Printf("OAuth2 callback URL is hardcoded to http://localhost:8080/oauth2callback and cannot be changed.")
+		log.Printf("To use login functionality, please run the server on port 8080 or authenticate first on port 8080 and then copy the configuration.")
 	}
 	router.HandleFunc("/api/logout", http.HandlerFunc(ga.GetLogoutHandler().ServeHTTP)).Methods("POST")
 
