@@ -204,8 +204,8 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		modelName = DefaultGeminiModel // Default model if not provided
 	}
 
-	provider, ok := CurrentProviders[modelName]
-	if !ok {
+	provider := GlobalModelsRegistry.GetProvider(modelName)
+	if provider == nil {
 		sendBadRequestError(w, r, fmt.Sprintf("Unsupported model: %s", modelName))
 		return
 	}
@@ -438,8 +438,13 @@ type sortableModelInfo struct {
 }
 
 func listModelsHandler(w http.ResponseWriter, r *http.Request) {
+	if GlobalModelsRegistry == nil {
+		sendJSONResponse(w, []ModelInfo{})
+		return
+	}
+
 	var sortableModels []sortableModelInfo
-	for modelName, provider := range CurrentProviders {
+	for modelName, provider := range GlobalModelsRegistry.providers {
 		sortableModels = append(sortableModels, sortableModelInfo{
 			Name:                 modelName,
 			MaxTokens:            provider.MaxTokens(modelName),
@@ -760,7 +765,7 @@ func getOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create client and get models
-	client := NewOpenAIClient(config, "")
+	client := NewOpenAIClient(config)
 	models, err := client.GetModels(r.Context())
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to fetch models for OpenAI config %s", id))
@@ -788,7 +793,7 @@ func refreshOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create client and refresh models
-	client := NewOpenAIClient(config, "")
+	client := NewOpenAIClient(config)
 	models, err := client.RefreshModels(r.Context())
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to refresh models for OpenAI config %s", id))

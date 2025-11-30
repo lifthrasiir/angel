@@ -109,9 +109,8 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 	ctx := context.Background()
 	var clientProvider HTTPClientProvider
 
-	// Clear CurrentProviders at the beginning of InitCurrentProvider
-	// to ensure a clean state before re-populating.
-	CurrentProviders = make(map[string]LLMProvider)
+	// Clear only Gemini-related providers, not all providers
+	GlobalModelsRegistry.ClearGeminiProviders()
 
 	if ga.Token == nil {
 		log.Println("InitCurrentProvider: OAuth token is nil. Cannot initialize client.")
@@ -151,20 +150,14 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 	// Ensure the final ProjectID is saved to the database
 	ga.SaveToken(ga.db, ga.Token)
 
-	// Centralized CurrentProviders population
+	// Centralized GlobalModelsRegistry population
 	if ga.TokenSource != nil {
 		provider := &CodeAssistProvider{
 			client: NewCodeAssistClient(ga.TokenSource, ga.ProjectID),
 		}
 
-		CurrentProviders["gemini-2.5-flash"] = provider
-		CurrentProviders["gemini-3-pro-preview"] = provider
-		CurrentProviders["gemini-2.5-pro"] = provider
-		CurrentProviders["gemini-2.5-flash-lite"] = provider
-		CurrentProviders["gemini-3-pro-image-preview"] = provider
-		CurrentProviders["gemini-2.5-flash-image"] = provider
-		CurrentProviders["gemini-2.5-flash-image-preview"] = provider
-		CurrentProviders["gemini-2.0-flash-preview-image-generation"] = provider
+		// Register Gemini models in GlobalModelsRegistry
+		GlobalModelsRegistry.SetGeminiProvider(provider)
 	} else {
 		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")
 	}
@@ -294,7 +287,7 @@ func (ga *GeminiAuth) GetLogoutHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ga.Token = nil
 		ga.UserEmail = ""
-		CurrentProviders = make(map[string]LLMProvider) // Clear all providers on logout
+		GlobalModelsRegistry.Clear() // Clear all providers on logout
 
 		// Delete token from DB
 		if err := DeleteOAuthToken(ga.db); err != nil {
@@ -329,15 +322,15 @@ func (ga *GeminiAuth) Validate(handlerName string, w http.ResponseWriter, r *htt
 
 	// Detailed logging at the start of ValidateAuthAndProject
 	// Check if any provider is initialized and attempt to re-initialize if needed
-	if len(CurrentProviders) == 0 {
+	if GlobalModelsRegistry.IsEmpty() {
 		log.Printf("%s: No GeminiClient initialized, attempting to re-initialize...", handlerName)
 		if ga.Token != nil {
 			// Attempt to re-initialize, which includes token refresh if needed
 			ga.InitCurrentProvider()
-			log.Printf("%s: CurrentProviders state after InitCurrentProvider: %t, ProjectID: %s", handlerName, len(CurrentProviders) == 0, ga.ProjectID)
+			log.Printf("%s: GlobalModelsRegistry state after InitCurrentProvider: %t, ProjectID: %s", handlerName, GlobalModelsRegistry.IsEmpty(), ga.ProjectID)
 		}
-		// After attempting re-initialization, check CurrentProviders again
-		if len(CurrentProviders) == 0 {
+		// After attempting re-initialization, check GlobalModelsRegistry again
+		if GlobalModelsRegistry.IsEmpty() {
 			log.Printf("%s: GeminiClient still not initialized after re-attempt.", handlerName)
 			// If CurrentProviders is still empty, it means token refresh failed or no token exists.
 			// Provide a more user-friendly message.

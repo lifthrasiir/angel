@@ -1,10 +1,18 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 )
+
+const AngelEvalModelName = "angel-eval"
 
 // Error types for models parsing and validation
 type ModelsError struct {
@@ -70,11 +78,28 @@ type Model struct {
 	InheritanceChain   []string // For debugging/validation
 }
 
+// OpenAI endpoint with provider and models
+type OpenAIEndpoint struct {
+	config     *OpenAIConfig
+	provider   LLMProvider
+	models     []OpenAIModel // Available models from this endpoint
+	lastUpdate time.Time
+	hash       string // Configuration hash for change detection
+}
+
 type ModelsRegistry struct {
 	Models       map[string]*Model
 	DisplayOrder []string
 	Aliases      map[string]string
 	rawConfig    *ModelsConfig // Keep for reference resolution
+
+	// Provider management
+	providers       map[string]LLMProvider     // model name -> provider
+	openAIEndpoints map[string]*OpenAIEndpoint // config hash -> endpoint
+	geminiProvider  LLMProvider                // Single Gemini provider
+
+	// Thread safety
+	mutex sync.RWMutex
 }
 
 // Global registry instance
@@ -92,10 +117,12 @@ func LoadModels(data []byte) (*ModelsRegistry, error) {
 	}
 
 	registry := &ModelsRegistry{
-		Models:       make(map[string]*Model),
-		DisplayOrder: config.DisplayOrder,
-		Aliases:      make(map[string]string),
-		rawConfig:    &config,
+		Models:          make(map[string]*Model),
+		DisplayOrder:    config.DisplayOrder,
+		Aliases:         make(map[string]string),
+		rawConfig:       &config,
+		providers:       make(map[string]LLMProvider),
+		openAIEndpoints: make(map[string]*OpenAIEndpoint),
 	}
 
 	// First pass: Parse raw models and handle aliases
@@ -583,50 +610,284 @@ func (r *ModelsRegistry) GetModel(name string) (*Model, bool) {
 	return model, exists
 }
 
-// SubagentProviderAndParams returns the subagent model and its parameters
-func (r *ModelsRegistry) SubagentProviderAndParams(modelName, task string) (*Model, error) {
-	model, exists := r.GetModel(modelName)
-	if !exists {
-		return nil, ModelsError{
-			Type:    ErrTypeNotFound,
-			Message: fmt.Sprintf("Model not found: %s", modelName),
+// Hash generates a unique hash for OpenAI config to detect changes
+func (config *OpenAIConfig) Hash() string {
+	hasher := sha256.New()
+	hasher.Write([]byte(config.Endpoint))
+	hasher.Write([]byte(config.APIKey))
+	hasher.Write([]byte(fmt.Sprintf("%v", config.Enabled)))
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+// InitializeOpenAIEndpoints sets up OpenAI providers from database configs
+func (r *ModelsRegistry) InitializeOpenAIEndpoints(db *sql.DB) error {
+	configs, err := GetOpenAIConfigs(db)
+	if err != nil {
+		return fmt.Errorf("failed to get OpenAI configs: %w", err)
+	}
+
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	// Clear existing OpenAI endpoints
+	for _, endpoint := range r.openAIEndpoints {
+		// Remove models from provider mapping
+		for _, model := range endpoint.models {
+			delete(r.providers, model.ID)
+		}
+	}
+	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
+
+	// Create new endpoints
+	for _, config := range configs {
+		if !config.Enabled {
+			continue
+		}
+
+		if err := r.createOpenAIEndpoint(&config); err != nil {
+			// Log error but continue with other configs
+			fmt.Printf("Failed to create OpenAI endpoint for %s: %v\n", config.Name, err)
+			continue
 		}
 	}
 
-	// Check if subagent is already resolved
-	subagentModel, exists := model.Subagents[task]
-	if exists {
-		return subagentModel, nil
+	return nil
+}
+
+// createOpenAIEndpoint creates a new OpenAI endpoint
+func (r *ModelsRegistry) createOpenAIEndpoint(config *OpenAIConfig) error {
+	hash := config.Hash()
+	if _, exists := r.openAIEndpoints[hash]; exists {
+		return fmt.Errorf("endpoint with hash %s already exists", hash)
 	}
 
-	// If not resolved, try to resolve it dynamically from the raw model data
-	rawModel := r.getRawModel(modelName)
-	if rawModel != nil && rawModel.Subagents != nil {
-		subagentRef, hasSubagentRef := rawModel.Subagents[task]
-		if hasSubagentRef {
-			resolvedModel, err := r.resolveModelReference(model, subagentRef)
-			if err != nil {
-				return nil, ModelsError{
-					Type:    ErrTypeResolution,
-					Message: fmt.Sprintf("Failed to resolve subagent '%s' for task '%s' in %s: %v", subagentRef, task, modelName, err),
-					Model:   modelName,
-					Context: map[string]interface{}{"task": task, "subagent": subagentRef},
-				}
+	// Create OpenAI client
+	client := NewOpenAIClient(config)
+
+	// Get available models
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := client.GetModels(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get models for %s: %w", config.Name, err)
+	}
+
+	// Create endpoint
+	endpoint := &OpenAIEndpoint{
+		config:     config,
+		provider:   client,
+		models:     models,
+		lastUpdate: time.Now(),
+		hash:       hash,
+	}
+
+	r.openAIEndpoints[hash] = endpoint
+
+	// Register models with provider
+	for _, model := range models {
+		r.providers[model.ID] = client
+	}
+
+	return nil
+}
+
+// UpdateOpenAIEndpoints updates OpenAI providers when configs change
+func (r *ModelsRegistry) UpdateOpenAIEndpoints(db *sql.DB) error {
+	configs, err := GetOpenAIConfigs(db)
+	if err != nil {
+		return fmt.Errorf("failed to get OpenAI configs: %w", err)
+	}
+
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	// Create maps for efficient lookup
+	newConfigs := make(map[string]*OpenAIConfig)
+	for i := range configs {
+		newConfigs[configs[i].ID] = &configs[i]
+	}
+
+	// Track which hashes are still needed
+	neededHashes := make(map[string]bool)
+
+	// Process new/updated configs
+	for _, config := range configs {
+		if !config.Enabled {
+			continue
+		}
+
+		hash := config.Hash()
+		neededHashes[hash] = true
+
+		if endpoint, exists := r.openAIEndpoints[hash]; exists {
+			// Update existing endpoint config reference
+			endpoint.config = &config
+		} else {
+			// Create new endpoint
+			if err := r.createOpenAIEndpointUnsafe(&config); err != nil {
+				fmt.Printf("Failed to create OpenAI endpoint for %s: %v\n", config.Name, err)
+				continue
 			}
-			// Cache the resolved subagent for future use
-			if model.Subagents == nil {
-				model.Subagents = make(map[string]*Model)
-			}
-			model.Subagents[task] = resolvedModel
-			return resolvedModel, nil
 		}
 	}
 
-	return nil, ModelsError{
-		Type:    ErrTypeNotFound,
-		Message: fmt.Sprintf("Subagent task not found: %s for model %s", task, modelName),
-		Context: map[string]interface{}{"task": task, "model": modelName},
+	// Remove unused endpoints
+	r.cleanupUnusedEndpointsUnsafe(neededHashes)
+
+	// Update model provider mappings
+	r.updateModelProvidersUnsafe()
+
+	return nil
+}
+
+// createOpenAIEndpointUnsafe creates endpoint without mutex lock (internal use)
+func (r *ModelsRegistry) createOpenAIEndpointUnsafe(config *OpenAIConfig) error {
+	hash := config.Hash()
+
+	client := NewOpenAIClient(config)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := client.GetModels(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get models for %s: %w", config.Name, err)
 	}
+
+	endpoint := &OpenAIEndpoint{
+		config:     config,
+		provider:   client,
+		models:     models,
+		lastUpdate: time.Now(),
+		hash:       hash,
+	}
+
+	r.openAIEndpoints[hash] = endpoint
+
+	for _, model := range models {
+		r.providers[model.ID] = client
+	}
+
+	return nil
+}
+
+// cleanupUnusedEndpointsUnsafe removes endpoints that are no longer needed (internal use)
+func (r *ModelsRegistry) cleanupUnusedEndpointsUnsafe(neededHashes map[string]bool) {
+	for hash, endpoint := range r.openAIEndpoints {
+		if !neededHashes[hash] {
+			// Remove models from provider mapping
+			for _, model := range endpoint.models {
+				delete(r.providers, model.ID)
+			}
+			delete(r.openAIEndpoints, hash)
+		}
+	}
+}
+
+// updateModelProvidersUnsafe updates the model to provider mappings (internal use)
+func (r *ModelsRegistry) updateModelProvidersUnsafe() {
+	// Clear existing non-Gemini providers (but preserve angel-eval)
+	for model, provider := range r.providers {
+		if provider != r.geminiProvider && model != AngelEvalModelName {
+			delete(r.providers, model)
+		}
+	}
+
+	// Re-add OpenAI models
+	for _, endpoint := range r.openAIEndpoints {
+		for _, model := range endpoint.models {
+			r.providers[model.ID] = endpoint.provider
+		}
+	}
+}
+
+// SetAngelEvalProvider sets the angel-eval provider
+func (r *ModelsRegistry) SetAngelEvalProvider(provider LLMProvider) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	r.providers[AngelEvalModelName] = provider
+}
+
+// SetGeminiProvider sets the Gemini provider
+func (r *ModelsRegistry) SetGeminiProvider(provider LLMProvider) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	r.geminiProvider = provider
+
+	// Register all Gemini models with the provider
+	for _, model := range r.Models {
+		if r.isGeminiModelUnsafe(model) {
+			r.providers[model.Name] = provider
+		}
+	}
+}
+
+// GetProvider returns the provider for a model name
+func (r *ModelsRegistry) GetProvider(modelName string) LLMProvider {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	return r.providers[modelName]
+}
+
+// Clear removes all providers and resets the registry
+func (r *ModelsRegistry) Clear() {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	r.providers = make(map[string]LLMProvider)
+	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
+	r.geminiProvider = nil
+}
+
+// ClearGeminiProviders removes only Gemini-related providers, preserving others
+func (r *ModelsRegistry) ClearGeminiProviders() {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	// Preserve angel-eval and other non-Gemini providers
+	angelEvalProvider := r.providers[AngelEvalModelName]
+	otherProviders := make(map[string]LLMProvider)
+	for model, provider := range r.providers {
+		// Only preserve non-Gemini providers
+		if provider != r.geminiProvider {
+			otherProviders[model] = provider
+		}
+	}
+
+	// Clear and restore non-Gemini providers
+	r.providers = otherProviders
+	if angelEvalProvider != nil {
+		r.providers[AngelEvalModelName] = angelEvalProvider
+	}
+	// Clear only Gemini-specific endpoints
+	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
+	r.geminiProvider = nil
+}
+
+// IsEmpty returns true if no providers are registered
+func (r *ModelsRegistry) IsEmpty() bool {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	return r.geminiProvider == nil && len(r.providers) == 0
+}
+
+// isGeminiModelUnsafe checks if a model is a Gemini model (internal use, no mutex)
+func (r *ModelsRegistry) isGeminiModelUnsafe(model *Model) bool {
+	// Check if model has Gemini providers
+	for _, provider := range model.Providers {
+		if provider == "gemini" || provider == "vertexai" {
+			return true
+		}
+	}
+
+	// Also check model name patterns
+	return strings.HasPrefix(model.Name, "gemini-") ||
+		strings.HasPrefix(model.Name, "vertexai-")
 }
 
 // GetAllModels returns all non-subagent models in display order

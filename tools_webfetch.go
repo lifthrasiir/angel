@@ -212,7 +212,10 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolH
 		return ToolHandlerResults{}, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
 	}
 
-	provider := CurrentProviders[params.ModelName]
+	provider := GlobalModelsRegistry.GetProvider(params.ModelName)
+	if provider == nil {
+		return ToolHandlerResults{}, fmt.Errorf("model provider not found: %s", params.ModelName)
+	}
 
 	webFetchProvider, _, webFetchGenParams := provider.SubagentProviderAndParams(params.ModelName, SubagentWebFetchTask)
 	if webFetchProvider == nil {

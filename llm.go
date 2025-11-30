@@ -11,9 +11,16 @@ import (
 
 const DefaultGeminiModel = "gemini-2.5-flash"
 
-var CurrentProviders = make(map[string]LLMProvider)
+// GetModelProvider returns LLM provider for given model name using ModelsRegistry.
+// This is a convenience function that delegates to GlobalModelsRegistry.
+func GetModelProvider(modelName string) LLMProvider {
+	if GlobalModelsRegistry == nil {
+		return nil
+	}
+	return GlobalModelsRegistry.GetProvider(modelName)
+}
 
-// SessionParams holds the parameters for a chat session.
+// SessionParams holds parameters for a chat session.
 type SessionParams struct {
 	Contents         []Content
 	SystemPrompt     string
@@ -29,7 +36,7 @@ type SessionGenerationParams struct {
 	TopP        float32
 }
 
-// OneShotResult holds the result of a single-shot content generation,
+// OneShotResult holds result of a single-shot content generation,
 // including text and any associated metadata.
 type OneShotResult struct {
 	Text               string
@@ -57,7 +64,7 @@ const (
 	SubagentImageGenerationTask  = "image_generation"
 )
 
-// MockLLMProvider is a mock implementation of the LLMProvider interface for testing.
+// MockLLMProvider is a mock implementation of LLMProvider interface for testing.
 type MockLLMProvider struct {
 	SendMessageStreamFunc         func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error)
 	GenerateContentOneShotFunc    func(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error)

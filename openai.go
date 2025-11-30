@@ -41,9 +41,6 @@ type OpenAIModel struct {
 	OwnedBy string `json:"owned_by"`
 }
 
-// Global cache for OpenAI clients to avoid duplication
-var openaiClients = make(map[string]*OpenAIClient)
-
 // OpenAIModelsResponse represents the response from /v1/models endpoint
 type OpenAIModelsResponse struct {
 	Object string        `json:"object"`
@@ -334,16 +331,8 @@ func convertGeminiSchemaToJSONSchema(geminiSchema *Schema) map[string]interface{
 	return jsonSchema
 }
 
-// NewOpenAIClient creates a new OpenAI-compatible client with shared instances
-func NewOpenAIClient(config *OpenAIConfig, modelName string) *OpenAIClient {
-	// Create a unique key for this config
-	configKey := fmt.Sprintf("%s|%s", config.Endpoint, config.APIKey)
-
-	// Check if we already have a client for this config
-	if client, exists := openaiClients[configKey]; exists {
-		return client
-	}
-
+// NewOpenAIClient creates a new OpenAI-compatible client
+func NewOpenAIClient(config *OpenAIConfig) *OpenAIClient {
 	// Create new client
 	client := &OpenAIClient{
 		config:         config,
@@ -352,9 +341,6 @@ func NewOpenAIClient(config *OpenAIConfig, modelName string) *OpenAIClient {
 		cacheTime:      time.Time{},
 		contextLengths: make(map[string]int),
 	}
-
-	// Cache the client
-	openaiClients[configKey] = client
 
 	return client
 }
@@ -853,7 +839,7 @@ func (c *OpenAIClient) SubagentProviderAndParams(modelName string, task string) 
 	if task == SubagentImageGenerationTask {
 		// For image generation, always use gemini-2.5-flash-image-preview
 		const geminiModelName = "gemini-2.5-flash-image-preview"
-		if fallbackProvider, ok := CurrentProviders[geminiModelName]; ok {
+		if fallbackProvider := GlobalModelsRegistry.GetProvider(geminiModelName); fallbackProvider != nil {
 			provider = fallbackProvider
 			returnModelName = geminiModelName
 			return
@@ -879,23 +865,22 @@ func InitOpenAIProviders(db *sql.DB) {
 		}
 
 		// Create client and get models to register as providers
-		client := NewOpenAIClient(&config, "")
+		client := NewOpenAIClient(&config)
 		models, err := client.GetModels(context.Background())
 		if err != nil {
 			log.Printf("Failed to fetch models for OpenAI config %s: %v", config.Name, err)
 			continue
 		}
 
-		// Register each model as a provider
+		// Register each model as a provider using the shared client
 		for _, model := range models {
-			modelClient := NewOpenAIClient(&config, model.ID)
-			CurrentProviders[model.ID] = modelClient
+			GlobalModelsRegistry.providers[model.ID] = client
 			log.Printf("Registered OpenAI model: %s (from config: %s)", model.ID, config.Name)
 
 			// Pre-warm MaxTokens cache asynchronously
 			go func(modelName string, provider LLMProvider) {
 				_ = provider.MaxTokens(modelName)
-			}(model.ID, modelClient)
+			}(model.ID, client)
 		}
 	}
 }
@@ -911,12 +896,17 @@ func ReloadOpenAIProviders(db *sql.DB) {
 
 	// Create set of valid model IDs from current enabled configs
 	validModels := make(map[string]bool)
+	// Create a mapping of config to client for sharing during reload
+	configClients := make(map[string]*OpenAIClient)
+
 	for _, config := range configs {
 		if !config.Enabled {
 			continue
 		}
 
-		client := NewOpenAIClient(&config, "")
+		client := NewOpenAIClient(&config)
+		configClients[config.ID] = client
+
 		models, err := client.GetModels(context.Background())
 		if err != nil {
 			log.Printf("Failed to fetch models for OpenAI config %s during reload: %v", config.Name, err)
@@ -929,22 +919,26 @@ func ReloadOpenAIProviders(db *sql.DB) {
 	}
 
 	// Remove providers that are no longer valid
-	for modelName, provider := range CurrentProviders {
-		if _, ok := provider.(*OpenAIClient); ok {
-			if !validModels[modelName] {
-				delete(CurrentProviders, modelName)
-				log.Printf("Removed OpenAI model provider: %s", modelName)
+	func() {
+		GlobalModelsRegistry.mutex.Lock()
+		defer GlobalModelsRegistry.mutex.Unlock()
+		for modelName, provider := range GlobalModelsRegistry.providers {
+			if _, ok := provider.(*OpenAIClient); ok {
+				if !validModels[modelName] {
+					delete(GlobalModelsRegistry.providers, modelName)
+					log.Printf("Removed OpenAI model provider: %s", modelName)
+				}
 			}
 		}
-	}
+	}()
 
-	// Add or update providers for valid models
+	// Add or update providers for valid models using shared clients
 	for _, config := range configs {
 		if !config.Enabled {
 			continue
 		}
 
-		client := NewOpenAIClient(&config, "")
+		client := configClients[config.ID]
 		models, err := client.GetModels(context.Background())
 		if err != nil {
 			log.Printf("Failed to fetch models for OpenAI config %s during reload: %v", config.Name, err)
@@ -953,14 +947,14 @@ func ReloadOpenAIProviders(db *sql.DB) {
 
 		for _, model := range models {
 			if validModels[model.ID] {
-				modelClient := NewOpenAIClient(&config, model.ID)
-				CurrentProviders[model.ID] = modelClient
+				// Use the same client instance for all models from this config
+				GlobalModelsRegistry.providers[model.ID] = client
 				log.Printf("Registered/updated OpenAI model: %s (from config: %s)", model.ID, config.Name)
 
 				// Pre-warm MaxTokens cache asynchronously
 				go func(modelName string, provider LLMProvider) {
 					_ = provider.MaxTokens(modelName)
-				}(model.ID, modelClient)
+				}(model.ID, client)
 			}
 		}
 	}

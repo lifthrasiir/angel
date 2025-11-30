@@ -56,7 +56,7 @@ func main() {
 		log.Fatalf("Failed to load models.json: %v", err)
 	}
 
-	_ = modelRegistry
+	GlobalModelsRegistry = modelRegistry
 
 	// Parse port from command line argument (default: 8080)
 	port := 8080
@@ -105,11 +105,11 @@ func main() {
 	ga := NewGeminiAuth(db)
 	ga.Init()
 
-	// Add angel-eval provider after default models are initialized
-	CurrentProviders["angel-eval"] = &AngelEvalProvider{}
+	// Initialize OpenAI endpoints from database configurations
+	GlobalModelsRegistry.InitializeOpenAIEndpoints(db)
 
-	// Initialize OpenAI providers from database configurations
-	InitOpenAIProviders(db)
+	// Add angel-eval provider after all other providers are initialized
+	GlobalModelsRegistry.SetAngelEvalProvider(&AngelEvalProvider{})
 
 	router := mux.NewRouter()
 	router.Use(makeContextMiddleware(db, ga))

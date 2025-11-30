@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,17 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 	}
 
 	InitMCPManager(testDB)
+
+	// Initialize GlobalModelsRegistry by loading models.json
+	modelsData, err := os.ReadFile("models.json")
+	if err != nil {
+		t.Fatalf("Failed to read models.json: %v", err)
+	}
+
+	_, err = LoadModels(modelsData)
+	if err != nil {
+		t.Fatalf("Failed to load models: %v", err)
+	}
 
 	// Reset GlobalGeminiAuth for each test
 	ga := NewGeminiAuth(testDB)
@@ -89,7 +101,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 			}
 		},
 	}
-	CurrentProviders[DefaultGeminiModel] = mockLLMProvider
+	GlobalModelsRegistry.SetGeminiProvider(mockLLMProvider)
 
 	// Create a new router for testing
 	router := mux.NewRouter()
@@ -107,8 +119,8 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 }
 
 func replaceProvider(provider LLMProvider) LLMProvider {
-	oldProvider := CurrentProviders[DefaultGeminiModel]
-	CurrentProviders[DefaultGeminiModel] = provider
+	oldProvider := GlobalModelsRegistry.GetProvider(DefaultGeminiModel)
+	GlobalModelsRegistry.SetGeminiProvider(provider)
 	return oldProvider
 }
 

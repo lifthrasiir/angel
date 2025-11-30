@@ -102,7 +102,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 	mockLLM := &MockGeminiProvider{
 		Responses: responses,
 	}
-	CurrentProviders["gemini-2.5-flash"] = mockLLM
+	GlobalModelsRegistry.SetGeminiProvider(mockLLM)
 
 	// Simulate user sending the first message
 	reqBody := strings.NewReader(`{"message": "Hello LLM, tell me a story."}`)
@@ -237,7 +237,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 		captureParams: &capturedSessionParams,
 	}
 
-	CurrentProviders["gemini-2.5-flash"] = wrapperProvider
+	GlobalModelsRegistry.SetGeminiProvider(wrapperProvider)
 
 	// Simulate user sending a follow-up message
 	reqBody = strings.NewReader(`{"message": "What happened next?"}`)

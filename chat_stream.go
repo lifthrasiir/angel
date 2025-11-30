@@ -52,8 +52,8 @@ func streamLLMResponse(
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
 
-	provider, ok := CurrentProviders[mc.LastMessageModel]
-	if !ok {
+	provider := GlobalModelsRegistry.GetProvider(mc.LastMessageModel)
+	if provider == nil {
 		return fmt.Errorf("unsupported model: %s", mc.LastMessageModel)
 	}
 
@@ -577,7 +577,7 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	}
 
 	// Check for (NAME: session name) comment ONLY FOR angel-eval model
-	if modelToUse == "angel-eval" {
+	if modelToUse == AngelEvalModelName {
 		nameCommentPattern := regexp.MustCompile(`\(NAME:\s*(.*?)\)`)
 		matches := nameCommentPattern.FindStringSubmatch(userMessage)
 		if len(matches) > 1 {
@@ -608,7 +608,12 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	ctx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
-	provider, returnModelName, sessionNameGenParams := CurrentProviders[modelToUse].SubagentProviderAndParams(modelToUse, SubagentSessionNameTask)
+	provider := GlobalModelsRegistry.GetProvider(modelToUse)
+	if provider == nil {
+		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
+		return
+	}
+	provider, returnModelName, sessionNameGenParams := provider.SubagentProviderAndParams(modelToUse, SubagentSessionNameTask)
 	if provider == nil {
 		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return

@@ -199,10 +199,11 @@ func handleSubagentTurn(
 	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
-	llmClient, subagentModelName, subagentGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(params.ModelName, "")
-	if llmClient == nil {
+	provider := GlobalModelsRegistry.GetProvider(params.ModelName)
+	if provider == nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM client for model %s not found", params.ModelName)
 	}
+	llmClient, subagentModelName, subagentGenParams := provider.SubagentProviderAndParams(params.ModelName, "")
 
 	// Update LastMessageModel to use the actual provider's model name
 	mc.LastMessageModel = subagentModelName
@@ -376,10 +377,11 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Get LLM client for image generation using the new task first to determine the correct model
-	llmClient, imageModelName, imageGenParams := CurrentProviders[params.ModelName].SubagentProviderAndParams(params.ModelName, SubagentImageGenerationTask)
-	if llmClient == nil {
+	provider := GlobalModelsRegistry.GetProvider(params.ModelName)
+	if provider == nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM client for image generation with model %s not found", params.ModelName)
 	}
+	llmClient, imageModelName, imageGenParams := provider.SubagentProviderAndParams(params.ModelName, SubagentImageGenerationTask)
 
 	// Set the last message model to use the actual provider's model name
 	mc.LastMessageModel = imageModelName

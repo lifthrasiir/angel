@@ -121,7 +121,12 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 
 	// Determine the model to use for token counting and generation
 	// For now, use the default model. In a real scenario, this might come from session config.
-	provider, returnModelName, compressionGenParams := CurrentProviders[modelName].SubagentProviderAndParams(modelName, SubagentCompressionTask)
+	provider := GlobalModelsRegistry.GetProvider(modelName)
+	if provider == nil {
+		err = fmt.Errorf("unsupported model for compression: %s", modelName)
+		return
+	}
+	provider, returnModelName, compressionGenParams := provider.SubagentProviderAndParams(modelName, SubagentCompressionTask)
 	if provider == nil {
 		err = fmt.Errorf("unsupported model for compression: %s", modelName)
 		return
