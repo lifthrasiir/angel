@@ -17,13 +17,3 @@ export const fetchUserInfo = async () => {
     return { email: null, success: false };
   }
 };
-
-export const handleLogin = (currentPath: string, inputMessage: string) => {
-  const draftMessage = inputMessage;
-  let redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
-
-  if (draftMessage) {
-    redirectToUrl += `&draft_message=${encodeURIComponent(draftMessage)}`;
-  }
-  window.location.href = redirectToUrl;
-};

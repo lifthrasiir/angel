@@ -485,66 +485,57 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           }}
         />
       )}
-      {!isLoggedIn && (
-        <div style={{ padding: '20px', textAlign: 'center' }}>
-          <p>Login required to start chatting.</p>
-        </div>
-      )}
-
-      {isLoggedIn && (
-        <>
-          <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
-            <div
-              style={{
-                maxWidth: 'var(--chat-container-max-width)',
-                margin: '0 auto',
-                padding: 'var(--spacing-unit)',
+      <div style={{ flexGrow: 1, overflowY: 'auto' }} ref={chatAreaRef}>
+        <div
+          style={{
+            maxWidth: 'var(--chat-container-max-width)',
+            margin: '0 auto',
+            padding: 'var(--spacing-unit)',
+          }}
+        >
+          {!hasMoreMessagesState && (
+            <SystemPromptEditor
+              key={sessionId || 'new'}
+              initialPrompt={systemPrompt}
+              currentLabel={currentSystemPromptLabel}
+              onPromptUpdate={(updatedPrompt) => {
+                setSystemPrompt(updatedPrompt.value);
               }}
-            >
-              {!hasMoreMessagesState && (
-                <SystemPromptEditor
-                  key={sessionId || 'new'}
-                  initialPrompt={systemPrompt}
-                  currentLabel={currentSystemPromptLabel}
-                  onPromptUpdate={(updatedPrompt) => {
-                    setSystemPrompt(updatedPrompt.value);
-                  }}
-                  isEditing={isSystemPromptEditing}
-                  predefinedPrompts={globalPrompts}
-                  workspaceId={workspaceId}
-                />
-              )}
-
-              {isPriorSessionLoading && (
-                <div style={{ textAlign: 'center', padding: '10px' }}>Loading more messages...</div>
-              )}
-              {renderedMessages}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-          {pendingConfirmation ? (
-            <ConfirmationDialog
-              onConfirm={(modifiedData) => sendConfirmation(true, sessionId!, primaryBranchId!, modifiedData)}
-              onDeny={() => sendConfirmation(false, sessionId!, primaryBranchId!)}
-              confirmationData={JSON.parse(pendingConfirmation)}
-            />
-          ) : (
-            <InputArea
-              handleSendMessage={handleSendMessage}
-              onFilesSelected={onFilesSelected}
-              handleRemoveFile={handleRemoveFile}
-              handleFileResizeStateChange={handleFileResizeStateChange}
-              handleFileProcessingStateChange={handleFileProcessingStateChange}
-              handleFileResized={handleFileResized}
-              handleCancelStreaming={handleCancelStreaming}
-              chatInputRef={chatInputRef}
-              chatAreaRef={chatAreaRef}
-              sessionId={sessionId}
-              selectedFiles={selectedFiles}
-              isSendDisabledByResizing={isSendDisabledByResizing}
+              isEditing={isSystemPromptEditing}
+              predefinedPrompts={globalPrompts}
+              workspaceId={workspaceId}
             />
           )}
-        </>
+
+          {isPriorSessionLoading && (
+            <div style={{ textAlign: 'center', padding: '10px' }}>Loading more messages...</div>
+          )}
+          {renderedMessages}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+      {pendingConfirmation ? (
+        <ConfirmationDialog
+          onConfirm={(modifiedData) => sendConfirmation(true, sessionId!, primaryBranchId!, modifiedData)}
+          onDeny={() => sendConfirmation(false, sessionId!, primaryBranchId!)}
+          confirmationData={JSON.parse(pendingConfirmation)}
+        />
+      ) : (
+        <InputArea
+          handleSendMessage={handleSendMessage}
+          onFilesSelected={onFilesSelected}
+          handleRemoveFile={handleRemoveFile}
+          handleFileResizeStateChange={handleFileResizeStateChange}
+          handleFileProcessingStateChange={handleFileProcessingStateChange}
+          handleFileResized={handleFileResized}
+          handleCancelStreaming={handleCancelStreaming}
+          chatInputRef={chatInputRef}
+          chatAreaRef={chatAreaRef}
+          sessionId={sessionId}
+          selectedFiles={selectedFiles}
+          isSendDisabledByResizing={isSendDisabledByResizing}
+          isDisabled={!isLoggedIn}
+        />
       )}
     </div>
   );

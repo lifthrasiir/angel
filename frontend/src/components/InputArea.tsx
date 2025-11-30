@@ -17,6 +17,7 @@ interface InputAreaProps {
   sessionId: string | null;
   selectedFiles: File[];
   isSendDisabledByResizing?: () => boolean;
+  isDisabled?: boolean;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
@@ -32,6 +33,7 @@ const InputArea: React.FC<InputAreaProps> = ({
   sessionId,
   selectedFiles,
   isSendDisabledByResizing,
+  isDisabled = false,
 }) => {
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -125,6 +127,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         chatAreaRef={chatAreaRef}
         sessionId={sessionId}
         isSendDisabledByResizing={isSendDisabledByResizing}
+        isDisabled={isDisabled}
       />
     </div>
   );

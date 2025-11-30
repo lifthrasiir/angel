@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 
 	"golang.org/x/oauth2"
@@ -219,7 +218,7 @@ func (ga *GeminiAuth) GetAuthCallbackHandler() http.Handler {
 		// Remove the state after use to prevent replay attacks
 		delete(ga.oauthStates, stateParam)
 
-		// Parse the original query string to extract redirect_to and draft_message
+		// Parse the original query string to extract redirect_to
 		parsedQuery, err := url.ParseQuery(originalQueryString)
 		if err != nil {
 			log.Printf("Error parsing original query string from state: %v", err)
@@ -231,18 +230,9 @@ func (ga *GeminiAuth) GetAuthCallbackHandler() http.Handler {
 		if frontendPath == "" {
 			frontendPath = "/" // Default to root if not specified
 		}
-		draftMessage := parsedQuery.Get("draft_message")
 
 		// Construct the final URL for the frontend
 		finalRedirectURL := frontendPath
-		if draftMessage != "" {
-			// Check if frontendPath already has query parameters
-			if strings.Contains(frontendPath, "?") {
-				finalRedirectURL = fmt.Sprintf("%s&draft_message=%s", frontendPath, url.QueryEscape(draftMessage))
-			} else {
-				finalRedirectURL = fmt.Sprintf("%s?draft_message=%s", frontendPath, url.QueryEscape(draftMessage))
-			}
-		}
 
 		code := r.FormValue("code")
 		Token, err := ga.GoogleOauthConfig.Exchange(context.Background(), code)

@@ -23,7 +23,6 @@ import {
   addErrorMessageAtom,
   addMessageAtom,
   resetChatSessionStateAtom,
-  inputMessageAtom,
   processingStartTimeAtom,
   isSystemPromptEditingAtom,
   messagesAtom,
@@ -64,7 +63,6 @@ export const useSessionLoader = ({
   }>();
   const location = useLocation();
 
-  const setInputMessage = useSetAtom(inputMessageAtom);
   const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
   const setIsSystemPromptEditing = useSetAtom(isSystemPromptEditingAtom);
   const setHasMoreMessages = useSetAtom(hasMoreMessagesAtom);
@@ -233,11 +231,6 @@ export const useSessionLoader = ({
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const redirectTo = params.get('redirect_to');
-    const draftMessage = params.get('draft_message');
-
-    if (draftMessage) {
-      setInputMessage(draftMessage);
-    }
 
     if (redirectTo) {
       if (redirectTo.startsWith('/')) {
