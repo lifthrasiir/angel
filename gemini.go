@@ -77,9 +77,23 @@ const (
 	GeminiCodeExecutionToolName = ".code_execution"
 )
 
+// resolveModelName resolves the model key to the actual API model name
+func (cap *CodeAssistProvider) resolveModelName(modelName string) string {
+	if model, exists := cap.models[modelName]; exists && model.ModelName != "" {
+		return model.ModelName
+	}
+	return "" // Return empty string to indicate model not found, similar to GeminiModelInfo
+}
+
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
 func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
-	modelInfo := GeminiModelInfo(modelName)
+	// Resolve the model name to the actual API model name
+	apiModelName := cap.resolveModelName(modelName)
+	if apiModelName == "" {
+		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
+	}
+
+	modelInfo := GeminiModelInfo(apiModelName)
 	if modelInfo == nil {
 		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
@@ -95,7 +109,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 	switch apiType {
 	case APITypeGemini:
 		// Use Gemini API
-		geminiClient, config, err := cap.createGeminiAPIClient(ctx, modelName)
+		geminiClient, config, err := cap.createGeminiAPIClient(ctx, apiModelName)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create Gemini API client: %w", err)
 		}
@@ -103,7 +117,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 		// Convert SessionParams to GenerateContentRequest
 		request := convertSessionParamsToGenerateRequest(modelInfo, params)
 
-		respBody, err := geminiClient.StreamGenerateContent(ctx, modelName, request)
+		respBody, err := geminiClient.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
 			// Check rate limit
 			if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
@@ -111,10 +125,10 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 				go func() {
 					retryAfter := parseRetryAfter("")
 					db, _ := getDbFromContext(ctx)
-					HandleModelRateLimit(db, config.ID, modelName, retryAfter)
-					log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, modelName)
+					HandleModelRateLimit(db, config.ID, apiModelName, retryAfter)
+					log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, apiModelName)
 				}()
-				return nil, nil, fmt.Errorf("rate limited for model %s", modelName)
+				return nil, nil, fmt.Errorf("rate limited for model %s", apiModelName)
 			}
 			return nil, nil, fmt.Errorf("failed to call Gemini API: %w", err)
 		}
@@ -150,7 +164,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 	case APITypeCodeAssist:
 		// Use Code Assist API (existing logic)
 		request := convertSessionParamsToGenerateRequest(modelInfo, params)
-		respBody, err := cap.client.StreamGenerateContent(ctx, modelName, request)
+		respBody, err := cap.client.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
 			log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
 			return nil, nil, err
@@ -234,6 +248,12 @@ func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, model
 }
 
 func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
+	// Resolve the model name to the actual API model name
+	apiModelName := cap.resolveModelName(modelName)
+	if apiModelName == "" {
+		return nil, fmt.Errorf("unsupported model: %s", modelName)
+	}
+
 	// Get database from context
 	db, err := getDbFromContext(ctx)
 	if err != nil {
@@ -248,43 +268,43 @@ func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string
 
 	if len(configs) == 0 {
 		// Use Code Assist API
-		return cap.client.CountTokens(ctx, modelName, contents)
+		return cap.client.CountTokens(ctx, apiModelName, contents)
 	}
 
 	// Use Gemini API
 	// Get next available API key for the model
-	config, err := GetNextGeminiAPIConfig(db, modelName)
+	config, err := GetNextGeminiAPIConfig(db, apiModelName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Gemini API config: %w", err)
 	}
 	if config == nil {
 		// No available configs, fallback to Code Assist API
-		log.Printf("No available Gemini API configs, falling back to Code Assist API for model %s", modelName)
-		return cap.client.CountTokens(ctx, modelName, contents)
+		log.Printf("No available Gemini API configs, falling back to Code Assist API for model %s", apiModelName)
+		return cap.client.CountTokens(ctx, apiModelName, contents)
 	}
 
 	// Update last_used timestamp
-	defer UpdateModelLastUsed(db, config.ID, modelName)
+	defer UpdateModelLastUsed(db, config.ID, apiModelName)
 
 	// Create Gemini API client
 	clientProvider := NewGeminiAPIHTTPClientProvider(config.APIKey)
 	client := NewGeminiAPIClient(clientProvider, config.APIKey)
 
 	// Call Gemini API
-	response, err := client.CountTokens(ctx, modelName, contents)
+	response, err := client.CountTokens(ctx, apiModelName, contents)
 	if err != nil {
 		// Check rate limit
 		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
 			// Handle rate limit
 			go func() {
 				retryAfter := parseRetryAfter("")
-				HandleModelRateLimit(db, config.ID, modelName, retryAfter)
-				log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, modelName)
+				HandleModelRateLimit(db, config.ID, apiModelName, retryAfter)
+				log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, apiModelName)
 			}()
 		}
 		// Fallback to Code Assist API
-		log.Printf("Gemini API CountTokens failed for model %s, falling back to Code Assist API: %v", modelName, err)
-		return cap.client.CountTokens(ctx, modelName, contents)
+		log.Printf("Gemini API CountTokens failed for model %s, falling back to Code Assist API: %v", apiModelName, err)
+		return cap.client.CountTokens(ctx, apiModelName, contents)
 	}
 
 	return response, nil
@@ -400,13 +420,11 @@ func (cap *CodeAssistProvider) selectAPIType(ctx context.Context, modelName stri
 	// Check if there are enabled Gemini API configs
 	for _, config := range configs {
 		if config.Enabled {
-			log.Printf("Using Gemini API for model %s", modelName)
 			return APITypeGemini, nil
 		}
 	}
 
 	// No Gemini API configs available, use Code Assist
-	log.Printf("No enabled Gemini API configs found, using Code Assist for model %s", modelName)
 	return APITypeCodeAssist, nil
 }
 
