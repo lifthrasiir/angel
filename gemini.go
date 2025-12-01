@@ -78,23 +78,21 @@ const (
 )
 
 // resolveModelName resolves the model key to the actual API model name
-func (cap *CodeAssistProvider) resolveModelName(modelName string) string {
-	if model, exists := cap.models[modelName]; exists && model.ModelName != "" {
-		return model.ModelName
+func (cap *CodeAssistProvider) resolveModel(modelName string) (*Model, string) {
+	if model, exists := cap.models[modelName]; exists {
+		apiModelName := model.ModelName
+		if apiModelName != "" {
+			return model, apiModelName
+		}
 	}
-	return "" // Return empty string to indicate model not found, similar to GeminiModelInfo
+	return nil, "" // Return nil to indicate model not found
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
 func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
-	// Resolve the model name to the actual API model name
-	apiModelName := cap.resolveModelName(modelName)
-	if apiModelName == "" {
-		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
-	}
-
-	modelInfo := GeminiModelInfo(apiModelName)
-	if modelInfo == nil {
+	// Resolve the model to get both model info and API model name
+	model, apiModelName := cap.resolveModel(modelName)
+	if model == nil {
 		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
 
@@ -115,7 +113,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 		}
 
 		// Convert SessionParams to GenerateContentRequest
-		request := convertSessionParamsToGenerateRequest(modelInfo, params)
+		request := convertSessionParamsToGenerateRequest(model, params)
 
 		respBody, err := geminiClient.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
@@ -163,7 +161,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 
 	case APITypeCodeAssist:
 		// Use Code Assist API (existing logic)
-		request := convertSessionParamsToGenerateRequest(modelInfo, params)
+		request := convertSessionParamsToGenerateRequest(model, params)
 		respBody, err := cap.client.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
 			log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
@@ -249,8 +247,8 @@ func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, model
 
 func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 	// Resolve the model name to the actual API model name
-	apiModelName := cap.resolveModelName(modelName)
-	if apiModelName == "" {
+	model, apiModelName := cap.resolveModel(modelName)
+	if model == nil {
 		return nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
 
@@ -314,18 +312,9 @@ func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string
 func (cap *CodeAssistProvider) MaxTokens(modelName string) int {
 	// Use model information from ModelRegistry models map
 	if model, exists := cap.models[modelName]; exists {
-		switch model.Name {
-		case "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
-			return 1048576
-		case "gemini-3-pro-image-preview", "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
-			return 65536
-		case "gemini-2.0-flash-preview-image-generation":
-			return 32768
-		default:
-			return 1048576
-		}
+		return model.MaxTokens
 	}
-	return 1048576
+	return 8192
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface for CodeAssistProvider.
@@ -471,9 +460,9 @@ func (p *geminiAPIHTTPClientProvider) Client(ctx context.Context) *http.Client {
 }
 
 // convertSessionParamsToGenerateRequest converts SessionParams to GenerateContentRequest
-func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params SessionParams) GenerateContentRequest {
+func convertSessionParamsToGenerateRequest(model *Model, params SessionParams) GenerateContentRequest {
 	var systemInstruction *Content
-	if params.SystemPrompt != "" && !modelInfo.IgnoreSystemPrompt {
+	if params.SystemPrompt != "" && !model.IgnoreSystemPrompt {
 		systemInstruction = &Content{
 			Parts: []Part{
 				{Text: params.SystemPrompt},
@@ -482,7 +471,7 @@ func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params Sessio
 	}
 
 	var tools []Tool
-	if modelInfo.ToolSupported {
+	if model.ToolSupported {
 		tools = GetToolsForGemini()
 		if params.ToolConfig != nil {
 			if _, ok := params.ToolConfig[""]; ok {
@@ -501,7 +490,7 @@ func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params Sessio
 	}
 
 	var thinkingConfig *ThinkingConfig
-	if params.IncludeThoughts && modelInfo.ThoughtEnabled {
+	if params.IncludeThoughts && model.ThoughtEnabled {
 		thinkingConfig = &ThinkingConfig{
 			IncludeThoughts: true,
 		}
@@ -530,7 +519,7 @@ func convertSessionParamsToGenerateRequest(modelInfo *GeminiModel, params Sessio
 			Temperature:        &genParams.Temperature,
 			TopP:               &genParams.TopP,
 			TopK:               &genParams.TopK,
-			ResponseModalities: modelInfo.ResponseModalities,
+			ResponseModalities: model.ResponseModalities,
 		},
 	}
 }

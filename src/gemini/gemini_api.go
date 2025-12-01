@@ -33,11 +33,6 @@ func (c *GeminiAPIClient) makeAPIRequest(ctx context.Context, url string, reqBod
 
 // StreamGenerateContent calls the StreamGenerateContent of Gemini API.
 func (c *GeminiAPIClient) StreamGenerateContent(ctx context.Context, modelName string, request GenerateContentRequest) (io.ReadCloser, error) {
-	// Validate model
-	if GeminiModelInfo(modelName) == nil {
-		return nil, fmt.Errorf("unsupported model: %s", modelName)
-	}
-
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?key=%s", modelName, c.APIKey)
 	headers := map[string]string{"Accept": "text/event-stream"}
 
@@ -52,11 +47,6 @@ func (c *GeminiAPIClient) StreamGenerateContent(ctx context.Context, modelName s
 
 // CountTokens calls the countTokens of Gemini API.
 func (c *GeminiAPIClient) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
-	// Validate model
-	if GeminiModelInfo(modelName) == nil {
-		return nil, fmt.Errorf("unsupported model: %s", modelName)
-	}
-
 	reqBody := CountTokenRequest{
 		Model:    modelName,
 		Contents: contents,
@@ -83,11 +73,6 @@ func (c *GeminiAPIClient) CountTokens(ctx context.Context, modelName string, con
 
 // GenerateContent calls the non-streaming generateContent endpoint
 func (c *GeminiAPIClient) GenerateContent(ctx context.Context, modelName string, request GenerateContentRequest) (*GenerateContentResponse, error) {
-	// Validate model
-	if GeminiModelInfo(modelName) == nil {
-		return nil, fmt.Errorf("unsupported model: %s", modelName)
-	}
-
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", modelName, c.APIKey)
 	resp, err := c.makeAPIRequest(ctx, url, request, nil)
 	if err != nil {

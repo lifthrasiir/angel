@@ -56,6 +56,7 @@ type RawModel struct {
 	ThoughtEnabled     *bool             `json:"thoughtEnabled,omitempty"`
 	ToolSupported      *bool             `json:"toolSupported,omitempty"`
 	ResponseModalities []string          `json:"responseModalities,omitempty"`
+	MaxTokens          *int              `json:"maxTokens,omitempty"`
 }
 
 // Resolved runtime structures
@@ -77,6 +78,7 @@ type Model struct {
 	ThoughtEnabled     bool
 	ToolSupported      bool
 	ResponseModalities []string
+	MaxTokens          int
 	InheritanceChain   []string // For debugging/validation
 }
 
@@ -195,6 +197,7 @@ func (r *ModelsRegistry) parseRawModels(config *ModelsConfig) error {
 				ThoughtEnabled:     r.getBoolValue(rawModel.ThoughtEnabled, false),
 				ToolSupported:      r.getBoolValue(rawModel.ToolSupported, false),
 				ResponseModalities: rawModel.ResponseModalities,
+				MaxTokens:          r.getIntValue(rawModel.MaxTokens, 8192),
 				InheritanceChain:   []string{name},
 			}
 
@@ -404,6 +407,14 @@ func (r *ModelsRegistry) getBoolValue(ptr *bool, defaultValue bool) bool {
 	return *ptr
 }
 
+// getIntValue gets the integer value from a tristate pointer
+func (r *ModelsRegistry) getIntValue(ptr *int, defaultValue int) int {
+	if ptr == nil {
+		return defaultValue
+	}
+	return *ptr
+}
+
 // mergeModel merges parent model into child model (child overrides parent)
 func (r *ModelsRegistry) mergeModel(parent, child *Model, childName string) {
 	// Merge non-array fields (child overrides parent if present)
@@ -428,6 +439,9 @@ func (r *ModelsRegistry) mergeModel(parent, child *Model, childName string) {
 		}
 		if childRaw.ToolSupported == nil {
 			child.ToolSupported = parent.ToolSupported
+		}
+		if childRaw.MaxTokens == nil {
+			child.MaxTokens = parent.MaxTokens
 		}
 	}
 

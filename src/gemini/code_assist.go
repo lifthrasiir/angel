@@ -9,66 +9,9 @@ import (
 	"net/http"
 )
 
-// GeminiModel holds information about a specific Gemini model and its capabilities
-type GeminiModel struct {
-	IgnoreSystemPrompt bool
-	ThoughtEnabled     bool
-	ToolSupported      bool
-	ResponseModalities []string
-}
-
 // HTTPClientProvider defines an interface for providing an *http.Client.
 type HTTPClientProvider interface {
 	Client(ctx context.Context) *http.Client
-}
-
-// geminiModels holds information about all supported Gemini models and their capabilities
-var geminiModels = map[string]*GeminiModel{
-	"gemini-3-pro-preview": {
-		ThoughtEnabled: true,
-		ToolSupported:  true,
-	},
-	"gemini-2.5-flash": {
-		ThoughtEnabled: true,
-		ToolSupported:  true,
-	},
-	"gemini-2.5-pro": {
-		ThoughtEnabled: true,
-		ToolSupported:  true,
-	},
-	"gemini-2.5-flash-lite": {
-		ThoughtEnabled: false,
-		ToolSupported:  true,
-	},
-	"gemini-3-pro-image-preview": {
-		IgnoreSystemPrompt: true,
-		ThoughtEnabled:     true,
-		ToolSupported:      false,
-		ResponseModalities: []string{ModalityText, ModalityImage},
-	},
-	"gemini-2.5-flash-image": {
-		IgnoreSystemPrompt: true,
-		ThoughtEnabled:     false,
-		ToolSupported:      false,
-		ResponseModalities: []string{ModalityText, ModalityImage},
-	},
-	"gemini-2.5-flash-image-preview": {
-		IgnoreSystemPrompt: true,
-		ThoughtEnabled:     false,
-		ToolSupported:      false,
-		ResponseModalities: []string{ModalityText, ModalityImage},
-	},
-	"gemini-2.0-flash-preview-image-generation": {
-		IgnoreSystemPrompt: true,
-		ThoughtEnabled:     false,
-		ToolSupported:      false,
-		ResponseModalities: []string{ModalityText, ModalityImage},
-	},
-}
-
-// GeminiModelInfo returns the capabilities of a given Gemini model
-func GeminiModelInfo(modelName string) *GeminiModel {
-	return geminiModels[modelName]
 }
 
 // Define CodeAssistClient struct
@@ -95,11 +38,6 @@ func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBo
 
 // StreamGenerateContent calls the StreamGenerateContent of Code Assist API.
 func (c *CodeAssistClient) StreamGenerateContent(ctx context.Context, modelName string, request GenerateContentRequest) (io.ReadCloser, error) {
-	// Validate model
-	if GeminiModelInfo(modelName) == nil {
-		return nil, fmt.Errorf("unsupported model: %s", modelName)
-	}
-
 	reqBody := CAGenerateContentRequest{
 		Model:   modelName,
 		Project: c.ProjectID,
@@ -120,11 +58,6 @@ func (c *CodeAssistClient) StreamGenerateContent(ctx context.Context, modelName 
 
 // CountTokens calls the countTokens of Code Assist API.
 func (c *CodeAssistClient) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
-	// Validate model
-	if GeminiModelInfo(modelName) == nil {
-		return nil, fmt.Errorf("unsupported model: %s", modelName)
-	}
-
 	reqBody := CaCountTokenRequest{
 		Request: CountTokenRequest{
 			Model:    modelName,
