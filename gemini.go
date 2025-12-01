@@ -45,6 +45,15 @@ func (ts *tokenSaverSource) Client(ctx context.Context) *http.Client {
 
 type CodeAssistProvider struct {
 	client *CodeAssistClient
+	models map[string]*Model
+}
+
+// NewCodeAssistProvider creates a new CodeAssistProvider with the given models and client
+func NewCodeAssistProvider(models map[string]*Model, client *CodeAssistClient) *CodeAssistProvider {
+	return &CodeAssistProvider{
+		client: client,
+		models: models,
+	}
 }
 
 // APIType defines which API to use
@@ -283,36 +292,44 @@ func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string
 
 // MaxTokens implements the LLMProvider interface for CodeAssistProvider.
 func (cap *CodeAssistProvider) MaxTokens(modelName string) int {
-	switch modelName {
-	case "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
-		return 1048576
-	case "gemini-3-pro-image-preview", "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
-		return 65536
-	case "gemini-2.0-flash-preview-image-generation":
-		return 32768
-	default:
-		return 1048576
+	// Use model information from ModelRegistry models map
+	if model, exists := cap.models[modelName]; exists {
+		switch model.Name {
+		case "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro":
+			return 1048576
+		case "gemini-3-pro-image-preview", "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
+			return 65536
+		case "gemini-2.0-flash-preview-image-generation":
+			return 32768
+		default:
+			return 1048576
+		}
 	}
+	return 1048576
 }
 
 // RelativeDisplayOrder implements the LLMProvider interface for CodeAssistProvider.
 func (cap *CodeAssistProvider) RelativeDisplayOrder(modelName string) int {
-	switch modelName {
-	case "gemini-2.5-flash":
-		return 10
-	case "gemini-3-pro-preview":
-		return 9
-	case "gemini-2.5-pro":
-		return 8
-	case "gemini-3-pro-image-preview":
-		return 7
-	case "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
-		return 6
-	case "gemini-2.5-flash-lite":
-		return 5
-	default:
-		return 0
+	// Use model information from ModelRegistry models map
+	if model, exists := cap.models[modelName]; exists {
+		switch model.Name {
+		case "gemini-2.5-flash":
+			return 10
+		case "gemini-3-pro-preview":
+			return 9
+		case "gemini-2.5-pro":
+			return 8
+		case "gemini-3-pro-image-preview":
+			return 7
+		case "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
+			return 6
+		case "gemini-2.5-flash-lite":
+			return 5
+		default:
+			return 0
+		}
 	}
+	return 0
 }
 
 // DefaultGenerationParams implements the LLMProvider interface for CodeAssistProvider.
@@ -322,23 +339,26 @@ func (cap *CodeAssistProvider) DefaultGenerationParams(modelName string) Session
 
 // SubagentProviderAndParams implements the LLMProvider interface for CodeAssistProvider.
 func (cap *CodeAssistProvider) SubagentProviderAndParams(modelName string, task string) (provider LLMProvider, returnModelName string, params SessionGenerationParams) {
-	params = SessionGenerationParams{
-		Temperature: 0.0,
-		TopK:        -1,
-		TopP:        1.0,
-	}
-
 	provider = cap // Return self as provider
 
-	if task == SubagentImageGenerationTask {
-		//returnModelName = "gemini-2.5-flash-image-preview"
-		returnModelName = "gemini-2.0-flash-preview-image-generation"
-	} else if modelName == "gemini-2.5-pro" {
-		returnModelName = "gemini-2.5-flash"
-	} else {
-		returnModelName = "gemini-2.5-flash-lite"
+	// Look up the model in the models map
+	if model, exists := cap.models[modelName]; exists && model.Subagents != nil {
+		// Use subagent information from ModelRegistry
+		if subagentModel, subagentExists := model.Subagents[task]; subagentExists {
+			// Use the subagent model defined in models.json
+			returnModelName = subagentModel.Name
+			params = SessionGenerationParams{
+				Temperature: subagentModel.GenParams.Temperature,
+				TopK:        subagentModel.GenParams.TopK,
+				TopP:        subagentModel.GenParams.TopP,
+			}
+			return
+		}
 	}
 
+	// If no subagent found, return empty values
+	returnModelName = ""
+	params = SessionGenerationParams{}
 	return
 }
 

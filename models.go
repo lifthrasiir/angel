@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
 )
 
 const AngelEvalModelName = "angel-eval"
@@ -810,7 +812,29 @@ func (r *ModelsRegistry) SetAngelEvalProvider(provider LLMProvider) {
 	r.providers[AngelEvalModelName] = provider
 }
 
-// SetGeminiProvider sets the Gemini provider
+// SetGeminiCodeAssistClient creates and sets the Gemini provider with the given CodeAssistClient
+func (r *ModelsRegistry) SetGeminiCodeAssistClient(client *CodeAssistClient) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	// Collect all Gemini models
+	geminiModels := make(map[string]*Model)
+	for _, model := range r.Models {
+		if r.isGeminiModelUnsafe(model) {
+			geminiModels[model.Name] = model
+		}
+	}
+
+	// Create a single provider instance that will be shared by all Gemini models
+	r.geminiProvider = NewCodeAssistProvider(geminiModels, client)
+
+	// Register all Gemini models with the provider
+	for modelName := range geminiModels {
+		r.providers[modelName] = r.geminiProvider
+	}
+}
+
+// SetGeminiProvider sets a custom LLM provider for Gemini models (for testing)
 func (r *ModelsRegistry) SetGeminiProvider(provider LLMProvider) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

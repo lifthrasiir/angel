@@ -151,12 +151,10 @@ func (ga *GeminiAuth) InitCurrentProvider() {
 
 	// Centralized GlobalModelsRegistry population
 	if ga.TokenSource != nil {
-		provider := &CodeAssistProvider{
-			client: NewCodeAssistClient(ga.TokenSource, ga.ProjectID),
-		}
+		client := NewCodeAssistClient(ga.TokenSource, ga.ProjectID)
 
 		// Register Gemini models in GlobalModelsRegistry
-		GlobalModelsRegistry.SetGeminiProvider(provider)
+		GlobalModelsRegistry.SetGeminiCodeAssistClient(client)
 	} else {
 		log.Println("InitCurrentProvider: No valid TokenSource available. LLM clients will not be initialized.")
 	}
