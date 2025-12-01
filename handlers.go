@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fvbommel/sortorder"
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
@@ -443,30 +442,11 @@ func listModelsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sortableModels []sortableModelInfo
-	for modelName, provider := range GlobalModelsRegistry.providers {
-		sortableModels = append(sortableModels, sortableModelInfo{
-			Name:                 modelName,
-			MaxTokens:            provider.MaxTokens(modelName),
-			RelativeDisplayOrder: provider.RelativeDisplayOrder(modelName),
-		})
-	}
-
-	// Sort models:
-	// 1. By RelativeDisplayOrder in descending order
-	// 2. Then by Name in natural ascending order
-	sort.Slice(sortableModels, func(i, j int) bool {
-		if sortableModels[i].RelativeDisplayOrder != sortableModels[j].RelativeDisplayOrder {
-			return sortableModels[i].RelativeDisplayOrder > sortableModels[j].RelativeDisplayOrder
-		}
-		return sortorder.NaturalLess(sortableModels[i].Name, sortableModels[j].Name)
-	})
-
 	var models []ModelInfo
-	for _, sm := range sortableModels {
+	for _, model := range GlobalModelsRegistry.GetAllModels() {
 		models = append(models, ModelInfo{
-			Name:      sm.Name,
-			MaxTokens: sm.MaxTokens,
+			Name:      model.Name,
+			MaxTokens: model.MaxTokens,
 		})
 	}
 

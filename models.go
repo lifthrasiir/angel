@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fvbommel/sortorder"
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
@@ -92,10 +94,10 @@ type OpenAIEndpoint struct {
 }
 
 type ModelsRegistry struct {
-	Models       map[string]*Model
-	DisplayOrder []string
-	Aliases      map[string]string
-	rawConfig    *ModelsConfig // Keep for reference resolution
+	builtinModels map[string]*Model
+	displayOrder  []string
+	aliases       map[string]string
+	rawConfig     *ModelsConfig // Keep for reference resolution
 
 	// Provider management
 	providers       map[string]LLMProvider     // model name -> provider
@@ -121,9 +123,9 @@ func LoadModels(data []byte) (*ModelsRegistry, error) {
 	}
 
 	registry := &ModelsRegistry{
-		Models:          make(map[string]*Model),
-		DisplayOrder:    config.DisplayOrder,
-		Aliases:         make(map[string]string),
+		builtinModels:   make(map[string]*Model),
+		displayOrder:    config.DisplayOrder,
+		aliases:         make(map[string]string),
 		rawConfig:       &config,
 		providers:       make(map[string]LLMProvider),
 		openAIEndpoints: make(map[string]*OpenAIEndpoint),
@@ -167,7 +169,7 @@ func (r *ModelsRegistry) parseRawModels(config *ModelsConfig) error {
 		switch v := raw.(type) {
 		case string:
 			// String alias
-			r.Aliases[name] = v
+			r.aliases[name] = v
 		case map[string]interface{}:
 			// Convert to RawModel
 			jsonBytes, err := json.Marshal(v)
@@ -202,7 +204,7 @@ func (r *ModelsRegistry) parseRawModels(config *ModelsConfig) error {
 			}
 
 			// Store raw model data for resolution
-			r.Models[name] = intermediate
+			r.builtinModels[name] = intermediate
 		default:
 			return ModelsError{
 				Type:    ErrTypeParse,
@@ -218,14 +220,14 @@ func (r *ModelsRegistry) parseRawModels(config *ModelsConfig) error {
 // resolveModels handles inheritance, genParams, subagents, and fallbacks in a single pass
 func (r *ModelsRegistry) resolveModels() error {
 	// Resolve inheritance chains first
-	for name, model := range r.Models {
+	for name, model := range r.builtinModels {
 		if err := r.resolveInheritance(model, name); err != nil {
 			return err
 		}
 	}
 
 	// Now resolve everything from RawModel perspective
-	for name, model := range r.Models {
+	for name, model := range r.builtinModels {
 		if err := r.resolveModelFromRaw(name, model); err != nil {
 			return err
 		}
@@ -460,12 +462,12 @@ func (r *ModelsRegistry) mergeModel(parent, child *Model, childName string) {
 // resolveModelReference resolves a model reference with inheritance-aware subagent path resolution
 func (r *ModelsRegistry) resolveModelReference(baseModel *Model, name string) (*Model, error) {
 	// 1. Check if it's an alias first
-	if alias, exists := r.Aliases[name]; exists {
+	if alias, exists := r.aliases[name]; exists {
 		name = alias
 	}
 
 	// 2. Check if direct model exists (after alias resolution)
-	if model, exists := r.Models[name]; exists {
+	if model, exists := r.builtinModels[name]; exists {
 		return model, nil
 	}
 
@@ -484,7 +486,7 @@ func (r *ModelsRegistry) resolveModelReference(baseModel *Model, name string) (*
 	if parentName == "" {
 		parentModel = baseModel
 	} else {
-		parentModel = r.Models[parentName]
+		parentModel = r.builtinModels[parentName]
 	}
 	if parentModel == nil {
 		return nil, ModelsError{
@@ -497,7 +499,7 @@ func (r *ModelsRegistry) resolveModelReference(baseModel *Model, name string) (*
 	// Traverse parentModel's inheritance chain and try each ancestor/subagentPath
 	for _, ancestorName := range parentModel.InheritanceChain {
 		targetName := ancestorName + subagentPath
-		if targetModel, exists := r.Models[targetName]; exists {
+		if targetModel, exists := r.builtinModels[targetName]; exists {
 			return targetModel, nil
 		}
 	}
@@ -573,8 +575,8 @@ func (r *ModelsRegistry) validate() error {
 	var errors []ModelsError
 
 	// Validate displayOrder references
-	for _, modelName := range r.DisplayOrder {
-		if _, exists := r.Models[modelName]; !exists {
+	for _, modelName := range r.displayOrder {
+		if _, exists := r.builtinModels[modelName]; !exists {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
 				Message: fmt.Sprintf("Model in displayOrder not found: %s", modelName),
@@ -584,7 +586,7 @@ func (r *ModelsRegistry) validate() error {
 	}
 
 	// Validate that all models have proper inheritance chains resolved
-	for name, model := range r.Models {
+	for name, model := range r.builtinModels {
 		if len(model.InheritanceChain) == 0 {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
@@ -595,10 +597,10 @@ func (r *ModelsRegistry) validate() error {
 	}
 
 	// Validate aliases point to existing models
-	for alias, target := range r.Aliases {
-		if _, exists := r.Models[target]; !exists {
+	for alias, target := range r.aliases {
+		if _, exists := r.builtinModels[target]; !exists {
 			// Check if target is also an alias
-			if _, targetExists := r.Aliases[target]; !targetExists {
+			if _, targetExists := r.aliases[target]; !targetExists {
 				errors = append(errors, ModelsError{
 					Type:    ErrTypeValidation,
 					Message: fmt.Sprintf("Alias target not found: %s -> %s", alias, target),
@@ -618,11 +620,11 @@ func (r *ModelsRegistry) validate() error {
 // GetModel retrieves a model by name or alias
 func (r *ModelsRegistry) GetModel(name string) (*Model, bool) {
 	// Check if it's an alias
-	if alias, exists := r.Aliases[name]; exists {
+	if alias, exists := r.aliases[name]; exists {
 		name = alias
 	}
 
-	model, exists := r.Models[name]
+	model, exists := r.builtinModels[name]
 	return model, exists
 }
 
@@ -833,7 +835,7 @@ func (r *ModelsRegistry) SetGeminiCodeAssistClient(client *CodeAssistClient) {
 
 	// Collect all Gemini models
 	geminiModels := make(map[string]*Model)
-	for _, model := range r.Models {
+	for _, model := range r.builtinModels {
 		if r.isGeminiModelUnsafe(model) {
 			geminiModels[model.Name] = model
 		}
@@ -856,7 +858,7 @@ func (r *ModelsRegistry) SetGeminiProvider(provider LLMProvider) {
 	r.geminiProvider = provider
 
 	// Register all Gemini models with the provider
-	for _, model := range r.Models {
+	for _, model := range r.builtinModels {
 		if r.isGeminiModelUnsafe(model) {
 			r.providers[model.Name] = provider
 		}
@@ -934,24 +936,29 @@ func (r *ModelsRegistry) GetAllModels() []*Model {
 	seen := make(map[string]bool)
 
 	// First add models in displayOrder
-	for _, name := range r.DisplayOrder {
-		if model, exists := r.Models[name]; exists {
-			if !seen[name] && !strings.Contains(name, "/") {
-				models = append(models, model)
-				seen[name] = true
-			}
-		}
-	}
-
-	// Then add any remaining models not in displayOrder
-	for name, model := range r.Models {
-		if !seen[name] && !strings.Contains(name, "/") {
+	for _, name := range r.displayOrder {
+		if model, exists := r.builtinModels[name]; exists {
 			models = append(models, model)
 			seen[name] = true
 		}
 	}
 
-	return models
+	// Then add any remaining non-Gemini models
+	var nonGeminiModels []*Model
+	for name, provider := range r.providers {
+		if !seen[name] && !strings.HasPrefix(name, "$") && provider != r.geminiProvider {
+			maxTokens := provider.MaxTokens(name)
+			nonGeminiModels = append(nonGeminiModels, &Model{Name: name, MaxTokens: maxTokens})
+			seen[name] = true
+		}
+	}
+
+	// Non-Gemini models are sorted by name in natural ascending order
+	sort.Slice(nonGeminiModels, func(i, j int) bool {
+		return sortorder.NaturalLess(nonGeminiModels[i].Name, nonGeminiModels[j].Name)
+	})
+
+	return append(models, nonGeminiModels...)
 }
 
 // Validate performs validation and returns detailed errors
@@ -959,8 +966,8 @@ func (r *ModelsRegistry) Validate() []ModelsError {
 	var errors []ModelsError
 
 	// Validate displayOrder references
-	for _, modelName := range r.DisplayOrder {
-		if _, exists := r.Models[modelName]; !exists {
+	for _, modelName := range r.displayOrder {
+		if _, exists := r.builtinModels[modelName]; !exists {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
 				Message: fmt.Sprintf("Model in displayOrder not found: %s", modelName),
@@ -970,7 +977,7 @@ func (r *ModelsRegistry) Validate() []ModelsError {
 	}
 
 	// Validate inheritance chains
-	for name, model := range r.Models {
+	for name, model := range r.builtinModels {
 		if len(model.InheritanceChain) == 0 {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
@@ -981,9 +988,9 @@ func (r *ModelsRegistry) Validate() []ModelsError {
 	}
 
 	// Validate aliases
-	for alias, target := range r.Aliases {
-		if _, exists := r.Models[target]; !exists {
-			if _, targetExists := r.Aliases[target]; !targetExists {
+	for alias, target := range r.aliases {
+		if _, exists := r.builtinModels[target]; !exists {
+			if _, targetExists := r.aliases[target]; !targetExists {
 				errors = append(errors, ModelsError{
 					Type:    ErrTypeValidation,
 					Message: fmt.Sprintf("Alias target not found: %s -> %s", alias, target),

@@ -21,7 +21,7 @@ func TestGeminiSubagentProvider(t *testing.T) {
 
 	// Create CodeAssistProvider with models map
 	geminiModels := make(map[string]*Model)
-	for _, model := range registry.Models {
+	for _, model := range registry.builtinModels {
 		if registry.isGeminiModelUnsafe(model) {
 			geminiModels[model.Name] = model
 		}
