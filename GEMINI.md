@@ -2,11 +2,11 @@
 
 - **Project:** Angel - A personalized coding agent using Go and React/TypeScript.
 - **Goal:** Create a simple, single-user web version of `@google/gemini-cli`.
-- **Default LLM Model:** `gemini-2.5-flash` (with support for `gemini-2.5-flash-lite` and `gemini-2.5-flash-image` variants)
+- **Default LLM Model:** `gemini-2.5-flash` (with support for other Gemini 2.5 and 3 models)
 
 ## Project Features
 
-- **Leverages Gemini Code Assist Free Tier**: The application integrates with the Gemini Code Assist API for LLM functionalities, utilizing the free tier. Authentication is handled via Google OAuth.
+- **Flexible LLM Integration**: The application supports multiple ways to connect to LLMs. It can use the Gemini Code Assist API (via Google OAuth) for free-tier access, or connect directly to the Gemini API using a standard API key.
 - **Multi-session and Workspaces**: Users can create and manage multiple chat sessions, which can be organized into distinct workspaces.
 - **Branching**: Users can create new conversation branches from existing user messages and switch between different branches within a session, allowing for exploration of alternative conversation paths. This is managed by linking messages using `parent_message_id` and `chosen_next_id` in the `messages` table, and associating them with specific `branch_id`s. The `primary_branch_id` in the `sessions` table indicates the currently active conversation path.
 - **Configurable System Prompt per Session**: Each chat session allows for a custom system prompt. These prompts support Go templating for dynamic generation using the `EvaluatePrompt` function, with a preview feature available in the UI.
@@ -19,13 +19,15 @@
 
 ## Go Backend
 
-- **Authentication (`auth.go`, `main.go`, `gemini.go`)**: Handles user authentication via Google OAuth, storing tokens in an SQLite database. The `tokenSaverSource` in `gemini.go` ensures tokens are saved upon acquisition or refresh. `main.go` sets up OAuth2 handlers.
+- **Authentication (`src/gemini/code_assist.go`, `src/gemini/google_login.go`)**: Manages user authentication. It supports two main methods: Google OAuth for the free-tier Code Assist API and direct API key authentication for the Gemini API.
 - **Database (`db.go`, `db_chat.go`)**: Uses SQLite (`angel.db`) for persistent storage of sessions, messages, and other configurations. `db_chat.go` specifically handles chat-related database operations. The `messages` table utilizes `parent_message_id`, `chosen_next_id`, and `branch_id` to manage conversation threads and branching. The `blobs` table stores file data with automatic reference counting via triggers. Functions like `AddMessageToSession` and `UpdateMessageContent` are crucial for message management. The database includes full-text search capabilities for chat history and periodic WAL checkpointing for performance optimization.
-- **Gemini API Interaction (`gemini.go`, `gemini_types.go`, `llm.go`)**:
+- **Chat Logic (`chat_*.go`)**: Includes `chat_branch.go`, `chat_command.go`, `chat_stream.go` and so on for better modularity.
+- **Gemini API Interaction (`src/gemini/gemini_api.go`, `llm.go`, `models.go`)**:
   - Defines the `LLMProvider` interface in `llm.go` for abstracting interactions with various Large Language Models, including methods like `SendMessageStream` (for streaming responses), `GenerateContentOneShot` (for single-shot responses), `CountTokens`, `MaxTokens`, `RelativeDisplayOrder`, and `DefaultGenerationParams`.
   - `SessionParams` in `llm.go` holds all parameters for an LLM chat session, including `Contents`, `ModelName`, `SystemPrompt`, `IncludeThoughts`, `GenerationParams` (e.g., Temperature, TopK, TopP), and `ToolConfig`.
-  - `gemini_types.go` strictly defines official Gemini API types such as `Content`, `Part` (which includes `Thought`, `FunctionCall`, `FunctionResponse`), `Schema` (for tool definitions), `GenerationConfig`, and various metadata types (`URLContextMetadata`, `GroundingMetadata`).
-  - The `CodeAssistClient` in `gemini.go` facilitates communication with the Gemini API, handling token counting, code assist loading, and user onboarding.
+  - `src/gemini/types.go` strictly defines official Gemini API types such as `Content`, `Part`, `Schema`, etc.
+  - The `CodeAssistClient` and a new `GeminiClient` in the `src/gemini/` directory facilitate communication with Google's APIs.
+- **Model Management (`models.go`, `models.json`)**: Model definitions (names, token limits, capabilities) are loaded at startup from `models.json`. The `ModelsRegistry` in `models.go` manages access to these model definitions.
 - **OpenAI-Compatible LLM Support (`openai.go`)**: The `OpenAIClient` implements the `LLMProvider` interface for OpenAI-compatible APIs, supporting streaming chat completions, function calling, and automatic context length probing for models like Ollama. The system can dynamically register multiple OpenAI models from database configurations.
 - **Model Context Protocol (MCP) Management (`mcp.go`)**: The `MCPManager` in `mcp.go` handles connections to multiple MCP servers. It resolves naming conflicts between built-in and MCP tools by prefixing MCP tool names (e.g., `mcpName__toolName`) and dispatches tool calls via `DispatchToolCall`.
 - **Server-Sent Events (SSE) Implementation (`sse.go`)**: The `sseWriter` in `sse.go` streams real-time updates to clients. It defines various `EventType`s (e.g., `EventInitialState`, `EventThought`, `EventModelMessage`, `EventFunctionCall`, `EventFunctionResponse`, `EventComplete`, `EventSessionName`, `EventCumulTokenCount`, `EventError`) and supports broadcasting events to active SSE clients. The streaming protocol is a custom JSON stream format, intentionally avoiding the `event:` prefix.
@@ -36,69 +38,30 @@
 ## React/TypeScript Frontend
 
 - **Core Technologies**: Built with React, TypeScript, and Vite.
-- **Key Files**:
-  - **`main.tsx`**: The application's entry point, responsible for rendering the main `ChatLayout` component.
-  - **`api/models.ts`**: Handles API calls related to fetching available LLM models.
-  - **`atoms/chatAtoms.ts`**: Defines Jotai atoms for global state management, including chat sessions, messages, and UI states.
-  - **`types/chat.ts`**: Contains TypeScript interface definitions for chat-related data structures, such as messages, sessions, and attachments.
-  - **`utils/`**: This directory contains various utility functions, including `fileHandler.ts` (for file attachments), `measurementUtils.ts` (for UI element measurements), `messageHandler.ts` (for message processing), `sessionManager.ts` (for session-related operations), `stringUtils.ts` (for string manipulations), and `userManager.ts` (for user-related data).
+- **Key Files & Hooks**:
+  - **`main.tsx`**: The application's entry point.
+  - **`useChatSession.ts`**: A central hub hook that encapsulates all chat session-related state and logic.
+  - **`useSessionManager.ts`**: Handles the complex logic for managing the list of workspaces and sessions in the sidebar.
+  - **`useMessageSending.ts` & `useSessionLoader.ts`**: Manage sending messages and loading session history, including handling the Server-Sent Events (SSE) connection for real-time updates.
+  - **`atoms/chatAtoms.ts`**: Defines Jotai atoms for global state management.
+  - **`types/chat.ts`**: Contains TypeScript interface definitions for chat-related data structures.
 - **UI Components**:
-  - **`ChatArea.tsx`**: The central component for the chat interface, managing message display, system prompt editing, file attachment previews, and the chat input field. Supports infinite scrolling and message editing capabilities.
-  - **`ChatInput.tsx`**: Integrated within `ChatArea.tsx`, handles user message input and sending with context-aware behavior (Enter key behavior depends on context).
-  - **`ChatLayout.tsx`**: Defines the overall application layout, handling authentication rendering, integrating the sidebar and chat area, and displaying toast messages.
-  - **`SystemPromptEditor.tsx`**: Provides the UI for editing and previewing system prompts. It supports selecting prompt types, custom editing, evaluating Go templates via the backend API (`/api/evaluatePrompt`), expanding/collapsing content, and a read-only mode for existing sessions.
-  - **`InitialState`**: This struct is used to send the initial state of a chat session to the frontend. It includes the `SessionId` (which corresponds to the `sessions.id` in the database and is used for URL updates), the `History` of messages, the `SystemPrompt` for the session, the `WorkspaceID` it belongs to, and the `PrimaryBranchID` of the currently active branch within that session. The `SessionId` is a string generated by `generateID()` and is used consistently across the frontend for routing and identification.
-  - **`MCPSettings.tsx`**: Provides a user interface for managing Model Context Protocol (MCP) server configurations, including viewing connection status, available tools, and adding/deleting configurations.
-  - **`OpenAISettings.tsx`**: Provides a user interface for managing OpenAI-compatible LLM provider configurations, including API endpoints, keys, and model selection.
-  - **`SessionMenu.tsx`**: Provides a context menu for sessions with options to rename, move to workspace, and delete sessions.
-  - **Message Editing**: Users can edit messages (including the first message in a session) with explicit edit buttons, replacing focus-based editing with clearer UI controls. Edited messages can be retried to regenerate responses.
-  - **Error Recovery**: Retry buttons appear alongside consecutive error messages, allowing users to retry failed operations with a single click.
-  - **Branch Management**: Enhanced branch listing and switching capabilities with improved UI controls for managing conversation branches.
-  - **Drag & Drop Support**: Proper drag & drop support for internal images and file attachments with improved file handling.
-  - **Mobile Support**: Minimal mobile support for basic functionality on smaller screens.
-  - **Syntax Highlighting**: Enhanced code display with proper syntax highlighting, including within unified diffs.
-  - **Global Error Handling**: Implements a global `window.onerror` handler to catch uncaught JavaScript errors and display them using the `ToastMessage` component for improved user feedback.
-  - **Model Selection**: Allows users to select different LLM models for their chat sessions, including support for `gemini-2.5-flash`, `gemini-2.5-flash-lite`, and `gemini-2.5-flash-image` variants, leveraging the `/api/models` endpoint to fetch available models and their token limits.
-  - **Other UI Components**: Includes components for displaying individual messages (`ChatMessage.tsx`, `UserTextMessage.tsx`, `ModelTextMessage.tsx`, `FunctionCallMessage.tsx`, `FunctionResponseMessage.tsx`, `FunctionPairMessage.tsx`, `SystemMessage.tsx`, `CompressionMessage.tsx`, `EnvChangedMessage.tsx`), managing session and workspace lists (`SessionList.tsx`, `WorkspaceList.tsx`), rendering markdown (`MarkdownRenderer.tsx`), displaying thoughts (`ThoughtGroup.tsx`), specialized tool components (`GenerateImage.tsx`, `BlobImage.tsx`, `WebFetch.tsx`), and file attachment previews with resizing capabilities (`FileAttachmentPreview.tsx`).
-- **State Management**: Utilizes Jotai for global state management across the chat application.
-- **Custom Hooks**:
-  - **`useChatSession.ts`**: A central hub hook that encapsulates all chat session-related state and logic. It integrates `useChat`, `useMessageSending`, `useSessionLoader`, and `useWorkspaceAndSessions`.
-  - **`useMessageSending.ts`**: Encapsulates the logic for sending messages and streaming subsequent responses. 
-    - **Backend Connection**: Sends user messages (with attachments) via POST requests to the `/api/chat` endpoint (for new sessions) or `/api/chat/{sessionId}` (for existing sessions).
-    - **Streaming Processing**: Processes streaming responses from the backend (using SSE event types defined in `sse.go`) to update the UI in real-time.
-    - **Cancellation**: Sends a DELETE request to `/api/chat/{sessionId}/call` to cancel ongoing streaming, which is handled by the `cancelCall` function in `call_manager.go` on the backend.
-  - **`useSessionLoader.ts`**: Encapsulates the logic for loading existing chat sessions and possibly streaming the ongoing call.
-    - **Backend Connection**: Establishes an SSE connection to the `/api/chat/{sessionId}` endpoint via the `loadSession` function to receive session history and real-time updates.
-    **Authentication**: Fetches user information from the `/api/userinfo` endpoint via `fetchUserInfo` to verify login status.
-  - **`useWorkspaceAndSessions.ts`**: Encapsulates the logic for fetching workspace and session data.
-    - **Backend Connection**: Fetches workspace and session lists from the `/api/chat` (sessions list) endpoint via the `fetchSessions` function.
-  - **`useCommandProcessor.ts`**: Handles processing of user commands (e.g., `/compress`).
-  - **`useDocumentTitle.ts`**: Manages dynamic updates to the browser document title.
-  - **`useEscToCancel.ts`**: Implements logic for cancelling operations using the Escape key.
-  - **`useAttachmentResize.ts`**: Manages automatic resizing of image attachments, providing state for processing, resizing options, and file optimization before sending.
-  - **`WorkspaceContext.tsx`**: Provides a React Context for workspace-related data, often used in conjunction with `useWorkspaceAndSessions.ts`.
+  - **`ChatArea.tsx`**: The central component for the chat interface.
+  - **`ChatLayout.tsx`**: Defines the overall application layout.
+  - **`SystemPromptEditor.tsx`**: UI for editing and previewing system prompts.
+  - **`Sidebar.tsx`**: Contains the `WorkspaceList` and `SessionList`, which were significantly refactored for better state management and performance.
+  - **Message Components**: A suite of components for rendering different message types (`UserTextMessage.tsx`, `ModelTextMessage.tsx`, `FunctionCallMessage.tsx`, etc.).
 
 ## General Project Concepts and Cautions
 
 - **Language**: Code and comments are in English. User responses should be in the requested language (currently Korean).
-- **Terminology**: The terms "agent" or "angel" refer to the LLM model.
-- **Development**: Features may require modifications to both Go and TypeScript code. Aim to refactor significant duplications or similar structures.
-- **Build:** Always run the minimal necessary build command: `npm run build-frontend` (frontend-only), `npm run build-backend` (backend-only), or `npm run build` (both). Never `npm start` (user responsibility). Run without prompt.
-- **Port Configuration:** The application port can be changed to a limited extent via configuration.
-- **Tests:** `npm run test` (backend-only). The backend tests cover various functionalities, including:
-  - **Test Utilities (`test_utils.go`)**: Provides helper functions for setting up the test environment (`setupTest`), parsing SSE streams (`parseSseStream`), and sending HTTP requests (`testRequest`, `testStreamingRequest`).
-  - **Core Backend Logic**: Tests the correct management of conversation threads, message linking, branching logic, streaming response consolidation, client synchronization with ongoing streams, API call cancellation, workspace and session management, token counting, prompt evaluation, and MCP configuration management.
-  - **LLM Mocking**: `MockLLMProvider` is used to simulate LLM responses for controlled testing. The `angel-eval` model also serves as a specialized LLM for testing and debugging purposes, allowing for controlled streaming of responses.
-- **Dependency**: Minimize new dependencies. Clearly explain why any new dependency is required.
-- **Comments**: Comments are strictly for future maintainers, explaining *why* complex or non-obvious code exists, not *what* it does. Avoid comments that describe new features, temporary changes, or are only relevant during code generation.
-- **Modern Practices:** Prioritize current, idiomatic patterns and best practices for relevant frameworks/languages, ensuring up-to-date, performant, and maintainable solutions, unless contradicted by project conventions.
+- **Build:** When building the backend or running tests, the **`-tags sqlite_fts5`** flag is required (e.g., `go build -tags sqlite_fts5 .`). The provided npm scripts (`npm run build`, `npm run test`) handle this automatically.
+- **Tests:** `npm run test` (backend-only). The backend tests cover various functionalities. Use `npm run test-backend -- -run <TestName>` for specific tests.
 - **File Operations (`replace`, `write_file`)**:
   - `old_string`/`new_string` must exactly match, including all whitespace, indentation, and newlines.
   - For complex modifications, prefer `write_file` (read file, modify in memory, then overwrite).
-  - **Caution for Agents**: When providing string literals containing newlines to `replace` or `write_file` tools, ensure that newlines are *double-escaped* (e.g., `\n` becomes `\\n`, `\r\n` becomes `\\r\\n`). This is to prevent issues during JSON serialization of the tool arguments.
 - **Message Chain Management**: The `MessageChain` struct in `message.go` provides a high-level abstraction for managing sequences of messages in a conversation branch. It handles parent-child relationships, message ordering, generation tracking, and model management automatically. This is the preferred way to manage message addition and conversation flow.
 - **Responsiveness:** Always prioritize and act on the user's *latest* input. If a new instruction arrives during an ongoing task, you *must* immediately halt the current task and address the new instruction; do not assume continuation.
-- **ID Generation**: All workspace and session IDs generated by `generateID()` should contain at least one capital letter (CamelCase recommended for testing) to avoid collision with certain predefined routes.
 - **Security**: While assumed to be used as a localhost application, CSRF protection is in place.
 
 ## Core Data Structures and Interaction Flow (Concise)
@@ -176,7 +139,7 @@ Angel utilizes Server-Sent Events (SSE) for real-time, interactive conversations
 
 - Never, ever remove the intentionally hard-coded GoogleOauthConfig!!!!
 - You do NOT need to export anything in the same package!!!!
-- `gemini_types.go` is for the official Gemini API types, and nothing else.
+- **`src/gemini/types.go`** is for the official Gemini API types, and nothing else.
 - The streaming protocol intentionally avoids `event:`.
 - Feel free to use `git checkout` to roll your modification back. But do not use any other git command unless requested.
 - When using `replace` or `write_file`, pay close attention to newlines and whitespace. These tools demand exact literal matches.
@@ -184,4 +147,3 @@ Angel utilizes Server-Sent Events (SSE) for real-time, interactive conversations
   - **Complex Changes:** For complex modifications prone to `replace` errors, prefer `write_file` (read file, modify in memory, then overwrite).
 - **Go Error Handling:** When an error occurs, prefer re-declaring the variable using `:=` instead of `var` followed by `=` to avoid "declared and not used" errors and ensure proper variable scoping.
 - **Addressing User Doubts:** If a user expresses doubt or questions a proposed solution, immediately pause the current task. Prioritize understanding the user's perspective and the reasoning behind their concerns. Engage in a dialogue to clarify their thoughts, address their points, and collaboratively arrive at a solution that aligns with their understanding and expectations. The goal is to ensure the user feels heard and confident in the approach.
-
