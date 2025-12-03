@@ -203,9 +203,9 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		modelName = DefaultGeminiModel // Default model if not provided
 	}
 
-	provider := GlobalModelsRegistry.GetProvider(modelName)
-	if provider == nil {
-		sendBadRequestError(w, r, fmt.Sprintf("Unsupported model: %s", modelName))
+	modelProvider, err := GlobalModelsRegistry.GetModelProvider(modelName)
+	if err != nil {
+		sendBadRequestError(w, r, err.Error())
 		return
 	}
 
@@ -216,7 +216,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp, err := provider.CountTokens(context.Background(), modelName, contents)
+	resp, err := modelProvider.CountTokens(context.Background(), contents)
 	if err != nil {
 		if apiErr, ok := err.(*APIError); ok {
 			http.Error(w, fmt.Sprintf("CountTokens API call failed: %v", apiErr.Message), apiErr.StatusCode)

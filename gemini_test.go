@@ -31,58 +31,58 @@ func TestGeminiSubagentProvider(t *testing.T) {
 
 	// Test 1: session_name task for gemini-2.5-flash
 	t.Run("SessionNameTask", func(t *testing.T) {
-		returnModelName, returnProvider, err := registry.ResolveSubagent("gemini-2.5-flash", "session_name")
+		modelProvider, err := registry.ResolveSubagent("gemini-2.5-flash", "session_name")
 		if err != nil {
 			t.Fatalf("Failed to resolve subagent: %v", err)
 		}
 
 		// Should return gemini-2.5-flash/subagent, which modelName *is* gemini-2.5-flash-lite
-		if returnModelName != "gemini-2.5-flash/subagent" {
-			t.Errorf("Expected 'gemini-2.5-flash/subagent', got '%s'", returnModelName)
+		if modelProvider.Name != "gemini-2.5-flash/subagent" {
+			t.Errorf("Expected 'gemini-2.5-flash/subagent', got '%s'", modelProvider.Name)
 		}
 
 		// Provider should be self
-		if returnProvider != registry.geminiProvider {
-			t.Error("Expected returnProvider to be the same as provider")
+		if modelProvider.LLMProvider != registry.geminiProvider {
+			t.Error("Expected modelProvider.provider to be the same as geminiProvider")
 		}
 	})
 
 	// Test 2: image_generation task for gemini-2.5-flash
 	t.Run("ImageGenerationTask", func(t *testing.T) {
-		returnModelName, _, err := registry.ResolveSubagent("gemini-2.5-flash", "image_generation")
+		modelProvider, err := registry.ResolveSubagent("gemini-2.5-flash", "image_generation")
 		if err != nil {
 			t.Fatalf("Failed to resolve subagent: %v", err)
 		}
 
 		// Should return some image model (currently gemini-2.5-flash-image, but may change)
-		if !strings.Contains(returnModelName, "-image") {
-			t.Errorf("Expected some image model, got '%s'", returnModelName)
+		if !strings.Contains(modelProvider.Name, "-image") {
+			t.Errorf("Expected some image model, got '%s'", modelProvider.Name)
 		}
 	})
 
 	// Test 3: Non-existent task
 	t.Run("NonExistentTask", func(t *testing.T) {
-		returnModelName, _, err := registry.ResolveSubagent("gemini-2.5-flash", "non_existent_task")
+		modelProvider, err := registry.ResolveSubagent("gemini-2.5-flash", "non_existent_task")
 		if err == nil {
 			t.Fatalf("Expected error for non-existent task, got none")
 		}
 
 		// Should return empty values when task not found
-		if returnModelName != "" {
-			t.Errorf("Expected empty returnModelName for non-existent task, got '%s'", returnModelName)
+		if modelProvider.Name != "" {
+			t.Errorf("Expected empty model name for non-existent task, got '%s'", modelProvider.Name)
 		}
 	})
 
 	// Test 4: Non-existent model
 	t.Run("NonExistentModel", func(t *testing.T) {
-		returnModelName, _, err := registry.ResolveSubagent("non-existent-model", "session_name")
+		modelProvider, err := registry.ResolveSubagent("non-existent-model", "session_name")
 		if err == nil {
 			t.Fatalf("Expected error for non-existent model, got none")
 		}
 
 		// Should return empty values when model not found
-		if returnModelName != "" {
-			t.Errorf("Expected empty returnModelName for non-existent model, got '%s'", returnModelName)
+		if modelProvider.Name != "" {
+			t.Errorf("Expected empty model name for non-existent model, got '%s'", modelProvider.Name)
 		}
 	})
 

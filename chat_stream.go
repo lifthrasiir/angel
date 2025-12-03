@@ -52,9 +52,9 @@ func streamLLMResponse(
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
 
-	provider := GlobalModelsRegistry.GetProvider(mc.LastMessageModel)
-	if provider == nil {
-		return fmt.Errorf("unsupported model: %s", mc.LastMessageModel)
+	modelProvider, err := GlobalModelsRegistry.GetModelProvider(mc.LastMessageModel)
+	if err != nil {
+		return err
 	}
 
 	var firstFinishReason string
@@ -63,7 +63,7 @@ func streamLLMResponse(
 			return err
 		}
 
-		seq, closer, err := provider.SendMessageStream(ctx, mc.LastMessageModel, SessionParams{
+		seq, closer, err := modelProvider.SendMessageStream(ctx, SessionParams{
 			Contents:        currentHistory,
 			SystemPrompt:    initialState.SystemPrompt,
 			IncludeThoughts: true,
@@ -608,13 +608,13 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	ctx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
-	returnModelName, provider, err := GlobalModelsRegistry.ResolveSubagent(modelToUse, SubagentSessionNameTask)
+	modelProvider, err := GlobalModelsRegistry.ResolveSubagent(modelToUse, SubagentSessionNameTask)
 	if err != nil {
 		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return
 	}
 
-	oneShotResult, err := provider.GenerateContentOneShot(ctx, returnModelName, SessionParams{
+	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, SessionParams{
 		Contents: []Content{
 			{
 				Role:  RoleUser,

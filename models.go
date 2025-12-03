@@ -873,6 +873,15 @@ func (r *ModelsRegistry) GetProvider(modelName string) LLMProvider {
 	return r.providers[modelName]
 }
 
+// GetModelProvider returns a ModelProvider wrapper that automatically handles the model name
+func (r *ModelsRegistry) GetModelProvider(modelName string) (ModelProvider, error) {
+	provider := r.GetProvider(modelName)
+	if provider == nil {
+		return ModelProvider{}, fmt.Errorf("unsupported model: %s", modelName)
+	}
+	return ModelProvider{LLMProvider: provider, Name: modelName}, nil
+}
+
 // Clear removes all providers and resets the registry
 func (r *ModelsRegistry) Clear() {
 	r.mutex.Lock()
@@ -1027,7 +1036,7 @@ func (r *ModelsRegistry) ModelGenerationParams(modelName string) (GenerationPara
 }
 
 // ResolveSubagent resolves a subagent for a given model and task, returning the resolved model name and provider
-func (r *ModelsRegistry) ResolveSubagent(modelName string, task string) (resolvedModelName string, provider LLMProvider, err error) {
+func (r *ModelsRegistry) ResolveSubagent(modelName string, task string) (ModelProvider, error) {
 	// Check if it's an alias
 	if alias, exists := r.aliases[modelName]; exists {
 		modelName = alias
@@ -1035,7 +1044,7 @@ func (r *ModelsRegistry) ResolveSubagent(modelName string, task string) (resolve
 
 	model, exists := r.builtinModels[modelName]
 	if !exists {
-		return "", nil, ModelsError{
+		return ModelProvider{}, ModelsError{
 			Type:    ErrTypeNotFound,
 			Message: fmt.Sprintf("Model not found: %s", modelName),
 			Model:   modelName,
@@ -1045,7 +1054,7 @@ func (r *ModelsRegistry) ResolveSubagent(modelName string, task string) (resolve
 	// Check if model has the requested subagent
 	subagentModel, exists := model.Subagents[task]
 	if !exists {
-		return "", nil, ModelsError{
+		return ModelProvider{}, ModelsError{
 			Type:    ErrTypeNotFound,
 			Message: fmt.Sprintf("Subagent not found for task '%s' in model '%s'", task, modelName),
 			Model:   modelName,
@@ -1055,16 +1064,16 @@ func (r *ModelsRegistry) ResolveSubagent(modelName string, task string) (resolve
 
 	// Get provider for the subagent model
 	r.mutex.RLock()
-	provider = r.providers[subagentModel.Name]
+	provider := r.providers[subagentModel.Name]
 	r.mutex.RUnlock()
 
 	if provider == nil {
-		return "", nil, ModelsError{
+		return ModelProvider{}, ModelsError{
 			Type:    ErrTypeResolution,
 			Message: fmt.Sprintf("No provider available for subagent model '%s'", subagentModel.Name),
 			Model:   subagentModel.Name,
 		}
 	}
 
-	return subagentModel.Name, provider, nil
+	return ModelProvider{LLMProvider: provider, Name: subagentModel.Name}, nil
 }

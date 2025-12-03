@@ -199,13 +199,13 @@ func handleSubagentTurn(
 	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
-	subagentModelName, llmClient, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, "")
+	modelProvider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, "")
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
 
 	// Update LastMessageModel to use the actual provider's model name
-	mc.LastMessageModel = subagentModelName
+	mc.LastMessageModel = modelProvider.Name
 
 	var fullResponseText strings.Builder
 	var firstFinishReason string
@@ -222,7 +222,7 @@ func handleSubagentTurn(
 		llmCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute timeout for subagent turn
 
 		// Stream LLM response
-		seq, closer, err := llmClient.SendMessageStream(llmCtx, subagentModelName, *sessionParams)
+		seq, closer, err := modelProvider.SendMessageStream(llmCtx, *sessionParams)
 		if err != nil {
 			cancel() // Ensure context is cancelled on error
 			return ToolHandlerResults{}, fmt.Errorf("failed to get streaming response from subagent LLM: %w", err)
@@ -375,13 +375,13 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Get LLM client for image generation using the new task first to determine the correct model
-	imageModelName, llmClient, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentImageGenerationTask)
+	imageModelProvider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentImageGenerationTask)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
 
 	// Set the last message model to use the actual provider's model name
-	mc.LastMessageModel = imageModelName
+	mc.LastMessageModel = imageModelProvider.Name
 
 	// Save user message to subsession with input image attachments
 	var userMessageAttachments []FileAttachment
@@ -450,7 +450,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	defer cancel()
 
 	// Stream LLM response
-	seq, closer, err := llmClient.SendMessageStream(llmCtx, imageModelName, *sessionParams)
+	seq, closer, err := imageModelProvider.SendMessageStream(llmCtx, *sessionParams)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to get streaming response from image generation LLM: %w", err)
 	}

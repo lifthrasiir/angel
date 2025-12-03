@@ -35,6 +35,32 @@ type LLMProvider interface {
 	MaxTokens(modelName string) int
 }
 
+// ModelProvider wraps LLMProvider and automatically manages model name
+type ModelProvider struct {
+	LLMProvider
+	Name string
+}
+
+// SendMessageStream calls the underlying provider with the stored model name
+func (mp ModelProvider) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	return mp.LLMProvider.SendMessageStream(ctx, mp.Name, params)
+}
+
+// GenerateContentOneShot calls the underlying provider with the stored model name
+func (mp ModelProvider) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
+	return mp.LLMProvider.GenerateContentOneShot(ctx, mp.Name, params)
+}
+
+// CountTokens calls the underlying provider with the stored model name
+func (mp ModelProvider) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
+	return mp.LLMProvider.CountTokens(ctx, mp.Name, contents)
+}
+
+// MaxTokens calls the underlying provider with the stored model name
+func (mp ModelProvider) MaxTokens() int {
+	return mp.LLMProvider.MaxTokens(mp.Name)
+}
+
 // Well-known tasks for subagents.
 const (
 	SubagentCompressionTask      = "compression"

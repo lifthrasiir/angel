@@ -86,7 +86,7 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 }
 
 // executeWebFetchFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
-func executeWebFetchFallback(ctx context.Context, prompt string, modelName string, llmProvider LLMProvider) (ToolHandlerResults, error) {
+func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider ModelProvider) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		return ToolHandlerResults{}, fmt.Errorf("no URL found in the prompt for fallback")
@@ -118,7 +118,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 		Contents: []Content{{Role: "user", Parts: []Part{{Text: fallbackPrompt}}}},
 	}
 
-	oneShotResult, err := llmProvider.GenerateContentOneShot(ctx, modelName, sessionParams)
+	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, sessionParams)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("Error during LLM processing of fallback content: %v", err)
 	}
@@ -131,7 +131,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelName strin
 	}}, nil
 }
 
-func executeWebFetch(ctx context.Context, prompt string, modelName string, fallbackModelName string, llmProvider LLMProvider, fallbackProvider LLMProvider) (ToolHandlerResults, error) {
+func executeWebFetch(ctx context.Context, prompt string, modelProvider ModelProvider, fallbackModelProvider ModelProvider) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		// If no URLs are found, perform a DuckDuckGo search
@@ -142,14 +142,14 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, fallb
 		// Modify the prompt to explicitly ask to exclude irrelevant content
 		modifiedPrompt := fmt.Sprintf("Process the content from this URL: %s\nExtract relevant information, excluding any irrelevant content.", duckDuckGoURL)
 
-		return executeWebFetchFallback(ctx, modifiedPrompt, fallbackModelName, fallbackProvider)
+		return executeWebFetchFallback(ctx, modifiedPrompt, fallbackModelProvider)
 	}
 
 	// Check for private IP before calling LLM
 	urlToProcess := urls[0] // Assuming we only process the first URL for private IP check
 	if isPrivateIp(urlToProcess) {
 		log.Printf("WebFetchTool: Detected private IP for %s. Bypassing LLM and performing manual fetch.", urlToProcess)
-		return executeWebFetchFallback(ctx, prompt, fallbackModelName, fallbackProvider)
+		return executeWebFetchFallback(ctx, prompt, fallbackModelProvider)
 	}
 
 	// Primary Gemini API call with urlContext
@@ -161,7 +161,7 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, fallb
 		},
 	}
 
-	oneShotResult, err := llmProvider.GenerateContentOneShot(ctx, modelName, sessionParams)
+	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, sessionParams)
 
 	processingError := false
 	if err != nil {
@@ -190,7 +190,7 @@ func executeWebFetch(ctx context.Context, prompt string, modelName string, fallb
 
 	if processingError {
 		// Perform fallback for the original prompt
-		return executeWebFetchFallback(ctx, prompt, fallbackModelName, fallbackProvider)
+		return executeWebFetchFallback(ctx, prompt, fallbackModelProvider)
 	}
 
 	// If no processing error, return the LLM's response
@@ -211,16 +211,16 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolH
 	}
 
 	// Resolve subagents for web fetch tasks
-	modelName, provider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentWebFetchTask)
+	modelProvider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentWebFetchTask)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s): %w", params.ModelName, err)
 	}
-	fallbackModelName, fallbackProvider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentWebFetchFallbackTask)
+	fallbackModelProvider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentWebFetchFallbackTask)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch_fallback (model: %s): %w", params.ModelName, err)
 	}
 
-	return executeWebFetch(ctx, prompt, modelName, fallbackModelName, provider, fallbackProvider)
+	return executeWebFetch(ctx, prompt, modelProvider, fallbackModelProvider)
 }
 
 var webFetchToolDefinition = ToolDefinition{

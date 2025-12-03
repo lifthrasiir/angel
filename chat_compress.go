@@ -120,14 +120,14 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	// Resolve subagent for compression task
-	returnModelName, provider, err := GlobalModelsRegistry.ResolveSubagent(modelName, SubagentCompressionTask)
+	modelProvider, err := GlobalModelsRegistry.ResolveSubagent(modelName, SubagentCompressionTask)
 	if err != nil {
 		err = fmt.Errorf("unsupported model for compression: %s: %w", modelName, err)
 		return
 	}
 
 	// 2. Calculate originalTokenCount.
-	originalTokenResp, err := provider.CountTokens(ctx, returnModelName, curatedHistory)
+	originalTokenResp, err := modelProvider.CountTokens(ctx, curatedHistory)
 	if err != nil {
 		err = fmt.Errorf("failed to call CountTokens API: %w", err)
 		return
@@ -193,7 +193,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	})
 
 	// 6. Call LLM to get summary (XML format) using GenerateContentOneShot.
-	oneShotResult, err := provider.GenerateContentOneShot(ctx, returnModelName, SessionParams{
+	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, SessionParams{
 		Contents:        llmRequestContents,
 		SystemPrompt:    systemPrompt,
 		IncludeThoughts: false,
@@ -388,7 +388,7 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 	}
 
 	// Perform a single CountTokens call for the combined content
-	newTokenResp, err := provider.CountTokens(ctx, returnModelName, combinedContentForTokenCount)
+	newTokenResp, err := modelProvider.CountTokens(ctx, combinedContentForTokenCount)
 	if err != nil {
 		err = fmt.Errorf("CountTokens API call failed for combined history: %w", err)
 		return
