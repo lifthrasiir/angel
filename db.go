@@ -1402,12 +1402,12 @@ func GetOpenAIConfigs(db *sql.DB) ([]OpenAIConfig, error) {
 	return configs, nil
 }
 
-// MarshalTimeMap time.Time 맵을 JSON으로 변환 (기본 직렬화 사용)
+// MarshalTimeMap converts a map of time.Time to JSON (uses default serialization)
 func MarshalTimeMap(m map[string]time.Time) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// UnmarshalTimeMap JSON을 time.Time 맵으로 변환
+// UnmarshalTimeMap converts JSON to a map of time.Time
 func UnmarshalTimeMap(data string) (map[string]time.Time, error) {
 	var result map[string]time.Time
 	if data == "" || data == "null" {
@@ -1430,7 +1430,7 @@ func GetGeminiAPIConfigs(db *sql.DB) ([]GeminiAPIConfig, error) {
 	}
 	defer rows.Close()
 
-	var configs []GeminiAPIConfig
+	configs := []GeminiAPIConfig{}
 	for rows.Next() {
 		var config GeminiAPIConfig
 		var lastUsedByModelStr sql.NullString
@@ -1455,60 +1455,51 @@ func GetGeminiAPIConfigs(db *sql.DB) ([]GeminiAPIConfig, error) {
 
 		configs = append(configs, config)
 	}
-	if configs == nil {
-		return []GeminiAPIConfig{}, nil
-	}
+
 	return configs, nil
 }
 
-// GetNextGeminiAPIConfig 모델별로 다음 API key 선택
-func GetNextGeminiAPIConfig(db *sql.DB, modelName string) (*GeminiAPIConfig, error) {
+// GetNextGeminiAPIConfig selects the next Gemini API configuration to use based on the least recently used strategy for a specific model.
+func GetNextGeminiAPIConfig(db *sql.DB, modelName string) (selectedConfig *GeminiAPIConfig, err error) {
 	configs, err := GetGeminiAPIConfigs(db)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	var selectedConfig *GeminiAPIConfig
-	var oldestTime time.Time = time.Now() // 현재 시간으로 초기화
+	oldestTime := time.Now()
 
 	for _, config := range configs {
 		if !config.Enabled {
 			continue
 		}
 
-		// 해당 모델의 last_used 시간 가져오기
+		// Get the last_used time for the specific model
 		lastUsed := config.LastUsedByModel[modelName]
 
-		// 사용 기록이 없으면 zero time으로 취급 (가장 오래된 것)
-		if lastUsed.IsZero() {
-			lastUsed = time.Time{}
-		}
-
-		// 가장 오래된 것 선택
+		// Select the oldest one
 		if lastUsed.Before(oldestTime) {
 			oldestTime = lastUsed
 			selectedConfig = &config
 		}
 	}
 
-	return selectedConfig, nil
+	return
 }
 
-// UpdateModelLastUsed 특정 모델의 마지막 사용 시간 업데이트
+// UpdateModelLastUsed updates the last used time for a specific model in the Gemini API configuration.
 func UpdateModelLastUsed(db *sql.DB, id, modelName string) error {
-	// 현재 설정 가져오기
 	config, err := GetGeminiAPIConfig(db, id)
 	if err != nil {
 		return err
 	}
 
-	// 맵 초기화 및 업데이트
+	// Initialize and update the map
 	if config.LastUsedByModel == nil {
 		config.LastUsedByModel = make(map[string]time.Time)
 	}
 	config.LastUsedByModel[modelName] = time.Now()
 
-	// JSON으로 변환 (time.Time이 자동으로 RFC3339로 serialize됨)
+	// Convert to JSON (time.Time automatically serializes to RFC3339)
 	lastUsedJSON, err := MarshalTimeMap(config.LastUsedByModel)
 	if err != nil {
 		return err
@@ -1523,24 +1514,24 @@ func UpdateModelLastUsed(db *sql.DB, id, modelName string) error {
 	return err
 }
 
-// HandleModelRateLimit 특정 모델의 rate limit 처리
+// HandleModelRateLimit handles rate limiting for a specific model by updating its last used time with a future timestamp.
 func HandleModelRateLimit(db *sql.DB, id, modelName string, retryAfter time.Duration) error {
-	// 현재 시간 + retryAfter + 버퍼(30초) 로 설정
+	// Current time + retryAfter + buffer (30 seconds)
 	futureTime := time.Now().Add(retryAfter).Add(30 * time.Second)
 
-	// 현재 설정 가져오기
+	// Get the current configuration
 	config, err := GetGeminiAPIConfig(db, id)
 	if err != nil {
 		return err
 	}
 
-	// 맵 초기화 및 업데이트
+	// Initialize and update the map
 	if config.LastUsedByModel == nil {
 		config.LastUsedByModel = make(map[string]time.Time)
 	}
 	config.LastUsedByModel[modelName] = futureTime
 
-	// JSON으로 변환
+	// Convert to JSON
 	lastUsedJSON, err := MarshalTimeMap(config.LastUsedByModel)
 	if err != nil {
 		return err
