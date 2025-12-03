@@ -199,11 +199,10 @@ func handleSubagentTurn(
 	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
-	provider := GlobalModelsRegistry.GetProvider(params.ModelName)
-	if provider == nil {
-		return ToolHandlerResults{}, fmt.Errorf("LLM client for model %s not found", params.ModelName)
+	subagentModelName, llmClient, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, "")
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
-	llmClient, subagentModelName, subagentGenParams := provider.SubagentProviderAndParams(params.ModelName, "")
 
 	// Update LastMessageModel to use the actual provider's model name
 	mc.LastMessageModel = subagentModelName
@@ -215,9 +214,8 @@ func handleSubagentTurn(
 	for {
 		// Configure SessionParams for LLM call
 		sessionParams := &SessionParams{
-			SystemPrompt:     session.SystemPrompt,
-			Contents:         currentHistory, // Use updated history
-			GenerationParams: &subagentGenParams,
+			SystemPrompt: session.SystemPrompt,
+			Contents:     currentHistory,
 		}
 
 		// Use a context with a timeout for the LLM call
@@ -377,11 +375,10 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Get LLM client for image generation using the new task first to determine the correct model
-	provider := GlobalModelsRegistry.GetProvider(params.ModelName)
-	if provider == nil {
-		return ToolHandlerResults{}, fmt.Errorf("LLM client for image generation with model %s not found", params.ModelName)
+	imageModelName, llmClient, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentImageGenerationTask)
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
-	llmClient, imageModelName, imageGenParams := provider.SubagentProviderAndParams(params.ModelName, SubagentImageGenerationTask)
 
 	// Set the last message model to use the actual provider's model name
 	mc.LastMessageModel = imageModelName
@@ -444,9 +441,8 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 
 	// Configure session params for image generation
 	sessionParams := &SessionParams{
-		SystemPrompt:     "Generate images based on the user's request. The output should contain the generated images.",
-		Contents:         content,
-		GenerationParams: &imageGenParams,
+		SystemPrompt: "Generate images based on the user's request. The output should contain the generated images.",
+		Contents:     content,
 	}
 
 	// Use a context with timeout for the image generation

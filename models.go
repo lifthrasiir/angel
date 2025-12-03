@@ -945,13 +945,17 @@ func (r *ModelsRegistry) GetAllModels() []*Model {
 
 	// Then add any remaining non-Gemini models
 	var nonGeminiModels []*Model
-	for name, provider := range r.providers {
-		if !seen[name] && !strings.HasPrefix(name, "$") && provider != r.geminiProvider {
-			maxTokens := provider.MaxTokens(name)
-			nonGeminiModels = append(nonGeminiModels, &Model{Name: name, MaxTokens: maxTokens})
-			seen[name] = true
+	func() {
+		r.mutex.RLock()
+		defer r.mutex.RUnlock()
+		for name, provider := range r.providers {
+			if !seen[name] && !strings.HasPrefix(name, "$") && provider != r.geminiProvider {
+				maxTokens := provider.MaxTokens(name)
+				nonGeminiModels = append(nonGeminiModels, &Model{Name: name, MaxTokens: maxTokens})
+				seen[name] = true
+			}
 		}
-	}
+	}()
 
 	// Non-Gemini models are sorted by name in natural ascending order
 	sort.Slice(nonGeminiModels, func(i, j int) bool {
@@ -1001,4 +1005,66 @@ func (r *ModelsRegistry) Validate() []ModelsError {
 	}
 
 	return errors
+}
+
+// ModelGenerationParams returns the generation parameters for a given model name
+func (r *ModelsRegistry) ModelGenerationParams(modelName string) (GenerationParams, error) {
+	// Check if it's an alias
+	if alias, exists := r.aliases[modelName]; exists {
+		modelName = alias
+	}
+
+	model, exists := r.builtinModels[modelName]
+	if !exists {
+		return GenerationParams{}, ModelsError{
+			Type:    ErrTypeNotFound,
+			Message: fmt.Sprintf("Model not found: %s", modelName),
+			Model:   modelName,
+		}
+	}
+
+	return model.GenParams, nil
+}
+
+// ResolveSubagent resolves a subagent for a given model and task, returning the resolved model name and provider
+func (r *ModelsRegistry) ResolveSubagent(modelName string, task string) (resolvedModelName string, provider LLMProvider, err error) {
+	// Check if it's an alias
+	if alias, exists := r.aliases[modelName]; exists {
+		modelName = alias
+	}
+
+	model, exists := r.builtinModels[modelName]
+	if !exists {
+		return "", nil, ModelsError{
+			Type:    ErrTypeNotFound,
+			Message: fmt.Sprintf("Model not found: %s", modelName),
+			Model:   modelName,
+		}
+	}
+
+	// Check if model has the requested subagent
+	subagentModel, exists := model.Subagents[task]
+	if !exists {
+		return "", nil, ModelsError{
+			Type:    ErrTypeNotFound,
+			Message: fmt.Sprintf("Subagent not found for task '%s' in model '%s'", task, modelName),
+			Model:   modelName,
+			Context: map[string]interface{}{"task": task},
+		}
+	}
+
+	// Get provider for the subagent model
+	r.mutex.RLock()
+	provider = r.providers[subagentModel.Name]
+	r.mutex.RUnlock()
+
+	if provider == nil {
+		return "", nil, ModelsError{
+			Type:    ErrTypeResolution,
+			Message: fmt.Sprintf("No provider available for subagent model '%s'", subagentModel.Name),
+			Model:   subagentModel.Name,
+		}
+	}
+
+	return subagentModel.Name, provider, nil
 }

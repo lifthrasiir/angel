@@ -41,18 +41,6 @@ func (w *testProviderWrapper) MaxTokens(modelName string) int {
 	return w.original.MaxTokens(modelName)
 }
 
-func (w *testProviderWrapper) RelativeDisplayOrder(modelName string) int {
-	return w.original.RelativeDisplayOrder(modelName)
-}
-
-func (w *testProviderWrapper) DefaultGenerationParams(modelName string) SessionGenerationParams {
-	return w.original.DefaultGenerationParams(modelName)
-}
-
-func (w *testProviderWrapper) SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
-	return w.original.SubagentProviderAndParams(modelName, task)
-}
-
 func TestThoughtSignatureHandling(t *testing.T) {
 	// Setup test environment
 	router, db, _ := setupTest(t)

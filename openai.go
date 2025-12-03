@@ -478,22 +478,6 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, 
 	// Convert contents to OpenAI chat messages
 	messages := convertGeminiToOpenAIContent(params.Contents)
 
-	// Get default generation parameters
-	genParams := c.DefaultGenerationParams(modelName)
-
-	// Apply session-specific parameters if provided
-	if params.GenerationParams != nil {
-		if params.GenerationParams.Temperature >= 0 {
-			genParams.Temperature = params.GenerationParams.Temperature
-		}
-		if params.GenerationParams.TopP >= 0 {
-			genParams.TopP = params.GenerationParams.TopP
-		}
-		if params.GenerationParams.TopK >= 0 {
-			// OpenAI doesn't support TopK directly, ignore
-		}
-	}
-
 	// Convert Gemini tools to OpenAI format
 	var openAITools []OpenAITool
 	if params.ToolConfig == nil {
@@ -504,12 +488,10 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, 
 
 	// Prepare request
 	req := OpenAIChatRequest{
-		Model:       modelName,
-		Messages:    messages,
-		Temperature: &genParams.Temperature,
-		TopP:        &genParams.TopP,
-		Stream:      true,
-		Tools:       openAITools,
+		Model:    modelName,
+		Messages: messages,
+		Stream:   true,
+		Tools:    openAITools,
 	}
 
 	// Set tool choice if specified
@@ -811,44 +793,6 @@ func (c *OpenAIClient) MaxTokens(modelName string) int {
 	}
 
 	return 4096 // Safe default
-}
-
-// RelativeDisplayOrder implements the LLMProvider interface
-func (c *OpenAIClient) RelativeDisplayOrder(modelName string) int {
-	return 5 // Lower priority than Gemini models
-}
-
-// DefaultGenerationParams implements the LLMProvider interface
-func (c *OpenAIClient) DefaultGenerationParams(modelName string) SessionGenerationParams {
-	return SessionGenerationParams{
-		Temperature: 0.7,
-		TopK:        -1, // Not supported by OpenAI
-		TopP:        1.0,
-	}
-}
-
-// SubagentProviderAndParams implements the LLMProvider interface
-func (c *OpenAIClient) SubagentProviderAndParams(modelName string, task string) (provider LLMProvider, returnModelName string, params SessionGenerationParams) {
-	provider = c
-	returnModelName = modelName
-	params = SessionGenerationParams{
-		Temperature: 0.0,
-		TopK:        -1,
-		TopP:        1.0,
-	}
-	if task == SubagentImageGenerationTask {
-		// For image generation, always use gemini-2.5-flash-image-preview
-		const geminiModelName = "gemini-2.5-flash-image-preview"
-		if fallbackProvider := GlobalModelsRegistry.GetProvider(geminiModelName); fallbackProvider != nil {
-			provider = fallbackProvider
-			returnModelName = geminiModelName
-			return
-		} else {
-			// If no Gemini provider is available, log the error
-			log.Printf("Image generation task requested but no Gemini provider available")
-		}
-	}
-	return
 }
 
 // InitOpenAIProviders initializes OpenAI providers from database configurations

@@ -68,8 +68,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 	ga.InitCurrentProvider()
 
 	// Override CurrentProvider with MockLLMProvider for testing
-	var mockLLMProvider *MockLLMProvider
-	mockLLMProvider = &MockLLMProvider{
+	mockLLMProvider := &MockLLMProvider{
 		SendMessageStreamFunc: func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 			// Default mock implementation: return an empty sequence
 			return iter.Seq[GenerateContentResponse](func(yield func(GenerateContentResponse) bool) {}), io.NopCloser(nil), nil
@@ -82,23 +81,6 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 		},
 		MaxTokensFunc: func(modelName string) int {
 			return 1048576 // Mocked max tokens
-		},
-		RelativeDisplayOrderFunc: func(modelName string) int {
-			return 0 // Mocked relative display order
-		},
-		DefaultGenerationParamsFunc: func(modelName string) SessionGenerationParams {
-			return SessionGenerationParams{
-				Temperature: 0.7,
-				TopK:        64,
-				TopP:        0.95,
-			}
-		},
-		SubagentProviderAndParamsFunc: func(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
-			return mockLLMProvider, modelName, SessionGenerationParams{
-				Temperature: 0.0,
-				TopK:        -1,
-				TopP:        1.0,
-			}
 		},
 	}
 	GlobalModelsRegistry.SetGeminiProvider(mockLLMProvider)

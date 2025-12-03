@@ -608,13 +608,8 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	ctx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
-	provider := GlobalModelsRegistry.GetProvider(modelToUse)
-	if provider == nil {
-		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
-		return
-	}
-	provider, returnModelName, sessionNameGenParams := provider.SubagentProviderAndParams(modelToUse, SubagentSessionNameTask)
-	if provider == nil {
+	returnModelName, provider, err := GlobalModelsRegistry.ResolveSubagent(modelToUse, SubagentSessionNameTask)
+	if err != nil {
 		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return
 	}
@@ -626,9 +621,8 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 				Parts: []Part{{Text: nameInputPrompt}},
 			},
 		},
-		SystemPrompt:     nameSystemPrompt,
-		IncludeThoughts:  false,
-		GenerationParams: &sessionNameGenParams,
+		SystemPrompt:    nameSystemPrompt,
+		IncludeThoughts: false,
 	})
 	if err != nil {
 		log.Printf("Failed to infer session name for %s: %v", sessionId, err)

@@ -64,13 +64,6 @@ const (
 	APITypeGemini     APIType = "gemini"
 )
 
-// geminiDefaultGenerationParams holds the default generation parameters for Gemini models
-var geminiDefaultGenerationParams = SessionGenerationParams{
-	Temperature: 1.0,
-	TopK:        64,
-	TopP:        0.95,
-}
-
 // Reserved names for Gemini's internal tools.
 const (
 	GeminiUrlContextToolName    = ".url_context"
@@ -97,7 +90,7 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 	}
 
 	// Determine which API to use
-	apiType, err := cap.selectAPIType(ctx, modelName)
+	apiType, err := cap.selectAPIType(ctx)
 	if err != nil {
 		log.Printf("SendMessageStream: Failed to select API type: %v", err)
 		// Fall back to Code Assist
@@ -314,61 +307,7 @@ func (cap *CodeAssistProvider) MaxTokens(modelName string) int {
 	if model, exists := cap.models[modelName]; exists {
 		return model.MaxTokens
 	}
-	return 8192
-}
-
-// RelativeDisplayOrder implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) RelativeDisplayOrder(modelName string) int {
-	// Use model information from ModelRegistry models map
-	if model, exists := cap.models[modelName]; exists {
-		switch model.Name {
-		case "gemini-2.5-flash":
-			return 10
-		case "gemini-3-pro-preview":
-			return 9
-		case "gemini-2.5-pro":
-			return 8
-		case "gemini-3-pro-image-preview":
-			return 7
-		case "gemini-2.5-flash-image", "gemini-2.5-flash-image-preview":
-			return 6
-		case "gemini-2.5-flash-lite":
-			return 5
-		default:
-			return 0
-		}
-	}
 	return 0
-}
-
-// DefaultGenerationParams implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) DefaultGenerationParams(modelName string) SessionGenerationParams {
-	return geminiDefaultGenerationParams
-}
-
-// SubagentProviderAndParams implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) SubagentProviderAndParams(modelName string, task string) (provider LLMProvider, returnModelName string, params SessionGenerationParams) {
-	provider = cap // Return self as provider
-
-	// Look up the model in the models map
-	if model, exists := cap.models[modelName]; exists && model.Subagents != nil {
-		// Use subagent information from ModelRegistry
-		if subagentModel, subagentExists := model.Subagents[task]; subagentExists {
-			// Use the subagent model defined in models.json
-			returnModelName = subagentModel.Name
-			params = SessionGenerationParams{
-				Temperature: subagentModel.GenParams.Temperature,
-				TopK:        subagentModel.GenParams.TopK,
-				TopP:        subagentModel.GenParams.TopP,
-			}
-			return
-		}
-	}
-
-	// If no subagent found, return empty values
-	returnModelName = ""
-	params = SessionGenerationParams{}
-	return
 }
 
 // parseRetryAfter parses Retry-After header
@@ -392,7 +331,7 @@ func parseRetryAfter(retryAfter string) time.Duration {
 }
 
 // selectAPIType determines which API to use based on available configurations
-func (cap *CodeAssistProvider) selectAPIType(ctx context.Context, modelName string) (APIType, error) {
+func (cap *CodeAssistProvider) selectAPIType(ctx context.Context) (APIType, error) {
 	// Get database from context
 	db, err := getDbFromContext(ctx)
 	if err != nil {
@@ -496,18 +435,16 @@ func convertSessionParamsToGenerateRequest(model *Model, params SessionParams) G
 		}
 	}
 
-	// Determine final generation parameters, prioritizing SessionParams
-	genParams := geminiDefaultGenerationParams
-	if params.GenerationParams != nil {
-		if params.GenerationParams.Temperature >= 0 { // Assuming >=0 means set
-			genParams.Temperature = params.GenerationParams.Temperature
-		}
-		if params.GenerationParams.TopP >= 0 { // Assuming >=0 means set
-			genParams.TopP = params.GenerationParams.TopP
-		}
-		if params.GenerationParams.TopK >= 0 { // Assuming >=0 means set
-			genParams.TopK = params.GenerationParams.TopK
-		}
+	var temperature, topP *float32
+	var topK *int32
+	if model.GenParams.Temperature >= 0 {
+		temperature = &model.GenParams.Temperature
+	}
+	if model.GenParams.TopP >= 0 {
+		topP = &model.GenParams.TopP
+	}
+	if model.GenParams.TopK >= 0 {
+		topK = &model.GenParams.TopK
 	}
 
 	return GenerateContentRequest{
@@ -516,9 +453,9 @@ func convertSessionParamsToGenerateRequest(model *Model, params SessionParams) G
 		Tools:             tools,
 		GenerationConfig: &GenerationConfig{
 			ThinkingConfig:     thinkingConfig,
-			Temperature:        &genParams.Temperature,
-			TopP:               &genParams.TopP,
-			TopK:               &genParams.TopK,
+			Temperature:        temperature,
+			TopP:               topP,
+			TopK:               topK,
 			ResponseModalities: model.ResponseModalities,
 		},
 	}

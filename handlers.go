@@ -429,13 +429,6 @@ type ModelInfo struct {
 	MaxTokens int    `json:"maxTokens"`
 }
 
-// sortableModelInfo is an internal struct used for sorting models before sending to frontend.
-type sortableModelInfo struct {
-	Name                 string
-	MaxTokens            int
-	RelativeDisplayOrder int
-}
-
 func listModelsHandler(w http.ResponseWriter, r *http.Request) {
 	if GlobalModelsRegistry == nil {
 		sendJSONResponse(w, []ModelInfo{})

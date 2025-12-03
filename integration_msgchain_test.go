@@ -82,21 +82,6 @@ func (m *MockGeminiProvider) MaxTokens(modelName string) int {
 	return 1024 // A reasonable default for a simple eval model
 }
 
-// RelativeDisplayOrder implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) RelativeDisplayOrder(modelName string) int {
-	return 0
-}
-
-// DefaultGenerationParams implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) DefaultGenerationParams(modelName string) SessionGenerationParams {
-	return SessionGenerationParams{}
-}
-
-// SubagentProviderAndParams implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
-	return m, modelName, SessionGenerationParams{}
-}
-
 // mockCloser implements io.Closer for testing purposes
 type mockCloser struct{}
 

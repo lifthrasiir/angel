@@ -119,16 +119,10 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 		return // No compressible messages found
 	}
 
-	// Determine the model to use for token counting and generation
-	// For now, use the default model. In a real scenario, this might come from session config.
-	provider := GlobalModelsRegistry.GetProvider(modelName)
-	if provider == nil {
-		err = fmt.Errorf("unsupported model for compression: %s", modelName)
-		return
-	}
-	provider, returnModelName, compressionGenParams := provider.SubagentProviderAndParams(modelName, SubagentCompressionTask)
-	if provider == nil {
-		err = fmt.Errorf("unsupported model for compression: %s", modelName)
+	// Resolve subagent for compression task
+	returnModelName, provider, err := GlobalModelsRegistry.ResolveSubagent(modelName, SubagentCompressionTask)
+	if err != nil {
+		err = fmt.Errorf("unsupported model for compression: %s: %w", modelName, err)
 		return
 	}
 
@@ -200,10 +194,9 @@ func CompressSession(ctx context.Context, db *sql.DB, sessionID string, modelNam
 
 	// 6. Call LLM to get summary (XML format) using GenerateContentOneShot.
 	oneShotResult, err := provider.GenerateContentOneShot(ctx, returnModelName, SessionParams{
-		Contents:         llmRequestContents,
-		SystemPrompt:     systemPrompt,
-		IncludeThoughts:  false,
-		GenerationParams: &compressionGenParams,
+		Contents:        llmRequestContents,
+		SystemPrompt:    systemPrompt,
+		IncludeThoughts: false,
 	})
 	if err != nil {
 		err = fmt.Errorf("GenerateContentOneShot API call failed for compression: %w", err)

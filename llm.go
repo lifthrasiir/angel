@@ -11,29 +11,12 @@ import (
 
 const DefaultGeminiModel = "gemini-2.5-flash"
 
-// GetModelProvider returns LLM provider for given model name using ModelsRegistry.
-// This is a convenience function that delegates to GlobalModelsRegistry.
-func GetModelProvider(modelName string) LLMProvider {
-	if GlobalModelsRegistry == nil {
-		return nil
-	}
-	return GlobalModelsRegistry.GetProvider(modelName)
-}
-
 // SessionParams holds parameters for a chat session.
 type SessionParams struct {
-	Contents         []Content
-	SystemPrompt     string
-	IncludeThoughts  bool
-	GenerationParams *SessionGenerationParams
-	ToolConfig       map[string]interface{}
-}
-
-// SessionGenerationParams holds common generation parameters for a session.
-type SessionGenerationParams struct {
-	Temperature float32
-	TopK        int32
-	TopP        float32
+	Contents        []Content
+	SystemPrompt    string
+	IncludeThoughts bool
+	ToolConfig      map[string]interface{}
 }
 
 // OneShotResult holds result of a single-shot content generation,
@@ -50,12 +33,9 @@ type LLMProvider interface {
 	GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error)
 	CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error)
 	MaxTokens(modelName string) int
-	RelativeDisplayOrder(modelName string) int
-	DefaultGenerationParams(modelName string) SessionGenerationParams
-	SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams)
 }
 
-// Well-known tasks for SubagentProviderAndParams.
+// Well-known tasks for subagents.
 const (
 	SubagentCompressionTask      = "compression"
 	SubagentSessionNameTask      = "session_name"
@@ -66,13 +46,10 @@ const (
 
 // MockLLMProvider is a mock implementation of LLMProvider interface for testing.
 type MockLLMProvider struct {
-	SendMessageStreamFunc         func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error)
-	GenerateContentOneShotFunc    func(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error)
-	CountTokensFunc               func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error)
-	MaxTokensFunc                 func(modelName string) int
-	RelativeDisplayOrderFunc      func(modelName string) int
-	DefaultGenerationParamsFunc   func(modelName string) SessionGenerationParams
-	SubagentProviderAndParamsFunc func(modelName string, task string) (LLMProvider, string, SessionGenerationParams)
+	SendMessageStreamFunc      func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error)
+	GenerateContentOneShotFunc func(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error)
+	CountTokensFunc            func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error)
+	MaxTokensFunc              func(modelName string) int
 }
 
 // SendMessageStream implements the LLMProvider interface for MockLLMProvider.
@@ -104,40 +81,7 @@ func (m *MockLLMProvider) MaxTokens(modelName string) int {
 	if m.MaxTokensFunc != nil {
 		return m.MaxTokensFunc(modelName)
 	}
-	return 1048576 // Default fallback
-}
-
-// RelativeDisplayOrder implements the LLMProvider interface for MockLLMProvider.
-func (m *MockLLMProvider) RelativeDisplayOrder(modelName string) int {
-	if m.RelativeDisplayOrderFunc != nil {
-		return m.RelativeDisplayOrderFunc(modelName)
-	}
-	return 0 // Default fallback
-}
-
-// DefaultGenerationParams implements the LLMProvider interface for MockLLMProvider.
-func (m *MockLLMProvider) DefaultGenerationParams(modelName string) SessionGenerationParams {
-	if m.DefaultGenerationParamsFunc != nil {
-		return m.DefaultGenerationParamsFunc(modelName)
-	}
-	return SessionGenerationParams{
-		Temperature: 1.0,
-		TopK:        64,
-		TopP:        0.95,
-	} // Default fallback
-}
-
-// SubagentProviderAndParams implements the LLMProvider interface for MockLLMProvider.
-func (m *MockLLMProvider) SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
-	if m.SubagentProviderAndParamsFunc != nil {
-		return m.SubagentProviderAndParamsFunc(modelName, task)
-	}
-	// Default mock behavior for subagent provider
-	return m, modelName, SessionGenerationParams{
-		Temperature: 0.0,
-		TopK:        -1,
-		TopP:        1.0,
-	}
+	return 1000000 // Default fallback
 }
 
 var _ LLMProvider = (*MockLLMProvider)(nil)

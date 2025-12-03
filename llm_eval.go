@@ -177,24 +177,6 @@ func (p *AngelEvalProvider) MaxTokens(modelName string) int {
 	return 1024 // A reasonable default for a simple eval model
 }
 
-// RelativeDisplayOrder implements the LLMProvider interface for AngelEvalProvider.
-func (p *AngelEvalProvider) RelativeDisplayOrder(modelName string) int {
-	return -100
-}
-
-func (p *AngelEvalProvider) DefaultGenerationParams(modelName string) SessionGenerationParams {
-	return SessionGenerationParams{}
-}
-
-// SubagentProviderAndParams implements the LLMProvider interface for AngelEvalProvider.
-func (p *AngelEvalProvider) SubagentProviderAndParams(modelName string, task string) (LLMProvider, string, SessionGenerationParams) {
-	return p, modelName, SessionGenerationParams{
-		Temperature: 0.0,
-		TopK:        -1,
-		TopP:        1.0,
-	}
-}
-
 // Helper functions for random generation
 func generateRandomString(length int) string {
 	charset := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
