@@ -16,6 +16,7 @@ interface Account {
   createdAt: string;
   updatedAt: string;
   kind: string;
+  hasProject: boolean;
 }
 
 const SettingsPage: React.FC = () => {
@@ -57,7 +58,9 @@ const SettingsPage: React.FC = () => {
       if (response.ok) {
         const data: Account[] = await response.json();
         setAccounts(data);
-        setHasConnectedAccounts(data.length > 0);
+        // Only count accounts with valid projects as "connected"
+        const activeAccounts = data.filter((account) => account.hasProject);
+        setHasConnectedAccounts(activeAccounts.length > 0);
       } else {
         console.error('Failed to fetch accounts:', response.status, response.statusText);
         setHasConnectedAccounts(false);
@@ -113,11 +116,12 @@ const SettingsPage: React.FC = () => {
 
   // Update authentication status whenever accounts or API keys change
   useEffect(() => {
-    const [hasAccounts, hasApiKeys] = [accounts.length > 0, false];
+    // Only count accounts with valid projects
+    const hasValidAccounts = accounts.some((account) => account.hasProject);
 
     // We need to check API keys state separately since it's managed by atom
     // This is a simplified check - in practice, we'd rely on the atom state
-    setIsAuthenticated(hasAccounts || hasApiKeys);
+    setIsAuthenticated(hasValidAccounts || false);
   }, [accounts, setIsAuthenticated]);
 
   const handleLogoutAccount = async (accountId: number, email: string) => {
@@ -304,6 +308,7 @@ const SettingsPage: React.FC = () => {
     // Separate accounts by kind
     const geminicliAccounts = accounts.filter((account) => account.kind === 'geminicli');
     const antigravityAccounts = accounts.filter((account) => account.kind === 'antigravity');
+    const activeAccounts = accounts.filter((account) => account.hasProject);
 
     return (
       <div>
@@ -311,9 +316,13 @@ const SettingsPage: React.FC = () => {
 
         {geminicliAccounts.length > 0 || antigravityAccounts.length > 0 ? (
           <div>
-            <h4>Connected Google Accounts ({accounts.length})</h4>
+            <h4>
+              Connected Google Accounts ({activeAccounts.length} active, {accounts.length - activeAccounts.length}{' '}
+              inactive)
+            </h4>
             <p style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-              Accounts are automatically distributed when using the LLM.
+              Only active accounts (with project IDs) are used for LLM operations. Inactive accounts are shown for
+              reference only.
             </p>
 
             {/* Two-column layout for different providers */}
@@ -332,13 +341,19 @@ const SettingsPage: React.FC = () => {
                           alignItems: 'center',
                           padding: '8px 12px',
                           margin: '4px 0',
-                          backgroundColor: '#f8f9fa',
+                          backgroundColor: account.hasProject ? '#f8f9fa' : '#fff3cd',
                           borderRadius: '4px',
-                          border: '1px solid #dee2e6',
+                          border: `1px solid ${account.hasProject ? '#dee2e6' : '#ffeaa7'}`,
+                          opacity: account.hasProject ? 1 : 0.7,
                         }}
                       >
                         <div>
                           <strong>{account.email}</strong>
+                          {!account.hasProject && (
+                            <div style={{ fontSize: '11px', color: '#856404', marginTop: '2px' }}>
+                              No project ID - inactive
+                            </div>
+                          )}
                         </div>
                         <button
                           onClick={() => handleLogoutAccount(account.id, account.email)}
@@ -374,13 +389,19 @@ const SettingsPage: React.FC = () => {
                           alignItems: 'center',
                           padding: '8px 12px',
                           margin: '4px 0',
-                          backgroundColor: '#f8f9fa',
+                          backgroundColor: account.hasProject ? '#f8f9fa' : '#fff3cd',
                           borderRadius: '4px',
-                          border: '1px solid #dee2e6',
+                          border: `1px solid ${account.hasProject ? '#dee2e6' : '#ffeaa7'}`,
+                          opacity: account.hasProject ? 1 : 0.7,
                         }}
                       >
                         <div>
                           <strong>{account.email}</strong>
+                          {!account.hasProject && (
+                            <div style={{ fontSize: '11px', color: '#856404', marginTop: '2px' }}>
+                              No project ID - inactive
+                            </div>
+                          )}
                         </div>
                         <button
                           onClick={() => handleLogoutAccount(account.id, account.email)}

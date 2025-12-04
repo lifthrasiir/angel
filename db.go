@@ -1374,9 +1374,56 @@ func GetOAuthTokens(db *sql.DB) ([]OAuthToken, error) {
 	return tokens, nil
 }
 
+// GetOAuthTokensWithValidProjectID retrieves only OAuth tokens that have valid (non-empty) project IDs.
+func GetOAuthTokensWithValidProjectID(db *sql.DB) ([]OAuthToken, error) {
+	rows, err := db.Query("SELECT id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at FROM oauth_tokens WHERE project_id IS NOT NULL AND project_id != '' ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query OAuth tokens with valid project IDs: %w", err)
+	}
+	defer rows.Close()
+
+	tokens := []OAuthToken{}
+	for rows.Next() {
+		var token OAuthToken
+		var nullUserEmail sql.NullString
+		var nullProjectID sql.NullString
+		var lastUsedByModelStr sql.NullString
+
+		err := rows.Scan(&token.ID, &token.TokenData, &nullUserEmail, &nullProjectID, &token.Kind, &lastUsedByModelStr, &token.CreatedAt, &token.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan OAuth token: %w", err)
+		}
+
+		// Handle NULL fields
+		if nullUserEmail.Valid {
+			token.UserEmail = nullUserEmail.String
+		}
+		if nullProjectID.Valid {
+			token.ProjectID = nullProjectID.String
+		}
+
+		// JSON field deserialization - handle NULL
+		var jsonStr string
+		if lastUsedByModelStr.Valid {
+			jsonStr = lastUsedByModelStr.String
+		} else {
+			jsonStr = "{}"
+		}
+		token.LastUsedByModel, err = UnmarshalTimeMap(jsonStr)
+		if err != nil {
+			log.Printf("Failed to unmarshal last_used_by_model for token %d: %v", token.ID, err)
+			token.LastUsedByModel = make(map[string]time.Time)
+		}
+
+		tokens = append(tokens, token)
+	}
+
+	return tokens, nil
+}
+
 // GetNextOAuthToken selects the next OAuth token to use based on the least recently used strategy for a specific kind and model.
 func GetNextOAuthToken(db *sql.DB, kind string, modelName string) (selectedToken *OAuthToken, err error) {
-	tokens, err := GetOAuthTokens(db)
+	tokens, err := GetOAuthTokensWithValidProjectID(db)
 	if err != nil {
 		return
 	}

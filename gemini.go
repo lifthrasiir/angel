@@ -310,7 +310,7 @@ func tryAllProviders[T any](
 		case "geminicli", "antigravity":
 			// Handle OAuth-based providers
 			var tokens []OAuthToken
-			tokens, err = GetOAuthTokens(db)
+			tokens, err = GetOAuthTokensWithValidProjectID(db)
 			if err != nil {
 				err = fmt.Errorf("failed to get OAuth tokens: %w", err)
 				return

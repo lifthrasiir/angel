@@ -53,11 +53,12 @@ func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	accounts := make([]map[string]interface{}, 0)
 	for _, token := range tokens {
 		account := map[string]interface{}{
-			"id":        token.ID,
-			"email":     token.UserEmail,
-			"createdAt": token.CreatedAt,
-			"updatedAt": token.UpdatedAt,
-			"kind":      token.Kind,
+			"id":         token.ID,
+			"email":      token.UserEmail,
+			"createdAt":  token.CreatedAt,
+			"updatedAt":  token.UpdatedAt,
+			"kind":       token.Kind,
+			"hasProject": token.ProjectID != "", // Include project ID status
 		}
 		accounts = append(accounts, account)
 	}
