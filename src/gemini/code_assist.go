@@ -18,21 +18,38 @@ type HTTPClientProvider interface {
 type CodeAssistClient struct {
 	baseClient
 	ProjectID string
+	apiHost   string
+	userAgent string
 }
 
 // NewCodeAssistClient creates a new CodeAssist client
-func NewCodeAssistClient(clientProvider HTTPClientProvider, projectID string) *CodeAssistClient {
+func NewCodeAssistClient(clientProvider HTTPClientProvider, projectID string, provider string) *CodeAssistClient {
+	apiHost := "cloudcode-pa.googleapis.com"
+	userAgent := ""
+	if provider == "antigravity" {
+		apiHost = "daily-cloudcode-pa.sandbox.googleapis.com"
+		userAgent = "antigravity/1.104.0 win32/x64"
+	}
+
 	return &CodeAssistClient{
 		baseClient: baseClient{
 			clientProvider: clientProvider,
 			clientName:     "CodeAssistClient",
 		},
 		ProjectID: projectID,
+		apiHost:   apiHost,
+		userAgent: userAgent,
 	}
 }
 
 // makeAPIRequest creates and executes an HTTP request with common error handling
 func (c *CodeAssistClient) makeAPIRequest(ctx context.Context, url string, reqBody interface{}, headers map[string]string) (*http.Response, error) {
+	if c.userAgent != "" {
+		if headers == nil {
+			headers = make(map[string]string)
+		}
+		headers["User-Agent"] = c.userAgent
+	}
 	return c.MakeAPIRequest(ctx, url, reqBody, headers)
 }
 
@@ -44,7 +61,7 @@ func (c *CodeAssistClient) StreamGenerateContent(ctx context.Context, modelName 
 		Request: request,
 	}
 
-	url := "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent"
+	url := fmt.Sprintf("https://%s/v1internal:streamGenerateContent", c.apiHost)
 	headers := map[string]string{"Accept": "text/event-stream"}
 
 	resp, err := c.makeAPIRequest(ctx, url, reqBody, headers)
@@ -65,7 +82,7 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, modelName string, co
 		},
 	}
 
-	url := "https://cloudcode-pa.googleapis.com/v1internal:countTokens"
+	url := fmt.Sprintf("https://%s/v1internal:countTokens", c.apiHost)
 	resp, err := c.makeAPIRequest(ctx, url, reqBody, nil)
 	if err != nil {
 		return nil, err
@@ -82,7 +99,7 @@ func (c *CodeAssistClient) CountTokens(ctx context.Context, modelName string, co
 
 // LoadCodeAssist calls the loadCodeAssist of Code Assist API.
 func (c *CodeAssistClient) LoadCodeAssist(ctx context.Context, req LoadCodeAssistRequest) (*LoadCodeAssistResponse, error) {
-	url := "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+	url := fmt.Sprintf("https://%s/v1internal:loadCodeAssist", c.apiHost)
 	resp, err := c.makeAPIRequest(ctx, url, req, nil)
 	if err != nil {
 		return nil, err
@@ -113,7 +130,7 @@ func (c *CodeAssistClient) LoadCodeAssist(ctx context.Context, req LoadCodeAssis
 
 // OnboardUser calls the onboardUser of Code Assist API.
 func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserRequest) (*LongRunningOperationResponse, error) {
-	url := "https://cloudcode-pa.googleapis.com/v1internal:onboardUser"
+	url := fmt.Sprintf("https://%s/v1internal:onboardUser", c.apiHost)
 	resp, err := c.makeAPIRequest(ctx, url, req, nil)
 	if err != nil {
 		return nil, err
@@ -136,7 +153,7 @@ func (c *CodeAssistClient) OnboardUser(ctx context.Context, req OnboardUserReque
 
 // SetCodeAssistGlobalUserSetting calls the setCodeAssistGlobalUserSetting of Code Assist API.
 func (c *CodeAssistClient) SetCodeAssistGlobalUserSetting(ctx context.Context, req SetCodeAssistGlobalUserSettingRequest) (*CodeAssistGlobalUserSettingResponse, error) {
-	url := "https://cloudcode-pa.googleapis.com/v1internal:setCodeAssistGlobalUserSetting"
+	url := fmt.Sprintf("https://%s/v1internal:setCodeAssistGlobalUserSetting", c.apiHost)
 	resp, err := c.makeAPIRequest(ctx, url, req, nil)
 	if err != nil {
 		return nil, err

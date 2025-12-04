@@ -307,8 +307,8 @@ func tryAllProviders[T any](
 				}
 			}
 
-		case "codeassist":
-			// Get OAuth tokens for Code Assist
+		case "geminicli", "antigravity":
+			// Handle OAuth-based providers
 			var tokens []OAuthToken
 			tokens, err = GetOAuthTokens(db)
 			if err != nil {
@@ -316,21 +316,21 @@ func tryAllProviders[T any](
 				return
 			}
 
-			// Filter tokens for "geminicli" kind and sort by last_used for this model (oldest first)
-			var geminiTokens []OAuthToken
+			// Filter tokens for the current provider kind and sort by last_used for this model (oldest first)
+			var providerTokens []OAuthToken
 			for _, token := range tokens {
-				if token.Kind == "geminicli" {
-					geminiTokens = append(geminiTokens, token)
+				if token.Kind == providerType {
+					providerTokens = append(providerTokens, token)
 				}
 			}
 
 			apiModelName := model.ModelName
 
-			sort.Slice(geminiTokens, func(i, j int) bool {
-				return geminiTokens[i].LastUsedByModel[apiModelName].Before(geminiTokens[j].LastUsedByModel[apiModelName])
+			sort.Slice(providerTokens, func(i, j int) bool {
+				return providerTokens[i].LastUsedByModel[apiModelName].Before(providerTokens[j].LastUsedByModel[apiModelName])
 			})
 
-			for _, token := range geminiTokens {
+			for _, token := range providerTokens {
 				// Parse OAuth token
 				var oauthToken oauth2.Token
 				if err := json.Unmarshal([]byte(token.TokenData), &oauthToken); err != nil {
@@ -339,8 +339,9 @@ func tryAllProviders[T any](
 				}
 
 				// Create token source and client (oauth2.TokenSource will handle refresh automatically)
-				tokenSource := GlobalGeminiAuth.GoogleOauthConfig.TokenSource(context.Background(), &oauthToken)
-				client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID)
+				oauthConfig := GlobalGeminiAuth.getOAuthConfig(providerType)
+				tokenSource := oauthConfig.TokenSource(context.Background(), &oauthToken)
+				client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID, providerType)
 
 				// Update last_used for this model
 				UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
@@ -362,14 +363,15 @@ func tryAllProviders[T any](
 				}
 			}
 
-		case "antigravity":
-			// TODO
-
 		default:
 			log.Panicf("Unknown provider type: %s", providerType)
 		}
 	}
 
+	// If we reach here, all providers failed. Return the last error if available, otherwise create a generic error.
+	if err == nil {
+		err = fmt.Errorf("all providers failed for model %s", model.ModelName)
+	}
 	return
 }
 

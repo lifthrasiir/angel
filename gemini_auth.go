@@ -20,7 +20,6 @@ import (
 
 // GeminiAuth encapsulates the global state related to authentication providers.
 type GeminiAuth struct {
-	GoogleOauthConfig    *oauth2.Config
 	initMutex            sync.Mutex
 	db                   *sql.DB
 	oauthStates          map[string]string // Stores randomState -> originalQueryString
@@ -55,26 +54,54 @@ func (ga *GeminiAuth) SaveTokenWithKind(db *sql.DB, t *oauth2.Token, userEmail s
 	log.Printf("OAuth token saved to DB with kind %s for user %s.", kind, userEmail)
 }
 
+// THIS IS INTENTIONALLY HARD-CODED TO MATCH GEMINI-CLI!
+var geminiCliConfig = oauth2.Config{
+	ClientID:     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+	ClientSecret: "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",
+	Scopes: []string{
+		"https://www.googleapis.com/auth/cloud-platform",
+		"https://www.googleapis.com/auth/userinfo.email",
+		"https://www.googleapis.com/auth/userinfo.profile",
+	},
+	Endpoint: google.Endpoint,
+}
+
+// THIS IS INTENTIONALLY HARD-CODED TO MATCH ANTIGRAVITY!
+var antigravityConfig = oauth2.Config{
+	ClientID:     "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+	ClientSecret: "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",
+	Scopes: []string{
+		"https://www.googleapis.com/auth/cloud-platform",
+		"https://www.googleapis.com/auth/userinfo.email",
+		"https://www.googleapis.com/auth/userinfo.profile",
+		"https://www.googleapis.com/auth/cclog",
+		"https://www.googleapis.com/auth/experimentsandconfigs",
+	},
+	Endpoint: google.Endpoint,
+}
+
 // Init initializes the authentication state.
 func (ga *GeminiAuth) Init() {
 	ga.initMutex.Lock()
 	defer ga.initMutex.Unlock()
 
-	// THIS IS INTENTIONALLY HARD-CODED TO MATCH GEMINI-CLI!
-	ga.GoogleOauthConfig = &oauth2.Config{
-		ClientID:     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-		ClientSecret: "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",
-		RedirectURL:  "http://localhost:8080/oauth2callback", // Web app redirect URI
-		Scopes: []string{
-			"https://www.googleapis.com/auth/cloud-platform",
-			"https://www.googleapis.com/auth/userinfo.email",
-			"https://www.googleapis.com/auth/userinfo.profile",
-		},
-		Endpoint: google.Endpoint,
-	}
-
 	// Initialize all authentication providers
 	ga.EnsureProvidersInitialized()
+}
+
+// getOAuthConfig returns the OAuth config for the specified provider
+func (ga *GeminiAuth) getOAuthConfig(provider string) *oauth2.Config {
+	var config oauth2.Config
+	switch provider {
+	case "geminicli":
+		config = geminiCliConfig
+	case "antigravity":
+		config = antigravityConfig
+	default:
+		config = geminiCliConfig // default to geminicli
+	}
+	config.RedirectURL = "http://localhost:8080/oauth2callback"
+	return &config
 }
 
 // HasAuthenticatedProviders checks if any authentication providers are configured.
@@ -87,7 +114,7 @@ func (ga *GeminiAuth) HasAuthenticatedProviders() bool {
 	}
 
 	for _, token := range tokens {
-		if token.Kind == "geminicli" {
+		if token.Kind == "geminicli" || token.Kind == "antigravity" {
 			return true
 		}
 	}
@@ -131,13 +158,17 @@ func (ga *GeminiAuth) EnsureProvidersInitialized() error {
 	}
 
 	hasGeminiTokens := false
+	hasAntigravityTokens := false
 	for _, token := range tokens {
-		if token.Kind == "geminicli" {
+		switch token.Kind {
+		case "geminicli":
 			hasGeminiTokens = true
-			break
+		case "antigravity":
+			hasAntigravityTokens = true
 		}
 	}
 
+	// Initialize Gemini CLI providers
 	if hasGeminiTokens {
 		// Get the least recently used token for initialization
 		selectedToken, err := GetNextOAuthToken(ga.db, "geminicli", "")
@@ -152,13 +183,40 @@ func (ga *GeminiAuth) EnsureProvidersInitialized() error {
 			}
 
 			// Create token source
-			tokenSource := ga.GoogleOauthConfig.TokenSource(ctx, &oauthToken)
+			oauthConfig := ga.getOAuthConfig("geminicli")
+			tokenSource := oauthConfig.TokenSource(ctx, &oauthToken)
 
 			// Set up CodeAssist client
-			client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, selectedToken.ProjectID)
+			client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, selectedToken.ProjectID, "geminicli")
 			GlobalModelsRegistry.SetGeminiCodeAssistClient(client)
 
 			log.Printf("Initialized Gemini provider with token for user %s", selectedToken.UserEmail)
+		}
+	}
+
+	// Initialize Antigravity providers
+	if hasAntigravityTokens {
+		// Get the least recently used token for initialization
+		selectedToken, err := GetNextOAuthToken(ga.db, "antigravity", "")
+		if err != nil {
+			return fmt.Errorf("failed to get next OAuth token: %w", err)
+		}
+
+		if selectedToken != nil {
+			var oauthToken oauth2.Token
+			if err := json.Unmarshal([]byte(selectedToken.TokenData), &oauthToken); err != nil {
+				return fmt.Errorf("failed to unmarshal OAuth token: %w", err)
+			}
+
+			// Create token source
+			oauthConfig := ga.getOAuthConfig("antigravity")
+			tokenSource := oauthConfig.TokenSource(ctx, &oauthToken)
+
+			// Set up CodeAssist client
+			client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, selectedToken.ProjectID, "antigravity")
+			GlobalModelsRegistry.SetGeminiCodeAssistClient(client)
+
+			log.Printf("Initialized Antigravity provider with token for user %s", selectedToken.UserEmail)
 		}
 	}
 
@@ -191,6 +249,19 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		redirectToQueryString = "redirect_to=/" // Ensure a default redirect_to
 	}
 
+	// Parse query parameters to get provider
+	queryParams, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		log.Printf("Error parsing query parameters: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	provider := queryParams.Get("provider")
+	if provider == "" {
+		provider = "geminicli" // default provider
+	}
+
 	// Generate a secure random state string
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -199,9 +270,17 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	randomState := base64.URLEncoding.EncodeToString(b)
-	GlobalGeminiAuth.oauthStates[randomState] = redirectToQueryString // Store the original query string with the random state
 
-	url := GlobalGeminiAuth.GoogleOauthConfig.AuthCodeURL(randomState)
+	// Store provider and original query string with the random state
+	stateData := map[string]string{
+		"provider": provider,
+		"query":    redirectToQueryString,
+	}
+	stateDataJSON, _ := json.Marshal(stateData)
+	GlobalGeminiAuth.oauthStates[randomState] = string(stateDataJSON)
+
+	oauthConfig := GlobalGeminiAuth.getOAuthConfig(provider)
+	url := oauthConfig.AuthCodeURL(randomState)
 
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
@@ -211,7 +290,7 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	stateParam := r.FormValue("state")
 
 	// Validate the random part of the state against the stored value
-	originalQueryString, ok := GlobalGeminiAuth.oauthStates[stateParam]
+	stateDataJSON, ok := GlobalGeminiAuth.oauthStates[stateParam]
 	if !ok {
 		log.Printf("Invalid or expired OAuth state: %s", stateParam)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -220,8 +299,19 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Remove the state after use to prevent replay attacks
 	delete(GlobalGeminiAuth.oauthStates, stateParam)
 
+	// Parse the stored state data
+	var stateData struct {
+		Provider string `json:"provider"`
+		Query    string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(stateDataJSON), &stateData); err != nil {
+		log.Printf("Error parsing state data: %v", err)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
 	// Parse the original query string to extract redirect_to
-	parsedQuery, err := url.ParseQuery(originalQueryString)
+	parsedQuery, err := url.ParseQuery(stateData.Query)
 	if err != nil {
 		log.Printf("Error parsing original query string from state: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -237,7 +327,8 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	finalRedirectURL := frontendPath
 
 	code := r.FormValue("code")
-	Token, err := GlobalGeminiAuth.GoogleOauthConfig.Exchange(context.Background(), code)
+	oauthConfig := GlobalGeminiAuth.getOAuthConfig(stateData.Provider)
+	Token, err := oauthConfig.Exchange(context.Background(), code)
 	if err != nil {
 		log.Printf("Failed to exchange token: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -246,7 +337,7 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch user info (email) first
 	var userEmail string
-	userInfoClient := GlobalGeminiAuth.GoogleOauthConfig.Client(context.Background(), Token)
+	userInfoClient := oauthConfig.Client(context.Background(), Token)
 	userInfoResp, err := userInfoClient.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 	if err != nil {
 		log.Printf("HandleGoogleCallback: Failed to fetch user info: %v", err)
@@ -265,7 +356,7 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get project ID via Google login flow
-	tokenSourceProvider := &tokenSourceProvider{TokenSource: oauth2.ReuseTokenSource(Token, GlobalGeminiAuth.GoogleOauthConfig.TokenSource(context.Background(), Token))}
+	tokenSourceProvider := &tokenSourceProvider{TokenSource: oauth2.ReuseTokenSource(Token, oauthConfig.TokenSource(context.Background(), Token))}
 	projectID, err := LoginWithGoogle(context.Background(), tokenSourceProvider, "")
 	if err != nil {
 		log.Printf("HandleGoogleCallback: Failed to get project ID: %v", err)
@@ -273,8 +364,8 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		projectID = ""
 	}
 
-	// Save token to database with project ID
-	GlobalGeminiAuth.SaveToken(GlobalGeminiAuth.db, Token, userEmail, projectID)
+	// Save token to database with project ID and provider kind
+	GlobalGeminiAuth.SaveTokenWithKind(GlobalGeminiAuth.db, Token, userEmail, projectID, stateData.Provider)
 
 	// Re-initialize providers after successful authentication
 	GlobalGeminiAuth.EnsureProvidersInitialized()

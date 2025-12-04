@@ -15,6 +15,7 @@ interface Account {
   email: string;
   createdAt: string;
   updatedAt: string;
+  kind: string;
 }
 
 const SettingsPage: React.FC = () => {
@@ -145,9 +146,9 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleLogin = () => {
+  const handleLoginWithProvider = (provider: string) => {
     const currentPath = window.location.pathname + window.location.search;
-    const redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
+    const redirectToUrl = `/login?provider=${provider}&redirect_to=${encodeURIComponent(currentPath)}`;
     window.location.href = redirectToUrl;
   };
 
@@ -296,60 +297,110 @@ const SettingsPage: React.FC = () => {
   interface AuthSettingsProps {
     accounts: Account[];
     handleLogoutAccount: (id: number, email: string) => void;
-    handleLogin: () => void;
     updateAuthenticationStatus: () => void;
   }
 
-  const AuthSettings: React.FC<AuthSettingsProps> = ({
-    accounts,
-    handleLogoutAccount,
-    handleLogin,
-    updateAuthenticationStatus,
-  }) => {
+  const AuthSettings: React.FC<AuthSettingsProps> = ({ accounts, handleLogoutAccount, updateAuthenticationStatus }) => {
+    // Separate accounts by kind
+    const geminicliAccounts = accounts.filter((account) => account.kind === 'geminicli');
+    const antigravityAccounts = accounts.filter((account) => account.kind === 'antigravity');
+
     return (
       <div>
         <h3>Authentication</h3>
 
-        {accounts.length > 0 ? (
+        {geminicliAccounts.length > 0 || antigravityAccounts.length > 0 ? (
           <div>
             <h4>Connected Google Accounts ({accounts.length})</h4>
             <p style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
               Accounts are automatically distributed when using the LLM.
             </p>
-            <div style={{ marginTop: '10px' }}>
-              {accounts.map((account) => (
-                <div
-                  key={account.id}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '8px 12px',
-                    margin: '4px 0',
-                    backgroundColor: '#f8f9fa',
-                    borderRadius: '4px',
-                    border: '1px solid #dee2e6',
-                  }}
-                >
-                  <div>
-                    <strong>{account.email}</strong>
+
+            {/* Two-column layout for different providers */}
+            <div style={{ display: 'flex', gap: '20px', marginTop: '10px' }}>
+              {/* Gemini CLI Column */}
+              <div style={{ flex: 1 }}>
+                {geminicliAccounts.length > 0 && (
+                  <div style={{ marginBottom: '15px' }}>
+                    <h6 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Gemini CLI</h6>
+                    {geminicliAccounts.map((account) => (
+                      <div
+                        key={account.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          margin: '4px 0',
+                          backgroundColor: '#f8f9fa',
+                          borderRadius: '4px',
+                          border: '1px solid #dee2e6',
+                        }}
+                      >
+                        <div>
+                          <strong>{account.email}</strong>
+                        </div>
+                        <button
+                          onClick={() => handleLogoutAccount(account.id, account.email)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '12px',
+                            backgroundColor: '#dc3545',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '3px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                  <button
-                    onClick={() => handleLogoutAccount(account.id, account.email)}
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: '12px',
-                      backgroundColor: '#dc3545',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '3px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
+                )}
+              </div>
+
+              {/* Antigravity Column */}
+              <div style={{ flex: 1 }}>
+                {antigravityAccounts.length > 0 && (
+                  <div style={{ marginBottom: '15px' }}>
+                    <h6 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Antigravity</h6>
+                    {antigravityAccounts.map((account) => (
+                      <div
+                        key={account.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          margin: '4px 0',
+                          backgroundColor: '#f8f9fa',
+                          borderRadius: '4px',
+                          border: '1px solid #dee2e6',
+                        }}
+                      >
+                        <div>
+                          <strong>{account.email}</strong>
+                        </div>
+                        <button
+                          onClick={() => handleLogoutAccount(account.id, account.email)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '12px',
+                            backgroundColor: '#dc3545',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '3px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : (
@@ -361,9 +412,9 @@ const SettingsPage: React.FC = () => {
           </div>
         )}
 
-        <div style={{ marginTop: '20px' }}>
+        <div style={{ marginTop: '20px', display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button
-            onClick={handleLogin}
+            onClick={() => handleLoginWithProvider('geminicli')}
             style={{
               padding: '8px 16px',
               backgroundColor: '#007bff',
@@ -373,7 +424,20 @@ const SettingsPage: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            Add New Account
+            Add Gemini CLI Account
+          </button>
+          <button
+            onClick={() => handleLoginWithProvider('antigravity')}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            Add Antigravity Account
           </button>
         </div>
 
@@ -600,7 +664,6 @@ const SettingsPage: React.FC = () => {
           <AuthSettings
             accounts={accounts}
             handleLogoutAccount={handleLogoutAccount}
-            handleLogin={handleLogin}
             updateAuthenticationStatus={updateAuthenticationStatus}
           />
         )}

@@ -39,7 +39,7 @@ func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 	serveSPAIndex(w, r)
 }
 
-// listAccountsHandler returns a list of all Google accounts associated with the user
+// listAccountsHandler returns a list of all OAuth accounts (geminicli, antigravity, etc.) associated with the user
 func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
@@ -49,18 +49,17 @@ func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter only geminicli tokens and prepare response (excluding sensitive projectId)
+	// Prepare response for all OAuth tokens (excluding sensitive projectId)
 	accounts := make([]map[string]interface{}, 0)
 	for _, token := range tokens {
-		if token.Kind == "geminicli" {
-			account := map[string]interface{}{
-				"id":        token.ID,
-				"email":     token.UserEmail,
-				"createdAt": token.CreatedAt,
-				"updatedAt": token.UpdatedAt,
-			}
-			accounts = append(accounts, account)
+		account := map[string]interface{}{
+			"id":        token.ID,
+			"email":     token.UserEmail,
+			"createdAt": token.CreatedAt,
+			"updatedAt": token.UpdatedAt,
+			"kind":      token.Kind,
 		}
+		accounts = append(accounts, account)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
