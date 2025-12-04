@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"sync"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -20,10 +19,8 @@ import (
 
 // GeminiAuth encapsulates the global state related to authentication providers.
 type GeminiAuth struct {
-	initMutex            sync.Mutex
-	db                   *sql.DB
-	oauthStates          map[string]string // Stores randomState -> originalQueryString
-	providersInitialized bool
+	db          *sql.DB
+	oauthStates map[string]string // Stores randomState -> originalQueryString
 }
 
 // NewGeminiAuth creates a new instance of GeminiAuth.
@@ -80,15 +77,6 @@ var antigravityConfig = oauth2.Config{
 	Endpoint: google.Endpoint,
 }
 
-// Init initializes the authentication state.
-func (ga *GeminiAuth) Init() {
-	ga.initMutex.Lock()
-	defer ga.initMutex.Unlock()
-
-	// Initialize all authentication providers
-	ga.EnsureProvidersInitialized()
-}
-
 // getOAuthConfig returns the OAuth config for the specified provider
 func (ga *GeminiAuth) getOAuthConfig(provider string) *oauth2.Config {
 	var config oauth2.Config
@@ -142,86 +130,6 @@ func (ga *GeminiAuth) HasAuthenticatedProviders() bool {
 	}
 
 	return openaiConfigsCount > 0
-}
-
-// EnsureProvidersInitialized ensures that authentication providers are properly initialized.
-func (ga *GeminiAuth) EnsureProvidersInitialized() error {
-	ctx := context.Background()
-
-	// Clear only Gemini-related providers, not all providers
-	GlobalModelsRegistry.ClearGeminiProviders()
-
-	// Initialize Google OAuth providers if tokens exist
-	tokens, err := GetOAuthTokens(ga.db)
-	if err != nil {
-		return fmt.Errorf("failed to get OAuth tokens: %w", err)
-	}
-
-	hasGeminiTokens := false
-	hasAntigravityTokens := false
-	for _, token := range tokens {
-		switch token.Kind {
-		case "geminicli":
-			hasGeminiTokens = true
-		case "antigravity":
-			hasAntigravityTokens = true
-		}
-	}
-
-	// Initialize Gemini CLI providers
-	if hasGeminiTokens {
-		// Get the least recently used token for initialization
-		selectedToken, err := GetNextOAuthToken(ga.db, "geminicli", "")
-		if err != nil {
-			return fmt.Errorf("failed to get next OAuth token: %w", err)
-		}
-
-		if selectedToken != nil {
-			var oauthToken oauth2.Token
-			if err := json.Unmarshal([]byte(selectedToken.TokenData), &oauthToken); err != nil {
-				return fmt.Errorf("failed to unmarshal OAuth token: %w", err)
-			}
-
-			// Create token source
-			oauthConfig := ga.getOAuthConfig("geminicli")
-			tokenSource := oauthConfig.TokenSource(ctx, &oauthToken)
-
-			// Set up CodeAssist client
-			client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, selectedToken.ProjectID, "geminicli")
-			GlobalModelsRegistry.SetGeminiCodeAssistClient(client)
-
-			log.Printf("Initialized Gemini provider with token for user %s", selectedToken.UserEmail)
-		}
-	}
-
-	// Initialize Antigravity providers
-	if hasAntigravityTokens {
-		// Get the least recently used token for initialization
-		selectedToken, err := GetNextOAuthToken(ga.db, "antigravity", "")
-		if err != nil {
-			return fmt.Errorf("failed to get next OAuth token: %w", err)
-		}
-
-		if selectedToken != nil {
-			var oauthToken oauth2.Token
-			if err := json.Unmarshal([]byte(selectedToken.TokenData), &oauthToken); err != nil {
-				return fmt.Errorf("failed to unmarshal OAuth token: %w", err)
-			}
-
-			// Create token source
-			oauthConfig := ga.getOAuthConfig("antigravity")
-			tokenSource := oauthConfig.TokenSource(ctx, &oauthToken)
-
-			// Set up CodeAssist client
-			client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, selectedToken.ProjectID, "antigravity")
-			GlobalModelsRegistry.SetGeminiCodeAssistClient(client)
-
-			log.Printf("Initialized Antigravity provider with token for user %s", selectedToken.UserEmail)
-		}
-	}
-
-	ga.providersInitialized = true
-	return nil
 }
 
 // tokenSourceProvider implements HTTPClientProvider for oauth2.TokenSource
@@ -367,9 +275,6 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Save token to database with project ID and provider kind
 	GlobalGeminiAuth.SaveTokenWithKind(GlobalGeminiAuth.db, Token, userEmail, projectID, stateData.Provider)
 
-	// Re-initialize providers after successful authentication
-	GlobalGeminiAuth.EnsureProvidersInitialized()
-
 	// Redirect to the original path after successful authentication
 	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)
 }
@@ -407,9 +312,6 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to logout", http.StatusInternalServerError)
 		return
 	}
-
-	// Re-initialize providers after account removal
-	GlobalGeminiAuth.EnsureProvidersInitialized()
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Account logged out successfully")

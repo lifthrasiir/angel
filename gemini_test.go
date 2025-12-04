@@ -27,7 +27,7 @@ func TestGeminiSubagentProvider(t *testing.T) {
 		}
 	}
 
-	registry.SetGeminiCodeAssistClient(nil)
+	registry.ResetGeminiProvider()
 
 	// Test 1: session_name task for gemini-2.5-flash
 	t.Run("SessionNameTask", func(t *testing.T) {

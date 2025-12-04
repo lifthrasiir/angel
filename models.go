@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/fvbommel/sortorder"
-	. "github.com/lifthrasiir/angel/gemini"
 )
 
 const AngelEvalModelName = "angel-eval"
@@ -146,8 +145,7 @@ func LoadModels(data []byte) (*ModelsRegistry, error) {
 		return nil, err
 	}
 
-	// Set global registry
-	GlobalModelsRegistry = registry
+	registry.ResetGeminiProvider()
 
 	return registry, nil
 }
@@ -828,8 +826,8 @@ func (r *ModelsRegistry) SetAngelEvalProvider(provider LLMProvider) {
 	r.providers[AngelEvalModelName] = provider
 }
 
-// SetGeminiCodeAssistClient creates and sets the Gemini provider with the given CodeAssistClient
-func (r *ModelsRegistry) SetGeminiCodeAssistClient(client *CodeAssistClient) {
+// ResetGeminiProvider creates and sets the Gemini provider.
+func (r *ModelsRegistry) ResetGeminiProvider() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -842,7 +840,7 @@ func (r *ModelsRegistry) SetGeminiCodeAssistClient(client *CodeAssistClient) {
 	}
 
 	// Create a single provider instance that will be shared by all Gemini models
-	r.geminiProvider = NewCodeAssistProvider(geminiModels, client)
+	r.geminiProvider = NewGeminiProvider(geminiModels)
 
 	// Register all Gemini models with the provider
 	for modelName := range geminiModels {
@@ -888,31 +886,6 @@ func (r *ModelsRegistry) Clear() {
 	defer r.mutex.Unlock()
 
 	r.providers = make(map[string]LLMProvider)
-	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
-	r.geminiProvider = nil
-}
-
-// ClearGeminiProviders removes only Gemini-related providers, preserving others
-func (r *ModelsRegistry) ClearGeminiProviders() {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	// Preserve angel-eval and other non-Gemini providers
-	angelEvalProvider := r.providers[AngelEvalModelName]
-	otherProviders := make(map[string]LLMProvider)
-	for model, provider := range r.providers {
-		// Only preserve non-Gemini providers
-		if provider != r.geminiProvider {
-			otherProviders[model] = provider
-		}
-	}
-
-	// Clear and restore non-Gemini providers
-	r.providers = otherProviders
-	if angelEvalProvider != nil {
-		r.providers[AngelEvalModelName] = angelEvalProvider
-	}
-	// Clear only Gemini-specific endpoints
 	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
 	r.geminiProvider = nil
 }

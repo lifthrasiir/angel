@@ -106,7 +106,6 @@ func main() {
 	InitMCPManager(db)
 
 	GlobalGeminiAuth = NewGeminiAuth(db)
-	GlobalGeminiAuth.Init()
 
 	// Initialize OpenAI endpoints from database configurations
 	GlobalModelsRegistry.InitializeOpenAIEndpoints(db)

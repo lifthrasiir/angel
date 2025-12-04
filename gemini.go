@@ -19,20 +19,16 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
-// Ensure CodeAssistProvider implements LLMProvider
-var _ LLMProvider = (*CodeAssistProvider)(nil)
+// Ensure GeminiProvider implements LLMProvider
+var _ LLMProvider = (*GeminiProvider)(nil)
 
-type CodeAssistProvider struct {
-	client *CodeAssistClient
+type GeminiProvider struct {
 	models map[string]*Model
 }
 
-// NewCodeAssistProvider creates a new CodeAssistProvider with the given models and client
-func NewCodeAssistProvider(models map[string]*Model, client *CodeAssistClient) *CodeAssistProvider {
-	return &CodeAssistProvider{
-		client: client,
-		models: models,
-	}
+// NewGeminiProvider creates a new GeminiProvider with the given models
+func NewGeminiProvider(models map[string]*Model) *GeminiProvider {
+	return &GeminiProvider{models: models}
 }
 
 // Reserved names for Gemini's internal tools.
@@ -42,8 +38,8 @@ const (
 )
 
 // resolveModelName resolves the model key to the actual API model name
-func (cap *CodeAssistProvider) resolveModel(modelName string) (*Model, string) {
-	if model, exists := cap.models[modelName]; exists {
+func (p *GeminiProvider) resolveModel(modelName string) (*Model, string) {
+	if model, exists := p.models[modelName]; exists {
 		apiModelName := model.ModelName
 		if apiModelName != "" {
 			return model, apiModelName
@@ -53,9 +49,9 @@ func (cap *CodeAssistProvider) resolveModel(modelName string) (*Model, string) {
 }
 
 // SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
-func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	// Resolve the model to get both model info and API model name
-	model, apiModelName := cap.resolveModel(modelName)
+	model, apiModelName := p.resolveModel(modelName)
 	if model == nil {
 		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
@@ -159,9 +155,9 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 	return out.Seq, out.Closer, nil
 }
 
-// GenerateContentOneShot calls the streamGenerateContent of Code Assist API and returns a single response.
-func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
-	seq, closer, err := cap.SendMessageStream(ctx, modelName, params)
+// GenerateContentOneShot calls the streamGenerateContent API and returns a single response.
+func (p *GeminiProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
+	seq, closer, err := p.SendMessageStream(ctx, modelName, params)
 	if err != nil {
 		log.Printf("GenerateContentOneShot: SendMessageStream failed: %v", err)
 		return OneShotResult{}, err
@@ -204,9 +200,9 @@ func (cap *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, model
 	return OneShotResult{}, fmt.Errorf("no text content found in LLM response")
 }
 
-func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
+func (p *GeminiProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 	// Resolve the model name to the actual API model name
-	model, apiModelName := cap.resolveModel(modelName)
+	model, apiModelName := p.resolveModel(modelName)
 	if model == nil {
 		return nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
@@ -227,9 +223,9 @@ func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string
 }
 
 // MaxTokens implements the LLMProvider interface for CodeAssistProvider.
-func (cap *CodeAssistProvider) MaxTokens(modelName string) int {
+func (p *GeminiProvider) MaxTokens(modelName string) int {
 	// Use model information from ModelRegistry models map
-	if model, exists := cap.models[modelName]; exists {
+	if model, exists := p.models[modelName]; exists {
 		return model.MaxTokens
 	}
 	return 0

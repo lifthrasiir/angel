@@ -51,10 +51,6 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB) {
 		t.Fatalf("Failed to load models: %v", err)
 	}
 
-	// Reset GlobalGeminiAuth for each test
-	ga := NewGeminiAuth(testDB)
-	ga.Init()
-
 	// Override CurrentProvider with MockLLMProvider for testing
 	mockLLMProvider := &MockLLMProvider{
 		SendMessageStreamFunc: func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
