@@ -43,7 +43,7 @@ func (w *testProviderWrapper) MaxTokens(modelName string) int {
 
 func TestThoughtSignatureHandling(t *testing.T) {
 	// Setup test environment
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	// Create responses slice like the working integration tests
 	responses := []GenerateContentResponse{

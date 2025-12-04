@@ -18,11 +18,6 @@ import (
 // createBranchHandler creates a new branch from a given parent message.
 func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("createBranchHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -309,11 +304,6 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 // switchBranchHandler switches the primary branch of a session.
 func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("switchBranchHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -487,11 +477,6 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 // confirmBranchHandler handles the confirmation of a pending action on a branch.
 func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("confirmBranchHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -768,11 +753,6 @@ func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
 // retryErrorBranchHandler handles retry-error requests for a branch by removing error messages and resuming streaming.
 func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("retryErrorBranchHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]

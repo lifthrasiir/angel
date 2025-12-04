@@ -21,11 +21,6 @@ import (
 // extractSessionHandler extracts messages from a specific branch up to a given message and creates a new session.
 func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("extractSessionHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]

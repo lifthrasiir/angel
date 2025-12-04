@@ -74,7 +74,7 @@ func setupSessionWithPendingConfirmation(t *testing.T, router *mux.Router, db *s
 }
 
 func TestConfirmationDenial(t *testing.T) {
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	// Create a test workspace
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -146,7 +146,7 @@ func TestConfirmationDenial(t *testing.T) {
 }
 
 func TestConfirmationApproval(t *testing.T) {
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	// Create a test workspace
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")

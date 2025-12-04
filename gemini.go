@@ -14,36 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/oauth2"
-
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Ensure CodeAssistProvider implements LLMProvider
 var _ LLMProvider = (*CodeAssistProvider)(nil)
-
-// tokenSaverSource wraps an oauth2.TokenSource and saves the token to the database
-// whenever a new token is obtained (e.g., after a refresh).
-type tokenSaverSource struct {
-	oauth2.TokenSource
-	ga *GeminiAuth
-}
-
-func (ts *tokenSaverSource) Token() (*oauth2.Token, error) {
-	log.Println("tokenSaverSource: Attempting to get/refresh token...")
-	token, err := ts.TokenSource.Token()
-	if err != nil {
-		log.Printf("tokenSaverSource: Failed to get/refresh token: %v", err)
-		return nil, err
-	}
-	// Save the token to the database after it's obtained/refreshed
-	ts.ga.SaveToken(ts.ga.db, token)
-	return token, nil
-}
-
-func (ts *tokenSaverSource) Client(ctx context.Context) *http.Client {
-	return oauth2.NewClient(ctx, ts.TokenSource)
-}
 
 type CodeAssistProvider struct {
 	client *CodeAssistClient

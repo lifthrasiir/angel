@@ -12,10 +12,6 @@ import (
 // commandHandler handles POST requests for /api/chat/{sessionId}/command
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-	if !auth.Validate("commandHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionID := vars["sessionId"]

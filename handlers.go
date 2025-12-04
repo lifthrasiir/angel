@@ -145,25 +145,6 @@ func updateSessionWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Session workspace updated successfully")
 }
 
-func getUserInfoHandler(w http.ResponseWriter, r *http.Request) {
-	auth := getAuth(w, r)
-
-	// Use Validate to ensure token is valid and refreshed if necessary
-	if !auth.Validate("getUserInfoHandler", w, r) {
-		// Validate already sent an error response
-		return
-	}
-
-	// If UserEmail is empty but token is valid, try to re-fetch user info
-	userEmail, err := auth.GetUserEmail(r)
-	if err != nil {
-		log.Printf("getUserInfoHandler: Failed to get user email: %v", err)
-		// Non-fatal, continue without email
-	}
-
-	sendJSONResponse(w, map[string]string{"email": userEmail})
-}
-
 func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
@@ -215,11 +196,6 @@ func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
-	auth := getAuth(w, r)
-
-	if !auth.Validate("countTokensHandler", w, r) {
-		return
-	}
 
 	var requestBody struct {
 		Text  string `json:"text"`
@@ -263,11 +239,6 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 // handleCall handles GET and DELETE requests for /api/calls/{sessionId}
 func handleCall(w http.ResponseWriter, r *http.Request) {
-	auth := getAuth(w, r)
-
-	if !auth.Validate("handleCall", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -480,11 +451,6 @@ func listModelsHandler(w http.ResponseWriter, r *http.Request) {
 
 func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("updateSessionRootsHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]

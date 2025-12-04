@@ -47,7 +47,7 @@ func LoginWithGoogle(ctx context.Context, clientProvider HTTPClientProvider, pro
 			}
 		}
 
-		return "", nil
+		return projectID, nil
 	}
 
 	// User needs onboarding - proceed with onboarding flow

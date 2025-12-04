@@ -33,11 +33,6 @@ type InitialState struct {
 // New session and message handler
 func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("newSessionAndMessage", w, r) {
-		return
-	}
 
 	var requestBody struct {
 		Message      string           `json:"message"`
@@ -192,11 +187,6 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 // Chat message handler
 func chatMessage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("chatMessage", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -379,11 +369,6 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 // New endpoint to load chat session history
 func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("loadChatSession", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -559,11 +544,6 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("listSessionsByWorkspaceHandler", w, r) {
-		return
-	}
 
 	workspaceID := r.URL.Query().Get("workspaceId")
 
@@ -610,11 +590,6 @@ func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request
 // New endpoint to delete a chat session
 func deleteSession(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("deleteSession", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]

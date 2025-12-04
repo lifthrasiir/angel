@@ -33,11 +33,6 @@ type CompressResult struct {
 
 func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	auth := getAuth(w, r)
-
-	if !auth.Validate("compressSessionHandler", w, r) {
-		return
-	}
 
 	vars := mux.Vars(r)
 	sessionID := vars["sessionId"]

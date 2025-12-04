@@ -141,7 +141,7 @@ func responseFromPart(part Part) GenerateContentResponse {
 
 func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	// Setup router and context middleware
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	// Create the workspace for this test
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -299,7 +299,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 
 func TestBranchingMessageChain(t *testing.T) {
 	// Setup router and context middleware
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	// Create the workspace for this test
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -607,7 +607,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 func TestStreamingMessageConsolidation(t *testing.T) {
 	// Setup router and context middleware
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	// Create the workspace for this test
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -689,7 +689,7 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 }
 
 func TestSyncDuringThought(t *testing.T) {
-	router, db, _ := setupTest(t) // Get db from setupTest
+	router, db := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -855,7 +855,7 @@ func TestSyncDuringThought(t *testing.T) {
 }
 
 func TestSyncDuringResponse(t *testing.T) {
-	router, db, _ := setupTest(t) // Get db from setupTest
+	router, db := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -1010,7 +1010,7 @@ func TestSyncDuringResponse(t *testing.T) {
 }
 
 func TestCancelDuringSync(t *testing.T) {
-	router, db, _ := setupTest(t) // Get db from setupTest
+	router, db := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -1405,7 +1405,7 @@ func TestApplyCurationRules(t *testing.T) {
 }
 
 func TestCodeExecutionMessageHandling(t *testing.T) {
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
@@ -1569,7 +1569,7 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 }
 
 func TestRetryErrorBranchHandler(t *testing.T) {
-	router, db, _ := setupTest(t)
+	router, db := setupTest(t)
 
 	// Step 1: Create session and branch
 	sessionId := generateID()

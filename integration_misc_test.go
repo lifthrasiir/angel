@@ -12,7 +12,7 @@ import (
 
 // TestCountTokensHandler tests the countTokensHandler function
 func TestCountTokensHandler(t *testing.T) {
-	router, _, _ := setupTest(t)
+	router, _ := setupTest(t)
 
 	// Mock the CountTokens method of CurrentProvider
 	provider := GlobalModelsRegistry.GetProvider(DefaultGeminiModel)
@@ -63,7 +63,7 @@ func TestCountTokensHandler(t *testing.T) {
 
 // TestHandleEvaluatePrompt tests the handleEvaluatePrompt function
 func TestHandleEvaluatePrompt(t *testing.T) {
-	router, _, _ := setupTest(t)
+	router, _ := setupTest(t)
 
 	// Test case 1: Successful template evaluation
 	t.Run("Success", func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestHandleEvaluatePrompt(t *testing.T) {
 
 // TestGetMCPConfigsHandler tests the getMCPConfigsHandler function
 func TestGetMCPConfigsHandler(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Prepare some MCP configs in the DB
 	SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp1", ConfigJSON: json.RawMessage(`{}`), Enabled: true})
@@ -134,7 +134,7 @@ func TestGetMCPConfigsHandler(t *testing.T) {
 
 // TestSaveMCPConfigHandler tests the saveMCPConfigHandler function
 func TestSaveMCPConfigHandler(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Test case 1: Successful creation/update
 	t.Run("Success", func(t *testing.T) {
@@ -168,7 +168,7 @@ func TestSaveMCPConfigHandler(t *testing.T) {
 
 // TestDeleteMCPConfigHandler tests the deleteMCPConfigHandler function
 func TestDeleteMCPConfigHandler(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Prepare an MCP config in the DB
 	SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp-to-delete", ConfigJSON: json.RawMessage(`{}`), Enabled: true})

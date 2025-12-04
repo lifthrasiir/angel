@@ -30,6 +30,9 @@ import (
 
 const dbPath = "angel.db"
 
+// Global instances
+var GlobalGeminiAuth *GeminiAuth
+
 //go:embed frontend/dist
 var embeddedFiles embed.FS
 
@@ -102,8 +105,8 @@ func main() {
 
 	InitMCPManager(db)
 
-	ga := NewGeminiAuth(db)
-	ga.Init()
+	GlobalGeminiAuth = NewGeminiAuth(db)
+	GlobalGeminiAuth.Init()
 
 	// Initialize OpenAI endpoints from database configurations
 	GlobalModelsRegistry.InitializeOpenAIEndpoints(db)
@@ -112,7 +115,7 @@ func main() {
 	GlobalModelsRegistry.SetAngelEvalProvider(&AngelEvalProvider{})
 
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(db, ga))
+	router.Use(makeContextMiddleware(db))
 
 	// Apply CSRF middleware.
 	// For production, ensure csrf.Secure(true) is used with HTTPS.
@@ -129,8 +132,8 @@ func main() {
 
 	// OAuth2 handler is only active on default port 8080
 	if port == 8080 {
-		router.HandleFunc("/login", http.HandlerFunc(ga.GetAuthHandler().ServeHTTP)).Methods("GET")
-		router.HandleFunc("/oauth2callback", http.HandlerFunc(ga.GetAuthCallbackHandler().ServeHTTP)).Methods("GET")
+		router.HandleFunc("/login", authHandler).Methods("GET")
+		router.HandleFunc("/oauth2callback", authCallbackHandler).Methods("GET")
 	} else {
 		// Add /login handler that shows error message when not on port 8080
 		router.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +152,7 @@ func main() {
 		log.Printf("OAuth2 callback URL is hardcoded to http://localhost:8080/oauth2callback and cannot be changed.")
 		log.Printf("To use login functionality, please run the server on port 8080 or authenticate first on port 8080 and then copy the configuration.")
 	}
-	router.HandleFunc("/api/logout", http.HandlerFunc(ga.GetLogoutHandler().ServeHTTP)).Methods("POST")
+	router.HandleFunc("/api/logout", logoutHandler).Methods("POST")
 
 	InitRouter(router)
 
@@ -256,7 +259,6 @@ func InitRouter(router *mux.Router) {
 	router.HandleFunc("/api/chat/{sessionId}/command", commandHandler).Methods("POST")
 
 	router.HandleFunc("/api/blob/{blobHash}", handleDownloadBlobByHash).Methods("GET")
-	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
 	router.HandleFunc("/api/accounts", listAccountsHandler).Methods("GET")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
 	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
@@ -440,18 +442,14 @@ const (
 	// gaKey
 )
 
-func contextWithGlobals(ctx context.Context, db *sql.DB, auth Auth) context.Context {
-	ctx = context.WithValue(ctx, dbKey, db)
-	if auth != nil {
-		ctx = auth.SetAuthContext(ctx, auth) // Use the Auth interface's SetAuthContext method
-	}
-	return ctx
+func contextWithGlobals(ctx context.Context, db *sql.DB) context.Context {
+	return context.WithValue(ctx, dbKey, db)
 }
 
-func makeContextMiddleware(db *sql.DB, auth Auth) func(next http.Handler) http.Handler {
+func makeContextMiddleware(db *sql.DB) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(contextWithGlobals(r.Context(), db, auth))
+			r = r.WithContext(contextWithGlobals(r.Context(), db))
 			r = csrf.PlaintextHTTPRequest(r) // Required because we are typically working on localhost
 
 			next.ServeHTTP(w, r)
@@ -475,15 +473,6 @@ func getDbFromContext(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("database connection not found in context")
 	}
 	return db, nil
-}
-
-func getAuth(w http.ResponseWriter, r *http.Request) Auth {
-	auth, ok := r.Context().Value(authContextKey).(Auth)
-	if !ok {
-		http.Error(w, "Internal Server Error: Auth interface missing.", http.StatusInternalServerError)
-		runtime.Goexit()
-	}
-	return auth
 }
 
 func generateID() string {

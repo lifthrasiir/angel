@@ -14,16 +14,14 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gorilla/mux"
-	"golang.org/x/oauth2"
 
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
 // Helper function to set up the test environment
-func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
+func setupTest(t *testing.T) (*mux.Router, *sql.DB) {
 	// Initialize an in-memory database for testing with unique name
 	dbName := fmt.Sprintf(":memory:?cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL&test=%s", t.Name())
 	testDB, err := InitDB(dbName)
@@ -55,17 +53,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 
 	// Reset GlobalGeminiAuth for each test
 	ga := NewGeminiAuth(testDB)
-	// Explicitly set ProjectID for testing
-	ga.ProjectID = "test-project"
-
-	// Set a dummy token for testing to allow InitCurrentProvider to proceed
-	ga.Token = &oauth2.Token{
-		AccessToken: "dummy-access-token",
-		TokenType:   "Bearer",
-		Expiry:      time.Now().Add(time.Hour),
-	}
-
-	ga.InitCurrentProvider()
+	ga.Init()
 
 	// Override CurrentProvider with MockLLMProvider for testing
 	mockLLMProvider := &MockLLMProvider{
@@ -87,7 +75,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 
 	// Create a new router for testing
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(testDB, ga))
+	router.Use(makeContextMiddleware(testDB))
 	InitRouter(router)
 
 	// Ensure the database connection is closed after the test
@@ -97,7 +85,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, Auth) {
 		}
 	})
 
-	return router, testDB, ga
+	return router, testDB
 }
 
 func replaceProvider(provider LLMProvider) LLMProvider {

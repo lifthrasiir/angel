@@ -11,7 +11,7 @@ import (
 
 // TestCreateWorkspaceHandler tests the createWorkspaceHandler function
 func TestCreateWorkspaceHandler(t *testing.T) {
-	router, _, _ := setupTest(t)
+	router, _ := setupTest(t)
 
 	// Test case 1: Successful workspace creation
 	t.Run("Success", func(t *testing.T) {
@@ -50,7 +50,7 @@ func TestCreateWorkspaceHandler(t *testing.T) {
 
 // TestListWorkspacesHandler tests the listWorkspacesHandler function
 func TestListWorkspacesHandler(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Prepare some workspaces in the DB
 	CreateWorkspace(testDB, "ws1", "Workspace One", "")
@@ -87,7 +87,7 @@ func TestListWorkspacesHandler(t *testing.T) {
 
 // TestDeleteWorkspaceHandler tests the deleteWorkspaceHandler function
 func TestDeleteWorkspaceHandler(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Create a workspace and a session/message within it
 	workspaceID := "testWsDelete"
@@ -150,7 +150,7 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 
 // TestNewSessionAndMessage tests the newSessionAndMessage function
 func TestNewSessionAndMessage(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Test case 1: Successful creation of new session and message
 	t.Run("Success", func(t *testing.T) {
@@ -202,7 +202,7 @@ func TestNewSessionAndMessage(t *testing.T) {
 
 // TestChatMessage tests the chatMessage function
 func TestChatMessage(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Prepare a session
 	var err error // Declare err here
@@ -251,7 +251,7 @@ func TestChatMessage(t *testing.T) {
 
 // TestLoadChatSession tests the loadChatSession function
 func TestLoadChatSession(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Prepare a session and some messages
 	sessionId := "testLoadSession"
@@ -328,7 +328,7 @@ func TestLoadChatSession(t *testing.T) {
 
 // TestUpdateSessionNameHandler tests the updateSessionNameHandler function
 func TestUpdateSessionNameHandler(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Prepare a session
 	sessionId := "testUpdateNameSession"
@@ -365,7 +365,7 @@ func TestUpdateSessionNameHandler(t *testing.T) {
 
 // TestDeleteSession tests the deleteSession function
 func TestDeleteSession(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB := setupTest(t)
 
 	// Prepare a session and some messages
 	sessionId := "TestDeleteSession"

@@ -603,8 +603,8 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 		"AgentMessage": "",
 	})
 
-	// Create new context with database connection for subagent (no auth needed)
-	subagentCtx := contextWithGlobals(context.Background(), db, nil)
+	// Create new context with database connection for subagent
+	subagentCtx := contextWithGlobals(context.Background(), db)
 	ctx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
