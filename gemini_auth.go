@@ -40,17 +40,22 @@ func NewGeminiAuth(db *sql.DB) *GeminiAuth {
 
 // saveToken saves the OAuth token to the database.
 func (ga *GeminiAuth) SaveToken(db *sql.DB, t *oauth2.Token) {
+	ga.SaveTokenWithKind(db, t, "geminicli")
+}
+
+// saveTokenWithKind saves the OAuth token to the database with a specific kind.
+func (ga *GeminiAuth) SaveTokenWithKind(db *sql.DB, t *oauth2.Token, kind string) {
 	tokenJSON, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		log.Printf("Failed to marshal token: %v", err)
 		return
 	}
 
-	if err := SaveOAuthToken(db, string(tokenJSON), ga.UserEmail, ga.ProjectID); err != nil {
+	if err := SaveOAuthTokenWithKind(db, string(tokenJSON), ga.UserEmail, ga.ProjectID, kind); err != nil {
 		log.Printf("Failed to save OAuth token to DB: %v", err)
 		return
 	}
-	log.Println("OAuth token saved to DB.")
+	log.Printf("OAuth token saved to DB with kind %s.", kind)
 	ga.Token = t // Update global token variable
 }
 
@@ -240,10 +245,7 @@ func (ga *GeminiAuth) GetAuthCallbackHandler() http.Handler {
 			return
 		}
 
-		// Save token to file
-		ga.SaveToken(ga.db, Token)
-
-		// Fetch user info (email)
+		// Fetch user info (email) first
 		userInfoClient := ga.GoogleOauthConfig.Client(context.Background(), Token)
 		userInfoResp, err := userInfoClient.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 		if err != nil {
@@ -262,6 +264,9 @@ func (ga *GeminiAuth) GetAuthCallbackHandler() http.Handler {
 			}
 		}
 
+		// Save token to file after setting userEmail
+		ga.SaveToken(ga.db, Token)
+
 		// Re-initialize CurrentProviders after successful authentication and user info fetch
 		ga.InitCurrentProvider()
 
@@ -273,19 +278,50 @@ func (ga *GeminiAuth) GetAuthCallbackHandler() http.Handler {
 // GetLogoutHandler returns the HTTP handler for logout.
 func (ga *GeminiAuth) GetLogoutHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ga.Token = nil
-		ga.UserEmail = ""
-		GlobalModelsRegistry.Clear() // Clear all providers on logout
+		// Parse request body to get which account to logout
+		var request struct {
+			Email string `json:"email"`
+			ID    int    `json:"id"`
+		}
 
-		// Delete token from DB
-		if err := DeleteOAuthToken(ga.db); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			log.Printf("Failed to decode logout request: %v", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		var err error
+		if request.ID != 0 {
+			// Delete specific account by ID
+			err = DeleteOAuthTokenByID(ga.db, request.ID)
+			log.Printf("Logged out account with ID %d", request.ID)
+		} else if request.Email != "" {
+			// Delete specific account by email
+			err = DeleteOAuthTokenByEmail(ga.db, request.Email, "geminicli")
+			log.Printf("Logged out account for email %s", request.Email)
+		} else {
+			http.Error(w, "Either email or id must be provided", http.StatusBadRequest)
+			return
+		}
+
+		if err != nil {
 			log.Printf("Failed to delete OAuth token from DB: %v", err)
 			http.Error(w, "Failed to logout", http.StatusInternalServerError)
 			return
 		}
 
+		// Clear current auth state if it was the logged out account
+		if request.Email == ga.UserEmail {
+			ga.Token = nil
+			ga.UserEmail = ""
+			ga.ProjectID = ""
+			GlobalModelsRegistry.Clear()
+			// Try to initialize with next available account
+			ga.InitCurrentProvider()
+		}
+
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "Logged out successfully")
+		fmt.Fprint(w, "Account logged out successfully")
 	})
 }
 

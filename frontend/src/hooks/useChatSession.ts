@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-// useParams no longer needed since workspaceId is managed by FSM
 import { useAtomValue, useSetAtom } from 'jotai';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
 import { useAttachmentResize } from './useAttachmentResize';
@@ -7,7 +6,6 @@ import { useSessionManagerContext } from './SessionManagerContext';
 import { getSessionId, getWorkspaceId } from '../utils/sessionStateHelpers';
 
 import {
-  userEmailAtom,
   messagesAtom,
   inputMessageAtom,
   sessionsAtom,
@@ -28,8 +26,6 @@ import { useMessageSending } from './useMessageSending';
 import { getAvailableModels, ModelInfo } from '../api/models';
 
 export const useChatSession = () => {
-  const userEmail = useAtomValue(userEmailAtom);
-
   // Use sessionManager for sessionId and workspaceId
   const sessionManager = useSessionManagerContext();
   const chatSessionId = getSessionId(sessionManager.sessionState);
@@ -135,7 +131,6 @@ export const useChatSession = () => {
   };
 
   return {
-    userEmail,
     chatSessionId,
     messages,
     inputMessage,

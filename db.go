@@ -120,7 +120,11 @@ func createTables(db *sql.DB) error {
 		id INTEGER PRIMARY KEY,
 		token_data TEXT NOT NULL,
 		user_email TEXT,
-		project_id TEXT
+		project_id TEXT,
+		kind TEXT NOT NULL DEFAULT 'geminicli',
+		last_used_by_model TEXT DEFAULT '{}',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS workspaces (
@@ -302,11 +306,51 @@ func migrateDB(db *sql.DB) error {
 
 		// Add missing index for blob ref_count - critical for performance when deleting sessions with many blobs
 		`CREATE INDEX IF NOT EXISTS idx_blobs_ref_count ON blobs(ref_count)`,
+
+		// OAuth tokens table migration - add new columns for multi-token support
+		// These may fail if columns already exist, which is fine
+		`ALTER TABLE oauth_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'geminicli'`,
+		`ALTER TABLE oauth_tokens ADD COLUMN last_used_by_model TEXT DEFAULT '{}'`,
+		`ALTER TABLE oauth_tokens ADD COLUMN created_at DATETIME`,
+		`ALTER TABLE oauth_tokens ADD COLUMN updated_at DATETIME`,
+
+		// Set created_at and updated_at for existing records (use a reasonable default)
+		`UPDATE oauth_tokens SET created_at = datetime('now', '-30 days') WHERE created_at IS NULL`,
+		`UPDATE oauth_tokens SET updated_at = created_at WHERE updated_at IS NULL`,
+
+		// Add composite unique constraint for oauth_tokens
+		// SQLite doesn't support ALTER TABLE ADD CONSTRAINT for UNIQUE, so we need to recreate the table
+		// First, create a backup table with the new structure
+		`CREATE TABLE IF NOT EXISTS oauth_tokens_new (
+			id INTEGER PRIMARY KEY,
+			token_data TEXT NOT NULL,
+			user_email TEXT,
+			project_id TEXT,
+			kind TEXT NOT NULL DEFAULT 'geminicli',
+			last_used_by_model TEXT DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_email, kind)
+		)`,
+
+		// Copy data from old table to new table
+		`INSERT INTO oauth_tokens_new (id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at)
+			SELECT id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at FROM oauth_tokens`,
+
+		// Drop the old table and rename the new one
+		`DROP TABLE oauth_tokens`,
+		`ALTER TABLE oauth_tokens_new RENAME TO oauth_tokens`,
 	}
 
 	for _, stmt := range migrationStmts {
 		_, err := db.Exec(stmt)
 		if err != nil {
+			// Ignore "duplicate column name" errors for ALTER TABLE statements
+			if strings.Contains(err.Error(), "duplicate column name") ||
+				strings.Contains(err.Error(), "no such table") {
+				log.Printf("Migration step ignored (expected error): %s", err.Error())
+				continue
+			}
 			return fmt.Errorf("failed to execute migration statement '%s': %w", stmt, err)
 		}
 	}
@@ -658,64 +702,92 @@ func getHighestOAuthTokenID(db *sql.DB) (int, error) {
 	return highestID, nil
 }
 
-func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string) error {
-	// Get the highest existing ID, or use 1 if table is empty
+// getNextOAuthTokenID returns the next available ID for new oauth tokens
+func getNextOAuthTokenID(db *sql.DB) (int, error) {
 	highestID, err := getHighestOAuthTokenID(db)
+	if err != nil {
+		return 0, err
+	}
+	return highestID + 1, nil
+}
+
+func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string) error {
+	return SaveOAuthTokenWithKind(db, tokenJSON, userEmail, projectID, "geminicli")
+}
+
+func SaveOAuthTokenWithKind(db *sql.DB, tokenJSON string, userEmail string, projectID string, kind string) error {
+	// Get the next available ID
+	nextID, err := getNextOAuthTokenID(db)
 	if err != nil {
 		return err
 	}
-	if highestID == 0 {
-		highestID = 1
+
+	lastUsedByModelJSON, err := MarshalTimeMap(make(map[string]time.Time))
+	if err != nil {
+		return fmt.Errorf("failed to marshal last_used_by_model: %w", err)
 	}
 
+	// Use INSERT OR REPLACE to handle duplicates automatically due to UNIQUE(user_email, kind) constraint
 	_, err = db.Exec(
-		"INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id) VALUES (?, ?, ?, ?)",
-		highestID, tokenJSON, userEmail, projectID)
+		"INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		nextID, tokenJSON, userEmail, projectID, kind, lastUsedByModelJSON)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token: %w", err)
 	}
+	log.Printf("Saved OAuth token for user %s with kind %s", userEmail, kind)
 	return nil
 }
 
 func LoadOAuthToken(db *sql.DB) (string, string, string, error) {
-	// Get the highest existing ID, or return empty if table is empty
-	highestID, err := getHighestOAuthTokenID(db)
+	return LoadOAuthTokenWithKind(db, "geminicli")
+}
+
+func LoadOAuthTokenWithKind(db *sql.DB, kind string) (string, string, string, error) {
+	return LoadOAuthTokenWithKindAndModel(db, kind, "")
+}
+
+func LoadOAuthTokenWithKindAndModel(db *sql.DB, kind string, modelName string) (string, string, string, error) {
+	// Get the least recently used token for the kind and model
+	token, err := GetNextOAuthToken(db, kind, modelName)
 	if err != nil {
 		return "", "", "", err
 	}
-	if highestID == 0 {
-		log.Println("LoadOAuthToken: No existing token found in DB.")
+	if token == nil {
+		log.Printf("LoadOAuthTokenWithKindAndModel: No existing token found in DB for kind %s.", kind)
 		return "", "", "", nil // No token found, not an error
 	}
 
-	var tokenJSON string
-	var nullUserEmail sql.NullString
-	var nullProjectID sql.NullString
-	row := db.QueryRow("SELECT token_data, user_email, project_id FROM oauth_tokens WHERE id = ?", highestID)
-	err = row.Scan(&tokenJSON, &nullUserEmail, &nullProjectID)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to load OAuth token: %w", err)
-	}
-	userEmail := nullUserEmail.String
-	projectID := nullProjectID.String
-
-	return tokenJSON, userEmail, projectID, nil
+	return token.TokenData, token.UserEmail, token.ProjectID, nil
 }
 
 // DeleteOAuthToken deletes the OAuth token from the database.
 func DeleteOAuthToken(db *sql.DB) error {
-	// Get the highest existing ID, or return if table is empty
-	highestID, err := getHighestOAuthTokenID(db)
-	if err != nil {
-		return err
-	}
-	if highestID == 0 {
-		return nil // Table is empty, nothing to delete
-	}
+	return DeleteOAuthTokenWithKind(db, "geminicli")
+}
 
-	_, err = db.Exec("DELETE FROM oauth_tokens WHERE id = ?", highestID)
+func DeleteOAuthTokenWithKind(db *sql.DB, kind string) error {
+	// Delete all tokens of the specified kind
+	_, err := db.Exec("DELETE FROM oauth_tokens WHERE kind = ?", kind)
 	if err != nil {
-		return fmt.Errorf("failed to delete OAuth token: %w", err)
+		return fmt.Errorf("failed to delete OAuth tokens: %w", err)
+	}
+	return nil
+}
+
+// DeleteOAuthTokenByEmail deletes a specific OAuth token by user email and kind.
+func DeleteOAuthTokenByEmail(db *sql.DB, userEmail string, kind string) error {
+	_, err := db.Exec("DELETE FROM oauth_tokens WHERE user_email = ? AND kind = ?", userEmail, kind)
+	if err != nil {
+		return fmt.Errorf("failed to delete OAuth token for user %s: %w", userEmail, err)
+	}
+	return nil
+}
+
+// DeleteOAuthTokenByID deletes a specific OAuth token by ID.
+func DeleteOAuthTokenByID(db *sql.DB, id int) error {
+	_, err := db.Exec("DELETE FROM oauth_tokens WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete OAuth token with ID %d: %w", id, err)
 	}
 	return nil
 }
@@ -1241,6 +1313,155 @@ type GeminiAPIConfig struct {
 	LastUsedByModel map[string]time.Time `json:"last_used_by_model"`
 	CreatedAt       string               `json:"created_at"`
 	UpdatedAt       string               `json:"updated_at"`
+}
+
+// OAuthToken represents an OAuth token
+type OAuthToken struct {
+	ID              int                  `json:"id"`
+	TokenData       string               `json:"token_data"`
+	UserEmail       string               `json:"user_email"`
+	ProjectID       string               `json:"project_id"`
+	Kind            string               `json:"kind"`
+	LastUsedByModel map[string]time.Time `json:"last_used_by_model"`
+	CreatedAt       string               `json:"created_at"`
+	UpdatedAt       string               `json:"updated_at"`
+}
+
+// GetOAuthTokens retrieves all OAuth tokens from the database.
+func GetOAuthTokens(db *sql.DB) ([]OAuthToken, error) {
+	rows, err := db.Query("SELECT id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at FROM oauth_tokens ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query OAuth tokens: %w", err)
+	}
+	defer rows.Close()
+
+	tokens := []OAuthToken{}
+	for rows.Next() {
+		var token OAuthToken
+		var nullUserEmail sql.NullString
+		var nullProjectID sql.NullString
+		var lastUsedByModelStr sql.NullString
+
+		err := rows.Scan(&token.ID, &token.TokenData, &nullUserEmail, &nullProjectID, &token.Kind, &lastUsedByModelStr, &token.CreatedAt, &token.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan OAuth token: %w", err)
+		}
+
+		// Handle NULL fields
+		if nullUserEmail.Valid {
+			token.UserEmail = nullUserEmail.String
+		}
+		if nullProjectID.Valid {
+			token.ProjectID = nullProjectID.String
+		}
+
+		// JSON field deserialization - handle NULL
+		var jsonStr string
+		if lastUsedByModelStr.Valid {
+			jsonStr = lastUsedByModelStr.String
+		} else {
+			jsonStr = "{}"
+		}
+		token.LastUsedByModel, err = UnmarshalTimeMap(jsonStr)
+		if err != nil {
+			log.Printf("Failed to unmarshal last_used_by_model for token %d: %v", token.ID, err)
+			token.LastUsedByModel = make(map[string]time.Time)
+		}
+
+		tokens = append(tokens, token)
+	}
+
+	return tokens, nil
+}
+
+// GetNextOAuthToken selects the next OAuth token to use based on the least recently used strategy for a specific kind and model.
+func GetNextOAuthToken(db *sql.DB, kind string, modelName string) (selectedToken *OAuthToken, err error) {
+	tokens, err := GetOAuthTokens(db)
+	if err != nil {
+		return
+	}
+
+	oldestTime := time.Now()
+
+	for _, token := range tokens {
+		if token.Kind != kind {
+			continue
+		}
+
+		// Get the last_used time for the specific model
+		lastUsed := token.LastUsedByModel[modelName]
+
+		// Select the oldest one
+		if lastUsed.Before(oldestTime) {
+			oldestTime = lastUsed
+			selectedToken = &token
+		}
+	}
+
+	return
+}
+
+// UpdateOAuthTokenModelLastUsed updates the last used time for a specific model in the OAuth token.
+func UpdateOAuthTokenModelLastUsed(db *sql.DB, id int, modelName string) error {
+	token, err := GetOAuthToken(db, id)
+	if err != nil {
+		return err
+	}
+
+	// Update the last used time for the model
+	if token.LastUsedByModel == nil {
+		token.LastUsedByModel = make(map[string]time.Time)
+	}
+	token.LastUsedByModel[modelName] = time.Now()
+
+	lastUsedByModelJSON, err := MarshalTimeMap(token.LastUsedByModel)
+	if err != nil {
+		return fmt.Errorf("failed to marshal last_used_by_model: %w", err)
+	}
+
+	_, err = db.Exec("UPDATE oauth_tokens SET last_used_by_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", lastUsedByModelJSON, id)
+	if err != nil {
+		return fmt.Errorf("failed to update OAuth token last used time: %w", err)
+	}
+
+	return nil
+}
+
+// GetOAuthToken retrieves a specific OAuth token by ID.
+func GetOAuthToken(db *sql.DB, id int) (*OAuthToken, error) {
+	var token OAuthToken
+	var nullUserEmail sql.NullString
+	var nullProjectID sql.NullString
+	var lastUsedByModelStr sql.NullString
+
+	err := db.QueryRow("SELECT id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at FROM oauth_tokens WHERE id = ?", id).
+		Scan(&token.ID, &token.TokenData, &nullUserEmail, &nullProjectID, &token.Kind, &lastUsedByModelStr, &token.CreatedAt, &token.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OAuth token: %w", err)
+	}
+
+	// Handle NULL fields
+	if nullUserEmail.Valid {
+		token.UserEmail = nullUserEmail.String
+	}
+	if nullProjectID.Valid {
+		token.ProjectID = nullProjectID.String
+	}
+
+	// JSON field deserialization - handle NULL
+	var jsonStr string
+	if lastUsedByModelStr.Valid {
+		jsonStr = lastUsedByModelStr.String
+	} else {
+		jsonStr = "{}"
+	}
+	token.LastUsedByModel, err = UnmarshalTimeMap(jsonStr)
+	if err != nil {
+		log.Printf("Failed to unmarshal last_used_by_model for token %d: %v", token.ID, err)
+		token.LastUsedByModel = make(map[string]time.Time)
+	}
+
+	return &token, nil
 }
 
 // SearchResult represents a single search result

@@ -11,7 +11,11 @@ interface GeminiAPIConfig {
   created_at?: string;
 }
 
-const GeminiAPISettings: React.FC = () => {
+interface GeminiAPISettingsProps {
+  onConfigChange?: () => void;
+}
+
+const GeminiAPISettings: React.FC<GeminiAPISettingsProps> = ({ onConfigChange }) => {
   const [configs, setConfigs] = useState<GeminiAPIConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingConfig, setEditingConfig] = useState<GeminiAPIConfig | null>(null);
@@ -61,6 +65,7 @@ const GeminiAPISettings: React.FC = () => {
           setEditingConfig(null);
           setNewConfig({ name: '', api_key: '' });
           setIsAddingNew(false);
+          onConfigChange?.(); // Notify parent of config change
         } else {
           alert('Failed to update Gemini API config');
         }
@@ -78,6 +83,7 @@ const GeminiAPISettings: React.FC = () => {
           await fetchConfigs();
           setNewConfig({ name: '', api_key: '' });
           setIsAddingNew(false);
+          onConfigChange?.(); // Notify parent of config change
         } else {
           alert('Failed to add Gemini API config');
         }
@@ -97,6 +103,7 @@ const GeminiAPISettings: React.FC = () => {
 
         if (response.ok) {
           await fetchConfigs();
+          onConfigChange?.(); // Notify parent of config change
         } else {
           alert('Failed to delete Gemini API config');
         }

@@ -18,7 +18,11 @@ interface OpenAIModel {
   owned_by: string;
 }
 
-const OpenAISettings: React.FC = () => {
+interface OpenAISettingsProps {
+  onConfigChange?: () => void;
+}
+
+const OpenAISettings: React.FC<OpenAISettingsProps> = ({ onConfigChange }) => {
   const [configs, setConfigs] = useState<OpenAIConfig[]>([]);
   const [editingConfig, setEditingConfig] = useState<OpenAIConfig | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -85,6 +89,7 @@ const OpenAISettings: React.FC = () => {
       if (response.ok) {
         await fetchConfigs();
         resetForm();
+        onConfigChange?.(); // Notify parent of config change
         alert(editingConfig ? 'Configuration updated successfully!' : 'Configuration added successfully!');
       } else {
         const errorData = await response.json();
@@ -110,6 +115,7 @@ const OpenAISettings: React.FC = () => {
 
       if (response.ok) {
         await fetchConfigs();
+        onConfigChange?.(); // Notify parent of config change
         alert('Configuration deleted successfully!');
       } else {
         alert('Failed to delete configuration');

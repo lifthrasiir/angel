@@ -3,7 +3,9 @@ import type { ChatMessage, Session } from '../types/chat';
 import { ModelInfo } from '../api/models';
 import { PredefinedPrompt } from '../components/SystemPromptEditor';
 
-export const userEmailAtom = atom<string | null>(null);
+export const hasConnectedAccountsAtom = atom<boolean>(false);
+export const hasApiKeysAtom = atom<boolean>(false);
+export const isAuthenticatedAtom = atom<boolean>(false);
 export const messagesAtom = atom<ChatMessage[]>([]);
 export const inputMessageAtom = atom<string>('');
 export const sessionsAtom = atom<Session[]>([]);
@@ -14,7 +16,6 @@ export const systemPromptAtom = atom<string>('{{.Builtin.SystemPrompt}}');
 export const isSystemPromptEditingAtom = atom<boolean>(false);
 export const selectedFilesAtom = atom<File[]>([]);
 export const workspaceNameAtom = atom<string | undefined>(undefined);
-// Session's workspace ID from FSM (synced across all hook instances)
 export const sessionWorkspaceIdAtom = atom<string | undefined>(undefined);
 export const primaryBranchIdAtom = atom<string>('');
 export const availableModelsAtom = atom<Map<string, ModelInfo>>(new Map());

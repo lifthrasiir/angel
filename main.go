@@ -257,6 +257,7 @@ func InitRouter(router *mux.Router) {
 
 	router.HandleFunc("/api/blob/{blobHash}", handleDownloadBlobByHash).Methods("GET")
 	router.HandleFunc("/api/userinfo", getUserInfoHandler).Methods("GET")
+	router.HandleFunc("/api/accounts", listAccountsHandler).Methods("GET")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
 	router.HandleFunc("/api/evaluatePrompt", handleEvaluatePrompt).Methods("POST")
 	router.HandleFunc("/api/mcp/configs", getMCPConfigsHandler).Methods("GET")

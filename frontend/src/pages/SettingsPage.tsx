@@ -2,19 +2,27 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import MCPSettings from '../components/MCPSettings'; // Import the new component
 import OpenAISettings from '../components/OpenAISettings'; // Import OpenAI settings component
 import GeminiAPISettings from '../components/GeminiAPISettings'; // Import Gemini API settings component
 import SystemPromptEditor, { PredefinedPrompt } from '../components/SystemPromptEditor'; // Import SystemPromptEditor and PredefinedPrompt type
 
-import { globalPromptsAtom } from '../atoms/chatAtoms';
+import { globalPromptsAtom, hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/chatAtoms';
+
+interface Account {
+  id: number;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('auth');
-  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [globalPrompts, setGlobalPrompts] = useAtom(globalPromptsAtom); // Use setGlobalPrompts
-  const isLoggedIn = !!userEmail; // userEmail이 있으면 로그인된 것으로 간주
+  const setHasConnectedAccounts = useSetAtom(hasConnectedAccountsAtom);
+  const setHasApiKeys = useSetAtom(hasApiKeysAtom);
+  const setIsAuthenticated = useSetAtom(isAuthenticatedAtom);
   const navigate = useNavigate();
 
   // State for managing global prompts
@@ -22,6 +30,9 @@ const SettingsPage: React.FC = () => {
   const [newPromptLabel, setNewPromptLabel] = useState('');
   const [newPromptValue, setNewPromptValue] = useState('');
   const [isAddingNewPrompt, setIsAddingNewPrompt] = useState(false);
+
+  // State for managing accounts
+  const [accounts, setAccounts] = useState<Account[]>([]);
 
   const fetchGlobalPrompts = async () => {
     console.log('fetchGlobalPrompts: Fetching global prompts...');
@@ -39,43 +50,98 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const fetchAccounts = async () => {
+    try {
+      const response = await apiFetch('/api/accounts');
+      if (response.ok) {
+        const data: Account[] = await response.json();
+        setAccounts(data);
+        setHasConnectedAccounts(data.length > 0);
+      } else {
+        console.error('Failed to fetch accounts:', response.status, response.statusText);
+        setHasConnectedAccounts(false);
+      }
+    } catch (error) {
+      console.error('Error fetching accounts:', error);
+      setHasConnectedAccounts(false);
+    }
+  };
+
+  const checkApiKeys = async () => {
+    try {
+      const [openaiResponse, geminiResponse] = await Promise.all([
+        apiFetch('/api/openai-configs'),
+        apiFetch('/api/gemini-api-configs'),
+      ]);
+
+      let hasAnyApiKeys = false;
+
+      if (openaiResponse.ok) {
+        const openaiConfigs = await openaiResponse.json();
+        hasAnyApiKeys = hasAnyApiKeys || openaiConfigs.some((config: any) => config.enabled);
+      }
+
+      if (geminiResponse.ok) {
+        const geminiConfigs = await geminiResponse.json();
+        hasAnyApiKeys = hasAnyApiKeys || geminiConfigs.some((config: any) => config.enabled);
+      }
+
+      setHasApiKeys(hasAnyApiKeys);
+    } catch (error) {
+      console.error('Error fetching API keys:', error);
+      setHasApiKeys(false);
+    }
+  };
+
+  const updateAuthenticationStatus = async () => {
+    await checkApiKeys();
+    // Note: fetchAccounts is already called separately in useEffect
+  };
+
   useEffect(() => {
     document.title = 'Angel: Settings';
 
-    const fetchUserInfo = async () => {
-      try {
-        const response = await apiFetch('/api/userinfo');
-        if (response.ok) {
-          const data = await response.json();
-          setUserEmail(data.email);
-        } else if (response.status === 401) {
-          setUserEmail(null);
-        } else {
-          console.error('Failed to fetch user info:', response.status, response.statusText);
-          setUserEmail(null);
-        }
-      } catch (error) {
-        console.error('Error fetching user info:', error);
-        setUserEmail(null);
-      }
+    const initializeAuth = async () => {
+      await fetchGlobalPrompts();
+      await fetchAccounts();
+      await checkApiKeys();
     };
 
-    fetchUserInfo();
-    fetchGlobalPrompts();
+    initializeAuth();
   }, []);
 
-  const handleLogout = async () => {
+  // Update authentication status whenever accounts or API keys change
+  useEffect(() => {
+    const [hasAccounts, hasApiKeys] = [accounts.length > 0, false];
+
+    // We need to check API keys state separately since it's managed by atom
+    // This is a simplified check - in practice, we'd rely on the atom state
+    setIsAuthenticated(hasAccounts || hasApiKeys);
+  }, [accounts, setIsAuthenticated]);
+
+  const handleLogoutAccount = async (accountId: number, email: string) => {
+    if (!window.confirm(`Are you sure you want to logout the account ${email}?`)) {
+      return;
+    }
+
     try {
-      const response = await apiFetch('/api/logout', { method: 'POST' });
+      const response = await apiFetch('/api/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: accountId }),
+      });
       if (response.ok) {
-        setUserEmail(null);
-        // Optionally redirect to login page or home
-        window.location.href = '/'; // Redirect to home after logout
+        // Refresh accounts list and update connected accounts status
+        await fetchAccounts();
       } else {
-        console.error('Failed to logout:', response.status, response.statusText);
+        console.error('Failed to logout account:', response.status, response.statusText);
+        alert('Failed to logout account.');
       }
     } catch (error) {
-      console.error('Error during logout:', error);
+      console.error('Error during account logout:', error);
+      alert('Error occurred during account logout.');
     }
   };
 
@@ -84,6 +150,20 @@ const SettingsPage: React.FC = () => {
     const redirectToUrl = `/login?redirect_to=${encodeURIComponent(currentPath)}`;
     window.location.href = redirectToUrl;
   };
+
+  // Refresh accounts when the page becomes visible (user returns from login)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAccounts();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // Handlers for global prompts
   const savePromptsToBackend = async (prompts: PredefinedPrompt[]) => {
@@ -214,35 +294,92 @@ const SettingsPage: React.FC = () => {
   };
 
   interface AuthSettingsProps {
-    isLoggedIn: boolean;
-    userEmail: string | null;
-    handleLogout: () => void;
+    accounts: Account[];
+    handleLogoutAccount: (id: number, email: string) => void;
     handleLogin: () => void;
+    updateAuthenticationStatus: () => void;
   }
 
-  const AuthSettings: React.FC<AuthSettingsProps> = ({ isLoggedIn, userEmail, handleLogout, handleLogin }) => {
+  const AuthSettings: React.FC<AuthSettingsProps> = ({
+    accounts,
+    handleLogoutAccount,
+    handleLogin,
+    updateAuthenticationStatus,
+  }) => {
     return (
       <div>
         <h3>Authentication</h3>
-        {isLoggedIn ? (
-          <p>
-            Logged in as: <strong>{userEmail}</strong>
-            <button onClick={handleLogout} style={{ marginLeft: '10px', padding: '5px 10px' }}>
-              Logout
-            </button>
-          </p>
+
+        {accounts.length > 0 ? (
+          <div>
+            <h4>Connected Google Accounts ({accounts.length})</h4>
+            <p style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+              Accounts are automatically distributed when using the LLM.
+            </p>
+            <div style={{ marginTop: '10px' }}>
+              {accounts.map((account) => (
+                <div
+                  key={account.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 12px',
+                    margin: '4px 0',
+                    backgroundColor: '#f8f9fa',
+                    borderRadius: '4px',
+                    border: '1px solid #dee2e6',
+                  }}
+                >
+                  <div>
+                    <strong>{account.email}</strong>
+                  </div>
+                  <button
+                    onClick={() => handleLogoutAccount(account.id, account.email)}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '12px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
-          <p>
-            Not logged in.
-            <button onClick={handleLogin} style={{ marginLeft: '10px', padding: '5px 10px' }}>
-              Login
-            </button>
-          </p>
+          <div>
+            <p>No connected accounts.</p>
+            <p style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+              Add a Google account to start using the application.
+            </p>
+          </div>
         )}
+
+        <div style={{ marginTop: '20px' }}>
+          <button
+            onClick={handleLogin}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            Add New Account
+          </button>
+        </div>
 
         <hr style={{ margin: '30px 0', border: 'none', borderTop: '1px solid #eee' }} />
 
-        <GeminiAPISettings />
+        <GeminiAPISettings onConfigChange={updateAuthenticationStatus} />
       </div>
     );
   };
@@ -461,14 +598,14 @@ const SettingsPage: React.FC = () => {
       <div style={{ flexGrow: 1, padding: '20px', overflowY: 'auto' }}>
         {activeTab === 'auth' && (
           <AuthSettings
-            isLoggedIn={isLoggedIn}
-            userEmail={userEmail}
-            handleLogout={handleLogout}
+            accounts={accounts}
+            handleLogoutAccount={handleLogoutAccount}
             handleLogin={handleLogin}
+            updateAuthenticationStatus={updateAuthenticationStatus}
           />
         )}
         {activeTab === 'mcp' && <MCPSettings />}
-        {activeTab === 'openai' && <OpenAISettings />}
+        {activeTab === 'openai' && <OpenAISettings onConfigChange={updateAuthenticationStatus} />}
         {activeTab === 'prompts' && (
           <PromptSettings
             globalPrompts={globalPrompts}

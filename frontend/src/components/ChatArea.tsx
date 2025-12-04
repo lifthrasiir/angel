@@ -12,7 +12,7 @@ import {
   messagesAtom,
   selectedFilesAtom,
   availableModelsAtom,
-  userEmailAtom,
+  isAuthenticatedAtom,
   systemPromptAtom,
   isSystemPromptEditingAtom,
   globalPromptsAtom,
@@ -73,7 +73,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [messages] = useAtom(messagesAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [availableModels] = useAtom(availableModelsAtom);
-  const [userEmail] = useAtom(userEmailAtom);
+  const [isAuthenticated] = useAtom(isAuthenticatedAtom);
   const [systemPrompt, setSystemPrompt] = useAtom(systemPromptAtom);
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
@@ -101,8 +101,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
   const temporaryEnvChangeMessage = useAtomValue(temporaryEnvChangeMessageAtom);
-
-  const isLoggedIn = !!userEmail;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef(messages.length);
@@ -534,7 +532,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           sessionId={sessionId}
           selectedFiles={selectedFiles}
           isSendDisabledByResizing={isSendDisabledByResizing}
-          isDisabled={!isLoggedIn}
+          isDisabled={!isAuthenticated}
         />
       )}
     </div>

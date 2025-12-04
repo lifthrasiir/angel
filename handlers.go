@@ -39,6 +39,38 @@ func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 	serveSPAIndex(w, r)
 }
 
+// listAccountsHandler returns a list of all Google accounts associated with the user
+func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	tokens, err := GetOAuthTokens(db)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to get OAuth tokens")
+		return
+	}
+
+	// Filter only geminicli tokens and prepare response (excluding sensitive projectId)
+	accounts := make([]map[string]interface{}, 0)
+	for _, token := range tokens {
+		if token.Kind == "geminicli" {
+			account := map[string]interface{}{
+				"id":        token.ID,
+				"email":     token.UserEmail,
+				"createdAt": token.CreatedAt,
+				"updatedAt": token.UpdatedAt,
+			}
+			accounts = append(accounts, account)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(accounts); err != nil {
+		log.Printf("Failed to encode accounts response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
+}
+
 func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
