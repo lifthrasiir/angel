@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -334,9 +335,17 @@ func tryAllProviders[T any](
 					continue
 				}
 
-				// Create token source and client (oauth2.TokenSource will handle refresh automatically)
+				// Create token source with database refresh hook
 				oauthConfig := GlobalGeminiAuth.getOAuthConfig(providerType)
-				tokenSource := oauthConfig.TokenSource(context.Background(), &oauthToken)
+				tokenSource := &databaseTokenSource{
+					db:            db,
+					tokenID:       token.ID,
+					kind:          providerType,
+					userEmail:     token.UserEmail,
+					projectID:     token.ProjectID,
+					baseToken:     &oauthToken,
+					tokenSource:   oauthConfig.TokenSource(context.Background(), &oauthToken),
+				}
 				client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID, providerType)
 
 				// Update last_used for this model
@@ -447,4 +456,48 @@ func convertSessionParamsToGenerateRequest(model *Model, params SessionParams) G
 			ResponseModalities: model.ResponseModalities,
 		},
 	}
+}
+
+// databaseTokenSource wraps oauth2.TokenSource to save refreshed tokens to database
+type databaseTokenSource struct {
+	db          *sql.DB
+	tokenID     int
+	kind        string
+	userEmail   string
+	projectID   string
+	baseToken   *oauth2.Token
+	tokenSource oauth2.TokenSource
+	mu          sync.Mutex
+}
+
+// Token implements the oauth2.TokenSource interface
+// It returns a token, refreshing it if necessary, and saves the refreshed token to the database
+func (dts *databaseTokenSource) Token() (*oauth2.Token, error) {
+	dts.mu.Lock()
+	defer dts.mu.Unlock()
+
+	// Get token from the underlying source
+	token, err := dts.tokenSource.Token()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if token was refreshed by comparing access tokens
+	if token.AccessToken != dts.baseToken.AccessToken {
+		// Token was refreshed, save to database
+		tokenJSON, err := json.MarshalIndent(token, "", "  ")
+		if err != nil {
+			log.Printf("Failed to marshal refreshed OAuth token %d: %v", dts.tokenID, err)
+		} else {
+			if err := UpdateOAuthTokenData(dts.db, dts.tokenID, string(tokenJSON)); err != nil {
+				log.Printf("Failed to save refreshed OAuth token %d to DB: %v", dts.tokenID, err)
+			} else {
+				log.Printf("OAuth token %d refreshed and saved to DB for user %s", dts.tokenID, dts.userEmail)
+			}
+		}
+		// Update the stored base token
+		dts.baseToken = token
+	}
+
+	return token, nil
 }

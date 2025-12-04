@@ -738,6 +738,17 @@ func SaveOAuthTokenWithKind(db *sql.DB, tokenJSON string, userEmail string, proj
 	return nil
 }
 
+// UpdateOAuthTokenData updates the token data for an existing OAuth token
+func UpdateOAuthTokenData(db *sql.DB, tokenID int, tokenJSON string) error {
+	_, err := db.Exec(
+		"UPDATE oauth_tokens SET token_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		tokenJSON, tokenID)
+	if err != nil {
+		return fmt.Errorf("failed to update OAuth token data: %w", err)
+	}
+	return nil
+}
+
 func LoadOAuthToken(db *sql.DB) (string, string, string, error) {
 	return LoadOAuthTokenWithKind(db, "geminicli")
 }
