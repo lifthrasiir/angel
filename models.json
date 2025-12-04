@@ -89,7 +89,6 @@
         "gemini-3-pro": {
             "extends": "$chat",
             "providers": [
-                "antigravity",
                 "api"
             ],
             "modelName": "gemini-3-pro-preview",
@@ -101,21 +100,26 @@
             "toolSupported": true,
             "maxTokens": 1048576
         },
+        "gemini-3-pro-preview": "gemini-3-pro",
         "gemini-3-pro/subagent": {
             "extends": "gemini-2.5-flash",
             "genParams": "@subagent"
         },
         "gemini-3-pro+low": {
             "extends": "gemini-3-pro",
-            "genParams": {
-                "thinking": "low"
-            }
+            "providers": [
+                "antigravity"
+            ],
+            "modelName": "gemini-3-pro-low",
+            "fallback": "gemini-3-pro"
         },
         "gemini-3-pro+high": {
             "extends": "gemini-3-pro",
-            "genParams": {
-                "thinking": "high"
-            }
+            "providers": [
+                "antigravity"
+            ],
+            "modelName": "gemini-3-pro-high",
+            "fallback": "gemini-3-pro"
         },
         "gemini-2.0-flash-preview-image-generation": "gemini-2.5-flash-image",
         "gemini-2.5-flash-image": {
@@ -131,14 +135,21 @@
         "gemini-3-pro-image": {
             "extends": "$image",
             "providers": [
-                "api"
+                "antigravity"
             ],
-            "modelName": "gemini-3-pro-image-preview",
-            "fallback": "gemini-2.5-flash-image",
+            "modelName": "gemini-3-pro-image",
+            "fallback": "gemini-3-pro-image-preview",
             "thoughtEnabled": true,
             "maxTokens": 65536
         },
-        "gemini-3-pro-image-preview": "gemini-3-pro-image"
+        "gemini-3-pro-image-preview": {
+            "extends": "gemini-3-pro-image",
+            "providers": [
+                "api"
+            ],
+            "modelName": "gemini-3-pro-image-preview",
+            "fallback": "gemini-2.5-flash-image"
+        }
     },
     "displayOrder": [
         "gemini-2.5-flash",
