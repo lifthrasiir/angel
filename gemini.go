@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
+
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
@@ -110,10 +112,10 @@ func (cap *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName 
 		return
 	}
 
-	codeAssistCallback := func() (out StreamResult, err error) {
-		// Use Code Assist API (existing logic)
+	codeAssistCallback := func(client *CodeAssistClient) (out StreamResult, err error) {
+		// Use Code Assist API with the provided client
 		request := convertSessionParamsToGenerateRequest(model, params)
-		respBody, err := cap.client.StreamGenerateContent(ctx, apiModelName, request)
+		respBody, err := client.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
 			log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
 			return
@@ -218,8 +220,8 @@ func (cap *CodeAssistProvider) CountTokens(ctx context.Context, modelName string
 	apiCallback := func(client *GeminiAPIClient, config GeminiAPIConfig) (*CaCountTokenResponse, error) {
 		return client.CountTokens(ctx, apiModelName, contents)
 	}
-	codeAssistCallback := func() (*CaCountTokenResponse, error) {
-		return cap.client.CountTokens(ctx, apiModelName, contents)
+	codeAssistCallback := func(client *CodeAssistClient) (*CaCountTokenResponse, error) {
+		return client.CountTokens(ctx, apiModelName, contents)
 	}
 	return tryAllProviders(db, model, apiCallback, codeAssistCallback)
 }
@@ -257,7 +259,7 @@ func tryAllProviders[T any](
 	db *sql.DB,
 	model *Model,
 	apiCallback func(*GeminiAPIClient, GeminiAPIConfig) (T, error),
-	codeAssistCallback func() (T, error),
+	codeAssistCallback func(*CodeAssistClient) (T, error),
 ) (out T, err error) {
 	for _, providerType := range model.Providers {
 		switch providerType {
@@ -306,9 +308,58 @@ func tryAllProviders[T any](
 			}
 
 		case "codeassist":
-			out, err = codeAssistCallback()
-			if err == nil {
+			// Get OAuth tokens for Code Assist
+			var tokens []OAuthToken
+			tokens, err = GetOAuthTokens(db)
+			if err != nil {
+				err = fmt.Errorf("failed to get OAuth tokens: %w", err)
 				return
+			}
+
+			// Filter tokens for "geminicli" kind and sort by last_used for this model (oldest first)
+			var geminiTokens []OAuthToken
+			for _, token := range tokens {
+				if token.Kind == "geminicli" {
+					geminiTokens = append(geminiTokens, token)
+				}
+			}
+
+			apiModelName := model.ModelName
+
+			sort.Slice(geminiTokens, func(i, j int) bool {
+				return geminiTokens[i].LastUsedByModel[apiModelName].Before(geminiTokens[j].LastUsedByModel[apiModelName])
+			})
+
+			for _, token := range geminiTokens {
+				// Parse OAuth token
+				var oauthToken oauth2.Token
+				if err := json.Unmarshal([]byte(token.TokenData), &oauthToken); err != nil {
+					log.Printf("Failed to unmarshal OAuth token %d: %v", token.ID, err)
+					continue
+				}
+
+				// Create token source and client (oauth2.TokenSource will handle refresh automatically)
+				tokenSource := GlobalGeminiAuth.GoogleOauthConfig.TokenSource(context.Background(), &oauthToken)
+				client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID)
+
+				// Update last_used for this model
+				UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
+
+				out, err = codeAssistCallback(client)
+				if err == nil {
+					return
+				}
+
+				// Check rate limit
+				if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
+					// Handle rate limit
+					go func() {
+						retryAfter := parseRetryAfter("")
+						HandleOAuthRateLimit(db, token.ID, apiModelName, retryAfter)
+						log.Printf("Rate limit detected for OAuth token %d, model %s", token.ID, apiModelName)
+					}()
+					err = fmt.Errorf("rate limited for model %s", apiModelName)
+				}
 			}
 
 		case "antigravity":

@@ -1427,6 +1427,36 @@ func UpdateOAuthTokenModelLastUsed(db *sql.DB, id int, modelName string) error {
 	return nil
 }
 
+// HandleOAuthRateLimit handles rate limiting for OAuth tokens by updating the model's last used time with a future timestamp.
+func HandleOAuthRateLimit(db *sql.DB, id int, modelName string, retryAfter time.Duration) error {
+	// Current time + retryAfter + buffer (30 seconds)
+	futureTime := time.Now().Add(retryAfter).Add(30 * time.Second)
+
+	// Get the current token
+	token, err := GetOAuthToken(db, id)
+	if err != nil {
+		return err
+	}
+
+	// Initialize and update the map
+	if token.LastUsedByModel == nil {
+		token.LastUsedByModel = make(map[string]time.Time)
+	}
+	token.LastUsedByModel[modelName] = futureTime
+
+	lastUsedByModelJSON, err := MarshalTimeMap(token.LastUsedByModel)
+	if err != nil {
+		return fmt.Errorf("failed to marshal last_used_by_model: %w", err)
+	}
+
+	_, err = db.Exec("UPDATE oauth_tokens SET last_used_by_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", lastUsedByModelJSON, id)
+	if err != nil {
+		return fmt.Errorf("failed to update OAuth token last used time: %w", err)
+	}
+
+	return nil
+}
+
 // GetOAuthToken retrieves a specific OAuth token by ID.
 func GetOAuthToken(db *sql.DB, id int) (*OAuthToken, error) {
 	var token OAuthToken
