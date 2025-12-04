@@ -330,8 +330,7 @@ export const useSessionLoader = ({
                   setHasMoreMessages(hasMore);
 
                   // Update FSM state to mark session as loaded
-                  // Convert empty string to undefined
-                  const workspaceId = data.workspaceId || undefined;
+                  const workspaceId = data.workspaceId;
                   sessionManager.completeSessionLoading(data.sessionId, workspaceId, hasMore);
 
                   // Handle initial envChanged message
