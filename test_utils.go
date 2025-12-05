@@ -46,7 +46,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB) {
 		t.Fatalf("Failed to read models.json: %v", err)
 	}
 
-	_, err = LoadModels(modelsData)
+	GlobalModelsRegistry, err = LoadModels(modelsData)
 	if err != nil {
 		t.Fatalf("Failed to load models: %v", err)
 	}

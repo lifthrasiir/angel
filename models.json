@@ -27,8 +27,8 @@
                 "": "/subagent",
                 "compression": "/subagent",
                 "session_name": "/subagent",
-                "web_fetch": "/subagent",
-                "web_fetch_fallback": "/subagent",
+                "web_fetch": "gemini-2.5-flash/web_fetch",
+                "web_fetch_fallback": "gemini-2.5-flash/web_fetch",
                 "image_generation": "gemini-2.5-flash-image"
             },
             "ignoreSystemPrompt": false,
@@ -74,10 +74,17 @@
             "extends": "gemini-2.5-flash-lite",
             "genParams": "@subagent"
         },
+        "gemini-2.5-flash/web_fetch": {
+            "extends": "gemini-2.5-flash",
+            "genParams": "@subagent"
+        },
         "gemini-2.5-pro": {
             "extends": "$chat",
             "modelName": "gemini-2.5-pro",
             "fallback": "gemini-2.5-flash",
+            "subagents": {
+                "image_generation": "gemini-3-pro-image"
+            },
             "thoughtEnabled": true,
             "toolSupported": true,
             "maxTokens": 1048576
@@ -149,6 +156,64 @@
             ],
             "modelName": "gemini-3-pro-image-preview",
             "fallback": "gemini-2.5-flash-image"
+        },
+        "claude-sonnet-4.5": {
+            "extends": "$chat",
+            "providers": [
+                "antigravity"
+            ],
+            "modelName": "claude-sonnet-4-5",
+            "thoughtEnabled": false,
+            "toolSupported": true,
+            "maxTokens": 200000
+        },
+        "claude-sonnet-4.5/subagent": {
+            "extends": "claude-sonnet-4.5",
+            "genParams": "@subagent"
+        },
+        "claude-sonnet-4.5+thinking": {
+            "extends": "$chat",
+            "providers": [
+                "antigravity"
+            ],
+            "modelName": "claude-sonnet-4-5-thinking",
+            "fallback": "claude-sonnet-4.5",
+            "thoughtEnabled": true,
+            "toolSupported": true,
+            "maxTokens": 200000
+        },
+        "claude-sonnet-4.5+thinking/subagent": {
+            "extends": "claude-sonnet-4.5",
+            "genParams": "@subagent"
+        },
+        "claude-opus-4.5+thinking": {
+            "extends": "$chat",
+            "providers": [
+                "antigravity"
+            ],
+            "modelName": "claude-opus-4-5-thinking",
+            "fallback": "claude-sonnet-4.5+thinking",
+            "thoughtEnabled": true,
+            "toolSupported": true,
+            "maxTokens": 200000
+        },
+        "claude-opus-4.5+thinking/subagent": {
+            "extends": "claude-opus-4.5+thinking",
+            "genParams": "@subagent"
+        },
+        "gpt-oss:120b+medium": {
+            "extends": "$chat",
+            "providers": [
+                "antigravity"
+            ],
+            "modelName": "gpt-oss-120b-medium",
+            "thoughtEnabled": true,
+            "toolSupported": true,
+            "maxTokens": 131072
+        },
+        "gpt-oss:120b+medium/subagent": {
+            "extends": "gpt-oss:120b+medium",
+            "genParams": "@subagent"
         }
     },
     "displayOrder": [
@@ -158,6 +223,10 @@
         "gemini-2.5-pro",
         "gemini-2.5-flash-lite",
         "gemini-3-pro-image",
-        "gemini-2.5-flash-image"
+        "gemini-2.5-flash-image",
+        "claude-sonnet-4.5",
+        "claude-sonnet-4.5+thinking",
+        "claude-opus-4.5+thinking",
+        "gpt-oss:120b+medium"
     ]
 }

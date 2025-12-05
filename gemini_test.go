@@ -86,12 +86,77 @@ func TestGeminiSubagentProvider(t *testing.T) {
 		}
 	})
 
-	// Test 5: Verify MaxTokens method uses models
+	// Test 5: claude-sonnet-4.5 model lookup
+	t.Run("ClaudeSonnet45Lookup", func(t *testing.T) {
+		// Verify claude-sonnet-4.5 model is loaded in the registry
+		model, exists := registry.GetModel("claude-sonnet-4.5")
+		if !exists {
+			t.Fatalf("claude-sonnet-4.5 model not found in registry")
+		}
+
+		// Verify the model has the correct properties
+		if model.ModelName != "claude-sonnet-4-5" {
+			t.Errorf("Expected modelName 'claude-sonnet-4-5', got '%s'", model.ModelName)
+		}
+
+		// Verify the model is handled by GeminiProvider
+		provider := registry.GetProvider("claude-sonnet-4.5")
+		if provider == nil {
+			t.Fatalf("No provider found for claude-sonnet-4.5")
+		}
+
+		if provider != registry.geminiProvider {
+			t.Error("claude-sonnet-4.5 should be handled by GeminiProvider")
+		}
+
+		// Test GetModelProvider method (which internally calls resolveModel)
+		modelProvider, err := registry.GetModelProvider("claude-sonnet-4.5")
+		if err != nil {
+			t.Fatalf("GetModelProvider failed for claude-sonnet-4.5: %v", err)
+		}
+
+		if modelProvider.Name != "claude-sonnet-4.5" {
+			t.Errorf("Expected model provider name 'claude-sonnet-4.5', got '%s'", modelProvider.Name)
+		}
+
+		// Verify the model provider can resolve the model (implicitly testing resolveModel)
+		if modelProvider.LLMProvider == nil {
+			t.Fatal("GetModelProvider returned nil LLMProvider for claude-sonnet-4.5")
+		}
+	})
+
+	// Test 6: claude-sonnet-4.5 subagent lookup
+	t.Run("ClaudeSonnet45Subagent", func(t *testing.T) {
+		// Test subagent resolution for claude-sonnet-4.5
+		modelProvider, err := registry.ResolveSubagent("claude-sonnet-4.5", "")
+		if err != nil {
+			t.Fatalf("Failed to resolve subagent for claude-sonnet-4.5: %v", err)
+		}
+
+		// Should return claude-sonnet-4.5/subagent
+		if modelProvider.Name != "claude-sonnet-4.5/subagent" {
+			t.Errorf("Expected 'claude-sonnet-4.5/subagent', got '%s'", modelProvider.Name)
+		}
+
+		// Provider should be the GeminiProvider
+		if modelProvider.LLMProvider != registry.geminiProvider {
+			t.Error("Expected subagent provider to be GeminiProvider")
+		}
+	})
+
+	// Test 7: Verify MaxTokens method uses models
 	t.Run("MaxTokensFromModels", func(t *testing.T) {
 		maxTokens := registry.geminiProvider.MaxTokens("gemini-2.5-flash")
 		expected := 1048576 // From models.go MaxTokens logic
 		if maxTokens != expected {
 			t.Errorf("Expected maxTokens %d, got %d", expected, maxTokens)
+		}
+
+		// Test claude-sonnet-4.5 max tokens
+		claudeTokens := registry.geminiProvider.MaxTokens("claude-sonnet-4.5")
+		expectedClaudeTokens := 200000 // From models.json
+		if claudeTokens != expectedClaudeTokens {
+			t.Errorf("Expected claude-sonnet-4.5 maxTokens %d, got %d", expectedClaudeTokens, claudeTokens)
 		}
 
 		// Test non-existent model (should return default)

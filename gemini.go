@@ -338,13 +338,13 @@ func tryAllProviders[T any](
 				// Create token source with database refresh hook
 				oauthConfig := GlobalGeminiAuth.getOAuthConfig(providerType)
 				tokenSource := &databaseTokenSource{
-					db:            db,
-					tokenID:       token.ID,
-					kind:          providerType,
-					userEmail:     token.UserEmail,
-					projectID:     token.ProjectID,
-					baseToken:     &oauthToken,
-					tokenSource:   oauthConfig.TokenSource(context.Background(), &oauthToken),
+					db:          db,
+					tokenID:     token.ID,
+					kind:        providerType,
+					userEmail:   token.UserEmail,
+					projectID:   token.ProjectID,
+					baseToken:   &oauthToken,
+					tokenSource: oauthConfig.TokenSource(context.Background(), &oauthToken),
 				}
 				client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID, providerType)
 

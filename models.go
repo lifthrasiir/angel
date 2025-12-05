@@ -898,18 +898,10 @@ func (r *ModelsRegistry) IsEmpty() bool {
 	return r.geminiProvider == nil && len(r.providers) == 0
 }
 
-// isGeminiModelUnsafe checks if a model is a Gemini model (internal use, no mutex)
+// isGeminiModelUnsafe checks if a model is a built-in model that should be handled by GeminiProvider (internal use, no mutex)
 func (r *ModelsRegistry) isGeminiModelUnsafe(model *Model) bool {
-	// Check if model has Gemini providers
-	for _, provider := range model.Providers {
-		if provider == "gemini" || provider == "vertexai" {
-			return true
-		}
-	}
-
-	// Also check model name patterns
-	return strings.HasPrefix(model.Name, "gemini-") ||
-		strings.HasPrefix(model.Name, "vertexai-")
+	// Built-in models have providers, external models (like OpenAI) don't
+	return len(model.Providers) > 0
 }
 
 // GetAllModels returns all non-subagent models in display order
