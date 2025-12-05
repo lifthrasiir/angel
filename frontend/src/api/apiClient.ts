@@ -101,3 +101,41 @@ export async function extractSession(sessionId: string, messageId: string): Prom
 
   return response.json();
 }
+
+// Account Details Types
+export interface AccountDetailsResponse {
+  source: 'models' | 'quota';
+  models: Record<string, ModelDetails>;
+}
+
+export interface ModelDetails {
+  displayName?: string;
+  maxTokens?: number;
+  maxOutputTokens?: number;
+  supportsImages?: boolean;
+  supportsThinking?: boolean;
+  supportsVideo?: boolean;
+  thinkingBudget?: number;
+  minThinkingBudget?: number;
+  recommended?: boolean;
+  tokenizerType?: string;
+  model?: string;
+  apiProvider?: string;
+  modelProvider?: string;
+  quotaInfo?: QuotaInfo;
+  usages?: string[];
+}
+
+export interface QuotaInfo {
+  remainingFraction: number;
+  resetTime: string; // ISO 8601 timestamp
+}
+
+// Fetch detailed information about an OAuth account
+export async function fetchAccountDetails(accountId: number): Promise<AccountDetailsResponse> {
+  const response = await apiFetch(`/api/accounts/${accountId}/details`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch account details: ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}

@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/oauth2"
 
 	. "github.com/lifthrasiir/angel/gemini"
 )
@@ -69,6 +72,154 @@ func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
+}
+
+// AccountDetailsResponse is the unified response format for the account details endpoint
+type AccountDetailsResponse struct {
+	Source string                  `json:"source"` // "models" or "quota"
+	Models map[string]ModelDetails `json:"models"`
+}
+
+// getAccountDetailsHandler retrieves detailed information about an OAuth account
+// using v1internal:fetchAvailableModels or v1internal:retrieveUserQuota (fallback)
+func getAccountDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	db := getDb(w, r)
+
+	// Extract account ID from URL
+	vars := mux.Vars(r)
+	accountIDStr := vars["id"]
+	accountID, err := strconv.Atoi(accountIDStr)
+	if err != nil {
+		sendBadRequestError(w, r, "Invalid account ID")
+		return
+	}
+
+	// Load OAuth token from database
+	token, err := GetOAuthToken(db, accountID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			sendNotFoundError(w, r, "Account not found")
+		} else {
+			sendInternalServerError(w, r, err, "Failed to load account")
+		}
+		return
+	}
+
+	// Parse OAuth token
+	var oauthToken oauth2.Token
+	if err := json.Unmarshal([]byte(token.TokenData), &oauthToken); err != nil {
+		sendInternalServerError(w, r, err, "Failed to parse OAuth token")
+		return
+	}
+
+	// Get GeminiAuth to access OAuth config
+	ga, err := getGaFromContext(ctx)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to get authentication context")
+		return
+	}
+
+	// Create token source with OAuth config
+	oauthConfig := ga.getOAuthConfig(token.Kind)
+	tokenSource := oauthConfig.TokenSource(context.Background(), &oauthToken)
+
+	// Create CodeAssistClient
+	client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID, token.Kind)
+
+	switch token.Kind {
+	case "antigravity":
+		modelsResp, err := client.FetchAvailableModels(ctx)
+		if err != nil {
+			// Some other error - return it
+			sendInternalServerError(w, r, err, "Failed to fetch available models")
+			return
+		}
+
+		// Success - calculate usages for each model
+		models := calculateModelUsages(modelsResp)
+
+		response := AccountDetailsResponse{
+			Source: "models",
+			Models: models,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+
+	default:
+		quotaResp, err := client.RetrieveUserQuota(ctx)
+		if err != nil {
+			sendInternalServerError(w, r, err, "Failed to retrieve user quota")
+			return
+		}
+
+		// Transform quota buckets into models map
+		models := make(map[string]ModelDetails)
+		for _, bucket := range quotaResp.Buckets {
+			models[bucket.ModelID] = ModelDetails{
+				DisplayName: bucket.ModelID, // Fallback: use ID as name
+				QuotaInfo: &QuotaInfo{
+					RemainingFraction: bucket.RemainingFraction,
+					ResetTime:         bucket.ResetTime,
+				},
+			}
+		}
+
+		response := AccountDetailsResponse{
+			Source: "quota",
+			Models: models,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	}
+}
+
+// calculateModelUsages calculates the usages array for each model based on the usage category arrays
+func calculateModelUsages(resp *FetchAvailableModelsResponse) map[string]ModelDetails {
+	models := make(map[string]ModelDetails)
+
+	// Create a map for quick lookup of which categories each model belongs to
+	usageCategories := make(map[string][]string)
+
+	// Check each usage category
+	for _, modelID := range resp.CommandModelIds {
+		usageCategories[modelID] = append(usageCategories[modelID], "command")
+	}
+	for _, modelID := range resp.TabModelIds {
+		usageCategories[modelID] = append(usageCategories[modelID], "tab")
+	}
+	for _, modelID := range resp.ImageGenerationModelIds {
+		usageCategories[modelID] = append(usageCategories[modelID], "imageGeneration")
+	}
+	for _, modelID := range resp.MqueryModelIds {
+		usageCategories[modelID] = append(usageCategories[modelID], "mquery")
+	}
+	for _, modelID := range resp.WebSearchModelIds {
+		usageCategories[modelID] = append(usageCategories[modelID], "webSearch")
+	}
+
+	// Copy models and add usages
+	for modelID, details := range resp.Models {
+		details.Usages = usageCategories[modelID]
+		models[modelID] = details
+	}
+
+	return models
+}
+
+// is403PermissionDenied checks if an error is a 403 PERMISSION_DENIED error
+func is403PermissionDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "403") && strings.Contains(errMsg, "PERMISSION_DENIED")
 }
 
 func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {

@@ -1020,3 +1020,51 @@ type CodeAssistGlobalUserSettingResponse struct {
 	CloudaicompanionProject     string `json:"cloudaicompanionProject,omitempty"`
 	FreeTierDataCollectionOptin bool   `json:"freeTierDataCollectionOptin"`
 }
+
+// FetchAvailableModelsResponse represents the response from v1internal:fetchAvailableModels
+type FetchAvailableModelsResponse struct {
+	Models                  map[string]ModelDetails `json:"models"`
+	CommandModelIds         []string                `json:"commandModelIds,omitempty"`
+	TabModelIds             []string                `json:"tabModelIds,omitempty"`
+	ImageGenerationModelIds []string                `json:"imageGenerationModelIds,omitempty"`
+	MqueryModelIds          []string                `json:"mqueryModelIds,omitempty"`
+	WebSearchModelIds       []string                `json:"webSearchModelIds,omitempty"`
+}
+
+// ModelDetails contains detailed information about a model
+type ModelDetails struct {
+	DisplayName       string     `json:"displayName,omitempty"`
+	MaxTokens         int        `json:"maxTokens,omitempty"`
+	MaxOutputTokens   int        `json:"maxOutputTokens,omitempty"`
+	SupportsImages    bool       `json:"supportsImages,omitempty"`
+	SupportsThinking  bool       `json:"supportsThinking,omitempty"`
+	SupportsVideo     bool       `json:"supportsVideo,omitempty"`
+	ThinkingBudget    int        `json:"thinkingBudget,omitempty"`
+	MinThinkingBudget int        `json:"minThinkingBudget,omitempty"`
+	Recommended       bool       `json:"recommended,omitempty"`
+	TokenizerType     string     `json:"tokenizerType,omitempty"`
+	Model             string     `json:"model,omitempty"`
+	APIProvider       string     `json:"apiProvider,omitempty"`
+	ModelProvider     string     `json:"modelProvider,omitempty"`
+	QuotaInfo         *QuotaInfo `json:"quotaInfo,omitempty"`
+	Usages            []string   `json:"usages,omitempty"`
+}
+
+// QuotaInfo contains quota information for a model
+type QuotaInfo struct {
+	RemainingFraction float64 `json:"remainingFraction"`
+	ResetTime         string  `json:"resetTime"` // ISO 8601 format
+}
+
+// RetrieveUserQuotaResponse represents the response from v1internal:retrieveUserQuota
+type RetrieveUserQuotaResponse struct {
+	Buckets []QuotaBucket `json:"buckets"`
+}
+
+// QuotaBucket represents a single quota bucket for a model
+type QuotaBucket struct {
+	ResetTime         string  `json:"resetTime"`
+	TokenType         string  `json:"tokenType"`
+	ModelID           string  `json:"modelId"`
+	RemainingFraction float64 `json:"remainingFraction"`
+}

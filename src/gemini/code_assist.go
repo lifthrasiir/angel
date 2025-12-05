@@ -173,3 +173,45 @@ func (c *CodeAssistClient) SetCodeAssistGlobalUserSetting(ctx context.Context, r
 
 	return &settingRes, nil
 }
+
+// FetchAvailableModels calls the v1internal:fetchAvailableModels endpoint
+func (c *CodeAssistClient) FetchAvailableModels(ctx context.Context) (*FetchAvailableModelsResponse, error) {
+	url := fmt.Sprintf("https://%s/v1internal:fetchAvailableModels", c.apiHost)
+	reqBody := map[string]string{
+		"project": c.ProjectID,
+	}
+
+	resp, err := c.makeAPIRequest(ctx, url, reqBody, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result FetchAvailableModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// RetrieveUserQuota calls the v1internal:retrieveUserQuota endpoint
+func (c *CodeAssistClient) RetrieveUserQuota(ctx context.Context) (*RetrieveUserQuotaResponse, error) {
+	url := fmt.Sprintf("https://%s/v1internal:retrieveUserQuota", c.apiHost)
+	reqBody := map[string]string{
+		"project": c.ProjectID,
+	}
+
+	resp, err := c.makeAPIRequest(ctx, url, reqBody, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RetrieveUserQuotaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	}
+
+	return &result, nil
+}

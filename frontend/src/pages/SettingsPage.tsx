@@ -1,12 +1,13 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import { apiFetch } from '../api/apiClient';
+import { apiFetch, fetchAccountDetails, AccountDetailsResponse } from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import MCPSettings from '../components/MCPSettings'; // Import the new component
 import OpenAISettings from '../components/OpenAISettings'; // Import OpenAI settings component
 import GeminiAPISettings from '../components/GeminiAPISettings'; // Import Gemini API settings component
 import SystemPromptEditor, { PredefinedPrompt } from '../components/SystemPromptEditor'; // Import SystemPromptEditor and PredefinedPrompt type
+import { AccountDetailsModal } from '../components/AccountDetailsModal'; // Import AccountDetailsModal
 
 import { globalPromptsAtom, hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/chatAtoms';
 
@@ -35,6 +36,12 @@ const SettingsPage: React.FC = () => {
 
   // State for managing accounts
   const [accounts, setAccounts] = useState<Account[]>([]);
+
+  // State for account details modal
+  const [selectedAccountDetails, setSelectedAccountDetails] = useState<{
+    email: string;
+    details: AccountDetailsResponse;
+  } | null>(null);
 
   const fetchGlobalPrompts = async () => {
     console.log('fetchGlobalPrompts: Fetching global prompts...');
@@ -298,17 +305,97 @@ const SettingsPage: React.FC = () => {
     setIsAddingNewPrompt(false);
   };
 
+  const handleViewAccountDetails = async (account: Account) => {
+    try {
+      const details = await fetchAccountDetails(account.id);
+      setSelectedAccountDetails({
+        email: account.email,
+        details,
+      });
+    } catch (error) {
+      console.error('Failed to fetch account details:', error);
+      alert('Failed to load account details. Please try again.');
+    }
+  };
+
   interface AuthSettingsProps {
     accounts: Account[];
     handleLogoutAccount: (id: number, email: string) => void;
+    handleViewAccountDetails: (account: Account) => void;
     updateAuthenticationStatus: () => void;
   }
 
-  const AuthSettings: React.FC<AuthSettingsProps> = ({ accounts, handleLogoutAccount, updateAuthenticationStatus }) => {
+  const AuthSettings: React.FC<AuthSettingsProps> = ({
+    accounts,
+    handleLogoutAccount,
+    handleViewAccountDetails,
+    updateAuthenticationStatus,
+  }) => {
     // Separate accounts by kind
     const geminicliAccounts = accounts.filter((account) => account.kind === 'geminicli');
     const antigravityAccounts = accounts.filter((account) => account.kind === 'antigravity');
     const activeAccounts = accounts.filter((account) => account.hasProject);
+
+    // Render account list for a specific provider
+    const renderAccountList = (providerAccounts: Account[], providerName: string) => {
+      if (providerAccounts.length === 0) return null;
+
+      return (
+        <div style={{ flex: 1 }}>
+          <div style={{ marginBottom: '15px' }}>
+            <h6 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>{providerName}</h6>
+            {providerAccounts.map((account) => (
+              <div
+                key={account.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '8px 12px',
+                  margin: '4px 0',
+                  backgroundColor: account.hasProject ? '#f8f9fa' : '#fff3cd',
+                  borderRadius: '4px',
+                  border: `1px solid ${account.hasProject ? '#dee2e6' : '#ffeaa7'}`,
+                  opacity: account.hasProject ? 1 : 0.7,
+                }}
+              >
+                <div>
+                  <strong
+                    onClick={() => handleViewAccountDetails(account)}
+                    style={{
+                      cursor: 'pointer',
+                      color: '#007bff',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {account.email}
+                  </strong>
+                  {!account.hasProject && (
+                    <div style={{ fontSize: '11px', color: '#856404', marginTop: '2px' }}>No project ID - inactive</div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => handleLogoutAccount(account.id, account.email)}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '12px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
 
     return (
       <div>
@@ -327,101 +414,8 @@ const SettingsPage: React.FC = () => {
 
             {/* Two-column layout for different providers */}
             <div style={{ display: 'flex', gap: '20px', marginTop: '10px' }}>
-              {/* Gemini CLI Column */}
-              <div style={{ flex: 1 }}>
-                {geminicliAccounts.length > 0 && (
-                  <div style={{ marginBottom: '15px' }}>
-                    <h6 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Gemini CLI</h6>
-                    {geminicliAccounts.map((account) => (
-                      <div
-                        key={account.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '8px 12px',
-                          margin: '4px 0',
-                          backgroundColor: account.hasProject ? '#f8f9fa' : '#fff3cd',
-                          borderRadius: '4px',
-                          border: `1px solid ${account.hasProject ? '#dee2e6' : '#ffeaa7'}`,
-                          opacity: account.hasProject ? 1 : 0.7,
-                        }}
-                      >
-                        <div>
-                          <strong>{account.email}</strong>
-                          {!account.hasProject && (
-                            <div style={{ fontSize: '11px', color: '#856404', marginTop: '2px' }}>
-                              No project ID - inactive
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleLogoutAccount(account.id, account.email)}
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: '12px',
-                            backgroundColor: '#dc3545',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '3px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Antigravity Column */}
-              <div style={{ flex: 1 }}>
-                {antigravityAccounts.length > 0 && (
-                  <div style={{ marginBottom: '15px' }}>
-                    <h6 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Antigravity</h6>
-                    {antigravityAccounts.map((account) => (
-                      <div
-                        key={account.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '8px 12px',
-                          margin: '4px 0',
-                          backgroundColor: account.hasProject ? '#f8f9fa' : '#fff3cd',
-                          borderRadius: '4px',
-                          border: `1px solid ${account.hasProject ? '#dee2e6' : '#ffeaa7'}`,
-                          opacity: account.hasProject ? 1 : 0.7,
-                        }}
-                      >
-                        <div>
-                          <strong>{account.email}</strong>
-                          {!account.hasProject && (
-                            <div style={{ fontSize: '11px', color: '#856404', marginTop: '2px' }}>
-                              No project ID - inactive
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleLogoutAccount(account.id, account.email)}
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: '12px',
-                            backgroundColor: '#dc3545',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '3px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {renderAccountList(geminicliAccounts, 'Gemini CLI')}
+              {renderAccountList(antigravityAccounts, 'Antigravity')}
             </div>
           </div>
         ) : (
@@ -685,6 +679,7 @@ const SettingsPage: React.FC = () => {
           <AuthSettings
             accounts={accounts}
             handleLogoutAccount={handleLogoutAccount}
+            handleViewAccountDetails={handleViewAccountDetails}
             updateAuthenticationStatus={updateAuthenticationStatus}
           />
         )}
@@ -709,6 +704,15 @@ const SettingsPage: React.FC = () => {
           />
         )}
       </div>
+
+      {/* Account Details Modal */}
+      {selectedAccountDetails && (
+        <AccountDetailsModal
+          accountEmail={selectedAccountDetails.email}
+          details={selectedAccountDetails.details}
+          onClose={() => setSelectedAccountDetails(null)}
+        />
+      )}
     </div>
   );
 };
