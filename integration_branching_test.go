@@ -11,7 +11,7 @@ import (
 
 // TestBranchingLogic tests the branching functionality in sessions and messages.
 func TestBranchingLogic(t *testing.T) {
-	router, testDB := setupTest(t)
+	router, testDB, _ := setupTest(t)
 
 	// Scenario 1: Linear message flow - chosen_next_id updates correctly
 	t.Run("LinearMessageFlow", func(t *testing.T) {
@@ -405,7 +405,7 @@ func TestBranchingLogic(t *testing.T) {
 
 // TestNewSessionAndMessage_BranchIDConsistency tests that branch IDs are consistent when a new session is created.
 func TestNewSessionAndMessage_BranchIDConsistency(t *testing.T) {
-	router, testDB := setupTest(t)
+	router, testDB, _ := setupTest(t)
 
 	t.Run("BranchIDConsistency", func(t *testing.T) {
 		// Create the workspace before making the request
@@ -440,7 +440,7 @@ func TestNewSessionAndMessage_BranchIDConsistency(t *testing.T) {
 
 // TestCreateBranchHandler_BranchIDConsistency tests that branch IDs are consistent when a new branch is created.
 func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
-	router, testDB := setupTest(t)
+	router, testDB, _ := setupTest(t)
 
 	var newBranchID string // Declared here
 
@@ -531,7 +531,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 	// Scenario 1: Edit first message when there's only one message
 	t.Run("Scenario1_SingleMessage", func(t *testing.T) {
-		router, testDB := setupTest(t)
+		router, testDB, _ := setupTest(t)
 
 		// Create a new session
 		sessionId := generateID()
@@ -619,7 +619,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 	// Scenario 2: Edit first message when there's already a message chain
 	t.Run("Scenario2_ExistingChain", func(t *testing.T) {
-		router, testDB := setupTest(t)
+		router, testDB, _ := setupTest(t)
 
 		// Create a new session
 		sessionId := generateID()
@@ -725,7 +725,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 	// Scenario 3: Edit first message again after creating new chain: A1 -> B1 -> C1; A2 -> B2
 	t.Run("Scenario3_MultipleEdits", func(t *testing.T) {
-		router, testDB := setupTest(t)
+		router, testDB, _ := setupTest(t)
 
 		// Create a new session
 		sessionId := generateID()

@@ -196,6 +196,7 @@ func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func countTokensHandler(w http.ResponseWriter, r *http.Request) {
+	registry := getModelsRegistry(w, r)
 
 	var requestBody struct {
 		Text  string `json:"text"`
@@ -211,7 +212,7 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 		modelName = DefaultGeminiModel // Default model if not provided
 	}
 
-	modelProvider, err := GlobalModelsRegistry.GetModelProvider(modelName)
+	modelProvider, err := registry.GetModelProvider(modelName)
 	if err != nil {
 		sendBadRequestError(w, r, err.Error())
 		return
@@ -433,13 +434,10 @@ type ModelInfo struct {
 }
 
 func listModelsHandler(w http.ResponseWriter, r *http.Request) {
-	if GlobalModelsRegistry == nil {
-		sendJSONResponse(w, []ModelInfo{})
-		return
-	}
+	registry := getModelsRegistry(w, r)
 
 	var models []ModelInfo
-	for _, model := range GlobalModelsRegistry.GetAllModels() {
+	for _, model := range registry.GetAllModels() {
 		models = append(models, ModelInfo{
 			Name:      model.Name,
 			MaxTokens: model.MaxTokens,
@@ -675,6 +673,7 @@ func getOpenAIConfigsHandler(w http.ResponseWriter, r *http.Request) {
 // saveOpenAIConfigHandler handles POST requests for /api/openai-configs
 func saveOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	registry := getModelsRegistry(w, r)
 
 	var config OpenAIConfig
 	if !decodeJSONRequest(r, w, &config, "saveOpenAIConfigHandler") {
@@ -692,7 +691,7 @@ func saveOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reload OpenAI providers to reflect the changes
-	ReloadOpenAIProviders(db)
+	ReloadOpenAIProviders(db, registry)
 
 	sendJSONResponse(w, config)
 }
@@ -700,6 +699,7 @@ func saveOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 // deleteOpenAIConfigHandler handles DELETE requests for /api/openai-configs/{id}
 func deleteOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	registry := getModelsRegistry(w, r)
 
 	id := mux.Vars(r)["id"]
 	if id == "" {
@@ -713,7 +713,7 @@ func deleteOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reload OpenAI providers to reflect the deletion
-	ReloadOpenAIProviders(db)
+	ReloadOpenAIProviders(db, registry)
 
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "OpenAI config deleted successfully"})
 }

@@ -21,7 +21,7 @@ import (
 )
 
 // Helper function to set up the test environment
-func setupTest(t *testing.T) (*mux.Router, *sql.DB) {
+func setupTest(t *testing.T) (*mux.Router, *sql.DB, *ModelsRegistry) {
 	// Initialize an in-memory database for testing with unique name
 	dbName := fmt.Sprintf(":memory:?cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL&test=%s", t.Name())
 	testDB, err := InitDB(dbName)
@@ -40,13 +40,13 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB) {
 
 	InitMCPManager(testDB)
 
-	// Initialize GlobalModelsRegistry by loading models.json
+	// Initialize ModelsRegistry by loading models.json
 	modelsData, err := os.ReadFile("models.json")
 	if err != nil {
 		t.Fatalf("Failed to read models.json: %v", err)
 	}
 
-	GlobalModelsRegistry, err = LoadModels(modelsData)
+	modelsRegistry, err := LoadModels(modelsData)
 	if err != nil {
 		t.Fatalf("Failed to load models: %v", err)
 	}
@@ -67,11 +67,14 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB) {
 			return 1048576 // Mocked max tokens
 		},
 	}
-	GlobalModelsRegistry.SetGeminiProvider(mockLLMProvider)
+	modelsRegistry.SetGeminiProvider(mockLLMProvider)
+
+	// Initialize GeminiAuth
+	geminiAuth := NewGeminiAuth(testDB)
 
 	// Create a new router for testing
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(testDB))
+	router.Use(makeContextMiddleware(testDB, modelsRegistry, geminiAuth))
 	InitRouter(router)
 
 	// Ensure the database connection is closed after the test
@@ -81,12 +84,12 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB) {
 		}
 	})
 
-	return router, testDB
+	return router, testDB, modelsRegistry
 }
 
-func replaceProvider(provider LLMProvider) LLMProvider {
-	oldProvider := GlobalModelsRegistry.GetProvider(DefaultGeminiModel)
-	GlobalModelsRegistry.SetGeminiProvider(provider)
+func (r *ModelsRegistry) replaceGeminiProvider(provider LLMProvider) LLMProvider {
+	oldProvider := r.GetProvider(DefaultGeminiModel)
+	r.SetGeminiProvider(provider)
 	return oldProvider
 }
 

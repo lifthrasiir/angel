@@ -143,6 +143,8 @@ func (ga *GeminiAuth) IsAuthenticated(r *http.Request) bool {
 
 // authHandler handles authentication requests.
 func authHandler(w http.ResponseWriter, r *http.Request) {
+	ga := getGeminiAuth(w, r)
+
 	// Capture the entire raw query string from the /login request.
 	// This will contain both 'redirect_to' and 'draft_message'.
 	redirectToQueryString := r.URL.RawQuery
@@ -180,9 +182,9 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		"query":    redirectToQueryString,
 	}
 	stateDataJSON, _ := json.Marshal(stateData)
-	GlobalGeminiAuth.oauthStates[randomState] = string(stateDataJSON)
+	ga.oauthStates[randomState] = string(stateDataJSON)
 
-	oauthConfig := GlobalGeminiAuth.getOAuthConfig(provider)
+	oauthConfig := ga.getOAuthConfig(provider)
 	url := oauthConfig.AuthCodeURL(randomState)
 
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
@@ -190,17 +192,20 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 
 // authCallbackHandler handles authentication callback requests.
 func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	ga := getGeminiAuth(w, r)
+
 	stateParam := r.FormValue("state")
 
 	// Validate the random part of the state against the stored value
-	stateDataJSON, ok := GlobalGeminiAuth.oauthStates[stateParam]
+	stateDataJSON, ok := ga.oauthStates[stateParam]
 	if !ok {
 		log.Printf("Invalid or expired OAuth state: %s", stateParam)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 	// Remove the state after use to prevent replay attacks
-	delete(GlobalGeminiAuth.oauthStates, stateParam)
+	delete(ga.oauthStates, stateParam)
 
 	// Parse the stored state data
 	var stateData struct {
@@ -230,7 +235,7 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	finalRedirectURL := frontendPath
 
 	code := r.FormValue("code")
-	oauthConfig := GlobalGeminiAuth.getOAuthConfig(stateData.Provider)
+	oauthConfig := ga.getOAuthConfig(stateData.Provider)
 	Token, err := oauthConfig.Exchange(context.Background(), code)
 	if err != nil {
 		log.Printf("Failed to exchange token: %v", err)
@@ -268,7 +273,7 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save token to database with project ID and provider kind
-	GlobalGeminiAuth.SaveToken(GlobalGeminiAuth.db, Token, userEmail, projectID, stateData.Provider)
+	ga.SaveToken(db, Token, userEmail, projectID, stateData.Provider)
 
 	// Redirect to the original path after successful authentication
 	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)
@@ -276,6 +281,8 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 
 // logoutHandler handles logout requests.
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
 	// Parse request body to get which account to logout
 	var request struct {
 		Email string `json:"email"`
@@ -291,11 +298,11 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if request.ID != 0 {
 		// Delete specific account by ID
-		err = DeleteOAuthTokenByID(GlobalGeminiAuth.db, request.ID)
+		err = DeleteOAuthTokenByID(db, request.ID)
 		log.Printf("Logged out account with ID %d", request.ID)
 	} else if request.Email != "" {
 		// Delete specific account by email
-		err = DeleteOAuthTokenByEmail(GlobalGeminiAuth.db, request.Email, "geminicli")
+		err = DeleteOAuthTokenByEmail(db, request.Email, "geminicli")
 		log.Printf("Logged out account for email %s", request.Email)
 	} else {
 		http.Error(w, "Either email or id must be provided", http.StatusBadRequest)

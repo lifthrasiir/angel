@@ -80,6 +80,10 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 	if err != nil {
 		return ToolHandlerResults{}, err
 	}
+	registry, err := getRegistryFromContext(ctx)
+	if err != nil {
+		return ToolHandlerResults{}, err
+	}
 
 	// Check if the current session is already a subagent session
 	if strings.Contains(params.SessionId, ".") {
@@ -115,7 +119,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 		}
 
 		// Proceed with LLM turn for the new subagent
-		return handleSubagentTurn(ctx, db, subsessionID, &session, params, agentID, mc)
+		return handleSubagentTurn(ctx, db, registry, subsessionID, &session, params, agentID, mc)
 	} else {
 		// Interact with an existing subagent
 		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, subagentID)
@@ -136,7 +140,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 			return ToolHandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
 		}
 
-		return handleSubagentTurn(ctx, db, subsessionID, &session, params, "", mc)
+		return handleSubagentTurn(ctx, db, registry, subsessionID, &session, params, "", mc)
 	}
 }
 
@@ -144,6 +148,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 func handleSubagentTurn(
 	ctx context.Context,
 	db *sql.DB,
+	registry *ModelsRegistry,
 	subsessionID string,
 	session *Session,
 	params ToolHandlerParams,
@@ -199,7 +204,7 @@ func handleSubagentTurn(
 	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
-	modelProvider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, "")
+	modelProvider, err := registry.ResolveSubagent(params.ModelName, "")
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
@@ -375,7 +380,12 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Get LLM client for image generation using the new task first to determine the correct model
-	imageModelProvider, err := GlobalModelsRegistry.ResolveSubagent(params.ModelName, SubagentImageGenerationTask)
+	registry, err := getRegistryFromContext(ctx)
+	if err != nil {
+		return ToolHandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
+	}
+
+	imageModelProvider, err := registry.ResolveSubagent(params.ModelName, SubagentImageGenerationTask)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}

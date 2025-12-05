@@ -15,13 +15,13 @@ import (
 
 // TestInlineDataStreaming tests inlineData streaming functionality with proper SSE parsing
 func TestInlineDataStreaming(t *testing.T) {
-	router, _ := setupTest(t)
+	router, _, registry := setupTest(t)
 
 	// Create a simple 1x1 PNG image (base64 encoded)
 	pngData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
 	// Mock the SendMessageStream method to simulate inlineData response
-	provider := GlobalModelsRegistry.GetProvider(DefaultGeminiModel)
+	provider := registry.GetProvider(DefaultGeminiModel)
 	mockLLMProvider := provider.(*MockLLMProvider)
 	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 		// Create a mock response with text and inlineData
@@ -194,13 +194,13 @@ func TestInlineDataFilenameGeneration(t *testing.T) {
 
 // TestInlineDataCounterReset tests that the inlineData counter resets for each streaming session
 func TestInlineDataCounterReset(t *testing.T) {
-	router, db := setupTest(t)
+	router, db, registry := setupTest(t)
 
 	// Create a simple 1x1 PNG image (base64 encoded)
 	pngData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
 	// Mock the SendMessageStream method to simulate inlineData response
-	provider := GlobalModelsRegistry.GetProvider(DefaultGeminiModel)
+	provider := registry.GetProvider(DefaultGeminiModel)
 	mockLLMProvider := provider.(*MockLLMProvider)
 
 	var callCount int = 0

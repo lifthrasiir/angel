@@ -149,7 +149,7 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 		return
 	}
 
-	out, err := tryAllProviders(db, model, apiCallback, codeAssistCallback)
+	out, err := tryAllProviders(ctx, db, model, apiCallback, codeAssistCallback)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -220,7 +220,7 @@ func (p *GeminiProvider) CountTokens(ctx context.Context, modelName string, cont
 	codeAssistCallback := func(client *CodeAssistClient) (*CaCountTokenResponse, error) {
 		return client.CountTokens(ctx, apiModelName, contents)
 	}
-	return tryAllProviders(db, model, apiCallback, codeAssistCallback)
+	return tryAllProviders(ctx, db, model, apiCallback, codeAssistCallback)
 }
 
 // MaxTokens implements the LLMProvider interface for CodeAssistProvider.
@@ -253,6 +253,7 @@ func parseRetryAfter(retryAfter string) time.Duration {
 }
 
 func tryAllProviders[T any](
+	ctx context.Context,
 	db *sql.DB,
 	model *Model,
 	apiCallback func(*GeminiAPIClient, GeminiAPIConfig) (T, error),
@@ -335,8 +336,15 @@ func tryAllProviders[T any](
 					continue
 				}
 
+				var ga *GeminiAuth
+				ga, err = getGaFromContext(ctx)
+				if err != nil {
+					err = fmt.Errorf("failed to get GeminiAuth from context: %w", err)
+					return
+				}
+
 				// Create token source with database refresh hook
-				oauthConfig := GlobalGeminiAuth.getOAuthConfig(providerType)
+				oauthConfig := ga.getOAuthConfig(providerType)
 				tokenSource := &databaseTokenSource{
 					db:          db,
 					tokenID:     token.ID,

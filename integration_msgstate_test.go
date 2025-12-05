@@ -43,7 +43,7 @@ func (w *testProviderWrapper) MaxTokens(modelName string) int {
 
 func TestThoughtSignatureHandling(t *testing.T) {
 	// Setup test environment
-	router, db := setupTest(t)
+	router, db, registry := setupTest(t)
 
 	// Create responses slice like the working integration tests
 	responses := []GenerateContentResponse{
@@ -90,7 +90,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 	mockLLM := &MockGeminiProvider{
 		Responses: responses,
 	}
-	GlobalModelsRegistry.SetGeminiProvider(mockLLM)
+	registry.SetGeminiProvider(mockLLM)
 
 	// Simulate user sending the first message
 	reqBody := strings.NewReader(`{"message": "Hello LLM, tell me a story."}`)
@@ -225,7 +225,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 		captureParams: &capturedSessionParams,
 	}
 
-	GlobalModelsRegistry.SetGeminiProvider(wrapperProvider)
+	registry.SetGeminiProvider(wrapperProvider)
 
 	// Simulate user sending a follow-up message
 	reqBody = strings.NewReader(`{"message": "What happened next?"}`)

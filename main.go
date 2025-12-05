@@ -30,9 +30,6 @@ import (
 
 const dbPath = "angel.db"
 
-// Global instances
-var GlobalGeminiAuth *GeminiAuth
-
 //go:embed frontend/dist
 var embeddedFiles embed.FS
 
@@ -54,12 +51,10 @@ func main() {
 	// Fail early if not compiled with sqlite_fts5 tag
 	You_Are_Required_To_Compile_With__sqlite_fts5__Tag()
 
-	modelRegistry, err := LoadModels(modelsJSON)
+	modelsRegistry, err := LoadModels(modelsJSON)
 	if err != nil {
 		log.Fatalf("Failed to load models.json: %v", err)
 	}
-
-	GlobalModelsRegistry = modelRegistry
 
 	// Parse port from command line argument (default: 8080)
 	port := 8080
@@ -105,16 +100,16 @@ func main() {
 
 	InitMCPManager(db)
 
-	GlobalGeminiAuth = NewGeminiAuth(db)
+	geminiAuth := NewGeminiAuth(db)
 
 	// Initialize OpenAI endpoints from database configurations
-	GlobalModelsRegistry.InitializeOpenAIEndpoints(db)
+	modelsRegistry.InitializeOpenAIEndpoints(db)
 
 	// Add angel-eval provider after all other providers are initialized
-	GlobalModelsRegistry.SetAngelEvalProvider(&AngelEvalProvider{})
+	modelsRegistry.SetAngelEvalProvider(&AngelEvalProvider{})
 
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(db))
+	router.Use(makeContextMiddleware(db, modelsRegistry, geminiAuth))
 
 	// Apply CSRF middleware.
 	// For production, ensure csrf.Secure(true) is used with HTTPS.
@@ -438,17 +433,21 @@ type contextKey uint8
 
 const (
 	dbKey contextKey = iota
-	// gaKey
+	registryKey
+	gaKey
 )
 
-func contextWithGlobals(ctx context.Context, db *sql.DB) context.Context {
-	return context.WithValue(ctx, dbKey, db)
+func contextWithGlobals(ctx context.Context, db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth) context.Context {
+	ctx = context.WithValue(ctx, dbKey, db)
+	ctx = context.WithValue(ctx, registryKey, registry)
+	ctx = context.WithValue(ctx, gaKey, ga)
+	return ctx
 }
 
-func makeContextMiddleware(db *sql.DB) func(next http.Handler) http.Handler {
+func makeContextMiddleware(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(contextWithGlobals(r.Context(), db))
+			r = r.WithContext(contextWithGlobals(r.Context(), db, registry, ga))
 			r = csrf.PlaintextHTTPRequest(r) // Required because we are typically working on localhost
 
 			next.ServeHTTP(w, r)
@@ -465,6 +464,24 @@ func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
 	return db
 }
 
+func getModelsRegistry(w http.ResponseWriter, r *http.Request) *ModelsRegistry {
+	registry, ok := r.Context().Value(registryKey).(*ModelsRegistry)
+	if !ok {
+		http.Error(w, "Internal Server Error: Models registry missing.", http.StatusInternalServerError)
+		runtime.Goexit()
+	}
+	return registry
+}
+
+func getGeminiAuth(w http.ResponseWriter, r *http.Request) *GeminiAuth {
+	ga, ok := r.Context().Value(gaKey).(*GeminiAuth)
+	if !ok {
+		http.Error(w, "Internal Server Error: GeminiAuth missing.", http.StatusInternalServerError)
+		runtime.Goexit()
+	}
+	return ga
+}
+
 // getDbFromContext retrieves the *sql.DB instance from the given context.Context.
 func getDbFromContext(ctx context.Context) (*sql.DB, error) {
 	db, ok := ctx.Value(dbKey).(*sql.DB)
@@ -472,6 +489,24 @@ func getDbFromContext(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("database connection not found in context")
 	}
 	return db, nil
+}
+
+// getRegistryFromContext retrieves the *ModelsRegistry instance from the given context.Context.
+func getRegistryFromContext(ctx context.Context) (*ModelsRegistry, error) {
+	registry, ok := ctx.Value(registryKey).(*ModelsRegistry)
+	if !ok {
+		return nil, fmt.Errorf("models registry not found in context")
+	}
+	return registry, nil
+}
+
+// getGaFromContext retrieves the *GeminiAuth instance from the given context.Context.
+func getGaFromContext(ctx context.Context) (*GeminiAuth, error) {
+	ga, ok := ctx.Value(gaKey).(*GeminiAuth)
+	if !ok {
+		return nil, fmt.Errorf("gemini auth not found in context")
+	}
+	return ga, nil
 }
 
 func generateID() string {

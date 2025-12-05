@@ -18,6 +18,8 @@ import (
 // createBranchHandler creates a new branch from a given parent message.
 func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	registry := getModelsRegistry(w, r)
+	ga := getGeminiAuth(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -295,7 +297,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Stream LLM response - common for both paths
-	if err := streamLLMResponse(db, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, registry, ga, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response after branch operation")
 		return
 	}
@@ -477,6 +479,8 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 // confirmBranchHandler handles the confirmation of a pending action on a branch.
 func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	registry := getModelsRegistry(w, r)
+	ga := getGeminiAuth(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -690,7 +694,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resume streaming from the point after the function response
-	if err := streamLLMResponse(db, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, registry, ga, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response after confirmation")
 		return
 	}
@@ -753,6 +757,8 @@ func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
 // retryErrorBranchHandler handles retry-error requests for a branch by removing error messages and resuming streaming.
 func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	registry := getModelsRegistry(w, r)
+	ga := getGeminiAuth(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -917,7 +923,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resume streaming from the cleaned up state
-	if err := streamLLMResponse(db, initialState, sseW, mc, false, time.Now(), filteredHistoryContext); err != nil {
+	if err := streamLLMResponse(db, registry, ga, initialState, sseW, mc, false, time.Now(), filteredHistoryContext); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response during retry")
 		return
 	}

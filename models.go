@@ -107,9 +107,6 @@ type ModelsRegistry struct {
 	mutex sync.RWMutex
 }
 
-// Global registry instance
-var GlobalModelsRegistry *ModelsRegistry
-
 // LoadModels loads and parses the models.json file
 func LoadModels(data []byte) (*ModelsRegistry, error) {
 	var config ModelsConfig

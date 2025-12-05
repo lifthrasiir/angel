@@ -21,6 +21,8 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 // Helper function to stream LLM response
 func streamLLMResponse(
 	db *sql.DB,
+	registry *ModelsRegistry,
+	ga *GeminiAuth,
 	initialState InitialState,
 	sseW *sseWriter,
 	mc *MessageChain,
@@ -35,8 +37,8 @@ func streamLLMResponse(
 
 	// Create a cancellable context for the LLM call
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()                          // Ensure context is cancelled when function exits
-	ctx = context.WithValue(ctx, dbKey, db) // Required by tools
+	defer cancel()                                  // Ensure context is cancelled when function exits
+	ctx = contextWithGlobals(ctx, db, registry, ga) // Set all required context values
 
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {
@@ -52,7 +54,7 @@ func streamLLMResponse(
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
 
-	modelProvider, err := GlobalModelsRegistry.GetModelProvider(mc.LastMessageModel)
+	modelProvider, err := registry.GetModelProvider(mc.LastMessageModel)
 	if err != nil {
 		return err
 	}
@@ -452,7 +454,7 @@ func streamLLMResponse(
 				if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
 					userMsg = initialState.History[0].Parts[0].Text
 				}
-				inferAndSetSessionName(db, initialState.SessionId, userMsg, sseW, mc.LastMessageModel)
+				inferAndSetSessionName(db, registry, ga, initialState.SessionId, userMsg, sseW, mc.LastMessageModel)
 			}()
 		}
 	}
@@ -550,7 +552,7 @@ func checkStreamCancellation(
 }
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
-func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, sseW *sseWriter, modelToUse string) {
+func inferAndSetSessionName(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth, sessionId string, userMessage string, sseW *sseWriter, modelToUse string) {
 	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)
 
 	var inferredName string // Initialize to empty string
@@ -604,17 +606,17 @@ func inferAndSetSessionName(db *sql.DB, sessionId string, userMessage string, ss
 	})
 
 	// Create new context with database connection for subagent
-	subagentCtx := contextWithGlobals(context.Background(), db)
-	ctx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
+	subagentCtx := contextWithGlobals(context.Background(), db, registry, ga)
+	subagentCtx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
-	modelProvider, err := GlobalModelsRegistry.ResolveSubagent(modelToUse, SubagentSessionNameTask)
+	modelProvider, err := registry.ResolveSubagent(modelToUse, SubagentSessionNameTask)
 	if err != nil {
 		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return
 	}
 
-	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, SessionParams{
+	oneShotResult, err := modelProvider.GenerateContentOneShot(subagentCtx, SessionParams{
 		Contents: []Content{
 			{
 				Role:  RoleUser,

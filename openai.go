@@ -795,42 +795,8 @@ func (c *OpenAIClient) MaxTokens(modelName string) int {
 	return 4096 // Safe default
 }
 
-// InitOpenAIProviders initializes OpenAI providers from database configurations
-func InitOpenAIProviders(db *sql.DB) {
-	configs, err := GetOpenAIConfigs(db)
-	if err != nil {
-		log.Printf("Failed to load OpenAI configs: %v", err)
-		return
-	}
-
-	for _, config := range configs {
-		if !config.Enabled {
-			continue // Skip disabled configurations
-		}
-
-		// Create client and get models to register as providers
-		client := NewOpenAIClient(&config)
-		models, err := client.GetModels(context.Background())
-		if err != nil {
-			log.Printf("Failed to fetch models for OpenAI config %s: %v", config.Name, err)
-			continue
-		}
-
-		// Register each model as a provider using the shared client
-		for _, model := range models {
-			GlobalModelsRegistry.providers[model.ID] = client
-			log.Printf("Registered OpenAI model: %s (from config: %s)", model.ID, config.Name)
-
-			// Pre-warm MaxTokens cache asynchronously
-			go func(modelName string, provider LLMProvider) {
-				_ = provider.MaxTokens(modelName)
-			}(model.ID, client)
-		}
-	}
-}
-
 // ReloadOpenAIProviders reloads OpenAI providers from database configurations
-func ReloadOpenAIProviders(db *sql.DB) {
+func ReloadOpenAIProviders(db *sql.DB, registry *ModelsRegistry) {
 	// Get current OpenAI configs to know which models to keep
 	configs, err := GetOpenAIConfigs(db)
 	if err != nil {
@@ -864,12 +830,12 @@ func ReloadOpenAIProviders(db *sql.DB) {
 
 	// Remove providers that are no longer valid
 	func() {
-		GlobalModelsRegistry.mutex.Lock()
-		defer GlobalModelsRegistry.mutex.Unlock()
-		for modelName, provider := range GlobalModelsRegistry.providers {
+		registry.mutex.Lock()
+		defer registry.mutex.Unlock()
+		for modelName, provider := range registry.providers {
 			if _, ok := provider.(*OpenAIClient); ok {
 				if !validModels[modelName] {
-					delete(GlobalModelsRegistry.providers, modelName)
+					delete(registry.providers, modelName)
 					log.Printf("Removed OpenAI model provider: %s", modelName)
 				}
 			}
@@ -892,7 +858,9 @@ func ReloadOpenAIProviders(db *sql.DB) {
 		for _, model := range models {
 			if validModels[model.ID] {
 				// Use the same client instance for all models from this config
-				GlobalModelsRegistry.providers[model.ID] = client
+				registry.mutex.Lock()
+				registry.providers[model.ID] = client
+				registry.mutex.Unlock()
 				log.Printf("Registered/updated OpenAI model: %s (from config: %s)", model.ID, config.Name)
 
 				// Pre-warm MaxTokens cache asynchronously
