@@ -31,20 +31,15 @@ func NewGeminiAuth(db *sql.DB) *GeminiAuth {
 	}
 }
 
-// SaveToken saves the OAuth token to the database.
-func (ga *GeminiAuth) SaveToken(db *sql.DB, t *oauth2.Token, userEmail string, projectID string) {
-	ga.SaveTokenWithKind(db, t, userEmail, projectID, "geminicli")
-}
-
-// SaveTokenWithKind saves the OAuth token to the database with a specific kind.
-func (ga *GeminiAuth) SaveTokenWithKind(db *sql.DB, t *oauth2.Token, userEmail string, projectID string, kind string) {
+// SaveToken saves the OAuth token to the database with a specific kind.
+func (ga *GeminiAuth) SaveToken(db *sql.DB, t *oauth2.Token, userEmail string, projectID string, kind string) {
 	tokenJSON, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		log.Printf("Failed to marshal token: %v", err)
 		return
 	}
 
-	if err := SaveOAuthTokenWithKind(db, string(tokenJSON), userEmail, projectID, kind); err != nil {
+	if err := SaveOAuthToken(db, string(tokenJSON), userEmail, projectID, kind); err != nil {
 		log.Printf("Failed to save OAuth token to DB: %v", err)
 		return
 	}
@@ -273,7 +268,7 @@ func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save token to database with project ID and provider kind
-	GlobalGeminiAuth.SaveTokenWithKind(GlobalGeminiAuth.db, Token, userEmail, projectID, stateData.Provider)
+	GlobalGeminiAuth.SaveToken(GlobalGeminiAuth.db, Token, userEmail, projectID, stateData.Provider)
 
 	// Redirect to the original path after successful authentication
 	http.Redirect(w, r, finalRedirectURL, http.StatusTemporaryRedirect)

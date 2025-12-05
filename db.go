@@ -605,14 +605,6 @@ func CreateSession(db *sql.DB, sessionID string, systemPrompt string, workspaceI
 	return primaryBranchID, nil
 }
 
-func UpdateSessionSystemPrompt(db *sql.DB, sessionID string, systemPrompt string) error {
-	_, err := db.Exec("UPDATE sessions SET system_prompt = ? WHERE id = ?", systemPrompt, sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to update session system prompt: %w", err)
-	}
-	return nil
-}
-
 func UpdateSessionLastUpdated(db *sql.DB, sessionID string) error {
 	_, err := db.Exec("UPDATE sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", sessionID)
 	if err != nil {
@@ -711,11 +703,7 @@ func getNextOAuthTokenID(db *sql.DB) (int, error) {
 	return highestID + 1, nil
 }
 
-func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string) error {
-	return SaveOAuthTokenWithKind(db, tokenJSON, userEmail, projectID, "geminicli")
-}
-
-func SaveOAuthTokenWithKind(db *sql.DB, tokenJSON string, userEmail string, projectID string, kind string) error {
+func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string, kind string) error {
 	// Get the next available ID
 	nextID, err := getNextOAuthTokenID(db)
 	if err != nil {
@@ -745,42 +733,6 @@ func UpdateOAuthTokenData(db *sql.DB, tokenID int, tokenJSON string) error {
 		tokenJSON, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to update OAuth token data: %w", err)
-	}
-	return nil
-}
-
-func LoadOAuthToken(db *sql.DB) (string, string, string, error) {
-	return LoadOAuthTokenWithKind(db, "geminicli")
-}
-
-func LoadOAuthTokenWithKind(db *sql.DB, kind string) (string, string, string, error) {
-	return LoadOAuthTokenWithKindAndModel(db, kind, "")
-}
-
-func LoadOAuthTokenWithKindAndModel(db *sql.DB, kind string, modelName string) (string, string, string, error) {
-	// Get the least recently used token for the kind and model
-	token, err := GetNextOAuthToken(db, kind, modelName)
-	if err != nil {
-		return "", "", "", err
-	}
-	if token == nil {
-		log.Printf("LoadOAuthTokenWithKindAndModel: No existing token found in DB for kind %s.", kind)
-		return "", "", "", nil // No token found, not an error
-	}
-
-	return token.TokenData, token.UserEmail, token.ProjectID, nil
-}
-
-// DeleteOAuthToken deletes the OAuth token from the database.
-func DeleteOAuthToken(db *sql.DB) error {
-	return DeleteOAuthTokenWithKind(db, "geminicli")
-}
-
-func DeleteOAuthTokenWithKind(db *sql.DB, kind string) error {
-	// Delete all tokens of the specified kind
-	_, err := db.Exec("DELETE FROM oauth_tokens WHERE kind = ?", kind)
-	if err != nil {
-		return fmt.Errorf("failed to delete OAuth tokens: %w", err)
 	}
 	return nil
 }
@@ -972,7 +924,6 @@ func SaveMCPServerConfig(db *sql.DB, config MCPServerConfig) error {
 
 // GetMCPServerConfigs retrieves all MCP server configurations from the database.
 func GetMCPServerConfigs(db *sql.DB) ([]MCPServerConfig, error) {
-
 	rows, err := db.Query("SELECT name, config_json, enabled FROM mcp_configs")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query MCP server configs: %w", err)
@@ -1134,7 +1085,6 @@ func SaveGlobalPrompts(db *sql.DB, prompts []PredefinedPrompt) error {
 
 // GetGlobalPrompts retrieves all global prompts from the database.
 func GetGlobalPrompts(db *sql.DB) ([]PredefinedPrompt, error) {
-
 	rows, err := db.Query("SELECT label, value FROM global_prompts ORDER BY id ASC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query global prompts: %w", err)
@@ -1242,41 +1192,6 @@ func GetShellCommandByID(db DbOrTx, id string) (*ShellCommand, error) {
 		return nil, fmt.Errorf("failed to get shell command by ID %s: %w", id, err)
 	}
 	return &cmd, nil
-}
-
-// GetAllRunningShellCommands retrieves all shell commands that are currently running.
-func GetAllRunningShellCommands(db DbOrTx) ([]ShellCommand, error) {
-	rows, err := db.Query(`
-		SELECT id, branch_id, command, status, start_time, end_time, stdout, stderr,
-			exit_code, error_message, last_polled_at, next_poll_delay, stdout_offset, stderr_offset
-		FROM shell_commands WHERE status = 'running'
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get all running shell commands: %w", err)
-	}
-	defer rows.Close()
-
-	var commands []ShellCommand
-	for rows.Next() {
-		var cmd ShellCommand
-		if err := rows.Scan(
-			&cmd.ID, &cmd.BranchID, &cmd.Command, &cmd.Status, &cmd.StartTime, &cmd.EndTime,
-			&cmd.Stdout, &cmd.Stderr, &cmd.ExitCode, &cmd.ErrorMessage, &cmd.LastPolledAt,
-			&cmd.NextPollDelay, &cmd.StdoutOffset, &cmd.StderrOffset); err != nil {
-			return nil, fmt.Errorf("failed to scan shell command: %w", err)
-		}
-		commands = append(commands, cmd)
-	}
-	return commands, nil
-}
-
-// DeleteShellCommand deletes a shell command by its ID.
-func DeleteShellCommand(db DbOrTx, id string) error {
-	_, err := db.Exec("DELETE FROM shell_commands WHERE id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to delete shell command with ID %s: %w", id, err)
-	}
-	return nil
 }
 
 // SetInitialSessionEnv sets the initial session environment (generation 0).
@@ -1430,33 +1345,6 @@ func GetOAuthTokensWithValidProjectID(db *sql.DB) ([]OAuthToken, error) {
 	}
 
 	return tokens, nil
-}
-
-// GetNextOAuthToken selects the next OAuth token to use based on the least recently used strategy for a specific kind and model.
-func GetNextOAuthToken(db *sql.DB, kind string, modelName string) (selectedToken *OAuthToken, err error) {
-	tokens, err := GetOAuthTokensWithValidProjectID(db)
-	if err != nil {
-		return
-	}
-
-	oldestTime := time.Now()
-
-	for _, token := range tokens {
-		if token.Kind != kind {
-			continue
-		}
-
-		// Get the last_used time for the specific model
-		lastUsed := token.LastUsedByModel[modelName]
-
-		// Select the oldest one
-		if lastUsed.Before(oldestTime) {
-			oldestTime = lastUsed
-			selectedToken = &token
-		}
-	}
-
-	return
 }
 
 // UpdateOAuthTokenModelLastUsed updates the last used time for a specific model in the OAuth token.
@@ -1766,33 +1654,6 @@ func GetGeminiAPIConfigs(db *sql.DB) ([]GeminiAPIConfig, error) {
 	}
 
 	return configs, nil
-}
-
-// GetNextGeminiAPIConfig selects the next Gemini API configuration to use based on the least recently used strategy for a specific model.
-func GetNextGeminiAPIConfig(db *sql.DB, modelName string) (selectedConfig *GeminiAPIConfig, err error) {
-	configs, err := GetGeminiAPIConfigs(db)
-	if err != nil {
-		return
-	}
-
-	oldestTime := time.Now()
-
-	for _, config := range configs {
-		if !config.Enabled {
-			continue
-		}
-
-		// Get the last_used time for the specific model
-		lastUsed := config.LastUsedByModel[modelName]
-
-		// Select the oldest one
-		if lastUsed.Before(oldestTime) {
-			oldestTime = lastUsed
-			selectedConfig = &config
-		}
-	}
-
-	return
 }
 
 // UpdateModelLastUsed updates the last used time for a specific model in the Gemini API configuration.
