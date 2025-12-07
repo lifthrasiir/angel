@@ -364,8 +364,6 @@ const SettingsPage: React.FC = () => {
                     onClick={() => handleViewAccountDetails(account)}
                     style={{
                       cursor: 'pointer',
-                      color: '#007bff',
-                      textDecoration: 'underline',
                     }}
                   >
                     {account.email}

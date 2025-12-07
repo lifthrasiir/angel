@@ -156,8 +156,8 @@ export function AccountDetailsModal({ accountEmail, details, onClose }: Props) {
                           Max Output{getSortIndicator('maxOutputTokens')}
                         </th>
                         <th onClick={() => handleSort('images')}>Images{getSortIndicator('images')}</th>
-                        <th onClick={() => handleSort('thinking')}>Thinking{getSortIndicator('thinking')}</th>
                         <th onClick={() => handleSort('video')}>Video{getSortIndicator('video')}</th>
+                        <th onClick={() => handleSort('thinking')}>Thinking{getSortIndicator('thinking')}</th>
                         <th onClick={() => handleSort('usages')}>Usages{getSortIndicator('usages')}</th>
                       </>
                     )}

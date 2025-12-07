@@ -213,15 +213,6 @@ func calculateModelUsages(resp *FetchAvailableModelsResponse) map[string]ModelDe
 	return models
 }
 
-// is403PermissionDenied checks if an error is a 403 PERMISSION_DENIED error
-func is403PermissionDenied(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, "403") && strings.Contains(errMsg, "PERMISSION_DENIED")
-}
-
 func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
