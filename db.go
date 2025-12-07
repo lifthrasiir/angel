@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha512"
 	"database/sql"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -13,20 +14,25 @@ import (
 	"sync"
 	"time"
 
-	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/ncruces/go-sqlite3"
+	_ "github.com/ncruces/go-sqlite3/driver"
 
 	"github.com/lifthrasiir/angel/fs"
 )
+
+// See https://github.com/ncruces/sqlite-vec-go/tree/main for rebuilding this binary.
+//
+//go:embed src/go-sqlite3-v0.30.3+sqlite-vec-v0.1.6.wasm
+var sqliteBinary []byte
+
+func init() {
+	sqlite3.Binary = sqliteBinary
+}
 
 var (
 	walCheckpointTicker *time.Ticker
 	walCheckpointMutex  sync.Mutex
 )
-
-func init() {
-	sqlite_vec.Auto()
-}
 
 // StartWALCheckpointManager starts a background goroutine to periodically run WAL checkpoints
 func StartWALCheckpointManager(db *sql.DB) {

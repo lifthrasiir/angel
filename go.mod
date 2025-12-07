@@ -15,14 +15,13 @@ replace (
 )
 
 require (
-	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/csrf v1.7.3
 	github.com/gorilla/mux v1.8.1
 	github.com/k3a/html2text v1.2.0
-	github.com/mattn/go-sqlite3 v1.14.29
 	github.com/modelcontextprotocol/go-sdk v0.2.0
+	github.com/ncruces/go-sqlite3 v0.30.3
 	golang.org/x/oauth2 v0.23.0
 )
 
@@ -30,7 +29,9 @@ require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
+	github.com/tetratelabs/wazero v1.10.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 )

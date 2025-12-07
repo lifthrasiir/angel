@@ -48,9 +48,6 @@ func getExecutableName() string {
 }
 
 func main() {
-	// Fail early if not compiled with sqlite_fts5 tag
-	You_Are_Required_To_Compile_With__sqlite_fts5__Tag()
-
 	modelsRegistry, err := LoadModels(modelsJSON)
 	if err != nil {
 		log.Fatalf("Failed to load models.json: %v", err)
