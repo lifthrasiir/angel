@@ -9,6 +9,9 @@ import (
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // MCPManager manages all MCP connections.
@@ -55,7 +58,7 @@ func InitMCPManager(db *sql.DB) {
 		connections: make(map[string]*MCPConnection),
 	}
 
-	configs, err := GetMCPServerConfigs(db)
+	configs, err := database.GetMCPServerConfigs(db)
 	if err != nil {
 		log.Printf("Error loading MCP server configs: %v", err)
 		return

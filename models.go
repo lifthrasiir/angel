@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -13,6 +11,9 @@ import (
 	"time"
 
 	"github.com/fvbommel/sortorder"
+
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 const AngelEvalModelName = "angel-eval"
@@ -623,18 +624,9 @@ func (r *ModelsRegistry) GetModel(name string) (*Model, bool) {
 	return model, exists
 }
 
-// Hash generates a unique hash for OpenAI config to detect changes
-func (config *OpenAIConfig) Hash() string {
-	hasher := sha256.New()
-	hasher.Write([]byte(config.Endpoint))
-	hasher.Write([]byte(config.APIKey))
-	hasher.Write([]byte(fmt.Sprintf("%v", config.Enabled)))
-	return hex.EncodeToString(hasher.Sum(nil))
-}
-
 // InitializeOpenAIEndpoints sets up OpenAI providers from database configs
 func (r *ModelsRegistry) InitializeOpenAIEndpoints(db *sql.DB) error {
-	configs, err := GetOpenAIConfigs(db)
+	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenAI configs: %w", err)
 	}
@@ -707,7 +699,7 @@ func (r *ModelsRegistry) createOpenAIEndpoint(config *OpenAIConfig) error {
 
 // UpdateOpenAIEndpoints updates OpenAI providers when configs change
 func (r *ModelsRegistry) UpdateOpenAIEndpoints(db *sql.DB) error {
-	configs, err := GetOpenAIConfigs(db)
+	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenAI configs: %w", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // AngelEvalProvider implements the LLMProvider interface for the angel-eval model.

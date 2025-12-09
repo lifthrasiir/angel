@@ -9,8 +9,6 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
-const DefaultGeminiModel = "gemini-2.5-flash"
-
 // SessionParams holds parameters for a chat session.
 type SessionParams struct {
 	Contents        []Content

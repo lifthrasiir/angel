@@ -16,6 +16,8 @@ import (
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 type InitialState struct {
@@ -27,7 +29,7 @@ type InitialState struct {
 	Roots                  []string          `json:"roots"`
 	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"`
 	PendingConfirmation    string            `json:"pendingConfirmation,omitempty"`
-	EnvChanged             *EnvChanged       `json:"envChanged,omitempty"` // Added EnvChanged field
+	EnvChanged             *EnvChanged       `json:"envChanged,omitempty"`
 }
 
 // New session and message handler
@@ -50,11 +52,11 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionId := generateID()
+	sessionId := database.GenerateID()
 
 	var workspaceName string
 	if requestBody.WorkspaceID != "" {
-		workspace, err := GetWorkspace(db, requestBody.WorkspaceID)
+		workspace, err := database.GetWorkspace(db, requestBody.WorkspaceID)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get workspace %s", requestBody.WorkspaceID))
 			return
@@ -79,7 +81,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Handle InitialRoots if provided
 	if len(requestBody.InitialRoots) > 0 {
 		// Set initial roots as generation 0 environment
-		err := SetInitialSessionEnv(db, sessionId, requestBody.InitialRoots)
+		err := database.SetInitialSessionEnv(db, sessionId, requestBody.InitialRoots)
 		if err != nil {
 			sendInternalServerError(w, r, err, "Failed to set initial session environment")
 			return
@@ -98,7 +100,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session with primary_branch_id (moved after InitialRoots handling)
-	primaryBranchID, err := CreateSession(db, sessionId, systemPrompt, requestBody.WorkspaceID)
+	primaryBranchID, err := database.CreateSession(db, sessionId, systemPrompt, requestBody.WorkspaceID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create new session")
 		return
@@ -107,7 +109,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	userMessage := requestBody.Message
 
 	// Create a new message chain
-	mc, err := NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create new message chain")
 		return
@@ -123,7 +125,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update last_updated_at for the new session
-	if err := UpdateSessionLastUpdated(db, sessionId); err != nil {
+	if err := database.UpdateSessionLastUpdated(db, sessionId); err != nil {
 		log.Printf("Failed to update last_updated_at for new session %s: %v", sessionId, err)
 		// Non-fatal error, continue with response
 	}
@@ -141,21 +143,21 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	defer removeSseWriter(sessionId, sseW)
 
 	// Retrieve session history from DB for LLM (full context)
-	historyContext, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
+	historyContext, err := database.GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
 		return
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
-	frontendHistory, err := GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
+	frontendHistory, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
 		return
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
-	currentRoots, _, err := GetLatestSessionEnv(db, sessionId) // Generation is guaranteed to be 0
+	currentRoots, _, err := database.GetLatestSessionEnv(db, sessionId) // Generation is guaranteed to be 0
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to get latest session environment")
 		return
@@ -203,14 +205,14 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		Message     string           `json:"message"`
 		Attachments []FileAttachment `json:"attachments"`
 		Model       string           `json:"model"`
-		FetchLimit  int              `json:"fetchLimit"` // Add FetchLimit
+		FetchLimit  int              `json:"fetchLimit"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
 		return
 	}
 
-	session, err := GetSession(db, sessionId)
+	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		log.Printf("chatMessage: Failed to load session %s: %v", sessionId, err)
 		if errors.Is(err, sql.ErrNoRows) ||
@@ -228,7 +230,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	var envChangedEventPayload string
 
 	// Create a new message chain
-	mc, err := NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create message chain")
 		return
@@ -241,7 +243,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		mc.LastMessageModel = DefaultGeminiModel
 	}
 
-	_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
+	_, currentGeneration, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -250,14 +252,14 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	// Check for environment changes and add system message to chain if needed
 	if currentGeneration > mc.LastMessageGeneration {
 		// Get old roots from the previous generation
-		oldRoots, err := GetSessionEnv(db, sessionId, mc.LastMessageGeneration)
+		oldRoots, err := database.GetSessionEnv(db, sessionId, mc.LastMessageGeneration)
 		if err != nil {
 			log.Printf("chatMessage: Failed to get old session environment for session %s, generation %d: %v", sessionId, mc.LastMessageGeneration, err)
 			// Non-fatal, continue with user message
 		}
 
 		// Get new roots from the current generation
-		newRoots, err := GetSessionEnv(db, sessionId, currentGeneration)
+		newRoots, err := database.GetSessionEnv(db, sessionId, currentGeneration)
 		if err != nil {
 			log.Printf("chatMessage: Failed to get new session environment for session %s, generation %d: %v", sessionId, currentGeneration, err)
 			// Non-fatal, continue with user message
@@ -305,7 +307,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update last_updated_at for the session
-	if err := UpdateSessionLastUpdated(db, sessionId); err != nil {
+	if err := database.UpdateSessionLastUpdated(db, sessionId); err != nil {
 		log.Printf("Failed to update last_updated_at for session %s: %v", sessionId, err)
 		// Non-fatal error, continue with response
 	}
@@ -327,20 +329,20 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
 
 	// Retrieve session history from DB for LLM (full context)
-	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, primaryBranchID)
+	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
 		return
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
-	frontendHistoryForInitialState, err := GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
+	frontendHistoryForInitialState, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
 		return
 	}
 
-	roots, _, err := GetLatestSessionEnv(db, sessionId)
+	roots, _, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -382,7 +384,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if session exists
-	exists, err := SessionExists(db, sessionId)
+	exists, err := database.SessionExists(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to check session existence")
 		return
@@ -392,7 +394,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := GetSession(db, sessionId)
+	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to load session")
 		return
@@ -438,7 +440,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Use automatic branch detection to load history with pagination
-	history, actualBranchID, err := GetSessionHistoryPaginatedWithAutoBranch(db, sessionId, beforeMessageID, fetchLimit)
+	history, actualBranchID, err := database.GetSessionHistoryPaginatedWithAutoBranch(db, sessionId, beforeMessageID, fetchLimit)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to load session history")
 		return
@@ -449,7 +451,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		history = []FrontendMessage{}
 	}
 
-	currentRoots, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
+	currentRoots, currentGeneration, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -465,7 +467,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 			log.Printf("loadChatSession: Failed to parse last message ID: %v", err)
 			// Non-fatal, continue with generation 0
 		} else {
-			lastMessage, err := GetMessageByID(db, lastFrontendMessageID)
+			lastMessage, err := database.GetMessageByID(db, lastFrontendMessageID)
 			if err != nil {
 				log.Printf("loadChatSession: Failed to get last message by ID %d: %v", lastFrontendMessageID, err)
 				// Non-fatal, continue with generation 0
@@ -477,7 +479,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 	var initialStateEnvChanged *EnvChanged
 	if currentGeneration > lastMessageGenerationInHistory {
-		oldRoots, err := GetSessionEnv(db, sessionId, lastMessageGenerationInHistory)
+		oldRoots, err := database.GetSessionEnv(db, sessionId, lastMessageGenerationInHistory)
 		if err != nil {
 			log.Printf("loadChatSession: Failed to get old session environment for generation %d: %v", lastMessageGenerationInHistory, err)
 			// Non-fatal, continue
@@ -501,7 +503,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		EnvChanged:      initialStateEnvChanged,
 	}
 
-	branch, err := GetBranch(db, actualBranchID)
+	branch, err := database.GetBranch(db, actualBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get branch %s", actualBranchID))
 		return
@@ -551,7 +553,7 @@ func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := r.URL.Query().Get("workspaceId")
 
-	wsWithSessions, err := GetWorkspaceAndSessions(db, workspaceID)
+	wsWithSessions, err := database.GetWorkspaceAndSessions(db, workspaceID)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to retrieve sessions for workspace %s", workspaceID))
 		return
@@ -602,7 +604,7 @@ func deleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := DeleteSession(db, sessionId); err != nil {
+	if err := database.DeleteSession(db, sessionId); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete session %s", sessionId))
 		return
 	}
@@ -642,7 +644,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 					)
 				} else {
 					// Normal blob processing
-					blobData, err := GetBlob(db, att.Hash)
+					blobData, err := database.GetBlob(db, att.Hash)
 					if err != nil {
 						log.Printf("Error retrieving blob data for hash %s: %v", att.Hash, err)
 						// Decide how to handle this error: skip attachment, return error, etc.

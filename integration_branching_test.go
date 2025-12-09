@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // TestBranchingLogic tests the branching functionality in sessions and messages.
@@ -15,13 +18,13 @@ func TestBranchingLogic(t *testing.T) {
 
 	// Scenario 1: Linear message flow - chosen_next_id updates correctly
 	t.Run("LinearMessageFlow", func(t *testing.T) {
-		sessionId := generateID()                                                            // Generate session ID
-		primaryBranchID, err := CreateSession(testDB, sessionId, "System prompt", "default") // Updated
+		sessionId := database.GenerateID()
+		primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt", "default")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
-		mc, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
@@ -71,13 +74,13 @@ func TestBranchingLogic(t *testing.T) {
 
 	// Scenario 2: Branching - new session has correct parent_id and branch_id
 	t.Run("BranchingNewSession", func(t *testing.T) {
-		originalSessionId := generateID()
-		originalPrimaryBranchID, err := CreateSession(testDB, originalSessionId, "Original system prompt", "default")
+		originalSessionId := database.GenerateID()
+		originalPrimaryBranchID, err := database.CreateSession(testDB, originalSessionId, "Original system prompt", "default")
 		if err != nil {
 			t.Fatalf("Failed to create original session: %v", err)
 		}
 
-		mcOriginal, err := NewMessageChain(context.Background(), testDB, originalSessionId, originalPrimaryBranchID)
+		mcOriginal, err := database.NewMessageChain(context.Background(), testDB, originalSessionId, originalPrimaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain for original session: %v", err)
 		}
@@ -167,20 +170,20 @@ func TestBranchingLogic(t *testing.T) {
 
 	// Scenario 3: SetPrimaryBranchHandler
 	t.Run("SetPrimaryBranchHandler", func(t *testing.T) {
-		sessionId := generateID()
-		originalPrimaryBranchID, err := CreateSession(testDB, sessionId, "Session for primary branch test", "default")
+		sessionId := database.GenerateID()
+		originalPrimaryBranchID, err := database.CreateSession(testDB, sessionId, "Session for primary branch test", "default")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
 		// Create a new branch
 		msgToBranchFrom := Message{SessionID: sessionId, BranchID: originalPrimaryBranchID, Text: "Message to branch from for primary branch test", Type: "user"}
-		msgIDToBranchFrom, err := AddMessageToSession(context.Background(), testDB, msgToBranchFrom)
+		msgIDToBranchFrom, err := database.AddMessageToSession(context.Background(), testDB, msgToBranchFrom)
 		if err != nil {
 			t.Fatalf("Failed to add message to branch from for primary branch test: %v", err)
 		}
-		newBranchID := generateID()
-		_, err = CreateBranch(testDB, newBranchID, sessionId, &originalPrimaryBranchID, &msgIDToBranchFrom) // Pass generated ID
+		newBranchID := database.GenerateID()
+		_, err = database.CreateBranch(testDB, newBranchID, sessionId, &originalPrimaryBranchID, &msgIDToBranchFrom) // Pass generated ID
 		if err != nil {
 			t.Fatalf("Failed to create new branch for primary branch test: %v", err)
 		}
@@ -212,13 +215,13 @@ func TestBranchingLogic(t *testing.T) {
 	})
 
 	t.Run("TestGetSessionHistory_And_Context_InBranching", func(t *testing.T) {
-		sessionId := generateID()
-		primaryBranchID, err := CreateSession(testDB, sessionId, "System prompt for history test", "default")
+		sessionId := database.GenerateID()
+		primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for history test", "default")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
-		mcHistory, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mcHistory, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain for history test: %v", err)
 		}
@@ -264,12 +267,12 @@ func TestBranchingLogic(t *testing.T) {
 		}
 
 		// 2. Create a branch (branch from msg4)
-		newBranchID, err := CreateBranch(testDB, generateID(), sessionId, &primaryBranchID, &msg4.ID)
+		newBranchID, err := database.CreateBranch(testDB, database.GenerateID(), sessionId, &primaryBranchID, &msg4.ID)
 		if err != nil {
 			t.Fatalf("Failed to create new branch: %v", err)
 		}
 
-		mcNewBranch, err := NewMessageChain(context.Background(), testDB, sessionId, newBranchID)
+		mcNewBranch, err := database.NewMessageChain(context.Background(), testDB, sessionId, newBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain for new branch: %v", err)
 		}
@@ -295,9 +298,9 @@ func TestBranchingLogic(t *testing.T) {
 			t.Fatalf("Failed to add msgD: %v", err)
 		}
 
-		// 3. GetSessionHistory 테스트 (primaryBranchID)
+		// 3. GetSessionHistory test (primaryBranchID)
 		t.Run("GetSessionHistory_PrimaryBranch", func(t *testing.T) {
-			history, err := GetSessionHistory(testDB, sessionId, primaryBranchID)
+			history, err := database.GetSessionHistory(testDB, sessionId, primaryBranchID)
 			if err != nil {
 				t.Fatalf("GetSessionHistory failed: %v", err)
 			}
@@ -326,9 +329,9 @@ func TestBranchingLogic(t *testing.T) {
 			}
 		})
 
-		// 4. GetSessionHistoryContext 테스트 (primaryBranchID)
+		// 4. GetSessionHistoryContext test (primaryBranchID)
 		t.Run("GetSessionHistoryContext_PrimaryBranch", func(t *testing.T) {
-			history, err := GetSessionHistoryContext(testDB, sessionId, primaryBranchID)
+			history, err := database.GetSessionHistoryContext(testDB, sessionId, primaryBranchID)
 			if err != nil {
 				t.Fatalf("GetSessionHistoryContext failed: %v", err)
 			}
@@ -369,7 +372,7 @@ func TestBranchingLogic(t *testing.T) {
 
 		// 5. Test GetSessionHistoryContext (newBranchID)
 		t.Run("GetSessionHistoryContext_NewBranch", func(t *testing.T) {
-			history, err := GetSessionHistoryContext(testDB, sessionId, newBranchID)
+			history, err := database.GetSessionHistoryContext(testDB, sessionId, newBranchID)
 			if err != nil {
 				t.Fatalf("GetSessionHistoryContext failed: %v", err)
 			}
@@ -409,7 +412,7 @@ func TestNewSessionAndMessage_BranchIDConsistency(t *testing.T) {
 
 	t.Run("BranchIDConsistency", func(t *testing.T) {
 		// Create the workspace before making the request
-		CreateWorkspace(testDB, "testWsConsistency", "Consistency Workspace", "")
+		database.CreateWorkspace(testDB, "testWsConsistency", "Consistency Workspace", "")
 
 		payload := []byte(`{"message": "Initial message for consistency test", "workspaceId": "testWsConsistency"}`)
 		_ = testRequest(t, router, "POST", "/api/chat", payload, http.StatusOK)
@@ -446,23 +449,23 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 
 	t.Run("BranchIDConsistency", func(t *testing.T) {
 		// 1. Create an initial session and messages to branch from
-		sessionId := generateID()
-		primaryBranchID, err := CreateSession(testDB, sessionId, "Initial system prompt for branching test", "default")
+		sessionId := database.GenerateID()
+		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Initial system prompt for branching test", "default")
 		if err != nil {
 			t.Fatalf("Failed to create initial session: %v", err)
 		}
 		firstMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "First message for branching test", Type: "user"}
-		firstMessageID, err := AddMessageToSession(context.Background(), testDB, firstMessage)
+		firstMessageID, err := database.AddMessageToSession(context.Background(), testDB, firstMessage)
 		if err != nil {
 			t.Fatalf("Failed to add first message: %v", err)
 		}
 		parentMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &firstMessageID, Text: "Message to branch from", Type: "user"}
-		parentMessageID, err := AddMessageToSession(context.Background(), testDB, parentMessage)
+		parentMessageID, err := database.AddMessageToSession(context.Background(), testDB, parentMessage)
 		if err != nil {
 			t.Fatalf("Failed to add parent message: %v", err)
 		}
 		// Update chosen_next_id for the first message
-		if err = UpdateMessageChosenNextID(testDB, firstMessageID, &parentMessageID); err != nil {
+		if err = database.UpdateMessageChosenNextID(testDB, firstMessageID, &parentMessageID); err != nil {
 			t.Fatalf("Failed to update chosen_next_id for first message: %v", err)
 		}
 
@@ -534,14 +537,14 @@ func TestFirstMessageEditing(t *testing.T) {
 		router, testDB, _ := setupTest(t)
 
 		// Create a new session
-		sessionId := generateID()
-		primaryBranchID, err := CreateSession(testDB, sessionId, "Test system prompt", "")
+		sessionId := database.GenerateID()
+		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
 		// Create a message chain and add the first message
-		mc, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
@@ -597,11 +600,11 @@ func TestFirstMessageEditing(t *testing.T) {
 		}
 
 		// Test GetSessionHistory returns only the edited first message chain
-		session, err := GetSession(testDB, sessionId)
+		session, err := database.GetSession(testDB, sessionId)
 		if err != nil {
 			t.Fatalf("Failed to get session: %v", err)
 		}
-		history, err := GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
+		history, err := database.GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
 		if err != nil {
 			t.Fatalf("GetSessionHistory failed: %v", err)
 		}
@@ -622,14 +625,14 @@ func TestFirstMessageEditing(t *testing.T) {
 		router, testDB, _ := setupTest(t)
 
 		// Create a new session
-		sessionId := generateID()
-		primaryBranchID, err := CreateSession(testDB, sessionId, "Test system prompt", "")
+		sessionId := database.GenerateID()
+		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
 		// Create a message chain with multiple messages: A1 -> B1 -> C1
-		mc, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
@@ -695,11 +698,11 @@ func TestFirstMessageEditing(t *testing.T) {
 		}
 
 		// Test GetSessionHistory returns the correct chain after first message edit
-		session, err := GetSession(testDB, sessionId)
+		session, err := database.GetSession(testDB, sessionId)
 		if err != nil {
 			t.Fatalf("Failed to get session: %v", err)
 		}
-		history, err := GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
+		history, err := database.GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
 		if err != nil {
 			t.Fatalf("GetSessionHistory failed: %v", err)
 		}
@@ -728,14 +731,14 @@ func TestFirstMessageEditing(t *testing.T) {
 		router, testDB, _ := setupTest(t)
 
 		// Create a new session
-		sessionId := generateID()
-		primaryBranchID, err := CreateSession(testDB, sessionId, "Test system prompt", "")
+		sessionId := database.GenerateID()
+		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
 		// Create initial chain: A1 -> B1 -> C1
-		mc, err := NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
@@ -775,7 +778,7 @@ func TestFirstMessageEditing(t *testing.T) {
 		}
 
 		// Create new chain from the last message
-		mc, err = NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err = database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create new message chain: %v", err)
 		}

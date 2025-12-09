@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonschema"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // ToolHandlerParams contains parameters passed to a tool's handler function.

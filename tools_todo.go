@@ -7,7 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	fsPkg "github.com/lifthrasiir/angel/fs"
+	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
@@ -22,7 +22,7 @@ type TodoItem struct {
 }
 
 // readTodos reads the current TODO list from the SessionFS.
-func readTodos(sf *fsPkg.SessionFS) ([]TodoItem, error) {
+func readTodos(sf *filesystem.SessionFS) ([]TodoItem, error) {
 	data, err := sf.ReadFile(todoFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -44,7 +44,7 @@ func readTodos(sf *fsPkg.SessionFS) ([]TodoItem, error) {
 }
 
 // writeTodos writes the given TODO list to the SessionFS.
-func writeTodos(sf *fsPkg.SessionFS, todos []TodoItem) error {
+func writeTodos(sf *filesystem.SessionFS, todos []TodoItem) error {
 	jsonData, err := json.MarshalIndent(todos, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal TODOs: %w", err)

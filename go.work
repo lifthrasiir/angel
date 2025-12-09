@@ -1,9 +1,10 @@
 go 1.24.4
 
-use .
-
-use ./src/fs
-
-use ./src/editor
-
-use ./src/gemini
+use (
+	.
+	./src/filesystem
+	./src/editor
+	./src/gemini
+	./src/internal/database
+	./src/internal/types
+)

@@ -14,6 +14,8 @@ import (
 	"unicode"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // addHashWithSpacing adds a hash to the response with appropriate spacing to avoid
@@ -92,22 +94,22 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 
 	if hasSystemPrompt {
 		// Spawn a new subagent
-		agentID := generateID()
+		agentID := database.GenerateID()
 		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
 
-		_, err = CreateSession(db, subsessionID, systemPrompt, "")
+		_, err = database.CreateSession(db, subsessionID, systemPrompt, "")
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to create new subagent session with ID %s: %w", subsessionID, err)
 		}
 
 		// Now send the initial message to the newly spawned subagent
 		// This part is similar to the beginning of SubagentTurnTool
-		session, err := GetSession(db, subsessionID)
+		session, err := database.GetSession(db, subsessionID)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found after creation: %w", subsessionID, err)
 		}
 
-		mc, err := NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
+		mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
 		}
@@ -124,12 +126,12 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 		// Interact with an existing subagent
 		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, subagentID)
 
-		session, err := GetSession(db, subsessionID)
+		session, err := database.GetSession(db, subsessionID)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
 		}
 
-		mc, err := NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
+		mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
 		}
@@ -153,16 +155,16 @@ func handleSubagentTurn(
 	session *Session,
 	params ToolHandlerParams,
 	agentID string,
-	mc *MessageChain,
+	mc *database.MessageChain,
 ) (ToolHandlerResults, error) {
 	// Get main session environment
-	mainSessionEnvRoots, _, err := GetLatestSessionEnv(db, params.SessionId)
+	mainSessionEnvRoots, _, err := database.GetLatestSessionEnv(db, params.SessionId)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to get main session environment: %w", err)
 	}
 
 	// Get subagent session environment
-	subSessionEnvRoots, subSessionGeneration, err := GetLatestSessionEnv(db, subsessionID)
+	subSessionEnvRoots, subSessionGeneration, err := database.GetLatestSessionEnv(db, subsessionID)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to get subagent session environment: %w", err)
 	}
@@ -189,7 +191,7 @@ func handleSubagentTurn(
 			return ToolHandlerResults{}, fmt.Errorf("failed to add env_changed message to subagent session: %w", err)
 		}
 		// Add new subagent session environment in DB
-		_, err = AddSessionEnv(db, subsessionID, mainSessionEnvRoots)
+		_, err = database.AddSessionEnv(db, subsessionID, mainSessionEnvRoots)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to add new subagent session environment: %w", err)
 		}
@@ -197,7 +199,7 @@ func handleSubagentTurn(
 
 	// Load conversation context for the subagent (using GetSessionHistoryContext function defined in db_chat.go)
 	// GetSessionHistoryContext returns []FrontendMessage.
-	frontendMessages, err := GetSessionHistoryContext(db, subsessionID, session.PrimaryBranchID)
+	frontendMessages, err := database.GetSessionHistoryContext(db, subsessionID, session.PrimaryBranchID)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to get messages for subagent session %s: %w", subsessionID, err)
 	}
@@ -357,24 +359,24 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Create a subsession for image generation
-	agentID := generateID()
+	agentID := database.GenerateID()
 	subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
 
 	// Create subsession with system prompt for image generation
 	systemPrompt := "Generate images based on the user's request. The output should contain the generated images."
-	_, err = CreateSession(db, subsessionID, systemPrompt, "")
+	_, err = database.CreateSession(db, subsessionID, systemPrompt, "")
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to create image generation subsession with ID %s: %w", subsessionID, err)
 	}
 
 	// Get session for message chain creation
-	session, err := GetSession(db, subsessionID)
+	session, err := database.GetSession(db, subsessionID)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("image generation subsession with ID %s not found after creation: %w", subsessionID, err)
 	}
 
 	// Create message chain for the subsession
-	mc, err := NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
+	mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for image generation subsession: %w", err)
 	}
@@ -397,7 +399,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	var userMessageAttachments []FileAttachment
 	for _, hash := range inputHashes {
 		if hash != "" {
-			attachment, err := GetBlobAsFileAttachment(db, hash)
+			attachment, err := database.GetBlobAsFileAttachment(db, hash)
 			if err != nil {
 				return ToolHandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
 			}
@@ -428,7 +430,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	for _, hash := range inputHashes {
 		if hash != "" {
 			// Retrieve blob data for the hash
-			blobData, err := GetBlob(db, hash)
+			blobData, err := database.GetBlob(db, hash)
 			if err != nil {
 				return ToolHandlerResults{}, fmt.Errorf("failed to retrieve blob for hash %s: %w", hash, err)
 			}
@@ -488,7 +490,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 						continue
 					}
 
-					hash, err := SaveBlob(ctx, db, imageData)
+					hash, err := database.SaveBlob(ctx, db, imageData)
 					if err != nil {
 						log.Printf("Warning: Failed to save generated image blob: %v", err)
 						continue

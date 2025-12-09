@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"embed"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,11 +20,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/mux"
 
-	fsPkg "github.com/lifthrasiir/angel/fs"
+	"github.com/lifthrasiir/angel/filesystem"
+	"github.com/lifthrasiir/angel/internal/database"
 )
 
 const dbPath = "angel.db"
@@ -65,7 +64,7 @@ func main() {
 
 	checkNetworkFilesystem(dbPath)
 
-	db, err := InitDB(dbPath)
+	db, err := database.InitDB(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -75,10 +74,10 @@ func main() {
 	StartShellCommandManager(db) // Pass the database connection
 
 	// Start WAL checkpoint manager
-	StartWALCheckpointManager(db)
+	database.StartWALCheckpointManager(db)
 
 	// Retrieve or generate CSRF key
-	csrfKey, err := GetAppConfig(db, CSRFKeyName)
+	csrfKey, err := database.GetAppConfig(db, database.CSRFKeyName)
 	if err != nil {
 		log.Fatalf("Failed to retrieve CSRF key from DB: %v", err)
 	}
@@ -87,7 +86,7 @@ func main() {
 		if _, err := rand.Read(csrfKey); err != nil {
 			log.Fatalf("Failed to generate CSRF key: %v", err)
 		}
-		if err := SetAppConfig(db, CSRFKeyName, csrfKey); err != nil {
+		if err := database.SetAppConfig(db, database.CSRFKeyName, csrfKey); err != nil {
 			log.Fatalf("Failed to save CSRF key to DB: %v", err)
 		}
 		log.Println("Generated and saved new CSRF key.")
@@ -168,10 +167,10 @@ func main() {
 	log.Println("Shutting down server...")
 
 	// Stop WAL checkpoint manager
-	StopWALCheckpointManager()
+	database.StopWALCheckpointManager()
 
 	// Perform final WAL checkpoint before shutdown
-	if err := PerformWALCheckpoint(db); err != nil {
+	if err := database.PerformWALCheckpoint(db); err != nil {
 		log.Printf("Final WAL checkpoint failed: %v", err)
 	}
 
@@ -191,7 +190,7 @@ func checkNetworkFilesystem(dbPath string) {
 		log.Fatalf("Failed to get absolute path for angel.db: %v", err)
 	}
 
-	isNetwork, fsType, err := fsPkg.IsNetworkFilesystem(absDBPath)
+	isNetwork, fsType, err := filesystem.IsNetworkFilesystem(absDBPath)
 	if err != nil {
 		log.Printf("Warning: Could not determine if angel.db is on a network filesystem: %v", err)
 	} else if isNetwork {
@@ -505,29 +504,4 @@ func getGaFromContext(ctx context.Context) (*GeminiAuth, error) {
 		return nil, fmt.Errorf("gemini auth not found in context")
 	}
 	return ga, nil
-}
-
-func generateID() string {
-	for {
-		b := make([]byte, 8) // 8 bytes will result in an 11-character base64 string
-		if _, err := rand.Read(b); err != nil {
-			log.Printf("Error generating random ID: %v", err)
-			// Fallback to UUID or handle error appropriately
-			return uuid.New().String() // Fallback to UUID if random generation fails
-		}
-		id := base64.RawURLEncoding.EncodeToString(b)
-		// Check if the ID contains any uppercase letters
-		hasUppercase := false
-		for _, r := range id {
-			if r >= 'A' && r <= 'Z' {
-				hasUppercase = true
-				break
-			}
-		}
-		// If it has at least one uppercase letter, it's unlikely to collide with /new or /w/new
-		if hasUppercase {
-			return id
-		}
-		log.Println("Generated ID without uppercase, regenerating to avoid collision with /new or /w/new.")
-	}
 }

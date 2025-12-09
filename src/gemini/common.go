@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 )
 
+const DefaultGeminiModel = "gemini-2.5-flash"
+
 // baseClient provides common functionality for Gemini API clients
 type baseClient struct {
 	clientProvider HTTPClientProvider

@@ -11,8 +11,10 @@ import (
 	"sync"
 
 	"github.com/lifthrasiir/angel/editor"
-	fsPkg "github.com/lifthrasiir/angel/fs"
+	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // PendingConfirmation is a special error type used to signal that user confirmation is required.
@@ -26,7 +28,7 @@ func (e *PendingConfirmation) Error() string {
 
 // sessionFSEntry holds a SessionFS instance and its reference count.
 type sessionFSEntry struct {
-	sessionFS *fsPkg.SessionFS
+	sessionFS *filesystem.SessionFS
 	refCount  int
 }
 
@@ -36,13 +38,13 @@ var sessionFSMutex sync.Mutex // Mutex to protect sessionFSMap
 
 // getSessionFS retrieves or creates a SessionFS instance for a given session ID.
 // It increments the reference count for the SessionFS instance.
-func getSessionFS(ctx context.Context, sessionId string) (*fsPkg.SessionFS, error) { // Modified signature
+func getSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS, error) { // Modified signature
 	sessionFSMutex.Lock()
 	defer sessionFSMutex.Unlock()
 
 	entry, ok := sessionFSMap[sessionId]
 	if !ok {
-		sf, err := fsPkg.NewSessionFS(sessionId)
+		sf, err := filesystem.NewSessionFS(sessionId)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SessionFS for session %s: %w", sessionId, err)
 		}
@@ -54,7 +56,7 @@ func getSessionFS(ctx context.Context, sessionId string) (*fsPkg.SessionFS, erro
 		}
 
 		// Get the session environment to retrieve roots
-		roots, _, err := GetLatestSessionEnv(db, sessionId)
+		roots, _, err := database.GetLatestSessionEnv(db, sessionId)
 		if err != nil {
 			log.Printf("getSessionFS: Failed to get session %s to retrieve roots: %v", sessionId, err)
 			return nil, fmt.Errorf("failed to get session roots for session %s: %w", sessionId, err)
@@ -131,7 +133,7 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params ToolH
 			return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context for SaveBlob: %w", err)
 		}
 
-		hash, err := SaveBlob(ctx, db, content)
+		hash, err := database.SaveBlob(ctx, db, content)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to save blob for %s: %w", absolutePath, err)
 		}

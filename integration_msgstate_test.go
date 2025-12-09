@@ -14,6 +14,8 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // mockCloser is already defined in integration_msgchain_test.go
@@ -144,7 +146,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 
 	// Verification 1: Check if ThoughtSignature is stored in the database (using GetSessionHistoryContext for LLM context)
 	// This is what would be sent to the LLM, so it should include ThoughtSignature
-	messagesForLLM, err := GetSessionHistoryContext(db, sessionID, primaryBranchID)
+	messagesForLLM, err := database.GetSessionHistoryContext(db, sessionID, primaryBranchID)
 	if err != nil {
 		t.Fatalf("Failed to get messages for LLM context: %v", err)
 	}

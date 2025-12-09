@@ -18,6 +18,8 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // Ensure OpenAIClient implements LLMProvider
@@ -798,7 +800,7 @@ func (c *OpenAIClient) MaxTokens(modelName string) int {
 // ReloadOpenAIProviders reloads OpenAI providers from database configurations
 func ReloadOpenAIProviders(db *sql.DB, registry *ModelsRegistry) {
 	// Get current OpenAI configs to know which models to keep
-	configs, err := GetOpenAIConfigs(db)
+	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		log.Printf("Failed to load OpenAI configs for reload: %v", err)
 		return

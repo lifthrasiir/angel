@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 type EventType rune

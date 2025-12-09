@@ -13,6 +13,8 @@ import (
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // createBranchHandler creates a new branch from a given parent message.
@@ -42,7 +44,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// For retry, get the original message text and attachments if not provided
 	if isRetry && requestBody.NewMessageText == "" {
-		originalMessage, err := GetMessageByID(db, requestBody.UpdatedMessageID)
+		originalMessage, err := database.GetMessageByID(db, requestBody.UpdatedMessageID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				sendNotFoundError(w, r, "Message not found")
@@ -55,7 +57,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the updated message's role, type, parent_message_id, and branch_id to validate branching and create new branch
-	updatedType, updatedParentMessageID, updatedBranchID, err := GetMessageDetails(db, requestBody.UpdatedMessageID)
+	updatedType, updatedParentMessageID, updatedBranchID, err := database.GetMessageDetails(db, requestBody.UpdatedMessageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			sendNotFoundError(w, r, "Updated message not found")
@@ -72,14 +74,14 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get session details first (common for both paths)
-	session, err := GetSession(db, sessionId)
+	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get session %s", sessionId))
 		return
 	}
 
 	// Check if this is an attempt to edit the first message
-	currentChosenFirstID, err := GetSessionChosenFirstID(db, sessionId)
+	currentChosenFirstID, err := database.GetSessionChosenFirstID(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to get current chosen_first_id")
 		return
@@ -99,14 +101,14 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		newMessageText := requestBody.NewMessageText
 
 		// Create a new branch for the edited first message
-		newBranchID = generateID()
-		if _, err := CreateBranch(db, newBranchID, sessionId, nil, nil); err != nil {
+		newBranchID = database.GenerateID()
+		if _, err := database.CreateBranch(db, newBranchID, sessionId, nil, nil); err != nil {
 			sendInternalServerError(w, r, err, "Failed to create new branch for first message edit")
 			return
 		}
 
 		// Set the new branch as the primary branch for the session
-		if err := UpdateSessionPrimaryBranchID(db, sessionId, newBranchID); err != nil {
+		if err := database.UpdateSessionPrimaryBranchID(db, sessionId, newBranchID); err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to set new branch as primary for session %s", sessionId))
 			return
 		}
@@ -118,14 +120,14 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get the original message to preserve its properties
-		originalMessage, err := GetMessageByID(db, updatedMessageID)
+		originalMessage, err := database.GetMessageByID(db, updatedMessageID)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get original message %d", updatedMessageID))
 			return
 		}
 
 		// Create the new first message in the new branch
-		newMessageID, err = AddMessageToSession(r.Context(), db, Message{
+		newMessageID, err = database.AddMessageToSession(r.Context(), db, Message{
 			SessionID:       sessionId,
 			BranchID:        newBranchID,
 			ParentMessageID: nil,
@@ -142,13 +144,13 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Update the session's chosen_first_id to point to the new message
-		if err := UpdateSessionChosenFirstID(db, sessionId, &newMessageID); err != nil {
+		if err := database.UpdateSessionChosenFirstID(db, sessionId, &newMessageID); err != nil {
 			sendInternalServerError(w, r, err, "Failed to update session chosen_first_id")
 			return
 		}
 
 		// Retrieve session history for frontend InitialState
-		frontendHistoryForInitialState, err = GetSessionHistoryPaginated(db, sessionId, newBranchID, 0, 20)
+		frontendHistoryForInitialState, err = database.GetSessionHistoryPaginated(db, sessionId, newBranchID, 0, 20)
 		if err != nil {
 			sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
 			return
@@ -163,30 +165,30 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		newBranchID = generateID()
+		newBranchID = database.GenerateID()
 		branchFromMessageID := int(updatedParentMessageID.Int64)
 
 		// Create the new branch in the branches table
-		if _, err := CreateBranch(db, newBranchID, sessionId, &updatedBranchID, &branchFromMessageID); err != nil {
+		if _, err := database.CreateBranch(db, newBranchID, sessionId, &updatedBranchID, &branchFromMessageID); err != nil {
 			sendInternalServerError(w, r, err, "Failed to create new branch in branches table")
 			return
 		}
 
 		// Get current generation and original message
-		_, currentGeneration, err := GetLatestSessionEnv(db, sessionId)
+		_, currentGeneration, err := database.GetLatestSessionEnv(db, sessionId)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 			return
 		}
 
-		originalMessage, err := GetMessageByID(db, requestBody.UpdatedMessageID)
+		originalMessage, err := database.GetMessageByID(db, requestBody.UpdatedMessageID)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get original message %d: %v", requestBody.UpdatedMessageID, err))
 			return
 		}
 
 		// Create the new message in the new branch
-		newMessageID, err = AddMessageToSession(r.Context(), db, Message{
+		newMessageID, err = database.AddMessageToSession(r.Context(), db, Message{
 			SessionID:       sessionId,
 			BranchID:        newBranchID,
 			ParentMessageID: &branchFromMessageID,
@@ -204,25 +206,25 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Update the chosen_next_id of the branch_from_message_id to point to the new message
-		if err := UpdateMessageChosenNextID(db, branchFromMessageID, &newMessageID); err != nil {
+		if err := database.UpdateMessageChosenNextID(db, branchFromMessageID, &newMessageID); err != nil {
 			log.Printf("createBranchHandler: Failed to update chosen_next_id for branch_from_message_id %d: %v", branchFromMessageID, err)
 			// Non-fatal, but log it
 		}
 
 		// Set the new branch as the primary branch for the session
-		if err := UpdateSessionPrimaryBranchID(db, sessionId, newBranchID); err != nil {
+		if err := database.UpdateSessionPrimaryBranchID(db, sessionId, newBranchID); err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to set new branch as primary for session %s", sessionId))
 			return
 		}
 
 		// Create frontend history with the new message
-		newMessageAsFrontendMessage, err := GetMessageByID(db, newMessageID)
+		newMessageAsFrontendMessage, err := database.GetMessageByID(db, newMessageID)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get new message %d for initial state", newMessageID))
 			return
 		}
 
-		fm, _, err := createFrontendMessage(*newMessageAsFrontendMessage, sql.NullString{}, nil, false, false, false)
+		fm, _, err := database.CreateFrontendMessage(*newMessageAsFrontendMessage, sql.NullString{}, nil, false, false, false)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to convert new message %d to frontend message: %v", newMessageID, err))
 			return
@@ -231,7 +233,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update last_updated_at for the session (common for both paths)
-	if err := UpdateSessionLastUpdated(db, sessionId); err != nil {
+	if err := database.UpdateSessionLastUpdated(db, sessionId); err != nil {
 		log.Printf("Failed to update last_updated_at for session %s after branch operation: %v", sessionId, err)
 		// Non-fatal error, continue with response
 	}
@@ -245,14 +247,14 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	defer removeSseWriter(sessionId, sseW)
 
 	// Retrieve session history for LLM (full context) - common for both paths
-	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, newBranchID)
+	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, sessionId, newBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
 		return
 	}
 
 	// Get latest session environment - common for both paths
-	roots, _, err := GetLatestSessionEnv(db, sessionId)
+	roots, _, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -290,7 +292,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", newMessageID))
 
 	// Create a new message chain for streaming - common for both paths
-	mc, err := NewMessageChain(r.Context(), db, sessionId, newBranchID)
+	mc, err := database.NewMessageChain(r.Context(), db, sessionId, newBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create message chain for branch operation")
 		return
@@ -323,7 +325,7 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get current session to retrieve old primary branch ID
-	session, err := GetSession(db, sessionId)
+	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get session %s", sessionId))
 		return
@@ -331,7 +333,7 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 	oldPrimaryBranchID := session.PrimaryBranchID
 
 	// Update the session's primary branch ID
-	if err := UpdateSessionPrimaryBranchID(db, sessionId, requestBody.NewPrimaryBranchID); err != nil {
+	if err := database.UpdateSessionPrimaryBranchID(db, sessionId, requestBody.NewPrimaryBranchID); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to switch primary branch for session %s to %s", sessionId, requestBody.NewPrimaryBranchID))
 		return
 	}
@@ -348,7 +350,7 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 // handleOldPrimaryBranchChosenNextID handles the chosen_next_id logic for the old primary branch.
 func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchID, newPrimaryBranchID string) {
 	if oldPrimaryBranchID != "" && oldPrimaryBranchID != newPrimaryBranchID {
-		oldBranch, err := GetBranch(db, oldPrimaryBranchID)
+		oldBranch, err := database.GetBranch(db, oldPrimaryBranchID)
 		if err != nil {
 			log.Printf("switchBranchHandler: Failed to get old branch %s: %v", oldPrimaryBranchID, err)
 			// Non-fatal, continue
@@ -359,7 +361,7 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 			parentMsgID := *oldBranch.BranchFromMessageID
 
 			// Find the message that originally followed parentMsgID in its own branch
-			originalNextMessageID, err := GetOriginalNextMessageID(db, parentMsgID, oldPrimaryBranchID)
+			originalNextMessageID, err := database.GetOriginalNextMessageID(db, parentMsgID, oldPrimaryBranchID)
 			if err != nil && err != sql.ErrNoRows {
 				log.Printf("switchBranchHandler: Failed to find original next message for %d: %v", parentMsgID, err)
 				// Non-fatal, continue
@@ -371,13 +373,13 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 				chosenNextID = &val
 			}
 
-			if err := UpdateMessageChosenNextID(db, parentMsgID, chosenNextID); err != nil {
+			if err := database.UpdateMessageChosenNextID(db, parentMsgID, chosenNextID); err != nil {
 				log.Printf("switchBranchHandler: Failed to update chosen_next_id for message %d: %v", parentMsgID, err)
 				// Non-fatal, continue
 			}
 		} else {
 			// This was the initial branch. Its last message's chosen_next_id needs to revert to its original next message.
-			lastMessageID, _, _, err := GetLastMessageInBranch(db, sessionId, oldPrimaryBranchID)
+			lastMessageID, _, _, err := database.GetLastMessageInBranch(db, sessionId, oldPrimaryBranchID)
 			if err != nil && err != sql.ErrNoRows {
 				log.Printf("switchBranchHandler: Failed to get last message ID for old primary branch %s: %v", oldPrimaryBranchID, err)
 				// Non-fatal, continue
@@ -403,7 +405,7 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 					chosenNextID = &val
 				}
 
-				if err := UpdateMessageChosenNextID(db, lastMessageID, chosenNextID); err != nil {
+				if err := database.UpdateMessageChosenNextID(db, lastMessageID, chosenNextID); err != nil {
 					log.Printf("switchBranchHandler: Failed to update chosen_next_id for message %d: %v", lastMessageID, err)
 					// Non-fatal, continue
 				}
@@ -416,7 +418,7 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 	// If the new primary branch is a branched branch, update its branch_from_message_id's chosen_next_id
 	// to point to the first message of this new primary branch.
-	newBranch, err := GetBranch(db, newPrimaryBranchID)
+	newBranch, err := database.GetBranch(db, newPrimaryBranchID)
 	if err != nil {
 		log.Printf("switchBranchHandler: Failed to get new branch %s: %v", newPrimaryBranchID, err)
 		// Non-fatal, continue
@@ -425,7 +427,7 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 
 		// Find the first message of the new primary branch that has parentMsgID as its parent
 		var firstMessageOfNewBranchID int
-		firstMessageOfNewBranchID, err := GetFirstMessageOfBranch(db, parentMsgID, newPrimaryBranchID)
+		firstMessageOfNewBranchID, err := database.GetFirstMessageOfBranch(db, parentMsgID, newPrimaryBranchID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				log.Printf("switchBranchHandler: No first message found for new branch %s. Skipping chosen_next_id update.", newPrimaryBranchID)
@@ -434,7 +436,7 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 			}
 			// Non-fatal, continue
 		} else {
-			if err := UpdateMessageChosenNextID(db, parentMsgID, &firstMessageOfNewBranchID); err != nil {
+			if err := database.UpdateMessageChosenNextID(db, parentMsgID, &firstMessageOfNewBranchID); err != nil {
 				log.Printf("switchBranchHandler: Failed to update chosen_next_id for message %d: %v", parentMsgID, err)
 				// Non-fatal, continue
 			}
@@ -469,7 +471,7 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 
 	// Update the session's chosen_first_id to point to this first message
 	if firstMessageID != nil {
-		if err := UpdateSessionChosenFirstID(db, sessionID, firstMessageID); err != nil {
+		if err := database.UpdateSessionChosenFirstID(db, sessionID, firstMessageID); err != nil {
 			log.Printf("switchBranchHandler: Failed to update chosen_first_id for session %s: %v", sessionID, err)
 			// Non-fatal, continue
 		}
@@ -500,13 +502,13 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear pending_confirmation for the branch regardless of approval/denial
-	if err := UpdateBranchPendingConfirmation(db, branchId, ""); err != nil { // Set to empty string to clear
+	if err := database.UpdateBranchPendingConfirmation(db, branchId, ""); err != nil { // Set to empty string to clear
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to clear confirmation status for branch %s", branchId))
 		return
 	}
 
 	// Get session and branch details
-	session, err := GetSession(db, sessionId)
+	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get session %s", sessionId))
 		return
@@ -514,7 +516,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// If the confirmed branch is not the primary branch, switch to it
 	if session.PrimaryBranchID != branchId {
-		if err := UpdateSessionPrimaryBranchID(db, sessionId, branchId); err != nil {
+		if err := database.UpdateSessionPrimaryBranchID(db, sessionId, branchId); err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to switch primary branch to %s", branchId))
 			return
 		}
@@ -523,14 +525,14 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a new message chain
-	mc, err := NewMessageChain(r.Context(), db, sessionId, branchId)
+	mc, err := database.NewMessageChain(r.Context(), db, sessionId, branchId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to create message chain for session %s and branch %s", sessionId, branchId))
 		return
 	}
 
 	// Get the full message details for the last message (the function call)
-	lastMessage, err := GetMessageByID(db, mc.LastMessageID)
+	lastMessage, err := database.GetMessageByID(db, mc.LastMessageID)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get last message details for ID %d", mc.LastMessageID))
 		return
@@ -669,14 +671,14 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	sseW.sendServerEvent(EventWorkspaceHint, session.WorkspaceID)
 
 	// Retrieve session history from DB for LLM (full context)
-	fullFrontendHistoryForLLM, err := GetSessionHistoryContext(db, sessionId, branchId)
+	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, sessionId, branchId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM after confirmation")
 		return
 	}
 
 	var roots []string
-	roots, mc.LastMessageGeneration, err = GetLatestSessionEnv(db, sessionId)
+	roots, mc.LastMessageGeneration, err = database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -706,7 +708,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 // It continues deleting messages backwards until it finds a non-error message.
 func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
 	// Get the last message in the branch
-	lastMessageID, _, _, err := GetLastMessageInBranch(db, sessionID, branchID)
+	lastMessageID, _, _, err := database.GetLastMessageInBranch(db, sessionID, branchID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// No messages in branch, nothing to delete
@@ -726,7 +728,7 @@ func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
 
 	for currentMessageID != 0 {
 		// Get the current message details
-		currentMessage, err := GetMessageByID(db, currentMessageID)
+		currentMessage, err := database.GetMessageByID(db, currentMessageID)
 		if err != nil {
 			return fmt.Errorf("failed to get message %d: %w", currentMessageID, err)
 		}
@@ -738,7 +740,7 @@ func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
 		}
 
 		// This is an error message, delete it
-		if err := DeleteMessage(db, currentMessageID); err != nil {
+		if err := database.DeleteMessage(db, currentMessageID); err != nil {
 			return fmt.Errorf("failed to delete error message %d: %w", currentMessageID, err)
 		}
 
@@ -770,7 +772,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify that the session exists
-	session, err := GetSession(db, sessionId)
+	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			sendNotFoundError(w, r, "Session not found")
@@ -781,7 +783,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify that the branch exists and belongs to the session
-	branch, err := GetBranch(db, branchId)
+	branch, err := database.GetBranch(db, branchId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			sendNotFoundError(w, r, "Branch not found")
@@ -807,14 +809,14 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// First, retrieve the current session history before deleting error messages
 	// Retrieve session history for LLM (full context)
-	historyContext, err := GetSessionHistoryContext(db, sessionId, branchId)
+	historyContext, err := database.GetSessionHistoryContext(db, sessionId, branchId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve session history for LLM")
 		return
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
-	frontendHistory, err := GetSessionHistoryPaginated(db, sessionId, branchId, 0, 20)
+	frontendHistory, err := database.GetSessionHistoryPaginated(db, sessionId, branchId, 0, 20)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
 		return
@@ -825,7 +827,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Branch %s is empty, trying parent branch", branchId)
 
 		// Get the current branch to find its parent
-		currentBranch, err := GetBranch(db, branchId)
+		currentBranch, err := database.GetBranch(db, branchId)
 		if err != nil {
 			sendInternalServerError(w, r, err, "Failed to get current branch")
 			return
@@ -834,14 +836,14 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 		// If parent branch exists, get history from parent
 		if currentBranch.ParentBranchID != nil && *currentBranch.ParentBranchID != "" {
 			log.Printf("Getting history context from parent branch %s", *currentBranch.ParentBranchID)
-			historyContext, err = GetSessionHistoryContext(db, sessionId, *currentBranch.ParentBranchID)
+			historyContext, err = database.GetSessionHistoryContext(db, sessionId, *currentBranch.ParentBranchID)
 			if err != nil {
 				sendInternalServerError(w, r, err, "Failed to retrieve session history from parent branch")
 				return
 			}
 
 			// Also get frontend history from parent branch
-			frontendHistory, err = GetSessionHistoryPaginated(db, sessionId, *currentBranch.ParentBranchID, 0, 20)
+			frontendHistory, err = database.GetSessionHistoryPaginated(db, sessionId, *currentBranch.ParentBranchID, 0, 20)
 			if err != nil {
 				sendInternalServerError(w, r, err, "Failed to retrieve paginated session history from parent branch")
 				return
@@ -882,13 +884,13 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update session last_updated_at
-	if err := UpdateSessionLastUpdated(db, sessionId); err != nil {
+	if err := database.UpdateSessionLastUpdated(db, sessionId); err != nil {
 		log.Printf("Failed to update last_updated_at for session %s after retry: %v", sessionId, err)
 		// Non-fatal error, continue
 	}
 
 	// Get latest session environment
-	roots, _, err := GetLatestSessionEnv(db, sessionId)
+	roots, _, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
 		return
@@ -916,7 +918,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
 	// Create a new message chain for the branch
-	mc, err := NewMessageChain(r.Context(), db, sessionId, branchId)
+	mc, err := database.NewMessageChain(r.Context(), db, sessionId, branchId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create message chain for retry")
 		return

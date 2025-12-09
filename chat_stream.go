@@ -14,6 +14,8 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
@@ -25,7 +27,7 @@ func streamLLMResponse(
 	ga *GeminiAuth,
 	initialState InitialState,
 	sseW *sseWriter,
-	mc *MessageChain,
+	mc *database.MessageChain,
 	inferSessionName bool,
 	callStartTime time.Time,
 	fullHistoryForLLM []FrontendMessage,
@@ -79,7 +81,7 @@ func streamLLMResponse(
 			}
 			// If a model message was already created, update it with the error
 			if modelMessageID >= 0 {
-				if err := UpdateMessageContent(db, modelMessageID, errorMessage, true); err != nil {
+				if err := database.UpdateMessageContent(db, modelMessageID, errorMessage, true); err != nil {
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
@@ -102,7 +104,7 @@ func streamLLMResponse(
 
 				// Update last user message's cumul_token_count with PromptTokenCount
 				if lastUsageMetadata.PromptTokenCount > 0 && mc.LastMessageID != 0 {
-					if err := UpdateMessageTokens(db, mc.LastMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
+					if err := database.UpdateMessageTokens(db, mc.LastMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
 						log.Printf("Failed to update cumul_token_count for user message %d: %v", mc.LastMessageID, err)
 					}
 					broadcastToSession(
@@ -133,7 +135,7 @@ func streamLLMResponse(
 				// Check if a non-text part interrupts the current text stream
 				if (part.FunctionCall != nil || part.Thought || part.InlineData != nil) && modelMessageID >= 0 {
 					// Finalize the current model message before processing the non-text part
-					if err := UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
+					if err := database.UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
 						log.Printf("Failed to finalize model message before interruption: %v", err)
 					}
 					agentResponseText = "" // Reset for the next text block
@@ -233,7 +235,10 @@ func streamLLMResponse(
 					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsBytes))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
 
-					currentHistory = append(currentHistory, Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc, ThoughtSignature: state}}})
+					currentHistory = append(currentHistory, Content{
+						Role:  RoleModel,
+						Parts: []Part{{FunctionCall: &fc, ThoughtSignature: state}},
+					})
 					continue
 				} else if part.CodeExecutionResult != nil {
 					// Convert CodeExecutionResult to FunctionResponse with special name
@@ -375,7 +380,7 @@ func streamLLMResponse(
 					agentResponseText += part.Text // Accumulate text for DB update
 
 					// Update the message content in DB immediately for all parts (no FTS sync during streaming)
-					if err := UpdateMessageContent(db, modelMessageID, agentResponseText, false); err != nil {
+					if err := database.UpdateMessageContent(db, modelMessageID, agentResponseText, false); err != nil {
 						log.Printf("Failed to update model message content: %v", err)
 					}
 
@@ -424,7 +429,7 @@ func streamLLMResponse(
 
 	// Finalize the last model message if any text was streamed (sync FTS)
 	if modelMessageID >= 0 {
-		if err := UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
+		if err := database.UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
 			return logAndErrorf(err, "Failed to update final agent response")
 		}
 	}
@@ -434,7 +439,7 @@ func streamLLMResponse(
 
 	// Only infer session name if inferSessionName is true and the name is still empty
 	if inferSessionName {
-		currentSession, err := GetSession(db, initialState.SessionId)
+		currentSession, err := database.GetSession(db, initialState.SessionId)
 		if err != nil {
 			log.Printf("streamLLMResponse: Failed to get session %s for initial name check: %v", initialState.SessionId, err)
 			// If GetSession fails, assume name might be missing and attempt inference.
@@ -468,7 +473,7 @@ func streamLLMResponse(
 	// Update the final message with token count if available
 	// This applies to the last model message that was streamed
 	if modelMessageID >= 0 && finalTotalTokenCount != nil {
-		if err := UpdateMessageTokens(db, modelMessageID, *finalTotalTokenCount); err != nil {
+		if err := database.UpdateMessageTokens(db, modelMessageID, *finalTotalTokenCount); err != nil {
 			log.Printf("Failed to update final message tokens: %v", err)
 		}
 		broadcastToSession(initialState.SessionId, EventCumulTokenCount, fmt.Sprintf("%d\n%d", modelMessageID, *finalTotalTokenCount))
@@ -482,7 +487,7 @@ func streamLLMResponse(
 func appendAttachmentParts(db *sql.DB, toolResults ToolHandlerResults, partsForContent []Part) []Part {
 	for _, attachment := range toolResults.Attachments {
 		// Retrieve blob data from DB using hash
-		blobData, err := GetBlob(db, attachment.Hash)
+		blobData, err := database.GetBlob(db, attachment.Hash)
 		if err != nil {
 			log.Printf("Failed to retrieve blob data for hash %s: %v", attachment.Hash, err)
 			continue // Skip this attachment
@@ -508,7 +513,7 @@ func handlePendingConfirmation(db *sql.DB, initialState InitialState, pendingCon
 	confirmationData := string(confirmationDataBytes)
 
 	// Update branch pending_confirmation
-	if err := UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
+	if err := database.UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
 		broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
 		return logAndErrorf(err, "Failed to update branch pending_confirmation")
 	}
@@ -535,7 +540,7 @@ func checkStreamCancellation(
 		failCall(initialState.SessionId, ctx.Err())
 		// Update the message in DB with current accumulated text as-is
 		if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created and has content
-			if err := UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
+			if err := database.UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
 				log.Printf("Failed to update model message: %v", err)
 			}
 		}
@@ -568,7 +573,7 @@ func inferAndSetSessionName(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth
 		return
 	}
 
-	session, err := GetSession(db, sessionId)
+	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		log.Printf("Failed to get session %s for name inference: %v", sessionId, err)
 		return // inferredName remains empty
@@ -586,7 +591,7 @@ func inferAndSetSessionName(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth
 			extractedName := strings.TrimSpace(matches[1])
 			if extractedName != "" {
 				inferredName = extractedName
-				if err := UpdateSessionName(db, sessionId, inferredName); err != nil {
+				if err := database.UpdateSessionName(db, sessionId, inferredName); err != nil {
 					log.Printf("Failed to update session name from comment for %s: %v", sessionId, err)
 				}
 				log.Printf("inferAndSetSessionName: Inferred name from comment for session %s: %s", sessionId, inferredName)
@@ -639,7 +644,7 @@ func inferAndSetSessionName(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth
 
 	inferredName = llmInferredNameText // Set inferredName only if successful
 
-	if err := UpdateSessionName(db, sessionId, inferredName); err != nil {
+	if err := database.UpdateSessionName(db, sessionId, inferredName); err != nil {
 		log.Printf("Failed to update session name for %s: %v", sessionId, err)
 		// If DB update fails, inferredName is still the valid one, but DB might not reflect it.
 		// We still send the inferredName to frontend, as it's the best we have.

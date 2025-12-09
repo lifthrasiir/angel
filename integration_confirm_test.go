@@ -13,6 +13,8 @@ import (
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // Helper to create a session with a pending confirmation
@@ -77,7 +79,7 @@ func TestConfirmationDenial(t *testing.T) {
 	router, db, registry := setupTest(t)
 
 	// Create a test workspace
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -94,7 +96,7 @@ func TestConfirmationDenial(t *testing.T) {
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
-	_, err = AddSessionEnv(db, sessionId, []string{tempDir})
+	_, err = database.AddSessionEnv(db, sessionId, []string{tempDir})
 	if err != nil {
 		t.Fatalf("Failed to update session roots: %v", err)
 	}
@@ -149,7 +151,7 @@ func TestConfirmationApproval(t *testing.T) {
 	router, db, registry := setupTest(t)
 
 	// Create a test workspace
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -166,7 +168,7 @@ func TestConfirmationApproval(t *testing.T) {
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
-	_, err = AddSessionEnv(db, sessionId, []string{tempDir})
+	_, err = database.AddSessionEnv(db, sessionId, []string{tempDir})
 	if err != nil {
 		t.Fatalf("Failed to update session roots: %v", err)
 	}

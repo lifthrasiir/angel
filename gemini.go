@@ -18,6 +18,8 @@ import (
 	"golang.org/x/oauth2"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // Ensure GeminiProvider implements LLMProvider
@@ -263,7 +265,7 @@ func tryAllProviders[T any](
 		switch providerType {
 		case "api":
 			var configs []GeminiAPIConfig
-			configs, err = GetGeminiAPIConfigs(db)
+			configs, err = database.GetGeminiAPIConfigs(db)
 			if err != nil {
 				err = fmt.Errorf("failed to get Gemini API configs: %w", err)
 				return
@@ -286,7 +288,7 @@ func tryAllProviders[T any](
 				client := NewGeminiAPIClient(clientProvider, config.APIKey)
 
 				// Update last_used for this model
-				UpdateModelLastUsed(db, config.ID, apiModelName)
+				database.UpdateModelLastUsed(db, config.ID, apiModelName)
 
 				out, err = apiCallback(client, config)
 				if err == nil {
@@ -298,7 +300,7 @@ func tryAllProviders[T any](
 					// Handle rate limit
 					go func() {
 						retryAfter := parseRetryAfter("")
-						HandleModelRateLimit(db, config.ID, apiModelName, retryAfter)
+						database.HandleModelRateLimit(db, config.ID, apiModelName, retryAfter)
 						log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, apiModelName)
 					}()
 					err = fmt.Errorf("rate limited for model %s", apiModelName)
@@ -308,7 +310,7 @@ func tryAllProviders[T any](
 		case "geminicli", "antigravity":
 			// Handle OAuth-based providers
 			var tokens []OAuthToken
-			tokens, err = GetOAuthTokensWithValidProjectID(db)
+			tokens, err = database.GetOAuthTokensWithValidProjectID(db)
 			if err != nil {
 				err = fmt.Errorf("failed to get OAuth tokens: %w", err)
 				return
@@ -357,7 +359,7 @@ func tryAllProviders[T any](
 				client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID, providerType)
 
 				// Update last_used for this model
-				UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
+				database.UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
 
 				out, err = codeAssistCallback(client)
 				if err == nil {
@@ -369,7 +371,7 @@ func tryAllProviders[T any](
 					// Handle rate limit
 					go func() {
 						retryAfter := parseRetryAfter("")
-						HandleOAuthRateLimit(db, token.ID, apiModelName, retryAfter)
+						database.HandleOAuthRateLimit(db, token.ID, apiModelName, retryAfter)
 						log.Printf("Rate limit detected for OAuth token %d, model %s", token.ID, apiModelName)
 					}()
 					err = fmt.Errorf("rate limited for model %s", apiModelName)
@@ -497,7 +499,7 @@ func (dts *databaseTokenSource) Token() (*oauth2.Token, error) {
 		if err != nil {
 			log.Printf("Failed to marshal refreshed OAuth token %d: %v", dts.tokenID, err)
 		} else {
-			if err := UpdateOAuthTokenData(dts.db, dts.tokenID, string(tokenJSON)); err != nil {
+			if err := database.UpdateOAuthTokenData(dts.db, dts.tokenID, string(tokenJSON)); err != nil {
 				log.Printf("Failed to save refreshed OAuth token %d to DB: %v", dts.tokenID, err)
 			} else {
 				log.Printf("OAuth token %d refreshed and saved to DB for user %s", dts.tokenID, dts.userEmail)

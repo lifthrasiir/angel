@@ -15,6 +15,8 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // MockGeminiProvider for testing streamGeminiResponse
@@ -144,7 +146,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	router, db, registry := setupTest(t)
 
 	// Create the workspace for this test
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -302,7 +304,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	router, db, registry := setupTest(t)
 
 	// Create the workspace for this test
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -610,7 +612,7 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 	router, db, registry := setupTest(t)
 
 	// Create the workspace for this test
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -692,7 +694,7 @@ func TestSyncDuringThought(t *testing.T) {
 	router, db, registry := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -858,7 +860,7 @@ func TestSyncDuringResponse(t *testing.T) {
 	router, db, registry := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -1013,7 +1015,7 @@ func TestCancelDuringSync(t *testing.T) {
 	router, db, registry := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -1407,7 +1409,7 @@ func TestApplyCurationRules(t *testing.T) {
 func TestCodeExecutionMessageHandling(t *testing.T) {
 	router, db, registry := setupTest(t)
 
-	err := CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
+	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
 		t.Fatalf("Failed to create test workspace: %v", err)
 	}
@@ -1572,21 +1574,21 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	router, db, registry := setupTest(t)
 
 	// Step 1: Create session and branch
-	sessionId := generateID()
-	primaryBranchId := generateID()
+	sessionId := database.GenerateID()
+	primaryBranchId := database.GenerateID()
 
-	_, err := CreateSession(db, sessionId, "You are a helpful assistant", "")
+	_, err := database.CreateSession(db, sessionId, "You are a helpful assistant", "")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
-	_, err = CreateBranch(db, primaryBranchId, sessionId, nil, nil)
+	_, err = database.CreateBranch(db, primaryBranchId, sessionId, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create branch: %v", err)
 	}
 
 	// Step 2: Add messages using MessageChain for proper relationships
-	mc, err := NewMessageChain(context.Background(), db, sessionId, primaryBranchId)
+	mc, err := database.NewMessageChain(context.Background(), db, sessionId, primaryBranchId)
 	if err != nil {
 		t.Fatalf("Failed to create message chain: %v", err)
 	}
@@ -1613,7 +1615,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	errorMsgID := errorMsg.ID
 
 	// Verify error message is the last one
-	lastID, _, _, err := GetLastMessageInBranch(db, sessionId, primaryBranchId)
+	lastID, _, _, err := database.GetLastMessageInBranch(db, sessionId, primaryBranchId)
 	if err != nil {
 		t.Fatalf("Failed to get last message: %v", err)
 	}
@@ -1669,7 +1671,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	}
 
 	// Step 4: Verify error message was deleted
-	_, err = GetMessageByID(db, errorMsgID)
+	_, err = database.GetMessageByID(db, errorMsgID)
 	if err == nil {
 		t.Error("Error message still exists in database")
 	} else if err != sql.ErrNoRows {

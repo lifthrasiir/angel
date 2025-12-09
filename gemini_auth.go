@@ -15,6 +15,7 @@ import (
 	"golang.org/x/oauth2/google"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
 )
 
 // GeminiAuth encapsulates the global state related to authentication providers.
@@ -39,7 +40,7 @@ func (ga *GeminiAuth) SaveToken(db *sql.DB, t *oauth2.Token, userEmail string, p
 		return
 	}
 
-	if err := SaveOAuthToken(db, string(tokenJSON), userEmail, projectID, kind); err != nil {
+	if err := database.SaveOAuthToken(db, string(tokenJSON), userEmail, projectID, kind); err != nil {
 		log.Printf("Failed to save OAuth token to DB: %v", err)
 		return
 	}
@@ -90,7 +91,7 @@ func (ga *GeminiAuth) getOAuthConfig(provider string) *oauth2.Config {
 // HasAuthenticatedProviders checks if any authentication providers are configured.
 func (ga *GeminiAuth) HasAuthenticatedProviders() bool {
 	// Check if there are any OAuth tokens
-	tokens, err := GetOAuthTokens(ga.db)
+	tokens, err := database.GetOAuthTokens(ga.db)
 	if err != nil {
 		log.Printf("HasAuthenticatedProviders: Failed to check OAuth tokens: %v", err)
 		return false
@@ -298,11 +299,11 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if request.ID != 0 {
 		// Delete specific account by ID
-		err = DeleteOAuthTokenByID(db, request.ID)
+		err = database.DeleteOAuthTokenByID(db, request.ID)
 		log.Printf("Logged out account with ID %d", request.ID)
 	} else if request.Email != "" {
 		// Delete specific account by email
-		err = DeleteOAuthTokenByEmail(db, request.Email, "geminicli")
+		err = database.DeleteOAuthTokenByEmail(db, request.Email, "geminicli")
 		log.Printf("Logged out account for email %s", request.Email)
 	} else {
 		http.Error(w, "Either email or id must be provided", http.StatusBadRequest)

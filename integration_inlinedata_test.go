@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // TestInlineDataStreaming tests inlineData streaming functionality with proper SSE parsing

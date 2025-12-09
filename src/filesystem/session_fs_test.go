@@ -1,4 +1,4 @@
-package fs
+package filesystem
 
 import (
 	"bytes" // For checking stdout/stderr

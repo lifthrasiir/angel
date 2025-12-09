@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // TestCountTokensHandler tests the countTokensHandler function
@@ -94,8 +96,8 @@ func TestGetMCPConfigsHandler(t *testing.T) {
 	router, testDB, _ := setupTest(t)
 
 	// Prepare some MCP configs in the DB
-	SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp1", ConfigJSON: json.RawMessage(`{}`), Enabled: true})
-	SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp2", ConfigJSON: json.RawMessage(`{}`), Enabled: false})
+	database.SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp1", ConfigJSON: json.RawMessage(`{}`), Enabled: true})
+	database.SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp2", ConfigJSON: json.RawMessage(`{}`), Enabled: false})
 
 	rr := testRequest(t, router, "GET", "/api/mcp/configs", nil, http.StatusOK)
 
@@ -171,7 +173,7 @@ func TestDeleteMCPConfigHandler(t *testing.T) {
 	router, testDB, _ := setupTest(t)
 
 	// Prepare an MCP config in the DB
-	SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp-to-delete", ConfigJSON: json.RawMessage(`{}`), Enabled: true})
+	database.SaveMCPServerConfig(testDB, MCPServerConfig{Name: "mcp-to-delete", ConfigJSON: json.RawMessage(`{}`), Enabled: true})
 
 	// Test case 1: Successful deletion
 	t.Run("Success", func(t *testing.T) {

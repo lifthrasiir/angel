@@ -15,6 +15,8 @@ import (
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // Constants for compression logic (from gemini-cli/packages/core/src/core/client.ts)
@@ -72,7 +74,7 @@ func extractStateSnapshotContent(xmlContent string) string {
 
 func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, sessionID string, modelName string) (result CompressResult, err error) {
 	// 1. Load session and all messages from the database for the given sessionID.
-	session, err := GetSession(db, sessionID)
+	session, err := database.GetSession(db, sessionID)
 	if err != nil {
 		err = fmt.Errorf("failed to get session %s: %w", sessionID, err)
 		return
@@ -80,7 +82,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 
 	// Get all messages for the session, including thoughts, to accurately represent history for compression.
 	// We'll filter thoughts later if needed for the context sent to the LLM for summarization.
-	allMessages, err := GetSessionHistory(db, sessionID, session.PrimaryBranchID)
+	allMessages, err := database.GetSessionHistory(db, sessionID, session.PrimaryBranchID)
 	if err != nil {
 		err = fmt.Errorf("failed to get session history for %s: %w", sessionID, err)
 		return
@@ -239,7 +241,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 		// CumulTokenCount will be updated after adding the message
 	}
 
-	newCompressionMsgID, err := AddMessageToSession(ctx, tx, compressionMsg)
+	newCompressionMsgID, err := database.AddMessageToSession(ctx, tx, compressionMsg)
 	if err != nil {
 		err = fmt.Errorf("failed to add compression message to session: %w", err)
 		return
@@ -247,7 +249,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 
 	// Update the chosen_next_id of the message *before* the compressed block
 	if compressionMsgParentID != nil {
-		err = UpdateMessageChosenNextID(tx, *compressionMsgParentID, &newCompressionMsgID)
+		err = database.UpdateMessageChosenNextID(tx, *compressionMsgParentID, &newCompressionMsgID)
 		if err != nil {
 			err = fmt.Errorf("failed to update chosen_next_id for message %d: %w", *compressionMsgParentID, err)
 			return
@@ -363,7 +365,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 				// Handle attachments from msg.Attachments
 				for _, attachment := range msg.Attachments {
 					if attachment.Hash != "" {
-						blobData, err := GetBlob(db, attachment.Hash) // Use the db connection
+						blobData, err := database.GetBlob(db, attachment.Hash) // Use the db connection
 						if err != nil {
 							log.Printf("Warning: Failed to retrieve blob for hash %s: %v", attachment.Hash, err)
 							continue // Skip if blob cannot be retrieved
@@ -392,7 +394,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 	newTotalTokenCount := newTokenResp.TotalTokens
 
 	// Update the cumul_token_count for the new compression message
-	err = UpdateMessageTokens(tx, newCompressionMsgID, newTotalTokenCount)
+	err = database.UpdateMessageTokens(tx, newCompressionMsgID, newTotalTokenCount)
 	if err != nil {
 		err = fmt.Errorf("failed to update token count for compression message: %w", err)
 		return

@@ -16,6 +16,8 @@ import (
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // extractSessionHandler extracts messages from a specific branch up to a given message and creates a new session.
@@ -50,7 +52,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the original session to validate existence
-	originalSession, err := GetSession(db, sessionId)
+	originalSession, err := database.GetSession(db, sessionId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			sendNotFoundError(w, r, "Session not found")
@@ -61,7 +63,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the target message to find its branch
-	targetMessage, err := GetMessageByID(db, targetMessageID)
+	targetMessage, err := database.GetMessageByID(db, targetMessageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			sendNotFoundError(w, r, "Target message not found")
@@ -79,7 +81,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get all messages from the session up to the target message, following branch history
 	// Use GetSessionHistory to get the complete message chain without alterations
-	completeMessages, err := GetSessionHistory(db, sessionId, targetMessage.BranchID)
+	completeMessages, err := database.GetSessionHistory(db, sessionId, targetMessage.BranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to get messages from branch")
 		return
@@ -110,7 +112,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a new session
-	newSessionId := generateID()
+	newSessionId := database.GenerateID()
 
 	// Collect subsession IDs from subagent FunctionResponse messages
 	subsessionIDs := collectSubsessionIDs(processedMessages)
@@ -131,20 +133,20 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	// originalSession.SystemPrompt is already evaluated, so use it directly
 
 	// Create the new session
-	newPrimaryBranchID, err := CreateSession(db, newSessionId, originalSession.SystemPrompt, originalSession.WorkspaceID)
+	newPrimaryBranchID, err := database.CreateSession(db, newSessionId, originalSession.SystemPrompt, originalSession.WorkspaceID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create new session")
 		return
 	}
 
 	// Set the name for the new session
-	if err := UpdateSessionName(db, newSessionId, newSessionName); err != nil {
+	if err := database.UpdateSessionName(db, newSessionId, newSessionName); err != nil {
 		log.Printf("Failed to set name for new session %s: %v", newSessionId, err)
 		// Non-fatal error, continue
 	}
 
 	// Create a new message chain for the new session
-	mc, err := NewMessageChain(r.Context(), db, newSessionId, newPrimaryBranchID)
+	mc, err := database.NewMessageChain(r.Context(), db, newSessionId, newPrimaryBranchID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create new message chain")
 		return
@@ -160,7 +162,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get the original message to preserve all fields
-		originalMsg, err := GetMessageByID(db, originalMsgID)
+		originalMsg, err := database.GetMessageByID(db, originalMsgID)
 		if err != nil {
 			log.Printf("extractSessionHandler: Failed to get original message %d: %v", originalMsgID, err)
 			continue
@@ -201,7 +203,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update last_updated_at for the new session
-	if err := UpdateSessionLastUpdated(db, newSessionId); err != nil {
+	if err := database.UpdateSessionLastUpdated(db, newSessionId); err != nil {
 		log.Printf("Failed to update last_updated_at for new session %s: %v", newSessionId, err)
 		// Non-fatal error, continue with response
 	}
@@ -216,6 +218,75 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, response)
+}
+
+// processCompressionRemapping processes compression messages and remaps their content
+func processCompressionRemapping(db *sql.DB, messages []FrontendMessage) ([]FrontendMessage, error) {
+	var processed []FrontendMessage
+
+	for _, msg := range messages {
+		if msg.Type == TypeCompression {
+			// Handle compression message remapping
+			if len(msg.Parts) > 0 && msg.Parts[0].Text != "" {
+				// Parse compression data and remap if needed
+				var compressionData map[string]interface{}
+				if err := json.Unmarshal([]byte(msg.Parts[0].Text), &compressionData); err != nil {
+					log.Printf("Failed to parse compression data: %v", err)
+					processed = append(processed, msg)
+					continue
+				}
+
+				// Remap compression content as needed
+				remappedText, err := remapCompressionContent(db, compressionData)
+				if err != nil {
+					log.Printf("Failed to remap compression content: %v", err)
+					processed = append(processed, msg)
+					continue
+				}
+
+				// Create a new message with remapped content
+				remappedMsg := msg
+				if len(remappedMsg.Parts) > 0 {
+					remappedMsg.Parts[0].Text = remappedText
+				}
+				processed = append(processed, remappedMsg)
+			} else {
+				processed = append(processed, msg)
+			}
+		} else {
+			processed = append(processed, msg)
+		}
+	}
+
+	return processed, nil
+}
+
+// remapCompressionContent remaps the content of a compression message based on the actual messages
+func remapCompressionContent(db *sql.DB, compressionData map[string]interface{}) (string, error) {
+	// Extract the original message IDs from compression data
+	messageIDs, ok := compressionData["messageIds"].([]interface{})
+	if !ok {
+		return "", fmt.Errorf("invalid compression data format")
+	}
+
+	var remappedContent []string
+	for _, msgID := range messageIDs {
+		id, ok := msgID.(float64)
+		if !ok {
+			continue
+		}
+
+		// Get the actual message content
+		msg, err := database.GetMessageByID(db, int(id))
+		if err != nil {
+			log.Printf("Failed to get message %d for compression remapping: %v", int(id), err)
+			continue
+		}
+
+		remappedContent = append(remappedContent, fmt.Sprintf("Message %d: %s", msg.ID, msg.Text))
+	}
+
+	return strings.Join(remappedContent, "\n\n"), nil
 }
 
 var copiedSessionNamePattern = regexp.MustCompile(`^(.*?)(?:\s*\(Copy(?:\s+(\d+))?\))?$`)
@@ -257,14 +328,14 @@ func copySubsessionsToNewSession(db *sql.DB, sessionId string, newSessionID stri
 		newFullSessionID := fmt.Sprintf("%s.%s", newSessionID, subsessionID)
 
 		// Get the original subsession
-		originalSubsession, err := GetSession(db, fullSessionID)
+		originalSubsession, err := database.GetSession(db, fullSessionID)
 		if err != nil {
 			log.Printf("Failed to get subsession %s: %v", fullSessionID, err)
 			continue
 		}
 
 		// Create new subsession with new full session ID and new session ID as parent
-		_, err = CreateSession(db, newFullSessionID, originalSubsession.SystemPrompt, newSessionID)
+		_, err = database.CreateSession(db, newFullSessionID, originalSubsession.SystemPrompt, newSessionID)
 		if err != nil {
 			log.Printf("Failed to create new subsession %s: %v", newFullSessionID, err)
 			continue
@@ -284,18 +355,18 @@ func copySubsessionsToNewSession(db *sql.DB, sessionId string, newSessionID stri
 // copyMessagesBetweenSessions copies all messages from one session to another
 func copyMessagesBetweenSessions(db *sql.DB, sourceSessionID, targetSessionID string) error {
 	// Get all messages from source session
-	sourceMessages, err := GetSessionHistory(db, sourceSessionID, "")
+	sourceMessages, err := database.GetSessionHistory(db, sourceSessionID, "")
 	if err != nil {
 		return fmt.Errorf("failed to get messages from source session: %w", err)
 	}
 
 	// Create message chain for target session
-	targetBranchID, err := GetSessionPrimaryBranchID(db, targetSessionID)
+	targetBranchID, err := database.GetSessionPrimaryBranchID(db, targetSessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get primary branch ID for target session: %w", err)
 	}
 
-	mc, err := NewMessageChain(context.Background(), db, targetSessionID, targetBranchID)
+	mc, err := database.NewMessageChain(context.Background(), db, targetSessionID, targetBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create message chain for target session: %w", err)
 	}
@@ -309,7 +380,7 @@ func copyMessagesBetweenSessions(db *sql.DB, sourceSessionID, targetSessionID st
 			continue
 		}
 
-		originalMsg, err := GetMessageByID(db, originalMsgID)
+		originalMsg, err := database.GetMessageByID(db, originalMsgID)
 		if err != nil {
 			log.Printf("Failed to get original message %d: %v", originalMsgID, err)
 			continue

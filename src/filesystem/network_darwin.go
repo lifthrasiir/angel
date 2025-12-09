@@ -1,6 +1,6 @@
 //go:build darwin
 
-package fs
+package filesystem
 
 import (
 	"fmt"

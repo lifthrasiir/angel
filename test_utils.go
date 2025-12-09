@@ -18,13 +18,13 @@ import (
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
 )
 
 // Helper function to set up the test environment
 func setupTest(t *testing.T) (*mux.Router, *sql.DB, *ModelsRegistry) {
 	// Initialize an in-memory database for testing with unique name
-	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL", t.Name())
-	testDB, err := InitDB(dbName)
+	testDB, err := database.InitTestDB(t.Name())
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}

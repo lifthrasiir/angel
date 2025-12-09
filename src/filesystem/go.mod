@@ -1,4 +1,4 @@
-module github.com/lifthrasiir/angel/fs
+module github.com/lifthrasiir/angel/filesystem
 
 go 1.24.4
 

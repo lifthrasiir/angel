@@ -8,6 +8,8 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // ChatSearchResult represents a single chat search result
@@ -58,7 +60,7 @@ var searchChatToolDefinition = ToolDefinition{
 		currentWorkspaceID := ""
 		if currentSessionID != "" {
 			var session Session
-			session, err = GetSession(db, currentSessionID)
+			session, err = database.GetSession(db, currentSessionID)
 			if err != nil {
 				return ToolHandlerResults{}, fmt.Errorf("failed to get current session: %w", err)
 			}
@@ -94,7 +96,7 @@ var searchChatToolDefinition = ToolDefinition{
 // searchChatHistory searches through chat history using the common SearchMessages function
 func searchChatHistory(db *sql.DB, keywords, workspaceID, currentSessionID string) ([]ChatSearchResult, error) {
 	// Use the common SearchMessages function
-	searchResults, _, err := SearchMessages(db, keywords, 0, 20, workspaceID)
+	searchResults, _, err := database.SearchMessages(db, keywords, 0, 20, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search messages: %w", err)
 	}
@@ -212,7 +214,7 @@ This tool recovers previously un-perceived or raw data from SHA-512/256 hashes, 
 		hash := strings.TrimSpace(query)
 
 		// Try to retrieve the blob as a file attachment
-		attachment, err := GetBlobAsFileAttachment(db, hash)
+		attachment, err := database.GetBlobAsFileAttachment(db, hash)
 		if err != nil {
 			return ToolHandlerResults{}, fmt.Errorf("failed to retrieve content for hash %s: %w", hash, err)
 		}

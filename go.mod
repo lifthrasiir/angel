@@ -4,14 +4,18 @@ go 1.24.4
 
 require (
 	github.com/lifthrasiir/angel/editor v0.0.0-00010101000000-000000000000
-	github.com/lifthrasiir/angel/fs v0.0.0-00010101000000-000000000000
+	github.com/lifthrasiir/angel/filesystem v0.0.0-00010101000000-000000000000
 	github.com/lifthrasiir/angel/gemini v0.0.0-00010101000000-000000000000
+	github.com/lifthrasiir/angel/internal/database v0.0.0-00010101000000-000000000000
+	github.com/lifthrasiir/angel/internal/types v0.0.0-00010101000000-000000000000
 )
 
 replace (
 	github.com/lifthrasiir/angel/editor => ./src/editor
-	github.com/lifthrasiir/angel/fs => ./src/fs
+	github.com/lifthrasiir/angel/filesystem => ./src/filesystem
 	github.com/lifthrasiir/angel/gemini => ./src/gemini
+	github.com/lifthrasiir/angel/internal/database => ./src/internal/database
+	github.com/lifthrasiir/angel/internal/types => ./src/internal/types
 )
 
 require (
@@ -21,7 +25,6 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/k3a/html2text v1.2.0
 	github.com/modelcontextprotocol/go-sdk v0.2.0
-	github.com/ncruces/go-sqlite3 v0.30.3
 	golang.org/x/oauth2 v0.23.0
 )
 
@@ -29,6 +32,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/ncruces/go-sqlite3 v0.30.3 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/tetratelabs/wazero v1.10.1 // indirect

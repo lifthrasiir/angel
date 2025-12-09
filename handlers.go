@@ -15,6 +15,8 @@ import (
 	"golang.org/x/oauth2"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 func handleSessionPage(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +30,7 @@ func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exists, err := SessionExists(db, sessionId)
+	exists, err := database.SessionExists(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to check session existence")
 		return
@@ -46,7 +48,7 @@ func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
-	tokens, err := GetOAuthTokens(db)
+	tokens, err := database.GetOAuthTokens(db)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to get OAuth tokens")
 		return
@@ -96,7 +98,7 @@ func getAccountDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load OAuth token from database
-	token, err := GetOAuthToken(db, accountID)
+	token, err := database.GetOAuthToken(db, accountID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			sendNotFoundError(w, r, "Account not found")
@@ -231,7 +233,7 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := UpdateSessionName(db, sessionId, requestBody.Name); err != nil {
+	if err := database.UpdateSessionName(db, sessionId, requestBody.Name); err != nil {
 		sendInternalServerError(w, r, err, "Failed to update session name")
 		return
 	}
@@ -260,7 +262,7 @@ func updateSessionWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Verify that the workspace exists (allow empty string for anonymous workspace)
 	if requestBody.WorkspaceID != "" {
-		_, err := GetWorkspace(db, requestBody.WorkspaceID)
+		_, err := database.GetWorkspace(db, requestBody.WorkspaceID)
 		if err != nil {
 			sendNotFoundError(w, r, "Workspace not found")
 			return
@@ -268,7 +270,7 @@ func updateSessionWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify that the session exists
-	exists, err := SessionExists(db, sessionId)
+	exists, err := database.SessionExists(db, sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to check session existence")
 		return
@@ -278,7 +280,7 @@ func updateSessionWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := UpdateSessionWorkspace(db, sessionId, requestBody.WorkspaceID); err != nil {
+	if err := database.UpdateSessionWorkspace(db, sessionId, requestBody.WorkspaceID); err != nil {
 		sendInternalServerError(w, r, err, "Failed to update session workspace")
 		return
 	}
@@ -298,9 +300,9 @@ func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := generateID() // Reusing session ID generation for workspace ID
+	workspaceID := database.GenerateID() // Reusing session ID generation for workspace ID
 
-	if err := CreateWorkspace(db, workspaceID, requestBody.Name, ""); err != nil {
+	if err := database.CreateWorkspace(db, workspaceID, requestBody.Name, ""); err != nil {
 		sendInternalServerError(w, r, err, "Failed to create workspace")
 		return
 	}
@@ -311,7 +313,7 @@ func createWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 func listWorkspacesHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
-	workspaces, err := GetAllWorkspaces(db)
+	workspaces, err := database.GetAllWorkspaces(db)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve workspaces")
 		return
@@ -329,7 +331,7 @@ func deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := DeleteWorkspace(db, workspaceID); err != nil {
+	if err := database.DeleteWorkspace(db, workspaceID); err != nil {
 		sendInternalServerError(w, r, err, "Failed to delete workspace")
 		return
 	}
@@ -382,7 +384,6 @@ func countTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 // handleCall handles GET and DELETE requests for /api/calls/{sessionId}
 func handleCall(w http.ResponseWriter, r *http.Request) {
-
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
@@ -420,7 +421,7 @@ func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
 
 	var workspaceName string
 	if requestBody.WorkspaceID != "" {
-		workspace, err := GetWorkspace(db, requestBody.WorkspaceID)
+		workspace, err := database.GetWorkspace(db, requestBody.WorkspaceID)
 		if err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get workspace %s", requestBody.WorkspaceID))
 			return
@@ -450,7 +451,7 @@ type FrontendMCPConfig struct {
 func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
-	dbConfigs, err := GetMCPServerConfigs(db)
+	dbConfigs, err := database.GetMCPServerConfigs(db)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve MCP configs from DB")
 		return
@@ -514,7 +515,7 @@ func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 		Enabled:    requestBody.Enabled,
 	}
 
-	if err := SaveMCPServerConfig(db, config); err != nil {
+	if err := database.SaveMCPServerConfig(db, config); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to save MCP config %s", config.Name))
 		return
 	}
@@ -538,7 +539,7 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := DeleteMCPServerConfig(db, name); err != nil {
+	if err := database.DeleteMCPServerConfig(db, name); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete MCP config %s", name))
 		return
 	}
@@ -625,7 +626,7 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update the database
-	_, err = AddSessionEnv(db, sessionId, requestBody.Roots)
+	_, err = database.AddSessionEnv(db, sessionId, requestBody.Roots)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to update session roots in DB for session %s", sessionId))
 		return
@@ -661,7 +662,7 @@ func handleDownloadBlobByHash(w http.ResponseWriter, r *http.Request) {
 		blobHash = blobHash[:dotIndex]
 	}
 
-	data, err := GetBlob(db, blobHash) // GetBlob works with hash
+	data, err := database.GetBlob(db, blobHash) // GetBlob works with hash
 	if err != nil {
 		if strings.Contains(err.Error(), "blob not found") {
 			sendNotFoundError(w, r, "Blob data not found")
@@ -722,7 +723,7 @@ func handleDownloadBlobByHash(w http.ResponseWriter, r *http.Request) {
 func getSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
-	prompts, err := GetGlobalPrompts(db)
+	prompts, err := database.GetGlobalPrompts(db)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve global prompts")
 		return
@@ -736,7 +737,7 @@ func getSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
 			{Label: "Empty prompt", Value: ""},
 		}
 		// Save these defaults to the DB immediately
-		if err := SaveGlobalPrompts(db, prompts); err != nil {
+		if err := database.SaveGlobalPrompts(db, prompts); err != nil {
 			log.Printf("Failed to save default global prompts: %v", err)
 			// Continue even if saving fails, as prompts are in memory
 		}
@@ -754,7 +755,7 @@ func saveSystemPromptsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := SaveGlobalPrompts(db, prompts); err != nil {
+	if err := database.SaveGlobalPrompts(db, prompts); err != nil {
 		sendInternalServerError(w, r, err, "Failed to save global prompts")
 		return
 	}
@@ -772,8 +773,8 @@ type SearchRequest struct {
 
 // SearchResponse represents the search response
 type SearchResponse struct {
-	Results []SearchResult `json:"results"`
-	HasMore bool           `json:"has_more"`
+	Results []database.SearchResult `json:"results"`
+	HasMore bool                    `json:"has_more"`
 }
 
 // searchMessagesHandler handles POST requests to /api/search
@@ -785,7 +786,7 @@ func searchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, hasMore, err := SearchMessages(db, req.Query, req.MaxID, req.Limit, req.WorkspaceID)
+	results, hasMore, err := database.SearchMessages(db, req.Query, req.MaxID, req.Limit, req.WorkspaceID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to search messages")
 		return
@@ -803,7 +804,7 @@ func searchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 func getOpenAIConfigsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
-	configs, err := GetOpenAIConfigs(db)
+	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve OpenAI configs")
 		return
@@ -824,10 +825,10 @@ func saveOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Generate ID if not provided
 	if config.ID == "" {
-		config.ID = generateID()
+		config.ID = database.GenerateID()
 	}
 
-	if err := SaveOpenAIConfig(db, config); err != nil {
+	if err := database.SaveOpenAIConfig(db, config); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to save OpenAI config %s", config.Name))
 		return
 	}
@@ -849,7 +850,7 @@ func deleteOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := DeleteOpenAIConfig(db, id); err != nil {
+	if err := database.DeleteOpenAIConfig(db, id); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete OpenAI config %s", id))
 		return
 	}
@@ -871,7 +872,7 @@ func getOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get config
-	config, err := GetOpenAIConfig(db, id)
+	config, err := database.GetOpenAIConfig(db, id)
 	if err != nil {
 		sendNotFoundError(w, r, fmt.Sprintf("OpenAI config with ID %s not found", id))
 		return
@@ -899,7 +900,7 @@ func refreshOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get config
-	config, err := GetOpenAIConfig(db, id)
+	config, err := database.GetOpenAIConfig(db, id)
 	if err != nil {
 		sendNotFoundError(w, r, fmt.Sprintf("OpenAI config with ID %s not found", id))
 		return
@@ -920,7 +921,7 @@ func refreshOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 func getGeminiAPIConfigsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
-	configs, err := GetGeminiAPIConfigs(db)
+	configs, err := database.GetGeminiAPIConfigs(db)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to retrieve Gemini API configs")
 		return
@@ -940,10 +941,10 @@ func saveGeminiAPIConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Generate ID if not provided
 	if config.ID == "" {
-		config.ID = generateID()
+		config.ID = database.GenerateID()
 	}
 
-	if err := SaveGeminiAPIConfig(db, config); err != nil {
+	if err := database.SaveGeminiAPIConfig(db, config); err != nil {
 		sendInternalServerError(w, r, err, "Failed to save Gemini API config")
 		return
 	}
@@ -961,7 +962,7 @@ func deleteGeminiAPIConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := DeleteGeminiAPIConfig(db, id); err != nil {
+	if err := database.DeleteGeminiAPIConfig(db, id); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete Gemini API config %s", id))
 		return
 	}

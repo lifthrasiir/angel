@@ -7,6 +7,10 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+
+	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // commandHandler handles POST requests for /api/chat/{sessionId}/command
@@ -58,13 +62,13 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExecuteClearCommand executes clear or clearblobs command by creating a command message
-func ExecuteClearCommand(ctx context.Context, db DbOrTx, sessionID, command string) (int, error) {
+func ExecuteClearCommand(ctx context.Context, db database.DbOrTx, sessionID, command string) (int, error) {
 	// Get the primary branch for the session
 	sqlDB, ok := db.(*sql.DB)
 	if !ok {
 		return 0, fmt.Errorf("expected *sql.DB, got %T", db)
 	}
-	session, err := GetSession(sqlDB, sessionID)
+	session, err := database.GetSession(sqlDB, sessionID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get session: %w", err)
 	}
@@ -80,7 +84,7 @@ func ExecuteClearCommand(ctx context.Context, db DbOrTx, sessionID, command stri
 	}
 
 	// Get the last message in the branch to link properly
-	lastMessageID, _, _, err := GetLastMessageInBranch(db, sessionID, primaryBranchID)
+	lastMessageID, _, _, err := database.GetLastMessageInBranch(db, sessionID, primaryBranchID)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, fmt.Errorf("failed to get last message in branch: %w", err)
 	}
@@ -90,19 +94,19 @@ func ExecuteClearCommand(ctx context.Context, db DbOrTx, sessionID, command stri
 	}
 
 	// Add the command message to the database
-	commandMessageID, err := AddMessageToSession(ctx, db, commandMsg)
+	commandMessageID, err := database.AddMessageToSession(ctx, db, commandMsg)
 	if err != nil {
 		return 0, fmt.Errorf("failed to add command message: %w", err)
 	}
 
 	// Update the previous message's chosen_next_id to point to the command
 	if lastMessageID != 0 {
-		if err := UpdateMessageChosenNextID(db, lastMessageID, &commandMessageID); err != nil {
+		if err := database.UpdateMessageChosenNextID(db, lastMessageID, &commandMessageID); err != nil {
 			return 0, fmt.Errorf("failed to update chosen_next_id for previous message: %w", err)
 		}
 	} else {
 		// This is the first message, update session's chosen_first_id
-		if err := UpdateSessionChosenFirstID(sqlDB, sessionID, &commandMessageID); err != nil {
+		if err := database.UpdateSessionChosenFirstID(sqlDB, sessionID, &commandMessageID); err != nil {
 			// Non-fatal error, log but continue
 			fmt.Printf("Warning: Failed to update chosen_first_id for session %s: %v\n", sessionID, err)
 		}

@@ -7,6 +7,10 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // TestCreateWorkspaceHandler tests the createWorkspaceHandler function
@@ -53,8 +57,8 @@ func TestListWorkspacesHandler(t *testing.T) {
 	router, testDB, _ := setupTest(t)
 
 	// Prepare some workspaces in the DB
-	CreateWorkspace(testDB, "ws1", "Workspace One", "")
-	CreateWorkspace(testDB, "ws2", "Workspace Two", "")
+	database.CreateWorkspace(testDB, "ws1", "Workspace One", "")
+	database.CreateWorkspace(testDB, "ws2", "Workspace Two", "")
 
 	rr := testRequest(t, router, "GET", "/api/workspaces", nil, http.StatusOK)
 
@@ -91,15 +95,15 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 
 	// Create a workspace and a session/message within it
 	workspaceID := "testWsDelete"
-	CreateWorkspace(testDB, workspaceID, "Workspace to Delete", "")
+	database.CreateWorkspace(testDB, workspaceID, "Workspace to Delete", "")
 	var err error // Declare err here
-	sessionID := generateID()
-	primaryBranchID, err := CreateSession(testDB, sessionID, "System prompt", workspaceID)
+	sessionID := database.GenerateID()
+	primaryBranchID, err := database.CreateSession(testDB, sessionID, "System prompt", workspaceID)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 	msg := Message{SessionID: sessionID, BranchID: primaryBranchID, Text: "Hello", Type: "user"}
-	_, err = AddMessageToSession(context.Background(), testDB, msg)
+	_, err = database.AddMessageToSession(context.Background(), testDB, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}
@@ -157,7 +161,7 @@ func TestNewSessionAndMessage(t *testing.T) {
 		payload := []byte(`{"message": "Hello, world!", "workspaceId": "testWsNewSession"}`)
 
 		// Create a dummy workspace first
-		CreateWorkspace(testDB, "testWsNewSession", "New Session Workspace", "")
+		database.CreateWorkspace(testDB, "testWsNewSession", "New Session Workspace", "")
 
 		// Verify workspace was created in testDB
 		var count int
@@ -207,20 +211,20 @@ func TestChatMessage(t *testing.T) {
 	// Prepare a session
 	var err error // Declare err here
 	sessionId := "testChatSession"
-	_, err = CreateSession(testDB, sessionId, "Initial system prompt", "default")
+	_, err = database.CreateSession(testDB, sessionId, "Initial system prompt", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
 	// Test case 1: Successful addition of a new message
 	t.Run("Success", func(t *testing.T) {
-		sessionData, err := GetSession(testDB, sessionId)
+		sessionData, err := database.GetSession(testDB, sessionId)
 		if err != nil {
 			t.Fatalf("Failed to get session: %v", err)
 		}
 		// Add an initial message to the session
 		msg := Message{SessionID: sessionId, BranchID: sessionData.PrimaryBranchID, Text: "Initial message", Type: "user", Model: DefaultGeminiModel}
-		_, err = AddMessageToSession(context.Background(), testDB, msg)
+		_, err = database.AddMessageToSession(context.Background(), testDB, msg)
 		if err != nil {
 			t.Fatalf("Failed to add initial message: %v", err)
 		}
@@ -255,13 +259,13 @@ func TestLoadChatSession(t *testing.T) {
 
 	// Prepare a session and some messages
 	sessionId := "testLoadSession"
-	primaryBranchID, err := CreateSession(testDB, sessionId, "System prompt for loading", "default")
+	primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for loading", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
 	ctx := context.Background()
-	mc, err := NewMessageChain(ctx, testDB, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(ctx, testDB, sessionId, primaryBranchID)
 	if err != nil {
 		t.Fatalf("Failed to create message chain: %v", err)
 	}
@@ -332,7 +336,7 @@ func TestUpdateSessionNameHandler(t *testing.T) {
 
 	// Prepare a session
 	sessionId := "testUpdateNameSession"
-	_, err := CreateSession(testDB, sessionId, "System prompt", "default")
+	_, err := database.CreateSession(testDB, sessionId, "System prompt", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -369,12 +373,12 @@ func TestDeleteSession(t *testing.T) {
 
 	// Prepare a session and some messages
 	sessionId := "TestDeleteSession"
-	primaryBranchID, err := CreateSession(testDB, sessionId, "System prompt for deletion", "default")
+	primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for deletion", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 	msg := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "Message to be deleted", Type: "user"}
-	_, err = AddMessageToSession(context.Background(), testDB, msg)
+	_, err = database.AddMessageToSession(context.Background(), testDB, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}
