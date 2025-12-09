@@ -146,7 +146,8 @@ func createTables(db *sql.DB) error {
 		kind TEXT NOT NULL DEFAULT 'geminicli',
 		last_used_by_model TEXT DEFAULT '{}',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_email, kind)
 	);
 
 	CREATE TABLE IF NOT EXISTS workspaces (
@@ -167,6 +168,8 @@ func createTables(db *sql.DB) error {
 		data BLOB NOT NULL,
 		ref_count INTEGER DEFAULT 1 NOT NULL
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_blobs_ref_count ON blobs(ref_count);
 
 	CREATE TRIGGER IF NOT EXISTS increment_blob_refs
 		AFTER INSERT ON messages
@@ -310,59 +313,8 @@ func createTables(db *sql.DB) error {
 
 // migrateDB handles database schema migrations.
 func migrateDB(db *sql.DB) error {
-	// Migration for SI/SO HTML tag handling in FTS and trigger cleanup
-	migrationStmts := []string{
-		// Drop old FTS triggers if they exist
-		`DROP TRIGGER IF EXISTS message_search_insert`,
-		`DROP TRIGGER IF EXISTS message_search_update`,
-		`DROP TRIGGER IF EXISTS message_search_delete`,
-
-		// Drop and recreate the view to trigger FTS rebuild
-		`DROP VIEW IF EXISTS messages_searchable`,
-
-		// Recreate the view with SI/SO conversion
-		`CREATE VIEW messages_searchable AS
-			SELECT id, replace(replace(text, '<', '\x0e'), '>', '\x0f') as text, session_id,
-			(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
-			FROM messages WHERE type IN ('user', 'model')`,
-
-		// Add missing index for blob ref_count - critical for performance when deleting sessions with many blobs
-		`CREATE INDEX IF NOT EXISTS idx_blobs_ref_count ON blobs(ref_count)`,
-
-		// OAuth tokens table migration - add new columns for multi-token support
-		// These may fail if columns already exist, which is fine
-		`ALTER TABLE oauth_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'geminicli'`,
-		`ALTER TABLE oauth_tokens ADD COLUMN last_used_by_model TEXT DEFAULT '{}'`,
-		`ALTER TABLE oauth_tokens ADD COLUMN created_at DATETIME`,
-		`ALTER TABLE oauth_tokens ADD COLUMN updated_at DATETIME`,
-
-		// Set created_at and updated_at for existing records (use a reasonable default)
-		`UPDATE oauth_tokens SET created_at = datetime('now', '-30 days') WHERE created_at IS NULL`,
-		`UPDATE oauth_tokens SET updated_at = created_at WHERE updated_at IS NULL`,
-
-		// Add composite unique constraint for oauth_tokens
-		// SQLite doesn't support ALTER TABLE ADD CONSTRAINT for UNIQUE, so we need to recreate the table
-		// First, create a backup table with the new structure
-		`CREATE TABLE IF NOT EXISTS oauth_tokens_new (
-			id INTEGER PRIMARY KEY,
-			token_data TEXT NOT NULL,
-			user_email TEXT,
-			project_id TEXT,
-			kind TEXT NOT NULL DEFAULT 'geminicli',
-			last_used_by_model TEXT DEFAULT '{}',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(user_email, kind)
-		)`,
-
-		// Copy data from old table to new table
-		`INSERT INTO oauth_tokens_new (id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at)
-			SELECT id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at FROM oauth_tokens`,
-
-		// Drop the old table and rename the new one
-		`DROP TABLE oauth_tokens`,
-		`ALTER TABLE oauth_tokens_new RENAME TO oauth_tokens`,
-	}
+	// Keep empty for now, add migration statements as needed
+	migrationStmts := []string{}
 
 	for _, stmt := range migrationStmts {
 		_, err := db.Exec(stmt)
