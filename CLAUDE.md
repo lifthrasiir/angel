@@ -20,7 +20,7 @@
 ## Go Backend
 
 - **Authentication (`src/gemini/code_assist.go`, `src/gemini/google_login.go`)**: Manages user authentication. It supports two main methods: Google OAuth for the free-tier Code Assist API and direct API key authentication for the Gemini API.
-- **Database (`db.go`, `db_chat.go`)**: Uses SQLite (`angel.db`) for persistent storage of sessions, messages, and other configurations. `db_chat.go` specifically handles chat-related database operations. The `messages` table utilizes `parent_message_id`, `chosen_next_id`, and `branch_id` to manage conversation threads and branching. The `blobs` table stores file data with automatic reference counting via triggers. Functions like `AddMessageToSession` and `UpdateMessageContent` are crucial for message management. The database includes full-text search capabilities for chat history and periodic WAL checkpointing for performance optimization.
+- **Database (`src/database`)**: Uses SQLite (`angel.db`) for persistent storage of sessions, messages, and other configurations. The `messages` table utilizes `parent_message_id`, `chosen_next_id`, and `branch_id` to manage conversation threads and branching. The `blobs` table stores file data with automatic reference counting via triggers. Functions like `AddMessageToSession` and `UpdateMessageContent` are crucial for message management. The database includes full-text search capabilities for chat history and periodic WAL checkpointing for performance optimization.
 - **Chat Logic (`chat_*.go`)**: Includes `chat_branch.go`, `chat_command.go`, `chat_stream.go` and so on for better modularity.
 - **Gemini API Interaction (`src/gemini/gemini_api.go`, `llm.go`, `models.go`)**:
   - Defines the `LLMProvider` interface in `llm.go` for abstracting interactions with various Large Language Models, including methods like `SendMessageStream` (for streaming responses), `GenerateContentOneShot` (for single-shot responses), `CountTokens` and `MaxTokens`.
@@ -55,7 +55,7 @@
 ## General Project Concepts and Cautions
 
 - **Language**: Code and comments are in English. User responses should be in the requested language (currently Korean).
-- **Build:** When building the backend or running tests, the **`-tags sqlite_fts5`** flag is required (e.g., `go build -tags sqlite_fts5 .`). The provided npm scripts (`npm run build`, `npm run test`) handle this automatically.
+- **Build:** Always use `npm run build`. Consider using `npm run build-frontend` and `npm run build-backend` for faster iteration during development.
 - **Tests:** `npm run test` (backend-only). The backend tests cover various functionalities. Use `npm run test-backend -- -run <TestName>` for specific tests.
 - **File Operations (`replace`, `write_file`)**:
   - `old_string`/`new_string` must exactly match, including all whitespace, indentation, and newlines.
