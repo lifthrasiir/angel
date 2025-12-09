@@ -3,7 +3,8 @@ import { AccountDetailsResponse, ModelDetails, QuotaInfo } from '../api/apiClien
 
 interface Props {
   accountEmail: string;
-  details: AccountDetailsResponse;
+  details?: AccountDetailsResponse;
+  isLoading?: boolean;
   onClose: () => void;
 }
 
@@ -23,19 +24,20 @@ interface ModelEntry extends ModelDetails {
   modelId: string;
 }
 
-export function AccountDetailsModal({ accountEmail, details, onClose }: Props) {
+export function AccountDetailsModal({ accountEmail, details, isLoading = false, onClose }: Props) {
   const [sortColumn, setSortColumn] = useState<SortColumn>('displayName');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
-  const isQuotaOnly = details.source === 'quota';
+  const isQuotaOnly = details?.source === 'quota';
 
   // Convert models object to sortable array
   const modelEntries = useMemo((): ModelEntry[] => {
+    if (!details) return [];
     return Object.entries(details.models).map(([modelId, model]) => ({
       modelId,
       ...model,
     }));
-  }, [details.models]);
+  }, [details?.models]);
 
   // Sort models
   const sortedModels = useMemo(() => {
@@ -129,7 +131,7 @@ export function AccountDetailsModal({ accountEmail, details, onClose }: Props) {
       <div className="modal-content account-details-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Account Details: {accountEmail}</h2>
-          {isQuotaOnly && (
+          {!isLoading && isQuotaOnly && (
             <p className="quota-only-notice">
               ⚠️ Limited data available (quota-only mode). Some model information is not provided by this account type.
             </p>
@@ -140,57 +142,83 @@ export function AccountDetailsModal({ accountEmail, details, onClose }: Props) {
         </div>
 
         <div className="modal-body">
-          {modelEntries.length === 0 ? (
-            <p className="no-models-message">No models available for this account.</p>
-          ) : (
-            <div className="table-wrapper">
-              <table className="models-table">
-                <thead>
-                  <tr>
-                    <th onClick={() => handleSort('modelId')}>Model ID{getSortIndicator('modelId')}</th>
-                    {!isQuotaOnly && (
-                      <>
-                        <th onClick={() => handleSort('displayName')}>Display Name{getSortIndicator('displayName')}</th>
-                        <th onClick={() => handleSort('maxTokens')}>Max Tokens{getSortIndicator('maxTokens')}</th>
-                        <th onClick={() => handleSort('maxOutputTokens')}>
-                          Max Output{getSortIndicator('maxOutputTokens')}
-                        </th>
-                        <th onClick={() => handleSort('images')}>Images{getSortIndicator('images')}</th>
-                        <th onClick={() => handleSort('video')}>Video{getSortIndicator('video')}</th>
-                        <th onClick={() => handleSort('thinking')}>Thinking{getSortIndicator('thinking')}</th>
-                        <th onClick={() => handleSort('usages')}>Usages{getSortIndicator('usages')}</th>
-                      </>
-                    )}
-                    <th onClick={() => handleSort('quota')}>Quota Remaining{getSortIndicator('quota')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedModels.map((model) => (
-                    <tr key={model.modelId} className={model.recommended ? 'recommended' : ''}>
-                      <td className="model-id" title={model.modelId}>
-                        {model.modelId}
-                      </td>
-                      {!isQuotaOnly && (
-                        <>
-                          <td>{model.displayName || model.modelId}</td>
-                          <td className="number-cell">{model.maxTokens ? model.maxTokens.toLocaleString() : 'N/A'}</td>
-                          <td className="number-cell">
-                            {model.maxOutputTokens ? model.maxOutputTokens.toLocaleString() : 'N/A'}
-                          </td>
-                          <td className="center-cell">{model.supportsImages ? '✓' : '–'}</td>
-                          <td className="center-cell">{model.supportsThinking ? '✓' : '–'}</td>
-                          <td className="center-cell">{model.supportsVideo ? '✓' : '–'}</td>
-                          <td className="usages-cell">
-                            {model.usages && model.usages.length > 0 ? model.usages.join(', ') : '–'}
-                          </td>
-                        </>
-                      )}
-                      <td className="quota-cell">{formatQuota(model.quotaInfo)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {isLoading ? (
+            <div className="loading-container" style={{ textAlign: 'center', padding: '2rem' }}>
+              <div
+                style={{
+                  display: 'inline-block',
+                  width: '40px',
+                  height: '40px',
+                  border: '3px solid rgba(0, 0, 0, 0.1)',
+                  borderRadius: '50%',
+                  borderTopColor: '#3b82f6',
+                  animation: 'spin 1s linear infinite',
+                  marginBottom: '1rem',
+                }}
+              />
+              <p style={{ margin: '0', color: '#666' }}>Loading account details...</p>
             </div>
+          ) : (
+            <>
+              {!details ? (
+                <p className="no-models-message">Failed to load account details.</p>
+              ) : modelEntries.length === 0 ? (
+                <p className="no-models-message">No models available for this account.</p>
+              ) : (
+                <div className="table-wrapper">
+                  <table className="models-table">
+                    <thead>
+                      <tr>
+                        <th onClick={() => handleSort('modelId')}>Model ID{getSortIndicator('modelId')}</th>
+                        {!isQuotaOnly && (
+                          <>
+                            <th onClick={() => handleSort('displayName')}>
+                              Display Name{getSortIndicator('displayName')}
+                            </th>
+                            <th onClick={() => handleSort('maxTokens')}>Max Tokens{getSortIndicator('maxTokens')}</th>
+                            <th onClick={() => handleSort('maxOutputTokens')}>
+                              Max Output{getSortIndicator('maxOutputTokens')}
+                            </th>
+                            <th onClick={() => handleSort('images')}>Images{getSortIndicator('images')}</th>
+                            <th onClick={() => handleSort('video')}>Video{getSortIndicator('video')}</th>
+                            <th onClick={() => handleSort('thinking')}>Thinking{getSortIndicator('thinking')}</th>
+                            <th onClick={() => handleSort('usages')}>Usages{getSortIndicator('usages')}</th>
+                          </>
+                        )}
+                        <th onClick={() => handleSort('quota')}>Quota Remaining{getSortIndicator('quota')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedModels.map((model) => (
+                        <tr key={model.modelId} className={model.recommended ? 'recommended' : ''}>
+                          <td className="model-id" title={model.modelId}>
+                            {model.modelId}
+                          </td>
+                          {!isQuotaOnly && (
+                            <>
+                              <td>{model.displayName || model.modelId}</td>
+                              <td className="number-cell">
+                                {model.maxTokens ? model.maxTokens.toLocaleString() : 'N/A'}
+                              </td>
+                              <td className="number-cell">
+                                {model.maxOutputTokens ? model.maxOutputTokens.toLocaleString() : 'N/A'}
+                              </td>
+                              <td className="center-cell">{model.supportsImages ? '✓' : '–'}</td>
+                              <td className="center-cell">{model.supportsVideo ? '✓' : '–'}</td>
+                              <td className="center-cell">{model.supportsThinking ? '✓' : '–'}</td>
+                              <td className="usages-cell">
+                                {model.usages && model.usages.length > 0 ? model.usages.join(', ') : '–'}
+                              </td>
+                            </>
+                          )}
+                          <td className="quota-cell">{formatQuota(model.quotaInfo)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

@@ -132,8 +132,8 @@ export interface QuotaInfo {
 }
 
 // Fetch detailed information about an OAuth account
-export async function fetchAccountDetails(accountId: number): Promise<AccountDetailsResponse> {
-  const response = await apiFetch(`/api/accounts/${accountId}/details`);
+export async function fetchAccountDetails(accountId: number, signal?: AbortSignal): Promise<AccountDetailsResponse> {
+  const response = await apiFetch(`/api/accounts/${accountId}/details`, { signal });
   if (!response.ok) {
     throw new Error(`Failed to fetch account details: ${response.status} ${response.statusText}`);
   }

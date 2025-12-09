@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { apiFetch, fetchAccountDetails, AccountDetailsResponse } from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
@@ -40,8 +40,12 @@ const SettingsPage: React.FC = () => {
   // State for account details modal
   const [selectedAccountDetails, setSelectedAccountDetails] = useState<{
     email: string;
-    details: AccountDetailsResponse;
+    details?: AccountDetailsResponse;
+    isLoading: boolean;
   } | null>(null);
+
+  // Ref to store AbortController for current fetch request
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchGlobalPrompts = async () => {
     console.log('fetchGlobalPrompts: Fetching global prompts...');
@@ -306,16 +310,65 @@ const SettingsPage: React.FC = () => {
   };
 
   const handleViewAccountDetails = async (account: Account) => {
+    // Cancel any ongoing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    // Immediately show the modal with loading state
+    setSelectedAccountDetails({
+      email: account.email,
+      isLoading: true,
+    });
+
     try {
-      const details = await fetchAccountDetails(account.id);
+      const details = await fetchAccountDetails(account.id, abortController.signal);
+
+      // Check if request was aborted
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      // Update the modal with the loaded details
       setSelectedAccountDetails({
         email: account.email,
         details,
+        isLoading: false,
       });
     } catch (error) {
+      // Don't show error for aborted requests
+      if (abortController.signal.aborted) {
+        return;
+      }
+
       console.error('Failed to fetch account details:', error);
+      // Keep the modal open but show error state
+      setSelectedAccountDetails({
+        email: account.email,
+        isLoading: false,
+      });
       alert('Failed to load account details. Please try again.');
+    } finally {
+      // Clean up the abort controller reference
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
+  };
+
+  const handleCloseAccountDetails = () => {
+    // Cancel any ongoing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // Close the modal
+    setSelectedAccountDetails(null);
   };
 
   interface AuthSettingsProps {
@@ -708,7 +761,8 @@ const SettingsPage: React.FC = () => {
         <AccountDetailsModal
           accountEmail={selectedAccountDetails.email}
           details={selectedAccountDetails.details}
-          onClose={() => setSelectedAccountDetails(null)}
+          isLoading={selectedAccountDetails.isLoading}
+          onClose={handleCloseAccountDetails}
         />
       )}
     </div>
