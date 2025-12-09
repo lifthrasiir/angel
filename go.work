@@ -2,8 +2,8 @@ go 1.24.4
 
 use (
 	.
-	./src/filesystem
 	./src/editor
+	./src/filesystem
 	./src/gemini
 	./src/internal/database
 	./src/internal/types

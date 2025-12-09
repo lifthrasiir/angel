@@ -7,9 +7,9 @@
     "build-frontend": "npm run build --prefix frontend",
     "build-backend": "goimports -w . && go build -ldflags=\"-w\" .",
     "build": "npm run build-frontend && npm run build-backend",
-    "test-backend": "goimports -w . && go test -count=3 -timeout=20s ./... ./src/fs/... ./src/editor/...",
+    "test-backend": "goimports -w . && go test -count=3 -timeout=20s ./... ./src/filesystem/... ./src/editor/...",
     "test": "npm run test-backend",
-    "pack": "upx --lzma -9 -o angel.dist.exe angel.exe",
+    "pack": "upx --lzma -9 --force-overwrite -o angel.dist.exe angel.exe",
     "start": "node -e \"require('child_process').execSync(process.platform === 'win32' ? 'angel.exe' : '.\\angel', { stdio: 'inherit' })"
   },
   "keywords": [],

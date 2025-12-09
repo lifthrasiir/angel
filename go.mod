@@ -20,7 +20,6 @@ replace (
 
 require (
 	github.com/fvbommel/sortorder v1.1.0
-	github.com/google/uuid v1.6.0
 	github.com/gorilla/csrf v1.7.3
 	github.com/gorilla/mux v1.8.1
 	github.com/k3a/html2text v1.2.0
