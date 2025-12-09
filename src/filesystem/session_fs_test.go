@@ -53,11 +53,11 @@ func assertDirNotExists(t *testing.T, path string) {
 }
 
 func TestSessionFS_NewSessionFS(t *testing.T) {
-	sf, err := NewSessionFS("testSession1")
+	sf, err := NewSessionFS("testSession1", "angel-test-sessions")
 	checkError(t, err, "NewSessionFS failed")
 
 	//lint:ignore SA5011 err != nil will exit the goroutine in checkError
-	defer removeSandboxBaseDir(sf.sessionId) // Clean up after test
+	defer os.RemoveAll("angel-test-sessions") // Clean up after test
 
 	if sf == nil {
 		t.Fatalf("NewSessionFS returned nil SessionFS")
@@ -76,7 +76,7 @@ func TestSessionFS_NewSessionFS(t *testing.T) {
 }
 
 func TestSessionFS_AddRoot(t *testing.T) {
-	sf, err := NewSessionFS("testSessionAddRoot")
+	sf, err := NewSessionFS("testSessionAddRoot", "angel-test-sessions")
 	checkError(t, err, "NewSessionFS failed")
 	defer func() {
 		if err := sf.Close(); err != nil {
@@ -125,7 +125,7 @@ func TestSessionFS_AddRoot(t *testing.T) {
 }
 
 func TestSessionFS_FileOperations(t *testing.T) {
-	sf, err := NewSessionFS("testSessionFileOps")
+	sf, err := NewSessionFS("testSessionFileOps", "angel-test-sessions")
 	checkError(t, err, "NewSessionFS failed")
 	defer func() {
 		if err := sf.Close(); err != nil {
@@ -134,8 +134,8 @@ func TestSessionFS_FileOperations(t *testing.T) {
 	}()
 
 	// Get the sandbox base directory for this session
-	sandboxBaseDir := GetSandboxBaseDir(sf.sessionId)
-	defer removeSandboxBaseDir(sf.sessionId) // Clean up after test
+	sandboxBaseDir := sf.SandboxDir()
+	defer os.RemoveAll("angel-test-sessions") // Clean up after test
 
 	// Verify sandbox base directory doesn't exist yet
 	assertDirNotExists(t, sandboxBaseDir)
@@ -201,7 +201,7 @@ func TestSessionFS_FileOperations(t *testing.T) {
 }
 
 func TestSessionFS_Run(t *testing.T) {
-	sf, err := NewSessionFS("testSessionRun")
+	sf, err := NewSessionFS("testSessionRun", "angel-test-sessions")
 	checkError(t, err, "NewSessionFS failed")
 	defer func() {
 		if err := sf.Close(); err != nil {
@@ -210,8 +210,8 @@ func TestSessionFS_Run(t *testing.T) {
 	}()
 
 	// Get the sandbox base directory for this session
-	sandboxBaseDir := GetSandboxBaseDir(sf.sessionId)
-	defer removeSandboxBaseDir(sf.sessionId) // Clean up after test
+	sandboxBaseDir := sf.SandboxDir()
+	defer os.RemoveAll("angel-test-sessions") // Clean up after test
 
 	// --- Test Case 1: Run command with empty workingDir (defaults to anonymous root) ---
 	t.Run("Run_EmptyWorkingDir", func(t *testing.T) {
@@ -353,12 +353,12 @@ func TestSessionFS_Run(t *testing.T) {
 }
 
 func TestSessionFS_Close(t *testing.T) {
-	sf, err := NewSessionFS("testSessionClose")
+	sf, err := NewSessionFS("testSessionClose", "angel-test-sessions")
 	checkError(t, err, "NewSessionFS failed")
 
 	// Get the sandbox base directory for this session
-	sandboxBaseDir := GetSandboxBaseDir(sf.sessionId)
-	defer removeSandboxBaseDir(sf.sessionId) // Clean up after test
+	sandboxBaseDir := sf.SandboxDir()
+	defer os.RemoveAll("angel-test-sessions") // Clean up after test
 
 	// Trigger anonymous root creation and mounting
 	t.Logf("TestSessionFS_Close: Running echo test to trigger anonymous root creation.")

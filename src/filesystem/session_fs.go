@@ -18,17 +18,19 @@ import (
 // SessionFS manages file system operations for a specific session,
 // including root directories, current working directory, and anonymous root.
 type SessionFS struct {
-	sessionId string
+	sessionId  string
+	sandboxDir string // Full path to the sandbox directory for this session
 	// roots are absolute paths
 	roots []string
 	mu    sync.Mutex
 }
 
 // NewSessionFS creates a new SessionFS instance for the given session ID.
-func NewSessionFS(sessionId string) (*SessionFS, error) {
+func NewSessionFS(sessionId, baseDir string) (*SessionFS, error) {
 	sf := &SessionFS{
-		sessionId: sessionId,
-		roots:     []string{},
+		sessionId:  sessionId,
+		sandboxDir: filepath.Join(baseDir, sessionId),
+		roots:      []string{},
 	}
 
 	return sf, nil
@@ -105,11 +107,11 @@ func (sf *SessionFS) resolvePath(p string) (string, error) {
 	} else {
 		// If path is relative, resolve it against the sandbox base directory.
 		// This is the "anonymous root".
-		absPath = filepath.Clean(filepath.Join(GetSandboxBaseDir(sf.sessionId), p))
+		absPath = filepath.Clean(filepath.Join(sf.sandboxDir, p))
 
 		// Check if the relative path attempts to escape the anonymous root (e.g., contains "..")
 		// This check is crucial for security and consistency.
-		relPath, err := filepath.Rel(GetSandboxBaseDir(sf.sessionId), absPath)
+		relPath, err := filepath.Rel(sf.sandboxDir, absPath)
 		if err != nil {
 			return "", fmt.Errorf("invalid relative path resolution: %w", err)
 		}
@@ -127,7 +129,7 @@ func (sf *SessionFS) resolvePath(p string) (string, error) {
 		}
 	}
 
-	if !isValidPath && containsPath(GetSandboxBaseDir(sf.sessionId), absPath) {
+	if !isValidPath && containsPath(sf.sandboxDir, absPath) {
 		isValidPath = true
 	}
 
@@ -287,7 +289,7 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 	defer sf.mu.Unlock()
 
 	// Create sandbox for the duration of the command execution
-	sandbox, err := NewSandbox(sf.sessionId)
+	sandbox, err := NewSandbox(sf.sandboxDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sandbox for command execution: %w", err)
 	}
@@ -418,16 +420,12 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 	return rc, nil
 }
 
-// Close cleans up the SessionFS resources.
-func (sf *SessionFS) Close() error {
-	return nil
+// SandboxDir returns the full path to the sandbox directory for this session.
+func (sf *SessionFS) SandboxDir() string {
+	return sf.sandboxDir
 }
 
-// DestroySessionFS removes the session's sandbox directory and all its contents.
-func DestroySessionFS(sessionId string) error {
-	sandboxDir := GetSandboxBaseDir(sessionId)
-	if err := os.RemoveAll(sandboxDir); err != nil {
-		return fmt.Errorf("failed to remove session sandbox directory %s: %w", sandboxDir, err)
-	}
+// Close cleans up the SessionFS resources.
+func (sf *SessionFS) Close() error {
 	return nil
 }

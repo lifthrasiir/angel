@@ -6,8 +6,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
-	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -220,7 +221,7 @@ func GetSession(db *sql.DB, sessionID string) (Session, error) {
 }
 
 // DeleteSession deletes a session and all its associated messages, branches, shell commands, and session environments.
-func DeleteSession(db *sql.DB, sessionID string) error {
+func DeleteSession(db *sql.DB, sessionID string, sandboxBaseDir string) error {
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
 	if err != nil {
@@ -276,7 +277,8 @@ func DeleteSession(db *sql.DB, sessionID string) error {
 
 	// Destroy the session's file system sandbox directories for all identified sessions
 	for _, id := range sessionIDsToDelete {
-		if err := filesystem.DestroySessionFS(id); err != nil {
+		sessionDir := filepath.Join(sandboxBaseDir, id)
+		if err := os.RemoveAll(sessionDir); err != nil {
 			log.Printf("Warning: Failed to destroy session FS for %s: %v", id, err)
 		}
 	}

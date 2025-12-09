@@ -4,20 +4,24 @@ package filesystem
 
 import (
 	"os"
-	"sync"
+	"path/filepath"
 )
 
-var removeSandboxBaseDirMutex sync.Mutex
+const TestSandboxBaseDir = "angel-test-sessions"
 
-func removeSandboxBaseDir(sessionId string) {
-	removeSandboxBaseDirMutex.Lock()
-	defer removeSandboxBaseDirMutex.Unlock()
+func createTestSandboxDir(sessionId string) string {
+	testDir := filepath.Join(TestSandboxBaseDir, sessionId)
+	os.MkdirAll(testDir, 0755)
+	return testDir
+}
 
-	os.RemoveAll(GetSandboxBaseDir(sessionId))
+func removeTestSandboxDir(sessionId string) {
+	testDir := filepath.Join(TestSandboxBaseDir, sessionId)
+	os.RemoveAll(testDir)
 
-	// If the directory SandboxBaseDirPrefix is totally empty, ensure that it is also removed.
-	children, err := os.ReadDir(SandboxBaseDirPrefix)
+	// If the parent TestSandboxBaseDir directory is totally empty, ensure that it is also removed.
+	children, err := os.ReadDir(TestSandboxBaseDir)
 	if err == nil && len(children) == 0 {
-		os.RemoveAll(SandboxBaseDirPrefix)
+		os.RemoveAll(TestSandboxBaseDir)
 	}
 }

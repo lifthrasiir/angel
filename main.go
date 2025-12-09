@@ -29,6 +29,17 @@ import (
 
 const dbPath = "angel.db"
 
+// determineSandboxBaseDir determines the base directory for session sandboxes
+// based on the presence of go.mod file in the current directory
+func determineSandboxBaseDir() string {
+	if _, err := os.Stat("go.mod"); err == nil {
+		// go.mod exists in current directory, use _angel-data/sessions
+		return "_angel-data/sessions"
+	}
+	// No go.mod found, use angel-data/sessions
+	return "angel-data/sessions"
+}
+
 //go:embed frontend/dist
 var embeddedFiles embed.FS
 

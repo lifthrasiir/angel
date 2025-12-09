@@ -17,7 +17,7 @@ type Sandbox struct {
 }
 
 // NewSandbox creates a new Sandbox instance.
-func NewSandbox(sessionId string) (*Sandbox, error) {
+func NewSandbox(sessionDir string) (*Sandbox, error) {
 	return nil, fmt.Errorf("not yet implemented")
 }
 
@@ -35,13 +35,6 @@ func (s *Sandbox) Close() error {
 	// On Linux, the namespace cleanup happens automatically when the process exits
 	// We just need to clean up the temporary directory
 	return os.RemoveAll(s.baseDir)
-}
-
-const SandboxBaseDirPrefix = "angel-sessions"
-
-// GetSandboxBaseDir returns the base directory path for a given session ID.
-func GetSandboxBaseDir(sessionId string) string {
-	return filepath.Join(SandboxBaseDirPrefix, sessionId)
 }
 
 // Open implements the fs.FS interface.

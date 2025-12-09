@@ -48,8 +48,8 @@ type Sandbox struct {
 // NewSandbox creates a new Sandbox instance.
 // It creates a temporary directory but doesn't set up namespaces yet.
 // Namespaces are created per-command execution in Run().
-func NewSandbox(sessionId string) (*Sandbox, error) {
-	baseDir := GetSandboxBaseDir(sessionId)
+func NewSandbox(sessionDir string) (*Sandbox, error) {
+	baseDir := sessionDir
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create session temporary directory %s: %w", baseDir, err)
 	}
@@ -80,13 +80,6 @@ func (s *Sandbox) Close() error {
 	// On Linux, the namespace cleanup happens automatically when the process exits
 	// We just need to clean up the temporary directory
 	return os.RemoveAll(s.baseDir)
-}
-
-const SandboxBaseDirPrefix = "angel-sessions"
-
-// GetSandboxBaseDir returns the base directory path for a given session ID.
-func GetSandboxBaseDir(sessionId string) string {
-	return filepath.Join(SandboxBaseDirPrefix, sessionId)
 }
 
 // Open implements the fs.FS interface.

@@ -22,11 +22,11 @@ type Sandbox struct {
 }
 
 // NewSandbox creates a new Sandbox instance.
-// It creates a temporary directory under angel-sessions/<sessionId> and substs it.
-func NewSandbox(sessionId string) (*Sandbox, error) {
+// It creates a temporary directory under the specified directory and substs it.
+func NewSandbox(sessionDir string) (*Sandbox, error) {
 	var err error
 
-	baseDir := GetSandboxBaseDir(sessionId)
+	baseDir := sessionDir
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create session temporary directory %s: %w", baseDir, err)
 	}
@@ -72,14 +72,6 @@ func (s *Sandbox) Close() error {
 	}
 
 	return firstErr
-}
-
-const SandboxBaseDirPrefix = "angel-sessions"
-
-// GetSandboxBaseDir returns the base directory path for a given session ID.
-// This path is used for the actual temporary directory, not the subst drive.
-func GetSandboxBaseDir(sessionId string) string {
-	return filepath.Join(SandboxBaseDirPrefix, sessionId)
 }
 
 func findAvailableDriveLetter() (string, error) {

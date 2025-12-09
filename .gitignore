@@ -2,7 +2,9 @@
 *.exe
 *.db
 *.db-*
-angel-sessions
+_angel-data
+angel-data
+angel-test-*
 node_modules
 /angel
 .claude/settings.local.json

@@ -44,7 +44,10 @@ func getSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS,
 
 	entry, ok := sessionFSMap[sessionId]
 	if !ok {
-		sf, err := filesystem.NewSessionFS(sessionId)
+		// Determine the base directory for session sandboxes
+		baseDir := determineSandboxBaseDir()
+
+		sf, err := filesystem.NewSessionFS(sessionId, baseDir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SessionFS for session %s: %w", sessionId, err)
 		}
