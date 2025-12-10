@@ -15,6 +15,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -23,8 +24,8 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 // Helper function to stream LLM response
 func streamLLMResponse(
 	db *sql.DB,
-	registry *ModelsRegistry,
-	ga *GeminiAuth,
+	registry *llm.Models,
+	ga *llm.GeminiAuth,
 	initialState InitialState,
 	sseW *sseWriter,
 	mc *database.MessageChain,
@@ -67,7 +68,7 @@ func streamLLMResponse(
 			return err
 		}
 
-		seq, closer, err := modelProvider.SendMessageStream(ctx, SessionParams{
+		seq, closer, err := modelProvider.SendMessageStream(ctx, llm.SessionParams{
 			Contents:        currentHistory,
 			SystemPrompt:    initialState.SystemPrompt,
 			IncludeThoughts: true,
@@ -224,7 +225,7 @@ func streamLLMResponse(
 						continue
 					}
 					fc := FunctionCall{
-						Name: GeminiCodeExecutionToolName,
+						Name: llm.GeminiCodeExecutionToolName,
 						Args: argsMap,
 					}
 					fcJson, _ := json.Marshal(fc)
@@ -244,7 +245,7 @@ func streamLLMResponse(
 					// Convert CodeExecutionResult to FunctionResponse with special name
 					codeExecutionResult := part.CodeExecutionResult
 					fr := FunctionResponse{
-						Name:     GeminiCodeExecutionToolName,
+						Name:     llm.GeminiCodeExecutionToolName,
 						Response: codeExecutionResult,
 					}
 					frJson, _ := json.Marshal(fr)
@@ -557,7 +558,7 @@ func checkStreamCancellation(
 }
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
-func inferAndSetSessionName(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth, sessionId string, userMessage string, sseW *sseWriter, modelToUse string) {
+func inferAndSetSessionName(db *sql.DB, registry *llm.Models, ga *llm.GeminiAuth, sessionId string, userMessage string, sseW *sseWriter, modelToUse string) {
 	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)
 
 	var inferredName string // Initialize to empty string
@@ -584,7 +585,7 @@ func inferAndSetSessionName(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth
 	}
 
 	// Check for (NAME: session name) comment ONLY FOR angel-eval model
-	if modelToUse == AngelEvalModelName {
+	if modelToUse == llm.AngelEvalModelName {
 		nameCommentPattern := regexp.MustCompile(`\(NAME:\s*(.*?)\)`)
 		matches := nameCommentPattern.FindStringSubmatch(userMessage)
 		if len(matches) > 1 {
@@ -615,13 +616,13 @@ func inferAndSetSessionName(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth
 	subagentCtx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
-	modelProvider, err := registry.ResolveSubagent(modelToUse, SubagentSessionNameTask)
+	modelProvider, err := registry.ResolveSubagent(modelToUse, llm.SubagentSessionNameTask)
 	if err != nil {
 		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return
 	}
 
-	oneShotResult, err := modelProvider.GenerateContentOneShot(subagentCtx, SessionParams{
+	oneShotResult, err := modelProvider.GenerateContentOneShot(subagentCtx, llm.SessionParams{
 		Contents: []Content{
 			{
 				Role:  RoleUser,

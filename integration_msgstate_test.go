@@ -15,6 +15,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -22,16 +23,16 @@ import (
 
 // testProviderWrapper wraps a provider to capture params
 type testProviderWrapper struct {
-	original      LLMProvider
-	captureParams *SessionParams
+	original      llm.LLMProvider
+	captureParams *llm.SessionParams
 }
 
-func (w *testProviderWrapper) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+func (w *testProviderWrapper) SendMessageStream(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	*w.captureParams = params // Capture the SessionParams
 	return w.original.SendMessageStream(ctx, modelName, params)
 }
 
-func (w *testProviderWrapper) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
+func (w *testProviderWrapper) GenerateContentOneShot(ctx context.Context, modelName string, params llm.SessionParams) (llm.OneShotResult, error) {
 	return w.original.GenerateContentOneShot(ctx, modelName, params)
 }
 
@@ -196,7 +197,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 	// Scenario 2: User sends a follow-up message, verify ThoughtSignature is sent back to LLM
 
 	// Create a new mock for the second request
-	var capturedSessionParams SessionParams
+	var capturedSessionParams llm.SessionParams
 	secondResponses := []GenerateContentResponse{
 		{
 			Candidates: []Candidate{

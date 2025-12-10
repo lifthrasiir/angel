@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -23,8 +24,8 @@ func TestInlineDataStreaming(t *testing.T) {
 
 	// Mock the SendMessageStream method to simulate inlineData response
 	provider := registry.GetProvider(DefaultGeminiModel)
-	mockLLMProvider := provider.(*MockLLMProvider)
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	mockLLMProvider := provider.(*llm.MockLLMProvider)
+	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 		// Create a mock response with text and inlineData
 		responses := []GenerateContentResponse{
 			{
@@ -202,10 +203,10 @@ func TestInlineDataCounterReset(t *testing.T) {
 
 	// Mock the SendMessageStream method to simulate inlineData response
 	provider := registry.GetProvider(DefaultGeminiModel)
-	mockLLMProvider := provider.(*MockLLMProvider)
+	mockLLMProvider := provider.(*llm.MockLLMProvider)
 
 	var callCount int = 0
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 		callCount++
 
 		responses := []GenerateContentResponse{

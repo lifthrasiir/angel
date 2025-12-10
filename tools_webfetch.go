@@ -15,6 +15,7 @@ import (
 	html2text "github.com/k3a/html2text"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/llm"
 )
 
 const (
@@ -86,7 +87,7 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 }
 
 // executeWebFetchFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
-func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider ModelProvider) (ToolHandlerResults, error) {
+func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider llm.ModelProvider) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		return ToolHandlerResults{}, fmt.Errorf("no URL found in the prompt for fallback")
@@ -114,7 +115,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider M
 		"TextContent": textContent,
 	})
 
-	sessionParams := SessionParams{
+	sessionParams := llm.SessionParams{
 		Contents: []Content{{Role: "user", Parts: []Part{{Text: fallbackPrompt}}}},
 	}
 
@@ -131,7 +132,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider M
 	}}, nil
 }
 
-func executeWebFetch(ctx context.Context, prompt string, modelProvider ModelProvider, fallbackModelProvider ModelProvider) (ToolHandlerResults, error) {
+func executeWebFetch(ctx context.Context, prompt string, modelProvider, fallbackModelProvider llm.ModelProvider) (ToolHandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		// If no URLs are found, perform a DuckDuckGo search
@@ -153,11 +154,11 @@ func executeWebFetch(ctx context.Context, prompt string, modelProvider ModelProv
 	}
 
 	// Primary Gemini API call with urlContext
-	sessionParams := SessionParams{
+	sessionParams := llm.SessionParams{
 		Contents: []Content{{Role: "user", Parts: []Part{{Text: prompt}}}},
 		ToolConfig: map[string]interface{}{
-			"":                       map[string]interface{}{}, // No default tools
-			GeminiUrlContextToolName: map[string]interface{}{},
+			"":                           map[string]interface{}{}, // No default tools
+			llm.GeminiUrlContextToolName: map[string]interface{}{},
 		},
 	}
 
@@ -210,17 +211,17 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolH
 		return ToolHandlerResults{}, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
 	}
 
-	registry, err := getRegistryFromContext(ctx)
+	registry, err := llm.ModelsFromContext(ctx)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
 	}
 
 	// Resolve subagents for web fetch tasks
-	modelProvider, err := registry.ResolveSubagent(params.ModelName, SubagentWebFetchTask)
+	modelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentWebFetchTask)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s): %w", params.ModelName, err)
 	}
-	fallbackModelProvider, err := registry.ResolveSubagent(params.ModelName, SubagentWebFetchFallbackTask)
+	fallbackModelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentWebFetchFallbackTask)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch_fallback (model: %s): %w", params.ModelName, err)
 	}

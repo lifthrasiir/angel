@@ -17,6 +17,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -219,14 +220,14 @@ func getAccountDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get GeminiAuth to access OAuth config
-	ga, err := getGaFromContext(ctx)
+	ga, err := llm.GeminiAuthFromContext(ctx)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to get authentication context")
 		return
 	}
 
 	// Create token source with OAuth config
-	oauthConfig := ga.getOAuthConfig(token.Kind)
+	oauthConfig := ga.OAuthConfig(token.Kind)
 	tokenSource := oauthConfig.TokenSource(context.Background(), &oauthToken)
 
 	// Create CodeAssistClient
@@ -937,7 +938,7 @@ func saveOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reload OpenAI providers to reflect the changes
-	ReloadOpenAIProviders(db, registry)
+	llm.ReloadOpenAIProviders(db, registry)
 
 	sendJSONResponse(w, config)
 }
@@ -959,7 +960,7 @@ func deleteOpenAIConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reload OpenAI providers to reflect the deletion
-	ReloadOpenAIProviders(db, registry)
+	llm.ReloadOpenAIProviders(db, registry)
 
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "OpenAI config deleted successfully"})
 }
@@ -982,7 +983,7 @@ func getOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create client and get models
-	client := NewOpenAIClient(config)
+	client := llm.NewOpenAIClient(config)
 	models, err := client.GetModels(r.Context())
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to fetch models for OpenAI config %s", id))
@@ -1010,7 +1011,7 @@ func refreshOpenAIModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create client and refresh models
-	client := NewOpenAIClient(config)
+	client := llm.NewOpenAIClient(config)
 	models, err := client.RefreshModels(r.Context())
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to refresh models for OpenAI config %s", id))

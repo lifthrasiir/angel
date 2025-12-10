@@ -25,6 +25,7 @@ import (
 
 	"github.com/lifthrasiir/angel/filesystem"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 )
 
 const dbPath = "angel.db"
@@ -58,7 +59,7 @@ func getExecutableName() string {
 }
 
 func main() {
-	modelsRegistry, err := LoadModels(modelsJSON)
+	modelsRegistry, err := llm.LoadModels(modelsJSON)
 	if err != nil {
 		log.Fatalf("Failed to load models.json: %v", err)
 	}
@@ -107,13 +108,13 @@ func main() {
 
 	InitMCPManager(db)
 
-	geminiAuth := NewGeminiAuth("http://localhost:8080/oauth2callback")
+	geminiAuth := llm.NewGeminiAuth("http://localhost:8080/oauth2callback")
 
 	// Initialize OpenAI endpoints from database configurations
 	modelsRegistry.InitializeOpenAIEndpoints(db)
 
 	// Add angel-eval provider after all other providers are initialized
-	modelsRegistry.SetAngelEvalProvider(&AngelEvalProvider{})
+	modelsRegistry.SetAngelEvalProvider(&llm.AngelEvalProvider{})
 
 	router := mux.NewRouter()
 	router.Use(makeContextMiddleware(db, modelsRegistry, geminiAuth))
@@ -436,22 +437,14 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// Context keys for storing values in context.Context
-type contextKey uint8
-
-const (
-	registryKey contextKey = iota
-	gaKey
-)
-
-func contextWithGlobals(ctx context.Context, db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth) context.Context {
+func contextWithGlobals(ctx context.Context, db *sql.DB, registry *llm.Models, ga *llm.GeminiAuth) context.Context {
 	ctx = database.ContextWith(ctx, db)
-	ctx = context.WithValue(ctx, registryKey, registry)
-	ctx = context.WithValue(ctx, gaKey, ga)
+	ctx = llm.ContextWithModels(ctx, registry)
+	ctx = llm.ContextWithGeminiAuth(ctx, ga)
 	return ctx
 }
 
-func makeContextMiddleware(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth) func(next http.Handler) http.Handler {
+func makeContextMiddleware(db *sql.DB, registry *llm.Models, ga *llm.GeminiAuth) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r = r.WithContext(contextWithGlobals(r.Context(), db, registry, ga))
@@ -471,38 +464,20 @@ func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
 	return db
 }
 
-func getModelsRegistry(w http.ResponseWriter, r *http.Request) *ModelsRegistry {
-	registry, ok := r.Context().Value(registryKey).(*ModelsRegistry)
-	if !ok {
+func getModelsRegistry(w http.ResponseWriter, r *http.Request) *llm.Models {
+	registry, err := llm.ModelsFromContext(r.Context())
+	if err != nil {
 		http.Error(w, "Internal Server Error: Models registry missing.", http.StatusInternalServerError)
 		runtime.Goexit()
 	}
 	return registry
 }
 
-func getGeminiAuth(w http.ResponseWriter, r *http.Request) *GeminiAuth {
-	ga, ok := r.Context().Value(gaKey).(*GeminiAuth)
-	if !ok {
+func getGeminiAuth(w http.ResponseWriter, r *http.Request) *llm.GeminiAuth {
+	ga, err := llm.GeminiAuthFromContext(r.Context())
+	if err != nil {
 		http.Error(w, "Internal Server Error: GeminiAuth missing.", http.StatusInternalServerError)
 		runtime.Goexit()
 	}
 	return ga
-}
-
-// getRegistryFromContext retrieves the *ModelsRegistry instance from the given context.Context.
-func getRegistryFromContext(ctx context.Context) (*ModelsRegistry, error) {
-	registry, ok := ctx.Value(registryKey).(*ModelsRegistry)
-	if !ok {
-		return nil, fmt.Errorf("models registry not found in context")
-	}
-	return registry, nil
-}
-
-// getGaFromContext retrieves the *GeminiAuth instance from the given context.Context.
-func getGaFromContext(ctx context.Context) (*GeminiAuth, error) {
-	ga, ok := ctx.Value(gaKey).(*GeminiAuth)
-	if !ok {
-		return nil, fmt.Errorf("gemini auth not found in context")
-	}
-	return ga, nil
 }

@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"bufio"
@@ -798,7 +798,7 @@ func (c *OpenAIClient) MaxTokens(modelName string) int {
 }
 
 // ReloadOpenAIProviders reloads OpenAI providers from database configurations
-func ReloadOpenAIProviders(db *sql.DB, registry *ModelsRegistry) {
+func ReloadOpenAIProviders(db *sql.DB, registry *Models) {
 	// Get current OpenAI configs to know which models to keep
 	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {

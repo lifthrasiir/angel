@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"context"
@@ -21,6 +21,10 @@ import (
 	"github.com/lifthrasiir/angel/internal/database"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
+
+// GetToolsForGemini should return a list of built-in tools available for Gemini models.
+// TODO: Should eliminate once tools are refactored.
+var GetToolsForGemini func() []Tool
 
 // Ensure GeminiProvider implements LLMProvider
 var _ LLMProvider = (*GeminiProvider)(nil)
@@ -339,14 +343,14 @@ func tryAllProviders[T any](
 				}
 
 				var ga *GeminiAuth
-				ga, err = getGaFromContext(ctx)
+				ga, err = GeminiAuthFromContext(ctx)
 				if err != nil {
 					err = fmt.Errorf("failed to get GeminiAuth from context: %w", err)
 					return
 				}
 
 				// Create token source with database refresh hook
-				oauthConfig := ga.getOAuthConfig(providerType)
+				oauthConfig := ga.OAuthConfig(providerType)
 				tokenSource := &databaseTokenSource{
 					db:          db,
 					tokenID:     token.ID,

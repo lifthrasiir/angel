@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"context"
@@ -56,8 +56,8 @@ var antigravityConfig = oauth2.Config{
 	Endpoint: google.Endpoint,
 }
 
-// getOAuthConfig returns the OAuth config for the specified provider
-func (ga *GeminiAuth) getOAuthConfig(provider string) *oauth2.Config {
+// OAuthConfig returns the OAuth config for the specified provider
+func (ga *GeminiAuth) OAuthConfig(provider string) *oauth2.Config {
 	var config oauth2.Config
 	switch provider {
 	case "geminicli":
@@ -73,7 +73,7 @@ func (ga *GeminiAuth) getOAuthConfig(provider string) *oauth2.Config {
 
 // TokenSource creates a TokenSource for the given provider and token.
 func (ga *GeminiAuth) TokenSource(provider string, token *oauth2.Token) oauth2.TokenSource {
-	oauthConfig := ga.getOAuthConfig(provider)
+	oauthConfig := ga.OAuthConfig(provider)
 	return oauth2.ReuseTokenSource(token, oauthConfig.TokenSource(context.Background(), token))
 }
 
@@ -95,7 +95,7 @@ func (ga *GeminiAuth) GenerateAuthURL(provider, redirectToQueryString string) (s
 	stateDataJSON, _ := json.Marshal(stateData)
 	ga.oauthStates[randomState] = string(stateDataJSON)
 
-	oauthConfig := ga.getOAuthConfig(provider)
+	oauthConfig := ga.OAuthConfig(provider)
 	authURL := oauthConfig.AuthCodeURL(randomState)
 
 	return authURL, nil
@@ -133,7 +133,7 @@ func (ga *GeminiAuth) HandleCallback(ctx context.Context, state, code string) (s
 	}
 
 	// Exchange code for token
-	oauthConfig := ga.getOAuthConfig(stateData.Provider)
+	oauthConfig := ga.OAuthConfig(stateData.Provider)
 	token, err := oauthConfig.Exchange(ctx, code)
 	if err != nil {
 		return "", OAuthToken{}, fmt.Errorf("failed to exchange token: %w", err)

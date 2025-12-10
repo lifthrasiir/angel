@@ -16,6 +16,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -72,7 +73,7 @@ func extractStateSnapshotContent(xmlContent string) string {
 	return xmlContent // Fallback to full XML if tags not found
 }
 
-func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, sessionID string, modelName string) (result CompressResult, err error) {
+func CompressSession(ctx context.Context, db *sql.DB, registry *llm.Models, sessionID string, modelName string) (result CompressResult, err error) {
 	// 1. Load session and all messages from the database for the given sessionID.
 	session, err := database.GetSession(db, sessionID)
 	if err != nil {
@@ -118,7 +119,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 	}
 
 	// Resolve subagent for compression task
-	modelProvider, err := registry.ResolveSubagent(modelName, SubagentCompressionTask)
+	modelProvider, err := registry.ResolveSubagent(modelName, llm.SubagentCompressionTask)
 	if err != nil {
 		err = fmt.Errorf("unsupported model for compression: %s: %w", modelName, err)
 		return
@@ -191,7 +192,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 	})
 
 	// 6. Call LLM to get summary (XML format) using GenerateContentOneShot.
-	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, SessionParams{
+	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, llm.SessionParams{
 		Contents:        llmRequestContents,
 		SystemPrompt:    systemPrompt,
 		IncludeThoughts: false,
@@ -295,7 +296,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 						log.Printf("Failed to unmarshal FunctionCall for message %s: %v", msg.ID, err)
 						continue // Skip if malformed
 					}
-					if fc.Name == GeminiCodeExecutionToolName {
+					if fc.Name == llm.GeminiCodeExecutionToolName {
 						var ec ExecutableCode
 						if err := json.Unmarshal([]byte(fmt.Sprintf("%v", fc.Args)), &ec); err != nil {
 							log.Printf("Failed to unmarshal ExecutableCode from FunctionCall args for message %s: %v", msg.ID, err)
@@ -318,7 +319,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *ModelsRegistry, 
 						log.Printf("Failed to unmarshal FunctionResponse for message %s: %v", msg.ID, err)
 						continue // Skip if malformed
 					}
-					if fr.Name == GeminiCodeExecutionToolName {
+					if fr.Name == llm.GeminiCodeExecutionToolName {
 						var cer CodeExecutionResult
 						responseBytes, err := json.Marshal(fr.Response)
 						if err != nil {

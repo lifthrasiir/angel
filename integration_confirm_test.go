@@ -14,18 +14,18 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // Helper to create a session with a pending confirmation
-func setupSessionWithPendingConfirmation(t *testing.T, router *mux.Router, db *sql.DB, registry *ModelsRegistry, toolName string, toolArgs map[string]interface{}) (sessionId string, branchId string, pendingConfirmationData string, resp *http.Response) {
+func setupSessionWithPendingConfirmation(t *testing.T, router *mux.Router, db *sql.DB, registry *llm.Models, toolName string, toolArgs map[string]interface{}) (sessionId string, branchId string, pendingConfirmationData string, resp *http.Response) {
 	// Setup Mock Gemini Provider to return a function call for the specified tool
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{FunctionCall: &FunctionCall{Name: toolName, Args: toolArgs}}),
 		},
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	initialUserMessage := fmt.Sprintf("Please execute %s", toolName)
 	reqBody := map[string]interface{}{
@@ -174,13 +174,12 @@ func TestConfirmationApproval(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider to return a function response and a model response
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{FunctionResponse: &FunctionResponse{Name: "write_file", Response: map[string]interface{}{"status": "success"}}}),
 			responseFromPart(Part{Text: "File written successfully."}),
 		},
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	// Send an approval confirmation
 	confirmReqBody := map[string]interface{}{

@@ -15,6 +15,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -82,7 +83,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 	if err != nil {
 		return ToolHandlerResults{}, err
 	}
-	registry, err := getRegistryFromContext(ctx)
+	registry, err := llm.ModelsFromContext(ctx)
 	if err != nil {
 		return ToolHandlerResults{}, err
 	}
@@ -150,7 +151,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 func handleSubagentTurn(
 	ctx context.Context,
 	db *sql.DB,
-	registry *ModelsRegistry,
+	registry *llm.Models,
 	subsessionID string,
 	session *Session,
 	params ToolHandlerParams,
@@ -220,7 +221,7 @@ func handleSubagentTurn(
 	// Loop to continue LLM calls after tool execution
 	for {
 		// Configure SessionParams for LLM call
-		sessionParams := &SessionParams{
+		sessionParams := &llm.SessionParams{
 			SystemPrompt: session.SystemPrompt,
 			Contents:     currentHistory,
 		}
@@ -382,12 +383,12 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Get LLM client for image generation using the new task first to determine the correct model
-	registry, err := getRegistryFromContext(ctx)
+	registry, err := llm.ModelsFromContext(ctx)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
 	}
 
-	imageModelProvider, err := registry.ResolveSubagent(params.ModelName, SubagentImageGenerationTask)
+	imageModelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentImageGenerationTask)
 	if err != nil {
 		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
@@ -452,7 +453,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Configure session params for image generation
-	sessionParams := &SessionParams{
+	sessionParams := &llm.SessionParams{
 		SystemPrompt: "Generate images based on the user's request. The output should contain the generated images.",
 		Contents:     content,
 	}

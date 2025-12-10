@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"context"
@@ -93,7 +93,7 @@ type OpenAIEndpoint struct {
 	hash       string // Configuration hash for change detection
 }
 
-type ModelsRegistry struct {
+type Models struct {
 	builtinModels map[string]*Model
 	displayOrder  []string
 	aliases       map[string]string
@@ -109,7 +109,7 @@ type ModelsRegistry struct {
 }
 
 // LoadModels loads and parses the models.json file
-func LoadModels(data []byte) (*ModelsRegistry, error) {
+func LoadModels(data []byte) (*Models, error) {
 	var config ModelsConfig
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, ModelsError{
@@ -119,7 +119,7 @@ func LoadModels(data []byte) (*ModelsRegistry, error) {
 		}
 	}
 
-	registry := &ModelsRegistry{
+	registry := &Models{
 		builtinModels:   make(map[string]*Model),
 		displayOrder:    config.DisplayOrder,
 		aliases:         make(map[string]string),
@@ -149,7 +149,7 @@ func LoadModels(data []byte) (*ModelsRegistry, error) {
 }
 
 // parseRawModels converts raw JSON structures to intermediate representation
-func (r *ModelsRegistry) parseRawModels(config *ModelsConfig) error {
+func (r *Models) parseRawModels(config *ModelsConfig) error {
 	// Parse genParams (basic validation)
 	for name := range config.GenParams {
 		if _, exists := config.GenParams[name]; !exists {
@@ -214,7 +214,7 @@ func (r *ModelsRegistry) parseRawModels(config *ModelsConfig) error {
 }
 
 // resolveModels handles inheritance, genParams, subagents, and fallbacks in a single pass
-func (r *ModelsRegistry) resolveModels() error {
+func (r *Models) resolveModels() error {
 	// Resolve inheritance chains first
 	for name, model := range r.builtinModels {
 		if err := r.resolveInheritance(model, name); err != nil {
@@ -233,7 +233,7 @@ func (r *ModelsRegistry) resolveModels() error {
 }
 
 // resolveModelFromRaw resolves all model properties from RawModel in a single pass
-func (r *ModelsRegistry) resolveModelFromRaw(name string, model *Model) error {
+func (r *Models) resolveModelFromRaw(name string, model *Model) error {
 	rawModel := r.getRawModel(name)
 	if rawModel == nil {
 		return nil // Skip if no raw model (e.g., computed models)
@@ -318,7 +318,7 @@ func (r *ModelsRegistry) resolveModelFromRaw(name string, model *Model) error {
 }
 
 // getRawModel retrieves the raw model data from config
-func (r *ModelsRegistry) getRawModel(name string) *RawModel {
+func (r *Models) getRawModel(name string) *RawModel {
 	if r.rawConfig == nil {
 		return nil
 	}
@@ -345,12 +345,12 @@ func (r *ModelsRegistry) getRawModel(name string) *RawModel {
 }
 
 // resolveInheritance resolves the inheritance chain for a model
-func (r *ModelsRegistry) resolveInheritance(model *Model, modelName string) error {
+func (r *Models) resolveInheritance(model *Model, modelName string) error {
 	visited := make(map[string]bool)
 	return r.resolveInheritanceRecursive(model, modelName, visited)
 }
 
-func (r *ModelsRegistry) resolveInheritanceRecursive(model *Model, modelName string, visited map[string]bool) error {
+func (r *Models) resolveInheritanceRecursive(model *Model, modelName string, visited map[string]bool) error {
 	if visited[modelName] {
 		return ModelsError{
 			Type:    ErrTypeValidation,
@@ -398,7 +398,7 @@ func (r *ModelsRegistry) resolveInheritanceRecursive(model *Model, modelName str
 }
 
 // getBoolValue gets the boolean value from a tristate pointer
-func (r *ModelsRegistry) getBoolValue(ptr *bool, defaultValue bool) bool {
+func (r *Models) getBoolValue(ptr *bool, defaultValue bool) bool {
 	if ptr == nil {
 		return defaultValue
 	}
@@ -406,7 +406,7 @@ func (r *ModelsRegistry) getBoolValue(ptr *bool, defaultValue bool) bool {
 }
 
 // getIntValue gets the integer value from a tristate pointer
-func (r *ModelsRegistry) getIntValue(ptr *int, defaultValue int) int {
+func (r *Models) getIntValue(ptr *int, defaultValue int) int {
 	if ptr == nil {
 		return defaultValue
 	}
@@ -414,7 +414,7 @@ func (r *ModelsRegistry) getIntValue(ptr *int, defaultValue int) int {
 }
 
 // mergeModel merges parent model into child model (child overrides parent)
-func (r *ModelsRegistry) mergeModel(parent, child *Model, childName string) {
+func (r *Models) mergeModel(parent, child *Model, childName string) {
 	// Merge non-array fields (child overrides parent if present)
 	if child.Providers == nil {
 		child.Providers = parent.Providers
@@ -456,7 +456,7 @@ func (r *ModelsRegistry) mergeModel(parent, child *Model, childName string) {
 }
 
 // resolveModelReference resolves a model reference with inheritance-aware subagent path resolution
-func (r *ModelsRegistry) resolveModelReference(baseModel *Model, name string) (*Model, error) {
+func (r *Models) resolveModelReference(baseModel *Model, name string) (*Model, error) {
 	// 1. Check if it's an alias first
 	if alias, exists := r.aliases[name]; exists {
 		name = alias
@@ -512,7 +512,7 @@ func (r *ModelsRegistry) resolveModelReference(baseModel *Model, name string) (*
 }
 
 // resolveGenParams resolves genParams from reference or inline object
-func (r *ModelsRegistry) resolveGenParams(raw interface{}) (GenerationParams, error) {
+func (r *Models) resolveGenParams(raw interface{}) (GenerationParams, error) {
 	switch v := raw.(type) {
 	case string:
 		if paramSet, exists := r.rawConfig.GenParams[v]; exists {
@@ -536,7 +536,7 @@ func (r *ModelsRegistry) resolveGenParams(raw interface{}) (GenerationParams, er
 }
 
 // convertToGenParams converts raw interface{} to GenerationParams with strict type validation
-func (r *ModelsRegistry) convertToGenParams(raw interface{}) (GenerationParams, error) {
+func (r *Models) convertToGenParams(raw interface{}) (GenerationParams, error) {
 	paramMap, ok := raw.(map[string]interface{})
 	if !ok {
 		return GenerationParams{}, ModelsError{
@@ -567,7 +567,7 @@ func (r *ModelsRegistry) convertToGenParams(raw interface{}) (GenerationParams, 
 }
 
 // validate performs comprehensive validation of the resolved models
-func (r *ModelsRegistry) validate() error {
+func (r *Models) validate() error {
 	var errors []ModelsError
 
 	// Validate displayOrder references
@@ -614,7 +614,7 @@ func (r *ModelsRegistry) validate() error {
 }
 
 // GetModel retrieves a model by name or alias
-func (r *ModelsRegistry) GetModel(name string) (*Model, bool) {
+func (r *Models) GetModel(name string) (*Model, bool) {
 	// Check if it's an alias
 	if alias, exists := r.aliases[name]; exists {
 		name = alias
@@ -625,7 +625,7 @@ func (r *ModelsRegistry) GetModel(name string) (*Model, bool) {
 }
 
 // InitializeOpenAIEndpoints sets up OpenAI providers from database configs
-func (r *ModelsRegistry) InitializeOpenAIEndpoints(db *sql.DB) error {
+func (r *Models) InitializeOpenAIEndpoints(db *sql.DB) error {
 	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenAI configs: %w", err)
@@ -660,7 +660,7 @@ func (r *ModelsRegistry) InitializeOpenAIEndpoints(db *sql.DB) error {
 }
 
 // createOpenAIEndpoint creates a new OpenAI endpoint
-func (r *ModelsRegistry) createOpenAIEndpoint(config *OpenAIConfig) error {
+func (r *Models) createOpenAIEndpoint(config *OpenAIConfig) error {
 	hash := config.Hash()
 	if _, exists := r.openAIEndpoints[hash]; exists {
 		return fmt.Errorf("endpoint with hash %s already exists", hash)
@@ -698,7 +698,7 @@ func (r *ModelsRegistry) createOpenAIEndpoint(config *OpenAIConfig) error {
 }
 
 // UpdateOpenAIEndpoints updates OpenAI providers when configs change
-func (r *ModelsRegistry) UpdateOpenAIEndpoints(db *sql.DB) error {
+func (r *Models) UpdateOpenAIEndpoints(db *sql.DB) error {
 	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenAI configs: %w", err)
@@ -747,7 +747,7 @@ func (r *ModelsRegistry) UpdateOpenAIEndpoints(db *sql.DB) error {
 }
 
 // createOpenAIEndpointUnsafe creates endpoint without mutex lock (internal use)
-func (r *ModelsRegistry) createOpenAIEndpointUnsafe(config *OpenAIConfig) error {
+func (r *Models) createOpenAIEndpointUnsafe(config *OpenAIConfig) error {
 	hash := config.Hash()
 
 	client := NewOpenAIClient(config)
@@ -778,7 +778,7 @@ func (r *ModelsRegistry) createOpenAIEndpointUnsafe(config *OpenAIConfig) error 
 }
 
 // cleanupUnusedEndpointsUnsafe removes endpoints that are no longer needed (internal use)
-func (r *ModelsRegistry) cleanupUnusedEndpointsUnsafe(neededHashes map[string]bool) {
+func (r *Models) cleanupUnusedEndpointsUnsafe(neededHashes map[string]bool) {
 	for hash, endpoint := range r.openAIEndpoints {
 		if !neededHashes[hash] {
 			// Remove models from provider mapping
@@ -791,7 +791,7 @@ func (r *ModelsRegistry) cleanupUnusedEndpointsUnsafe(neededHashes map[string]bo
 }
 
 // updateModelProvidersUnsafe updates the model to provider mappings (internal use)
-func (r *ModelsRegistry) updateModelProvidersUnsafe() {
+func (r *Models) updateModelProvidersUnsafe() {
 	// Clear existing non-Gemini providers (but preserve angel-eval)
 	for model, provider := range r.providers {
 		if provider != r.geminiProvider && model != AngelEvalModelName {
@@ -808,7 +808,7 @@ func (r *ModelsRegistry) updateModelProvidersUnsafe() {
 }
 
 // SetAngelEvalProvider sets the angel-eval provider
-func (r *ModelsRegistry) SetAngelEvalProvider(provider LLMProvider) {
+func (r *Models) SetAngelEvalProvider(provider LLMProvider) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -816,7 +816,7 @@ func (r *ModelsRegistry) SetAngelEvalProvider(provider LLMProvider) {
 }
 
 // ResetGeminiProvider creates and sets the Gemini provider.
-func (r *ModelsRegistry) ResetGeminiProvider() {
+func (r *Models) ResetGeminiProvider() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -838,7 +838,7 @@ func (r *ModelsRegistry) ResetGeminiProvider() {
 }
 
 // SetGeminiProvider sets a custom LLM provider for Gemini models (for testing)
-func (r *ModelsRegistry) SetGeminiProvider(provider LLMProvider) {
+func (r *Models) SetGeminiProvider(provider LLMProvider) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -853,7 +853,7 @@ func (r *ModelsRegistry) SetGeminiProvider(provider LLMProvider) {
 }
 
 // GetProvider returns the provider for a model name
-func (r *ModelsRegistry) GetProvider(modelName string) LLMProvider {
+func (r *Models) GetProvider(modelName string) LLMProvider {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -861,7 +861,7 @@ func (r *ModelsRegistry) GetProvider(modelName string) LLMProvider {
 }
 
 // GetModelProvider returns a ModelProvider wrapper that automatically handles the model name
-func (r *ModelsRegistry) GetModelProvider(modelName string) (ModelProvider, error) {
+func (r *Models) GetModelProvider(modelName string) (ModelProvider, error) {
 	provider := r.GetProvider(modelName)
 	if provider == nil {
 		return ModelProvider{}, fmt.Errorf("unsupported model: %s", modelName)
@@ -870,7 +870,7 @@ func (r *ModelsRegistry) GetModelProvider(modelName string) (ModelProvider, erro
 }
 
 // Clear removes all providers and resets the registry
-func (r *ModelsRegistry) Clear() {
+func (r *Models) Clear() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -880,7 +880,7 @@ func (r *ModelsRegistry) Clear() {
 }
 
 // IsEmpty returns true if no providers are registered
-func (r *ModelsRegistry) IsEmpty() bool {
+func (r *Models) IsEmpty() bool {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -888,13 +888,13 @@ func (r *ModelsRegistry) IsEmpty() bool {
 }
 
 // isGeminiModelUnsafe checks if a model is a built-in model that should be handled by GeminiProvider (internal use, no mutex)
-func (r *ModelsRegistry) isGeminiModelUnsafe(model *Model) bool {
+func (r *Models) isGeminiModelUnsafe(model *Model) bool {
 	// Built-in models have providers, external models (like OpenAI) don't
 	return len(model.Providers) > 0
 }
 
 // GetAllModels returns all non-subagent models in display order
-func (r *ModelsRegistry) GetAllModels() []*Model {
+func (r *Models) GetAllModels() []*Model {
 	var models []*Model
 	seen := make(map[string]bool)
 
@@ -929,7 +929,7 @@ func (r *ModelsRegistry) GetAllModels() []*Model {
 }
 
 // Validate performs validation and returns detailed errors
-func (r *ModelsRegistry) Validate() []ModelsError {
+func (r *Models) Validate() []ModelsError {
 	var errors []ModelsError
 
 	// Validate displayOrder references
@@ -971,7 +971,7 @@ func (r *ModelsRegistry) Validate() []ModelsError {
 }
 
 // ModelGenerationParams returns the generation parameters for a given model name
-func (r *ModelsRegistry) ModelGenerationParams(modelName string) (GenerationParams, error) {
+func (r *Models) ModelGenerationParams(modelName string) (GenerationParams, error) {
 	// Check if it's an alias
 	if alias, exists := r.aliases[modelName]; exists {
 		modelName = alias
@@ -990,7 +990,7 @@ func (r *ModelsRegistry) ModelGenerationParams(modelName string) (GenerationPara
 }
 
 // ResolveSubagent resolves a subagent for a given model and task, returning the resolved model name and provider
-func (r *ModelsRegistry) ResolveSubagent(modelName string, task string) (ModelProvider, error) {
+func (r *Models) ResolveSubagent(modelName string, task string) (ModelProvider, error) {
 	// Check if it's an alias
 	if alias, exists := r.aliases[modelName]; exists {
 		modelName = alias

@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonschema"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -64,6 +65,10 @@ func GetBuiltinToolNames() map[string]bool {
 		builtinToolNames[toolName] = true
 	}
 	return builtinToolNames
+}
+
+func init() {
+	llm.GetToolsForGemini = GetToolsForGemini
 }
 
 // GetToolsForGemini returns a slice of Tool for Gemini API.

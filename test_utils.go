@@ -19,10 +19,11 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 )
 
 // Helper function to set up the test environment
-func setupTest(t *testing.T) (*mux.Router, *sql.DB, *ModelsRegistry) {
+func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 	// Initialize an in-memory database for testing with unique name
 	testDB, err := database.InitTestDB(t.Name())
 	if err != nil {
@@ -46,19 +47,19 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *ModelsRegistry) {
 		t.Fatalf("Failed to read models.json: %v", err)
 	}
 
-	modelsRegistry, err := LoadModels(modelsData)
+	modelsRegistry, err := llm.LoadModels(modelsData)
 	if err != nil {
 		t.Fatalf("Failed to load models: %v", err)
 	}
 
 	// Override CurrentProvider with MockLLMProvider for testing
-	mockLLMProvider := &MockLLMProvider{
-		SendMessageStreamFunc: func(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	mockLLMProvider := &llm.MockLLMProvider{
+		SendMessageStreamFunc: func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 			// Default mock implementation: return an empty sequence
 			return iter.Seq[GenerateContentResponse](func(yield func(GenerateContentResponse) bool) {}), io.NopCloser(nil), nil
 		},
-		GenerateContentOneShotFunc: func(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
-			return OneShotResult{Text: "Mocked one-shot response"}, nil
+		GenerateContentOneShotFunc: func(ctx context.Context, modelName string, params llm.SessionParams) (llm.OneShotResult, error) {
+			return llm.OneShotResult{Text: "Mocked one-shot response"}, nil
 		},
 		CountTokensFunc: func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 			return &CaCountTokenResponse{TotalTokens: 10}, nil
@@ -70,7 +71,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *ModelsRegistry) {
 	modelsRegistry.SetGeminiProvider(mockLLMProvider)
 
 	// Initialize GeminiAuth
-	geminiAuth := NewGeminiAuth("")
+	geminiAuth := llm.NewGeminiAuth("")
 
 	// Create a new router for testing
 	router := mux.NewRouter()
@@ -85,12 +86,6 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *ModelsRegistry) {
 	})
 
 	return router, testDB, modelsRegistry
-}
-
-func (r *ModelsRegistry) replaceGeminiProvider(provider LLMProvider) LLMProvider {
-	oldProvider := r.GetProvider(DefaultGeminiModel)
-	r.SetGeminiProvider(provider)
-	return oldProvider
 }
 
 type Sse struct {

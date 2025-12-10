@@ -16,6 +16,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -29,7 +30,7 @@ type MockGeminiProvider struct {
 }
 
 // ModelName implements the LLMProvider interface for MockGeminiProvider.
-func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	if m.Err != nil {
 		return nil, nil, m.Err
 	}
@@ -71,8 +72,8 @@ func (m *MockGeminiProvider) SendMessageStream(ctx context.Context, modelName st
 	return seq, &mockCloser{}, nil // Return a mock io.Closer
 }
 
-func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
-	return OneShotResult{Text: "inferred name"}, nil
+func (m *MockGeminiProvider) GenerateContentOneShot(ctx context.Context, modelName string, params llm.SessionParams) (llm.OneShotResult, error) {
+	return llm.OneShotResult{Text: "inferred name"}, nil
 }
 
 func (m *MockGeminiProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
@@ -152,14 +153,13 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "**Thinking**\nThis is a thought.", Thought: true}),
 			responseFromPart(Part{Text: "This is the model's response."}),
 		},
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	// 1. Start new session with initial user message
 	initialUserMessage := "Hello, Gemini!"
@@ -311,14 +311,13 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// i) Create three messages: A-B-C
 	// 1. Send initial user message (A)
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "B's thought", Thought: true}),
 			responseFromPart(Part{Text: "B's response"}),
 		},
 	})
-	defer registry.replaceGeminiProvider(provider)
 	msgA1Text := "Message A"
 	reqBodyA1 := map[string]interface{}{
 		"message":      msgA1Text,
@@ -362,7 +361,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	printMessages(t, db, "After A1-A3 chain")
 
 	// 2. Send second user message (C)
-	registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "B's thought", Thought: true}),
@@ -430,7 +429,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// ii) Create a new branch C1-C2-C3 after A3 (Model A)
 	// Create a new branch from message A3 (Model A)
-	registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
@@ -488,7 +487,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 
 	// Simulate streaming response for Message C (thought and model)
-	registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
@@ -618,14 +617,13 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider to stream "A", "B", "C" and then complete
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B"}),
 			responseFromPart(Part{Text: "C"}),
 		},
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	// 1. Start new session with initial user message
 	initialUserMessage := "Test streaming consolidation."
@@ -700,7 +698,7 @@ func TestSyncDuringThought(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -711,7 +709,6 @@ func TestSyncDuringThought(t *testing.T) {
 		},
 		Delay: 50 * time.Millisecond, // Faster for robust testing
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	// 1. Start new session with initial user message
 	initialUserMessage := "Hello, Gemini!"
@@ -866,7 +863,7 @@ func TestSyncDuringResponse(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -877,7 +874,6 @@ func TestSyncDuringResponse(t *testing.T) {
 		},
 		Delay: 50 * time.Millisecond, // Faster for robust testing
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	// 1. Start new session with initial user message
 	initialUserMessage := "Hello, Gemini!"
@@ -1021,7 +1017,7 @@ func TestCancelDuringSync(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -1034,7 +1030,6 @@ func TestCancelDuringSync(t *testing.T) {
 		ExtraDelayIndex:  5,
 		ExtraDelayAmount: 500 * time.Millisecond, // Long enough for cancellation
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	// 1. Start new session with initial user message
 	initialUserMessage := "Hello, Gemini!"
@@ -1363,7 +1358,7 @@ func TestApplyCurationRules(t *testing.T) {
 		{
 			name: "ExecutableCode FunctionCall without response: Model(EC) -> Model (EC removed)",
 			input: []FrontendMessage{
-				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: llm.GeminiCodeExecutionToolName}}}},
 				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
@@ -1373,13 +1368,13 @@ func TestApplyCurationRules(t *testing.T) {
 		{
 			name: "ExecutableCode FunctionCall with response: Model(EC) -> User(ECR) -> Model (all kept)",
 			input: []FrontendMessage{
-				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: GeminiCodeExecutionToolName}}}},
-				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: llm.GeminiCodeExecutionToolName}}}},
+				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: llm.GeminiCodeExecutionToolName}}}},
 				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 			expected: []FrontendMessage{
-				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: GeminiCodeExecutionToolName}}}},
-				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: GeminiCodeExecutionToolName}}}},
+				{Type: TypeFunctionCall, Parts: []Part{{FunctionCall: &FunctionCall{Name: llm.GeminiCodeExecutionToolName}}}},
+				{Type: TypeFunctionResponse, Parts: []Part{{FunctionResponse: &FunctionResponse{Name: llm.GeminiCodeExecutionToolName}}}},
 				{Type: TypeModelText, Parts: []Part{{Text: "Model 1"}}},
 			},
 		},
@@ -1415,13 +1410,12 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 	}
 
 	// Mock Gemini Provider to return ExecutableCode and CodeExecutionResult
-	provider := registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{ExecutableCode: &ExecutableCode{Language: "python", Code: "print('hello')"}}),
 			responseFromPart(Part{CodeExecutionResult: &CodeExecutionResult{Outcome: "OUTCOME_OK", Output: "hello"}}),
 		},
 	})
-	defer registry.replaceGeminiProvider(provider)
 
 	initialUserMessage := "Run some code."
 	reqBody := map[string]interface{}{
@@ -1454,8 +1448,8 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 			messageIdPart, rest, _ := strings.Cut(event.Payload, "\n")
 			functionName, argsJson, _ := strings.Cut(rest, "\n")
 			codeCallMessageID, _ = strconv.Atoi(messageIdPart)
-			if functionName != GeminiCodeExecutionToolName {
-				t.Errorf("Expected function name %s, got %s", GeminiCodeExecutionToolName, functionName)
+			if functionName != llm.GeminiCodeExecutionToolName {
+				t.Errorf("Expected function name %s, got %s", llm.GeminiCodeExecutionToolName, functionName)
 			}
 			var ec ExecutableCode
 			if err := json.Unmarshal([]byte(argsJson), &ec); err != nil {
@@ -1468,8 +1462,8 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 			messageIdPart, rest, _ := strings.Cut(event.Payload, "\n")
 			functionName, responseJson, _ := strings.Cut(rest, "\n")
 			codeResponseMessageID, _ = strconv.Atoi(messageIdPart)
-			if functionName != GeminiCodeExecutionToolName {
-				t.Errorf("Expected function name %s, got %s", GeminiCodeExecutionToolName, functionName)
+			if functionName != llm.GeminiCodeExecutionToolName {
+				t.Errorf("Expected function name %s, got %s", llm.GeminiCodeExecutionToolName, functionName)
 			}
 			var payload FunctionResponsePayload
 			if err := json.Unmarshal([]byte(responseJson), &payload); err != nil {
@@ -1526,8 +1520,8 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 	if err := json.Unmarshal([]byte(msg.Text), &fc); err != nil {
 		t.Errorf("Failed to unmarshal FunctionCall from DB text: %v", err)
 	}
-	if fc.Name != GeminiCodeExecutionToolName {
-		t.Errorf("Expected FunctionCall name in DB to be %s, got %s", GeminiCodeExecutionToolName, fc.Name)
+	if fc.Name != llm.GeminiCodeExecutionToolName {
+		t.Errorf("Expected FunctionCall name in DB to be %s, got %s", llm.GeminiCodeExecutionToolName, fc.Name)
 	}
 	var ec ExecutableCode
 	jsonBytes, err := json.Marshal(fc.Args)
@@ -1555,8 +1549,8 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 	if err := json.Unmarshal([]byte(msg.Text), &fr); err != nil {
 		t.Errorf("Failed to unmarshal FunctionResponse from DB text: %v", err)
 	}
-	if fr.Name != GeminiCodeExecutionToolName {
-		t.Errorf("Expected FunctionResponse name in DB to be %s, got %s", GeminiCodeExecutionToolName, fr.Name)
+	if fr.Name != llm.GeminiCodeExecutionToolName {
+		t.Errorf("Expected FunctionResponse name in DB to be %s, got %s", llm.GeminiCodeExecutionToolName, fr.Name)
 	}
 	var cer CodeExecutionResult
 	responseBytes, err := json.Marshal(fr.Response)
@@ -1624,7 +1618,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	}
 
 	// Step 3: Test retry with error message
-	registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry response"}),
 		},
@@ -1685,7 +1679,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	// Wait a bit to ensure the first retry call is completely finished
 	time.Sleep(100 * time.Millisecond)
 
-	registry.replaceGeminiProvider(&MockGeminiProvider{
+	registry.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry without errors"}),
 		},

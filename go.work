@@ -6,5 +6,6 @@ use (
 	./src/filesystem
 	./src/gemini
 	./src/internal/database
+	./src/internal/llm
 	./src/internal/types
 )

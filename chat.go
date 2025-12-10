@@ -17,6 +17,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -674,7 +675,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 		// Handle function calls and responses (these should override text/attachments for their specific message types)
 		if fm.Type == TypeFunctionCall && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
 			fc := fm.Parts[0].FunctionCall
-			if fc.Name == GeminiCodeExecutionToolName {
+			if fc.Name == llm.GeminiCodeExecutionToolName {
 				var ec ExecutableCode
 				// fc.Args is map[string]interface{}, need to marshal then unmarshal
 				argsBytes, err := json.Marshal(fc.Args)
@@ -692,7 +693,7 @@ func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMes
 			}
 		} else if fm.Type == TypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
 			fr := fm.Parts[0].FunctionResponse
-			if fr.Name == GeminiCodeExecutionToolName {
+			if fr.Name == llm.GeminiCodeExecutionToolName {
 				var cer CodeExecutionResult
 				// fr.Response is interface{}, need to marshal then unmarshal
 				responseBytes, err := json.Marshal(fr.Response)
