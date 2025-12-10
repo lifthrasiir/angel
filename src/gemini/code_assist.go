@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+
+	"golang.org/x/oauth2"
 )
 
 // HTTPClientProvider defines an interface for providing an *http.Client.
@@ -14,7 +16,20 @@ type HTTPClientProvider interface {
 	Client(ctx context.Context) *http.Client
 }
 
-// Define CodeAssistClient struct
+// TokenSourceClientProvider returns an HTTPClientProvider that is aware of the provided oauth2.TokenSource.
+func TokenSourceClientProvider(tokenSource oauth2.TokenSource) HTTPClientProvider {
+	return tokenSourceClientProvider{TokenSource: tokenSource}
+}
+
+type tokenSourceClientProvider struct {
+	oauth2.TokenSource
+}
+
+func (tscp tokenSourceClientProvider) Client(ctx context.Context) *http.Client {
+	return oauth2.NewClient(ctx, tscp.TokenSource)
+}
+
+// CodeAssistClient is a client for interacting with the Code Assist API.
 type CodeAssistClient struct {
 	baseClient
 	ProjectID string

@@ -107,7 +107,7 @@ func main() {
 
 	InitMCPManager(db)
 
-	geminiAuth := NewGeminiAuth(db)
+	geminiAuth := NewGeminiAuth("http://localhost:8080/oauth2callback")
 
 	// Initialize OpenAI endpoints from database configurations
 	modelsRegistry.InitializeOpenAIEndpoints(db)

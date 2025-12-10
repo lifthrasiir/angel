@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,108 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
+// authHandler handles authentication requests.
+func authHandler(w http.ResponseWriter, r *http.Request) {
+	ga := getGeminiAuth(w, r)
+
+	// Capture the entire raw query string from the /login request.
+	// This will contain both 'redirect_to' and 'draft_message'.
+	redirectToQueryString := r.URL.RawQuery
+	if redirectToQueryString == "" {
+		// If no query parameters, default to redirecting to the root.
+		// This case might not be hit if frontend always sends redirect_to.
+		redirectToQueryString = "redirect_to=/" // Ensure a default redirect_to
+	}
+
+	// Parse query parameters to get provider
+	queryParams, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		log.Printf("Error parsing query parameters: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	provider := queryParams.Get("provider")
+	if provider == "" {
+		provider = "geminicli" // default provider
+	}
+
+	// Generate auth URL
+	authURL, err := ga.GenerateAuthURL(provider, redirectToQueryString)
+	if err != nil {
+		log.Printf("Error generating auth URL: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+}
+
+// authCallbackHandler handles authentication callback requests.
+func authCallbackHandler(w http.ResponseWriter, r *http.Request) {
+	ga := getGeminiAuth(w, r)
+	db := getDb(w, r)
+
+	stateParam := r.FormValue("state")
+	code := r.FormValue("code")
+
+	// Handle callback using business logic
+	redirectURL, oauthToken, err := ga.HandleCallback(r.Context(), stateParam, code)
+	if err != nil {
+		log.Printf("Error handling callback: %v", err)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	err = database.SaveOAuthToken(db, oauthToken)
+	if err != nil {
+		log.Printf("Error saving OAuth token to DB: %v", err)
+		// Continue even if saving fails
+	}
+
+	// Redirect to the original path after successful authentication
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+}
+
+// logoutHandler handles logout requests.
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	// Parse request body to get which account to logout
+	var request struct {
+		Email string `json:"email"`
+		ID    int    `json:"id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		log.Printf("Failed to decode logout request: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var err error
+	if request.ID != 0 {
+		// Delete specific account by ID
+		err = database.DeleteOAuthTokenByID(db, request.ID)
+		log.Printf("Logged out account with ID %d", request.ID)
+	} else if request.Email != "" {
+		// Delete specific account by email
+		err = database.DeleteOAuthTokenByEmail(db, request.Email, "geminicli")
+		log.Printf("Logged out account for email %s", request.Email)
+	} else {
+		http.Error(w, "Either email or id must be provided", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		log.Printf("Failed to delete OAuth token from DB: %v", err)
+		http.Error(w, "Failed to logout", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Account logged out successfully")
+}
 func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
@@ -127,7 +230,7 @@ func getAccountDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	tokenSource := oauthConfig.TokenSource(context.Background(), &oauthToken)
 
 	// Create CodeAssistClient
-	client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID, token.Kind)
+	client := NewCodeAssistClient(TokenSourceClientProvider(tokenSource), token.ProjectID, token.Kind)
 
 	switch token.Kind {
 	case "antigravity":

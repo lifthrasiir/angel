@@ -356,7 +356,7 @@ func tryAllProviders[T any](
 					baseToken:   &oauthToken,
 					tokenSource: oauthConfig.TokenSource(context.Background(), &oauthToken),
 				}
-				client := NewCodeAssistClient(&tokenSourceProvider{TokenSource: tokenSource}, token.ProjectID, providerType)
+				client := NewCodeAssistClient(TokenSourceClientProvider(tokenSource), token.ProjectID, providerType)
 
 				// Update last_used for this model
 				database.UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)

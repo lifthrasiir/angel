@@ -176,7 +176,8 @@ func getNextOAuthTokenID(db *sql.DB) (int, error) {
 }
 
 // SaveOAuthToken saves an OAuth token to the database.
-func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID string, kind string) error {
+// Only token.TokenData, token.UserEmail, token.ProjectID and token.Kind are used.
+func SaveOAuthToken(db *sql.DB, token OAuthToken) error {
 	// Get the next available ID
 	nextID, err := getNextOAuthTokenID(db)
 	if err != nil {
@@ -191,11 +192,11 @@ func SaveOAuthToken(db *sql.DB, tokenJSON string, userEmail string, projectID st
 	// Use INSERT OR REPLACE to handle duplicates automatically due to UNIQUE(user_email, kind) constraint
 	_, err = db.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-		nextID, tokenJSON, userEmail, projectID, kind, lastUsedByModelJSON)
+		nextID, token.TokenData, token.UserEmail, token.ProjectID, token.Kind, lastUsedByModelJSON)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token: %w", err)
 	}
-	log.Printf("Saved OAuth token for user %s with kind %s", userEmail, kind)
+	log.Printf("Saved OAuth token for user %s with kind %s", token.UserEmail, token.Kind)
 	return nil
 }
 
@@ -658,24 +659,4 @@ func unmarshalTimeMap(data string) (map[string]time.Time, error) {
 		return make(map[string]time.Time), nil
 	}
 	return result, nil
-}
-
-// GetEnabledGeminiAPIConfigCount returns the count of enabled Gemini API configurations.
-func GetEnabledGeminiAPIConfigCount(db *sql.DB) (int, error) {
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM gemini_api_configs WHERE enabled = 1").Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count enabled Gemini API configs: %w", err)
-	}
-	return count, nil
-}
-
-// GetEnabledOpenAIConfigCount returns the count of enabled OpenAI configurations.
-func GetEnabledOpenAIConfigCount(db *sql.DB) (int, error) {
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM openai_configs WHERE enabled = 1").Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count enabled OpenAI configs: %w", err)
-	}
-	return count, nil
 }

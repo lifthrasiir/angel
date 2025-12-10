@@ -70,7 +70,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *ModelsRegistry) {
 	modelsRegistry.SetGeminiProvider(mockLLMProvider)
 
 	// Initialize GeminiAuth
-	geminiAuth := NewGeminiAuth(testDB)
+	geminiAuth := NewGeminiAuth("")
 
 	// Create a new router for testing
 	router := mux.NewRouter()
