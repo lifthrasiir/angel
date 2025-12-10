@@ -106,8 +106,7 @@ func (ga *GeminiAuth) HasAuthenticatedProviders() bool {
 	// Check if there are any API key configurations
 	// This would need to be implemented based on your API key storage
 	// For now, just check if there are any Gemini API configs
-	var geminiConfigsCount int
-	err = ga.db.QueryRow("SELECT COUNT(*) FROM gemini_api_configs WHERE enabled = 1").Scan(&geminiConfigsCount)
+	geminiConfigsCount, err := database.GetEnabledGeminiAPIConfigCount(ga.db)
 	if err != nil {
 		log.Printf("HasAuthenticatedProviders: Failed to check Gemini API configs: %v", err)
 		return false
@@ -118,8 +117,7 @@ func (ga *GeminiAuth) HasAuthenticatedProviders() bool {
 	}
 
 	// Check OpenAI configs too
-	var openaiConfigsCount int
-	err = ga.db.QueryRow("SELECT COUNT(*) FROM openai_configs WHERE enabled = 1").Scan(&openaiConfigsCount)
+	openaiConfigsCount, err := database.GetEnabledOpenAIConfigCount(ga.db)
 	if err != nil {
 		log.Printf("HasAuthenticatedProviders: Failed to check OpenAI configs: %v", err)
 		return false

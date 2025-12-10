@@ -587,3 +587,55 @@ func (mc *MessageChain) Add(ctx context.Context, db DbOrTx, msg Message) (Messag
 
 	return msg, nil
 }
+
+// GetOriginalNextMessageInBranch finds the message that originally follows a given message in its own branch.
+func GetOriginalNextMessageInBranch(db *sql.DB, parentMessageID int, branchID string) (*int, error) {
+	var originalNextMessageID sql.NullInt64
+	err := db.QueryRow(`
+		SELECT id FROM messages
+		WHERE parent_message_id = ? AND branch_id = ?
+		ORDER BY created_at ASC LIMIT 1
+	`, parentMessageID, branchID).Scan(&originalNextMessageID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // No original next message found
+		}
+		return nil, fmt.Errorf("failed to find original next message for %d: %w", parentMessageID, err)
+	}
+
+	if originalNextMessageID.Valid {
+		val := int(originalNextMessageID.Int64)
+		return &val, nil
+	}
+	return nil, nil
+}
+
+// GetBranchSessionID retrieves the session ID for a given branch ID.
+func GetBranchSessionID(db *sql.DB, branchID string) (string, error) {
+	var sessionID string
+	err := db.QueryRow("SELECT session_id FROM branches WHERE id = ?", branchID).Scan(&sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get session ID for branch %s: %w", branchID, err)
+	}
+	return sessionID, nil
+}
+
+// GetFirstMessageInBranch finds the first message of a branch (parent_message_id IS NULL).
+func GetFirstMessageInBranch(db *sql.DB, sessionID string, branchID string) (*int, error) {
+	var firstMessageID *int
+	err := db.QueryRow(`
+		SELECT id FROM messages
+		WHERE session_id = ? AND branch_id = ? AND parent_message_id IS NULL
+		ORDER BY created_at DESC LIMIT 1
+	`, sessionID, branchID).Scan(&firstMessageID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // No first message found
+		}
+		return nil, fmt.Errorf("failed to find first message for branch %s: %w", branchID, err)
+	}
+
+	return firstMessageID, nil
+}

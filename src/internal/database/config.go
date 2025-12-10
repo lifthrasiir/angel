@@ -659,3 +659,23 @@ func unmarshalTimeMap(data string) (map[string]time.Time, error) {
 	}
 	return result, nil
 }
+
+// GetEnabledGeminiAPIConfigCount returns the count of enabled Gemini API configurations.
+func GetEnabledGeminiAPIConfigCount(db *sql.DB) (int, error) {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM gemini_api_configs WHERE enabled = 1").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count enabled Gemini API configs: %w", err)
+	}
+	return count, nil
+}
+
+// GetEnabledOpenAIConfigCount returns the count of enabled OpenAI configurations.
+func GetEnabledOpenAIConfigCount(db *sql.DB) (int, error) {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM openai_configs WHERE enabled = 1").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count enabled OpenAI configs: %w", err)
+	}
+	return count, nil
+}

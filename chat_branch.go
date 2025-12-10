@@ -387,25 +387,14 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 
 			if lastMessageID != 0 {
 				// Find the message that originally followed lastMessageID in its own branch
-				var originalNextMessageID sql.NullInt64
-				err := db.QueryRow(`
-					SELECT id FROM messages
-					WHERE parent_message_id = ? AND branch_id = ?
-					ORDER BY created_at ASC LIMIT 1
-				`, lastMessageID, oldPrimaryBranchID).Scan(&originalNextMessageID)
+				originalNextMessageID, err := database.GetOriginalNextMessageInBranch(db, lastMessageID, oldPrimaryBranchID)
 
-				if err != nil && err != sql.ErrNoRows {
+				if err != nil {
 					log.Printf("switchBranchHandler: Failed to find original next message for %d: %v", lastMessageID, err)
 					// Non-fatal, continue
 				}
 
-				var chosenNextID *int
-				if originalNextMessageID.Valid {
-					val := int(originalNextMessageID.Int64)
-					chosenNextID = &val
-				}
-
-				if err := database.UpdateMessageChosenNextID(db, lastMessageID, chosenNextID); err != nil {
+				if err := database.UpdateMessageChosenNextID(db, lastMessageID, originalNextMessageID); err != nil {
 					log.Printf("switchBranchHandler: Failed to update chosen_next_id for message %d: %v", lastMessageID, err)
 					// Non-fatal, continue
 				}
@@ -445,8 +434,7 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 
 	// Additionally, check if the new primary branch has a first message (parent_message_id IS NULL)
 	// and update the session's chosen_first_id accordingly
-	var sessionID string
-	err = db.QueryRow("SELECT session_id FROM branches WHERE id = ?", newPrimaryBranchID).Scan(&sessionID)
+	sessionID, err := database.GetBranchSessionID(db, newPrimaryBranchID)
 	if err != nil {
 		log.Printf("switchBranchHandler: Failed to get session ID for branch %s: %v", newPrimaryBranchID, err)
 		// Non-fatal, continue
@@ -454,17 +442,10 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 	}
 
 	// Find the first message of the new primary branch (parent_message_id IS NULL)
-	var firstMessageID *int
-	err = db.QueryRow(`
-		SELECT id FROM messages
-		WHERE session_id = ? AND branch_id = ? AND parent_message_id IS NULL
-		ORDER BY created_at DESC LIMIT 1
-	`, sessionID, newPrimaryBranchID).Scan(&firstMessageID)
+	firstMessageID, err := database.GetFirstMessageInBranch(db, sessionID, newPrimaryBranchID)
 
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("switchBranchHandler: Failed to find first message for branch %s: %v", newPrimaryBranchID, err)
-		}
+		log.Printf("switchBranchHandler: Failed to find first message for branch %s: %v", newPrimaryBranchID, err)
 		// Non-fatal, continue
 		return
 	}

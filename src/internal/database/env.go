@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -140,4 +141,24 @@ func GetShellCommandByID(db DbOrTx, id string) (*ShellCommand, error) {
 		return nil, fmt.Errorf("failed to get shell command by ID %s: %w", id, err)
 	}
 	return &cmd, nil
+}
+
+// CleanupStaleShellCommands marks any previously running commands as failed on startup.
+// This is used to clean up commands that were running when Angel restarted.
+func CleanupStaleShellCommands(db *sql.DB, now time.Time) error {
+	result, err := db.Exec(`
+		UPDATE shell_commands
+		SET status = 'failed_on_startup',
+		    end_time = ?,
+		    error_message = 'Command failed because Angel restarted.'
+		WHERE status = 'running'`,
+		now.Unix())
+	if err != nil {
+		return fmt.Errorf("failed to update stale shell commands: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		fmt.Printf("Cleaned up %d stale shell commands.\n", rowsAffected)
+	}
+	return nil
 }

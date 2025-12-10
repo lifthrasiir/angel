@@ -38,26 +38,9 @@ func StartShellCommandManager(db *sql.DB) {
 	log.Println("Starting shell command manager...")
 
 	// Clean up any stale running commands from previous runs
-	cleanupStaleCommands(db)
-}
-
-// cleanupStaleCommands marks any previously running commands as failed on startup.
-// Optimized to use a single SQL UPDATE query.
-func cleanupStaleCommands(db *sql.DB) {
-	log.Println("Cleaning up stale shell commands from previous branch...")
-	result, err := db.Exec(`
-		UPDATE shell_commands
-		SET status = 'failed_on_startup',
-		    end_time = ?,
-		    error_message = 'Command failed because Angel restarted.'
-		WHERE status = 'running'`,
-		time.Now().Unix())
-	if err != nil {
+	if err := database.CleanupStaleShellCommands(db, time.Now()); err != nil {
 		log.Printf("Error updating stale shell commands: %v", err)
-		return
 	}
-	rowsAffected, _ := result.RowsAffected()
-	log.Printf("Cleaned up %d stale shell commands.", rowsAffected)
 }
 
 // updateCmdStateFromProcessState is called when a command has exited.
