@@ -440,13 +440,12 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 type contextKey uint8
 
 const (
-	dbKey contextKey = iota
-	registryKey
+	registryKey contextKey = iota
 	gaKey
 )
 
 func contextWithGlobals(ctx context.Context, db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth) context.Context {
-	ctx = context.WithValue(ctx, dbKey, db)
+	ctx = database.ContextWith(ctx, db)
 	ctx = context.WithValue(ctx, registryKey, registry)
 	ctx = context.WithValue(ctx, gaKey, ga)
 	return ctx
@@ -464,8 +463,8 @@ func makeContextMiddleware(db *sql.DB, registry *ModelsRegistry, ga *GeminiAuth)
 }
 
 func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
-	db, ok := r.Context().Value(dbKey).(*sql.DB)
-	if !ok {
+	db, err := database.FromContext(r.Context())
+	if err != nil {
 		http.Error(w, "Internal Server Error: Database connection missing.", http.StatusInternalServerError)
 		runtime.Goexit()
 	}
@@ -488,15 +487,6 @@ func getGeminiAuth(w http.ResponseWriter, r *http.Request) *GeminiAuth {
 		runtime.Goexit()
 	}
 	return ga
-}
-
-// getDbFromContext retrieves the *sql.DB instance from the given context.Context.
-func getDbFromContext(ctx context.Context) (*sql.DB, error) {
-	db, ok := ctx.Value(dbKey).(*sql.DB)
-	if !ok {
-		return nil, fmt.Errorf("database connection not found in context")
-	}
-	return db, nil
 }
 
 // getRegistryFromContext retrieves the *ModelsRegistry instance from the given context.Context.

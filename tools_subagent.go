@@ -78,7 +78,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 		return ToolHandlerResults{}, fmt.Errorf("subagent tool: must provide 'text'")
 	}
 
-	db, err := getDbFromContext(ctx)
+	db, err := database.FromContext(ctx)
 	if err != nil {
 		return ToolHandlerResults{}, err
 	}
@@ -353,7 +353,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		}
 	}
 
-	db, err := getDbFromContext(ctx)
+	db, err := database.FromContext(ctx)
 	if err != nil {
 		return ToolHandlerResults{}, err
 	}

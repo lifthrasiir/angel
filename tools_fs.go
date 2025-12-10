@@ -53,9 +53,9 @@ func getSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS,
 		}
 
 		// Get DB from context
-		db, err := getDbFromContext(ctx)
+		db, err := database.FromContext(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get DB from context in getSessionFS: %w", err)
+			return nil, err
 		}
 
 		// Get the session environment to retrieve roots
@@ -131,9 +131,9 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params ToolH
 	isBinary := !strings.HasPrefix(contentType, "text/")
 
 	if isBinary {
-		db, err := getDbFromContext(ctx)
+		db, err := database.FromContext(ctx)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context for SaveBlob: %w", err)
+			return ToolHandlerResults{}, err
 		}
 
 		hash, err := database.SaveBlob(ctx, db, content)

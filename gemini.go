@@ -59,9 +59,9 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
 
-	db, err := getDbFromContext(ctx)
+	db, err := database.FromContext(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get database from context: %w", err)
+		return nil, nil, err
 	}
 
 	type StreamResult struct {
@@ -211,9 +211,9 @@ func (p *GeminiProvider) CountTokens(ctx context.Context, modelName string, cont
 	}
 
 	// Get database from context
-	db, err := getDbFromContext(ctx)
+	db, err := database.FromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get database from context: %w", err)
+		return nil, err
 	}
 
 	apiCallback := func(client *GeminiAPIClient, config GeminiAPIConfig) (*CaCountTokenResponse, error) {

@@ -87,9 +87,9 @@ func updateCmdStateFromProcessState(db database.DbOrTx, cmdID string, rc *filesy
 
 // RunShellCommandTool handles the run_shell_command tool call.
 func RunShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	db, err := getDbFromContext(ctx) // Get DB from context
+	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context: %w", err)
+		return ToolHandlerResults{}, err
 	}
 
 	sfs, err := getSessionFS(ctx, params.SessionId) // Get SessionFS from tools_fs.go
@@ -234,9 +234,9 @@ func getBranchShellLock(branchID string) *sync.Mutex {
 
 // PollShellCommandTool handles the poll_shell_command tool call.
 func PollShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	db, err := getDbFromContext(ctx) // Get DB from context
+	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context: %w", err)
+		return ToolHandlerResults{}, err
 	}
 
 	if err := EnsureKnownKeys("poll_shell_command", args, "command_id"); err != nil {
@@ -386,9 +386,9 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 
 // KillShellCommandTool handles the kill_shell_command tool call.
 func KillShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	db, err := getDbFromContext(ctx) // Get DB from context
+	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get DB from context: %w", err)
+		return ToolHandlerResults{}, err
 	}
 
 	if err := EnsureKnownKeys("kill_shell_command", args, "command_id"); err != nil {

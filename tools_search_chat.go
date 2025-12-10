@@ -50,9 +50,9 @@ var searchChatToolDefinition = ToolDefinition{
 		}
 
 		// Get database connection from global context (assuming it's available)
-		db, err := getDbFromContext(ctx)
+		db, err := database.FromContext(ctx)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to get database connection: %w", err)
+			return ToolHandlerResults{}, err
 		}
 
 		// Get current session info
@@ -204,9 +204,9 @@ This tool recovers previously un-perceived or raw data from SHA-512/256 hashes, 
 		}
 
 		// Get database connection from context
-		db, err := getDbFromContext(ctx)
+		db, err := database.FromContext(ctx)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to get database connection: %w", err)
+			return ToolHandlerResults{}, err
 		}
 
 		// For now, treat query as a single hash
