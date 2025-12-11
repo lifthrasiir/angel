@@ -8,7 +8,7 @@ import (
 
 func TestGeminiSubagentProvider(t *testing.T) {
 	// Load actual models.json file
-	modelsFile, err := os.ReadFile("models.json")
+	modelsFile, err := os.ReadFile("../../../models.json")
 	if err != nil {
 		t.Fatalf("Failed to read models.json: %v", err)
 	}
