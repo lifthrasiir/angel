@@ -84,7 +84,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 	if err != nil {
 		return tool.HandlerResults{}, err
 	}
-	registry, err := llm.ModelsFromContext(ctx)
+	models, err := llm.ModelsFromContext(ctx)
 	if err != nil {
 		return tool.HandlerResults{}, err
 	}
@@ -127,7 +127,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 		}
 
 		// Proceed with LLM turn for the new subagent
-		return handleSubagentTurn(ctx, db, registry, tools, subsessionID, &session, params, agentID, mc)
+		return handleSubagentTurn(ctx, db, models, tools, subsessionID, &session, params, agentID, mc)
 	} else {
 		// Interact with an existing subagent
 		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, subagentID)
@@ -148,7 +148,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 			return tool.HandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
 		}
 
-		return handleSubagentTurn(ctx, db, registry, tools, subsessionID, &session, params, "", mc)
+		return handleSubagentTurn(ctx, db, models, tools, subsessionID, &session, params, "", mc)
 	}
 }
 
@@ -156,7 +156,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 func handleSubagentTurn(
 	ctx context.Context,
 	db *sql.DB,
-	registry *llm.Models,
+	models *llm.Models,
 	tools *tool.Tools,
 	subsessionID string,
 	session *Session,
@@ -213,7 +213,7 @@ func handleSubagentTurn(
 	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
-	modelProvider, err := registry.ResolveSubagent(params.ModelName, "")
+	modelProvider, err := models.ResolveSubagent(params.ModelName, "")
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
@@ -389,12 +389,12 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Get LLM client for image generation using the new task first to determine the correct model
-	registry, err := llm.ModelsFromContext(ctx)
+	models, err := llm.ModelsFromContext(ctx)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
 	}
 
-	imageModelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentImageGenerationTask)
+	imageModelProvider, err := models.ResolveSubagent(params.ModelName, llm.SubagentImageGenerationTask)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}

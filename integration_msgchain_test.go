@@ -144,7 +144,7 @@ func responseFromPart(part Part) GenerateContentResponse {
 
 func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	// Setup router and context middleware
-	router, db, registry := setupTest(t)
+	router, db, models := setupTest(t)
 
 	// Create the workspace for this test
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -153,7 +153,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "**Thinking**\nThis is a thought.", Thought: true}),
@@ -301,7 +301,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 
 func TestBranchingMessageChain(t *testing.T) {
 	// Setup router and context middleware
-	router, db, registry := setupTest(t)
+	router, db, models := setupTest(t)
 
 	// Create the workspace for this test
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -311,7 +311,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// i) Create three messages: A-B-C
 	// 1. Send initial user message (A)
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "B's thought", Thought: true}),
@@ -361,7 +361,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	printMessages(t, db, "After A1-A3 chain")
 
 	// 2. Send second user message (C)
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "B's thought", Thought: true}),
@@ -429,7 +429,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// ii) Create a new branch C1-C2-C3 after A3 (Model A)
 	// Create a new branch from message A3 (Model A)
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
@@ -487,7 +487,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 
 	// Simulate streaming response for Message C (thought and model)
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
@@ -608,7 +608,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 func TestStreamingMessageConsolidation(t *testing.T) {
 	// Setup router and context middleware
-	router, db, registry := setupTest(t)
+	router, db, models := setupTest(t)
 
 	// Create the workspace for this test
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -617,7 +617,7 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider to stream "A", "B", "C" and then complete
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B"}),
@@ -689,7 +689,7 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 }
 
 func TestSyncDuringThought(t *testing.T) {
-	router, db, registry := setupTest(t) // Get db from setupTest
+	router, db, models := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -698,7 +698,7 @@ func TestSyncDuringThought(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -854,7 +854,7 @@ func TestSyncDuringThought(t *testing.T) {
 }
 
 func TestSyncDuringResponse(t *testing.T) {
-	router, db, registry := setupTest(t) // Get db from setupTest
+	router, db, models := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -863,7 +863,7 @@ func TestSyncDuringResponse(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -1008,7 +1008,7 @@ func TestSyncDuringResponse(t *testing.T) {
 }
 
 func TestCancelDuringSync(t *testing.T) {
-	router, db, registry := setupTest(t) // Get db from setupTest
+	router, db, models := setupTest(t) // Get db from setupTest
 
 	// Create the workspace for this test
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -1017,7 +1017,7 @@ func TestCancelDuringSync(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -1402,7 +1402,7 @@ func TestApplyCurationRules(t *testing.T) {
 }
 
 func TestCodeExecutionMessageHandling(t *testing.T) {
-	router, db, registry := setupTest(t)
+	router, db, models := setupTest(t)
 
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
 	if err != nil {
@@ -1410,7 +1410,7 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 	}
 
 	// Mock Gemini Provider to return ExecutableCode and CodeExecutionResult
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{ExecutableCode: &ExecutableCode{Language: "python", Code: "print('hello')"}}),
 			responseFromPart(Part{CodeExecutionResult: &CodeExecutionResult{Outcome: "OUTCOME_OK", Output: "hello"}}),
@@ -1565,7 +1565,7 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 }
 
 func TestRetryErrorBranchHandler(t *testing.T) {
-	router, db, registry := setupTest(t)
+	router, db, models := setupTest(t)
 
 	// Step 1: Create session and branch
 	sessionId := database.GenerateID()
@@ -1618,7 +1618,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	}
 
 	// Step 3: Test retry with error message
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry response"}),
 		},
@@ -1679,7 +1679,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	// Wait a bit to ensure the first retry call is completely finished
 	time.Sleep(100 * time.Millisecond)
 
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry without errors"}),
 		},

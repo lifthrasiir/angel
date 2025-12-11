@@ -36,7 +36,7 @@ type CompressResult struct {
 
 func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
-	registry := getModelsRegistry(w, r)
+	models := getModels(w, r)
 
 	vars := mux.Vars(r)
 	sessionID := vars["sessionId"]
@@ -45,7 +45,7 @@ func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := CompressSession(r.Context(), db, registry, sessionID, DefaultGeminiModel)
+	result, err := CompressSession(r.Context(), db, models, sessionID, DefaultGeminiModel)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to compress session")
 		return
@@ -73,7 +73,7 @@ func extractStateSnapshotContent(xmlContent string) string {
 	return xmlContent // Fallback to full XML if tags not found
 }
 
-func CompressSession(ctx context.Context, db *sql.DB, registry *llm.Models, sessionID string, modelName string) (result CompressResult, err error) {
+func CompressSession(ctx context.Context, db *sql.DB, models *llm.Models, sessionID string, modelName string) (result CompressResult, err error) {
 	// 1. Load session and all messages from the database for the given sessionID.
 	session, err := database.GetSession(db, sessionID)
 	if err != nil {
@@ -119,7 +119,7 @@ func CompressSession(ctx context.Context, db *sql.DB, registry *llm.Models, sess
 	}
 
 	// Resolve subagent for compression task
-	modelProvider, err := registry.ResolveSubagent(modelName, llm.SubagentCompressionTask)
+	modelProvider, err := models.ResolveSubagent(modelName, llm.SubagentCompressionTask)
 	if err != nil {
 		err = fmt.Errorf("unsupported model for compression: %s: %w", modelName, err)
 		return

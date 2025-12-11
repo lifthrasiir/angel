@@ -19,9 +19,16 @@ import (
 )
 
 // Helper to create a session with a pending confirmation
-func setupSessionWithPendingConfirmation(t *testing.T, router *mux.Router, db *sql.DB, registry *llm.Models, toolName string, toolArgs map[string]interface{}) (sessionId string, branchId string, pendingConfirmationData string, resp *http.Response) {
+func setupSessionWithPendingConfirmation(
+	t *testing.T,
+	router *mux.Router,
+	db *sql.DB,
+	models *llm.Models,
+	toolName string,
+	toolArgs map[string]interface{},
+) (sessionId string, branchId string, pendingConfirmationData string, resp *http.Response) {
 	// Setup Mock Gemini Provider to return a function call for the specified tool
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{FunctionCall: &FunctionCall{Name: toolName, Args: toolArgs}}),
 		},
@@ -76,7 +83,7 @@ func setupSessionWithPendingConfirmation(t *testing.T, router *mux.Router, db *s
 }
 
 func TestConfirmationDenial(t *testing.T) {
-	router, db, registry := setupTest(t)
+	router, db, models := setupTest(t)
 
 	// Create a test workspace
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -92,7 +99,7 @@ func TestConfirmationDenial(t *testing.T) {
 	defer os.RemoveAll(tempDir) // Clean up the temporary directory
 
 	// Setup session with pending confirmation
-	sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(t, router, db, registry, "write_file", map[string]interface{}{"file_path": filepath.Join(tempDir, "denied.txt"), "content": "Denied Content"})
+	sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(t, router, db, models, "write_file", map[string]interface{}{"file_path": filepath.Join(tempDir, "denied.txt"), "content": "Denied Content"})
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
@@ -148,7 +155,7 @@ func TestConfirmationDenial(t *testing.T) {
 }
 
 func TestConfirmationApproval(t *testing.T) {
-	router, db, registry := setupTest(t)
+	router, db, models := setupTest(t)
 
 	// Create a test workspace
 	err := database.CreateWorkspace(db, "testWorkspace", "Test Workspace", "")
@@ -164,7 +171,7 @@ func TestConfirmationApproval(t *testing.T) {
 	defer os.RemoveAll(tempDir) // Clean up the temporary directory
 
 	// Setup session with pending confirmation
-	sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(t, router, db, registry, "write_file", map[string]interface{}{"file_path": filepath.Join(tempDir, "approved.txt"), "content": "Approved Content"})
+	sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(t, router, db, models, "write_file", map[string]interface{}{"file_path": filepath.Join(tempDir, "approved.txt"), "content": "Approved Content"})
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
@@ -174,7 +181,7 @@ func TestConfirmationApproval(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider to return a function response and a model response
-	registry.SetGeminiProvider(&MockGeminiProvider{
+	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{FunctionResponse: &FunctionResponse{Name: "write_file", Response: map[string]interface{}{"status": "success"}}}),
 			responseFromPart(Part{Text: "File written successfully."}),

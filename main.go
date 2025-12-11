@@ -74,7 +74,7 @@ func main() {
 	tools := tool.NewTools()
 	initTools(tools)
 
-	modelsRegistry, err := llm.LoadModels(modelsJSON)
+	models, err := llm.LoadModels(modelsJSON)
 	if err != nil {
 		log.Fatalf("Failed to load models.json: %v", err)
 	}
@@ -127,13 +127,13 @@ func main() {
 	geminiAuth := llm.NewGeminiAuth("http://localhost:8080/oauth2callback")
 
 	// Initialize OpenAI endpoints from database configurations
-	modelsRegistry.InitializeOpenAIEndpoints(db)
+	models.InitializeOpenAIEndpoints(db)
 
 	// Add angel-eval provider after all other providers are initialized
-	modelsRegistry.SetAngelEvalProvider(&llm.AngelEvalProvider{})
+	models.SetAngelEvalProvider(&llm.AngelEvalProvider{})
 
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(db, modelsRegistry, geminiAuth, tools))
+	router.Use(makeContextMiddleware(db, models, geminiAuth, tools))
 
 	// Apply CSRF middleware.
 	// For production, ensure csrf.Secure(true) is used with HTTPS.
@@ -481,7 +481,7 @@ func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
 	return db
 }
 
-func getModelsRegistry(w http.ResponseWriter, r *http.Request) *llm.Models {
+func getModels(w http.ResponseWriter, r *http.Request) *llm.Models {
 	models, err := llm.ModelsFromContext(r.Context())
 	if err != nil {
 		http.Error(w, "Internal Server Error: Models missing.", http.StatusInternalServerError)

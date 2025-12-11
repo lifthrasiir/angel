@@ -5,22 +5,22 @@ import (
 	"fmt"
 )
 
-// registryKey is the private context key for storing the ModelsRegistry
-type registryKey struct{}
+// modelsKey is the private context key for storing the Models registry
+type modelsKey struct{}
 
-// ModelsFromContext retrieves the *ModelsRegistry instance from the given context.Context.
-// Returns an error if no ModelsRegistry is found in the context.
+// ModelsFromContext retrieves the *Models instance from the given context.Context.
+// Returns an error if no Models registry is found in the context.
 func ModelsFromContext(ctx context.Context) (*Models, error) {
-	registry, ok := ctx.Value(registryKey{}).(*Models)
+	registry, ok := ctx.Value(modelsKey{}).(*Models)
 	if !ok {
 		return nil, fmt.Errorf("models registry not found in context")
 	}
 	return registry, nil
 }
 
-// ContextWithModels returns a new context.Context that contains the given *ModelsRegistry instance.
+// ContextWithModels returns a new context.Context that contains the given *Models instance.
 func ContextWithModels(ctx context.Context, registry *Models) context.Context {
-	return context.WithValue(ctx, registryKey{}, registry)
+	return context.WithValue(ctx, modelsKey{}, registry)
 }
 
 // gaKey is the private context key for storing the GeminiAuth

@@ -562,7 +562,7 @@ func checkStreamCancellation(
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
 func inferAndSetSessionName(
 	db *sql.DB,
-	registry *llm.Models,
+	models *llm.Models,
 	ga *llm.GeminiAuth,
 	tools *tool.Tools,
 	sessionId string,
@@ -623,11 +623,11 @@ func inferAndSetSessionName(
 	})
 
 	// Create new context with database connection for subagent
-	subagentCtx := contextWithGlobals(context.Background(), db, registry, ga, tools)
+	subagentCtx := contextWithGlobals(context.Background(), db, models, ga, tools)
 	subagentCtx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
-	modelProvider, err := registry.ResolveSubagent(modelToUse, llm.SubagentSessionNameTask)
+	modelProvider, err := models.ResolveSubagent(modelToUse, llm.SubagentSessionNameTask)
 	if err != nil {
 		log.Printf("inferAndSetSessionName: Unsupported model for session name inference: %s", modelToUse)
 		return

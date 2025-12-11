@@ -45,7 +45,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 	initTools(tools)
 	tools.InitMCPManager(testDB)
 
-	// Initialize ModelsRegistry by loading models.json
+	// Initialize Models by loading models.json
 	modelsData, err := os.ReadFile("models.json")
 	if err != nil {
 		t.Fatalf("Failed to read models.json: %v", err)

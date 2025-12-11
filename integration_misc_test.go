@@ -15,10 +15,10 @@ import (
 
 // TestCountTokensHandler tests the countTokensHandler function
 func TestCountTokensHandler(t *testing.T) {
-	router, _, registry := setupTest(t)
+	router, _, models := setupTest(t)
 
 	// Mock the CountTokens method of CurrentProvider
-	provider := registry.GetProvider(DefaultGeminiModel)
+	provider := models.GetProvider(DefaultGeminiModel)
 	mockLLMProvider := provider.(*llm.MockLLMProvider)
 	mockLLMProvider.CountTokensFunc = func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 		// Simulate token counting based on input text length
@@ -52,7 +52,7 @@ func TestCountTokensHandler(t *testing.T) {
 	// Test case 3: Authentication failure
 	t.Run("Authentication Failure", func(t *testing.T) {
 		// Temporarily set CurrentProvider to nil to simulate uninitialized client
-		registry.SetGeminiProvider(&llm.MockLLMProvider{
+		models.SetGeminiProvider(&llm.MockLLMProvider{
 			CountTokensFunc: func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 				return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: "Authentication failed"}
 			},

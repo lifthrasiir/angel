@@ -212,17 +212,17 @@ func WebFetchTool(ctx context.Context, args map[string]interface{}, params tool.
 		return tool.HandlerResults{}, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
 	}
 
-	registry, err := llm.ModelsFromContext(ctx)
+	models, err := llm.ModelsFromContext(ctx)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
 	}
 
 	// Resolve subagents for web fetch tasks
-	modelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentWebFetchTask)
+	modelProvider, err := models.ResolveSubagent(params.ModelName, llm.SubagentWebFetchTask)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s): %w", params.ModelName, err)
 	}
-	fallbackModelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentWebFetchFallbackTask)
+	fallbackModelProvider, err := models.ResolveSubagent(params.ModelName, llm.SubagentWebFetchFallbackTask)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch_fallback (model: %s): %w", params.ModelName, err)
 	}
