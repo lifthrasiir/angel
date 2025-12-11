@@ -19,12 +19,9 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
-
-// GetToolsForGemini should return a list of built-in tools available for Gemini models.
-// TODO: Should eliminate once tools are refactored.
-var GetToolsForGemini func() []Tool
 
 // Ensure GeminiProvider implements LLMProvider
 var _ LLMProvider = (*GeminiProvider)(nil)
@@ -67,6 +64,10 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 	if err != nil {
 		return nil, nil, err
 	}
+	tools, err := tool.FromContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	type StreamResult struct {
 		iter.Seq[GenerateContentResponse]
@@ -75,7 +76,7 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 
 	apiCallback := func(geminiClient *GeminiAPIClient, config GeminiAPIConfig) (out StreamResult, err error) {
 		// Convert SessionParams to GenerateContentRequest
-		request := convertSessionParamsToGenerateRequest(model, params)
+		request := convertSessionParamsToGenerateRequest(tools, model, params)
 
 		respBody, err := geminiClient.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
@@ -117,7 +118,7 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 
 	codeAssistCallback := func(client *CodeAssistClient) (out StreamResult, err error) {
 		// Use Code Assist API with the provided client
-		request := convertSessionParamsToGenerateRequest(model, params)
+		request := convertSessionParamsToGenerateRequest(tools, model, params)
 		respBody, err := client.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
 			log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
@@ -410,7 +411,7 @@ func (p *geminiAPIHTTPClientProvider) Client(ctx context.Context) *http.Client {
 }
 
 // convertSessionParamsToGenerateRequest converts SessionParams to GenerateContentRequest
-func convertSessionParamsToGenerateRequest(model *Model, params SessionParams) GenerateContentRequest {
+func convertSessionParamsToGenerateRequest(toolRegistry *tool.Tools, model *Model, params SessionParams) GenerateContentRequest {
 	var systemInstruction *Content
 	if params.SystemPrompt != "" && !model.IgnoreSystemPrompt {
 		systemInstruction = &Content{
@@ -422,7 +423,7 @@ func convertSessionParamsToGenerateRequest(model *Model, params SessionParams) G
 
 	var tools []Tool
 	if model.ToolSupported {
-		tools = GetToolsForGemini()
+		tools = toolRegistry.ForGemini()
 		if params.ToolConfig != nil {
 			if _, ok := params.ToolConfig[""]; ok {
 				// Remove the default tool list

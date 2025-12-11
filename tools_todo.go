@@ -9,6 +9,7 @@ import (
 
 	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/tool"
 )
 
 const todoFilePath = "TODO.json"
@@ -82,33 +83,33 @@ var validPriorities = map[string]bool{
 }
 
 // WriteTodoTool handles the write_todo tool call.
-func WriteTodoTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+func WriteTodoTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
 	sf, err := getSessionFS(ctx, params.SessionId)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get SessionFS for write_todo: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for write_todo: %w", err)
 	}
 	defer releaseSessionFS(params.SessionId)
 
 	action, ok := args["action"].(string)
 	if !ok || action == "" {
-		return ToolHandlerResults{Value: map[string]interface{}{"error": "Action is required for 'write_todo' tool."}},
+		return tool.HandlerResults{Value: map[string]interface{}{"error": "Action is required for 'write_todo' tool."}},
 			fmt.Errorf("missing or invalid 'action' argument")
 	}
 
 	currentTodos, err := readTodos(sf)
 	if err != nil {
-		return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to read TODOs: %v", err)}},
+		return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to read TODOs: %v", err)}},
 			err
 	}
 
 	switch action {
 	case "add":
-		if err := EnsureKnownKeys("write_todo(add)", args, "action", "content", "priority", "status"); err != nil {
-			return ToolHandlerResults{}, err
+		if err := tool.EnsureKnownKeys("write_todo(add)", args, "action", "content", "priority", "status"); err != nil {
+			return tool.HandlerResults{}, err
 		}
 		content, ok := args["content"].(string)
 		if !ok || content == "" {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": "Content is required for 'add' action."}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": "Content is required for 'add' action."}},
 				fmt.Errorf("missing or invalid 'content' argument for add action")
 		}
 
@@ -122,14 +123,14 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 
 		if p, ok := args["priority"].(string); ok {
 			if !validPriorities[p] {
-				return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid priority: %s. Must be low, medium, or high.", p)}},
+				return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid priority: %s. Must be low, medium, or high.", p)}},
 					fmt.Errorf("invalid priority: %s", p)
 			}
 			newTodo.Priority = p
 		}
 		if s, ok := args["status"].(string); ok {
 			if !validStatuses[s] {
-				return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid status: %s. Must be pending, in_progress, or completed.", s)}},
+				return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid status: %s. Must be pending, in_progress, or completed.", s)}},
 					fmt.Errorf("invalid status: %s", s)
 			}
 			newTodo.Status = s
@@ -137,18 +138,18 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 
 		currentTodos = append(currentTodos, newTodo)
 		if err := writeTodos(sf, currentTodos); err != nil {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to add TODO: %v", err)}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to add TODO: %v", err)}},
 				err
 		}
-		return ToolHandlerResults{Value: map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO added with ID: %s", newID), "todo": newTodo}}, nil
+		return tool.HandlerResults{Value: map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO added with ID: %s", newID), "todo": newTodo}}, nil
 
 	case "update":
-		if err := EnsureKnownKeys("write_todo(update)", args, "action", "id", "content", "priority", "status"); err != nil {
-			return ToolHandlerResults{}, err
+		if err := tool.EnsureKnownKeys("write_todo(update)", args, "action", "id", "content", "priority", "status"); err != nil {
+			return tool.HandlerResults{}, err
 		}
 		id, ok := args["id"].(string)
 		if !ok || id == "" {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": "ID is required for 'update' action."}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": "ID is required for 'update' action."}},
 				fmt.Errorf("missing or invalid 'id' argument for update action")
 		}
 
@@ -160,14 +161,14 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 				}
 				if s, ok := args["status"].(string); ok {
 					if !validStatuses[s] {
-						return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid status: %s. Must be pending, in_progress, or completed.", s)}},
+						return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid status: %s. Must be pending, in_progress, or completed.", s)}},
 							fmt.Errorf("invalid status: %s", s)
 					}
 					currentTodos[i].Status = s
 				}
 				if p, ok := args["priority"].(string); ok {
 					if !validPriorities[p] {
-						return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid priority: %s. Must be low, medium, or high.", p)}},
+						return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid priority: %s. Must be low, medium, or high.", p)}},
 							fmt.Errorf("invalid priority: %s", p)
 					}
 					currentTodos[i].Priority = p
@@ -177,23 +178,23 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 			}
 		}
 		if !found {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("TODO with ID %s not found.", id)}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("TODO with ID %s not found.", id)}},
 				fmt.Errorf("TODO with ID %s not found", id)
 		}
 
 		if err := writeTodos(sf, currentTodos); err != nil {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to update TODO: %v", err)}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to update TODO: %v", err)}},
 				err
 		}
-		return ToolHandlerResults{Value: map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO with ID %s updated.", id)}}, nil
+		return tool.HandlerResults{Value: map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO with ID %s updated.", id)}}, nil
 
 	case "delete":
-		if err := EnsureKnownKeys("write_todo(delete)", args, "action", "id"); err != nil {
-			return ToolHandlerResults{}, err
+		if err := tool.EnsureKnownKeys("write_todo(delete)", args, "action", "id"); err != nil {
+			return tool.HandlerResults{}, err
 		}
 		id, ok := args["id"].(string)
 		if !ok || id == "" {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": "ID is required for 'delete' action."}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": "ID is required for 'delete' action."}},
 				fmt.Errorf("missing or invalid 'id' argument for delete action")
 		}
 
@@ -207,53 +208,56 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params Tool
 			newTodos = append(newTodos, item)
 		}
 		if !found {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("TODO with ID %s not found.", id)}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("TODO with ID %s not found.", id)}},
 				fmt.Errorf("TODO with ID %s not found", id)
 		}
 
 		if err := writeTodos(sf, newTodos); err != nil {
-			return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to delete TODO: %v", err)}},
+			return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Failed to delete TODO: %v", err)}},
 				err
 		}
-		return ToolHandlerResults{Value: map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO with ID %s deleted.", id)}}, nil
+		return tool.HandlerResults{Value: map[string]interface{}{"status": "success", "message": fmt.Sprintf("TODO with ID %s deleted.", id)}}, nil
 
 	default:
-		return ToolHandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid action: %s", action)}},
+		return tool.HandlerResults{Value: map[string]interface{}{"error": fmt.Sprintf("Invalid action: %s", action)}},
 			fmt.Errorf("invalid action: %s", action)
 	}
 }
 
-var writeTodoToolDefinition = ToolDefinition{
-	Name:        "write_todo",
-	Description: "Manages the TODO list (available as `" + todoFilePath + "` at the anonymous working directory). Can add new TODOs, update status, priority, content, delete TODOs, or list all TODOs.",
-	Parameters: &Schema{
-		Type: TypeObject,
-		Properties: map[string]*Schema{
-			"action": {
-				Type:        TypeString,
-				Description: "Action to perform: \"add\", \"update\", \"delete\", or \"list\".",
-				Enum:        []string{"add", "update", "delete", "list"},
+// registerTodoTools registers todo-related tools
+func registerTodoTools(tools *tool.Tools) {
+	tools.Register(tool.Definition{
+		Name:        "write_todo",
+		Description: "Manages the TODO list (available as `" + todoFilePath + "` at the anonymous working directory). Can add new TODOs, update status, priority, content, delete TODOs, or list all TODOs.",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"action": {
+					Type:        TypeString,
+					Description: "Action to perform: \"add\", \"update\", \"delete\", or \"list\".",
+					Enum:        []string{"add", "update", "delete", "list"},
+				},
+				"id": {
+					Type:        TypeString,
+					Description: "ID of the TODO item. Required for 'update' and 'delete' actions.",
+				},
+				"content": {
+					Type:        TypeString,
+					Description: "Content of the TODO item. Required for 'add' action.",
+				},
+				"status": {
+					Type:        TypeString,
+					Description: "Status of the TODO item: 'pending', 'in_progress', or 'completed'.",
+					Enum:        []string{"pending", "in_progress", "completed"},
+				},
+				"priority": {
+					Type:        TypeString,
+					Description: "Priority of the TODO item: 'low', 'medium', or 'high'.",
+					Enum:        []string{"low", "medium", "high"},
+				},
 			},
-			"id": {
-				Type:        TypeString,
-				Description: "ID of the TODO item. Required for 'update' and 'delete' actions.",
-			},
-			"content": {
-				Type:        TypeString,
-				Description: "Content of the TODO item. Required for 'add' action.",
-			},
-			"status": {
-				Type:        TypeString,
-				Description: "Status of the TODO item: 'pending', 'in_progress', or 'completed'.",
-				Enum:        []string{"pending", "in_progress", "completed"},
-			},
-			"priority": {
-				Type:        TypeString,
-				Description: "Priority of the TODO item: 'low', 'medium', or 'high'.",
-				Enum:        []string{"low", "medium", "high"},
-			},
+			Required: []string{"action"},
 		},
-		Required: []string{"action"},
-	},
-	Handler: WriteTodoTool,
+		Handler: WriteTodoTool,
+	})
 }

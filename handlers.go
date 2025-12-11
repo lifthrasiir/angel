@@ -554,6 +554,7 @@ type FrontendMCPConfig struct {
 
 func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	tools := getTools(w, r)
 
 	dbConfigs, err := database.GetMCPServerConfigs(db)
 	if err != nil {
@@ -561,7 +562,7 @@ func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeConnections := mcpManager.GetMCPConnections()
+	activeConnections := tools.GetMCPConnections()
 	frontendConfigs := make([]FrontendMCPConfig, len(dbConfigs))
 
 	for i, dbConfig := range dbConfigs {
@@ -577,8 +578,8 @@ func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 		if frontendConfig.IsConnected {
 
 			toolsIterator := conn.Session.Tools(context.Background(), nil)
+			builtinToolNames := tools.BuiltinNames()
 			var tools []string
-			builtinToolNames := GetBuiltinToolNames()
 			for tool, err := range toolsIterator {
 				if err != nil {
 					log.Printf("Error iterating tools for %s: %v", dbConfig.Name, err)
@@ -602,6 +603,7 @@ func getMCPConfigsHandler(w http.ResponseWriter, r *http.Request) {
 
 func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	tools := getTools(w, r)
 
 	var requestBody struct {
 		Name       string `json:"name"`
@@ -626,9 +628,9 @@ func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Start or stop the connection based on the new enabled state
 	if config.Enabled {
-		mcpManager.startConnection(config)
+		tools.GetMCPManager().StartConnection(config)
 	} else {
-		mcpManager.stopConnection(config.Name)
+		tools.GetMCPManager().StopConnection(config.Name)
 	}
 
 	sendJSONResponse(w, config)
@@ -636,6 +638,7 @@ func saveMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	tools := getTools(w, r)
 
 	name := mux.Vars(r)["name"]
 	if name == "" {
@@ -648,7 +651,7 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mcpManager.stopConnection(name)
+	tools.GetMCPManager().StopConnection(name)
 
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "MCP config deleted successfully"})
 }

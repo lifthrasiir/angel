@@ -9,6 +9,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -20,77 +21,63 @@ type ChatSearchResult struct {
 	Date        string `json:"date"`
 }
 
-var searchChatToolDefinition = ToolDefinition{
-	Name:        "search_chat",
-	Description: "Search through chat history using keywords. Returns recent matching messages with context excerpts.",
-	Parameters: &Schema{
-		Type:        TypeObject,
-		Description: "Search for messages containing specific keywords",
-		Properties: map[string]*Schema{
-			"keywords": {
-				Type:        TypeString,
-				Description: "Keywords to search for in chat messages",
-			},
+// SearchChatTool handles searching through chat history
+func SearchChatTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
+	// Validate arguments
+	if err := tool.EnsureKnownKeys("search_chat", args, "keywords"); err != nil {
+		return tool.HandlerResults{}, err
+	}
+
+	keywords, ok := args["keywords"].(string)
+	if !ok {
+		return tool.HandlerResults{}, fmt.Errorf("keywords must be a string")
+	}
+
+	if strings.TrimSpace(keywords) == "" {
+		return tool.HandlerResults{}, fmt.Errorf("keywords cannot be empty")
+	}
+
+	// Get database connection from global context (assuming it's available)
+	db, err := database.FromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+
+	// Get current session info
+	currentSessionID := params.SessionId
+	currentWorkspaceID := ""
+	if currentSessionID != "" {
+		var session Session
+		session, err = database.GetSession(db, currentSessionID)
+		if err != nil {
+			return tool.HandlerResults{}, fmt.Errorf("failed to get current session: %w", err)
+		}
+		currentWorkspaceID = session.WorkspaceID
+	}
+
+	// Perform search
+	results, err := searchChatHistory(db, keywords, currentWorkspaceID, currentSessionID)
+	if err != nil {
+		return tool.HandlerResults{}, fmt.Errorf("failed to search chat history: %w", err)
+	}
+
+	// Convert results to JSON-serializable format
+	var resultsArray []map[string]interface{}
+	for _, result := range results {
+		resultsArray = append(resultsArray, map[string]interface{}{
+			"excerpt":      result.Excerpt,
+			"session_name": result.SessionName,
+			"who":          result.Who,
+			"date":         result.Date,
+		})
+	}
+
+	return tool.HandlerResults{
+		Value: map[string]interface{}{
+			"results": resultsArray,
+			"count":   len(resultsArray),
 		},
-		Required: []string{"keywords"},
-	},
-	Handler: func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-		// Validate arguments
-		if err := EnsureKnownKeys("search_chat", args, "keywords"); err != nil {
-			return ToolHandlerResults{}, err
-		}
-
-		keywords, ok := args["keywords"].(string)
-		if !ok {
-			return ToolHandlerResults{}, fmt.Errorf("keywords must be a string")
-		}
-
-		if strings.TrimSpace(keywords) == "" {
-			return ToolHandlerResults{}, fmt.Errorf("keywords cannot be empty")
-		}
-
-		// Get database connection from global context (assuming it's available)
-		db, err := database.FromContext(ctx)
-		if err != nil {
-			return ToolHandlerResults{}, err
-		}
-
-		// Get current session info
-		currentSessionID := params.SessionId
-		currentWorkspaceID := ""
-		if currentSessionID != "" {
-			var session Session
-			session, err = database.GetSession(db, currentSessionID)
-			if err != nil {
-				return ToolHandlerResults{}, fmt.Errorf("failed to get current session: %w", err)
-			}
-			currentWorkspaceID = session.WorkspaceID
-		}
-
-		// Perform search
-		results, err := searchChatHistory(db, keywords, currentWorkspaceID, currentSessionID)
-		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to search chat history: %w", err)
-		}
-
-		// Convert results to JSON-serializable format
-		var resultsArray []map[string]interface{}
-		for _, result := range results {
-			resultsArray = append(resultsArray, map[string]interface{}{
-				"excerpt":      result.Excerpt,
-				"session_name": result.SessionName,
-				"who":          result.Who,
-				"date":         result.Date,
-			})
-		}
-
-		return ToolHandlerResults{
-			Value: map[string]interface{}{
-				"results": resultsArray,
-				"count":   len(resultsArray),
-			},
-		}, nil
-	},
+	}, nil
 }
 
 // searchChatHistory searches through chat history using the common SearchMessages function
@@ -171,63 +158,86 @@ func formatCreatedAt(createdAt string) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
-var recallToolDefinition = ToolDefinition{
-	Name: "recall",
-	Description: `**Retrieves content for binary hashes that are NOT directly rendered or explicitly described in the chat.**
+// RecallTool handles recalling unprocessed binary content
+func RecallTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
+	// Validate arguments
+	if err := tool.EnsureKnownKeys("recall", args, "query"); err != nil {
+		return tool.HandlerResults{}, err
+	}
+
+	query, ok := args["query"].(string)
+	if !ok {
+		return tool.HandlerResults{}, fmt.Errorf("query must be a string")
+	}
+
+	if strings.TrimSpace(query) == "" {
+		return tool.HandlerResults{}, fmt.Errorf("query cannot be empty")
+	}
+
+	// Get database connection from context
+	db, err := database.FromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+
+	// For now, treat query as a single hash
+	// In the future, this could be expanded to handle multiple hashes or search functionality
+	hash := strings.TrimSpace(query)
+
+	// Try to retrieve the blob as a file attachment
+	attachment, err := database.GetBlobAsFileAttachment(db, hash)
+	if err != nil {
+		return tool.HandlerResults{}, fmt.Errorf("failed to retrieve content for hash %s: %w", hash, err)
+	}
+
+	// Return the hash as response text and the content as attachment
+	// This matches the generate_image tool response format
+	result := map[string]interface{}{
+		"response": fmt.Sprintf("Recalled content for hash %s follows:", hash),
+	}
+
+	return tool.HandlerResults{
+		Value:       result,
+		Attachments: []FileAttachment{attachment},
+	}, nil
+}
+
+// registerSearchChatTools registers search and recall tools
+func registerSearchChatTools(tools *tool.Tools) {
+	tools.Register(tool.Definition{
+		Name:        "search_chat",
+		Description: "Search through chat history using keywords. Returns recent matching messages with context excerpts.",
+		Parameters: &Schema{
+			Type:        TypeObject,
+			Description: "Search for messages containing specific keywords",
+			Properties: map[string]*Schema{
+				"keywords": {
+					Type:        TypeString,
+					Description: "Keywords to search for in chat messages",
+				},
+			},
+			Required: []string{"keywords"},
+		},
+		Handler: SearchChatTool,
+	})
+
+	tools.Register(tool.Definition{
+		Name: "recall",
+		Description: `**Retrieves content for binary hashes that are NOT directly rendered or explicitly described in the chat.**
 When binary content (e.g., images, audio, PDFs) is provided directly in the chat with a hash reference (e.g., '[Binary with hash ... follows:]' immediately followed by the rendered content), you can directly perceive and understand its details. In such cases, 'recall' is generally NOT required for basic comprehension.
 However, 'recall' is **ESSENTIAL** when you encounter messages explicitly stating that a binary with a given hash is **UNPROCESSED** (e.g., 'Binary with hash xyz is currently **UNPROCESSED**') and its content has not been rendered or described for you. In these situations, you **MUST** use 'recall' to access the content's details for internal analysis and understanding.
 This tool recovers previously un-perceived or raw data from SHA-512/256 hashes, enabling you to accurately comprehend content details, formulate precise responses, or perform further processing.`,
-	Parameters: &Schema{
-		Type:        TypeObject,
-		Description: "Recall unprocessed binary content for internal AI processing",
-		Properties: map[string]*Schema{
-			"query": {
-				Type:        TypeString,
-				Description: "The SHA-512/256 hash of the unprocessed binary content required for your internal comprehension and subsequent actions.",
+		Parameters: &Schema{
+			Type:        TypeObject,
+			Description: "Recall unprocessed binary content for internal AI processing",
+			Properties: map[string]*Schema{
+				"query": {
+					Type:        TypeString,
+					Description: "The SHA-512/256 hash of the unprocessed binary content required for your internal comprehension and subsequent actions.",
+				},
 			},
+			Required: []string{"query"},
 		},
-		Required: []string{"query"},
-	},
-	Handler: func(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-		// Validate arguments
-		if err := EnsureKnownKeys("recall", args, "query"); err != nil {
-			return ToolHandlerResults{}, err
-		}
-
-		query, ok := args["query"].(string)
-		if !ok {
-			return ToolHandlerResults{}, fmt.Errorf("query must be a string")
-		}
-
-		if strings.TrimSpace(query) == "" {
-			return ToolHandlerResults{}, fmt.Errorf("query cannot be empty")
-		}
-
-		// Get database connection from context
-		db, err := database.FromContext(ctx)
-		if err != nil {
-			return ToolHandlerResults{}, err
-		}
-
-		// For now, treat query as a single hash
-		// In the future, this could be expanded to handle multiple hashes or search functionality
-		hash := strings.TrimSpace(query)
-
-		// Try to retrieve the blob as a file attachment
-		attachment, err := database.GetBlobAsFileAttachment(db, hash)
-		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to retrieve content for hash %s: %w", hash, err)
-		}
-
-		// Return the hash as response text and the content as attachment
-		// This matches the generate_image tool response format
-		result := map[string]interface{}{
-			"response": fmt.Sprintf("Recalled content for hash %s follows:", hash),
-		}
-
-		return ToolHandlerResults{
-			Value:       result,
-			Attachments: []FileAttachment{attachment},
-		}, nil
-	},
+		Handler: RecallTool,
+	})
 }

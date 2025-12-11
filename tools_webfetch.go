@@ -16,6 +16,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/tool"
 )
 
 const (
@@ -87,10 +88,10 @@ func fetchWithTimeout(ctx context.Context, targetURL string, timeout time.Durati
 }
 
 // executeWebFetchFallback handles web fetching using a direct HTTP request and returns the fetched content processed by LLM.
-func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider llm.ModelProvider) (ToolHandlerResults, error) {
+func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider llm.ModelProvider) (tool.HandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
-		return ToolHandlerResults{}, fmt.Errorf("no URL found in the prompt for fallback")
+		return tool.HandlerResults{}, fmt.Errorf("no URL found in the prompt for fallback")
 	}
 	urlToFetch := urls[0]
 
@@ -102,7 +103,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider l
 
 	htmlContent, err := fetchWithTimeout(ctx, urlToFetch, URL_FETCH_TIMEOUT_MS*time.Millisecond)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("Error during fallback fetch for %s: %v", urlToFetch, err)
+		return tool.HandlerResults{}, fmt.Errorf("Error during fallback fetch for %s: %v", urlToFetch, err)
 	}
 
 	textContent := html2text.HTML2Text(htmlContent)
@@ -121,18 +122,18 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider l
 
 	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, sessionParams)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("Error during LLM processing of fallback content: %v", err)
+		return tool.HandlerResults{}, fmt.Errorf("Error during LLM processing of fallback content: %v", err)
 	}
 
 	llmContent := oneShotResult.Text
 
-	return ToolHandlerResults{Value: map[string]interface{}{
+	return tool.HandlerResults{Value: map[string]interface{}{
 		"llmContent":    llmContent,
 		"returnDisplay": fmt.Sprintf("Content for %s processed using fallback fetch.", urlToFetch),
 	}}, nil
 }
 
-func executeWebFetch(ctx context.Context, prompt string, modelProvider, fallbackModelProvider llm.ModelProvider) (ToolHandlerResults, error) {
+func executeWebFetch(ctx context.Context, prompt string, modelProvider, fallbackModelProvider llm.ModelProvider) (tool.HandlerResults, error) {
 	urls := extractURLs(prompt)
 	if len(urls) == 0 {
 		// If no URLs are found, perform a DuckDuckGo search
@@ -195,52 +196,55 @@ func executeWebFetch(ctx context.Context, prompt string, modelProvider, fallback
 	}
 
 	// If no processing error, return the LLM's response
-	return ToolHandlerResults{Value: map[string]interface{}{
+	return tool.HandlerResults{Value: map[string]interface{}{
 		"llmContent":    oneShotResult.Text,
 		"returnDisplay": "Content processed from prompt.",
 	}}, nil
 }
 
 // WebFetchTool implements the handler for the web_fetch tool.
-func WebFetchTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("web_fetch", args, "prompt"); err != nil {
-		return ToolHandlerResults{}, err
+func WebFetchTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
+	if err := tool.EnsureKnownKeys("web_fetch", args, "prompt"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 	prompt, ok := args["prompt"].(string)
 	if !ok || strings.TrimSpace(prompt) == "" {
-		return ToolHandlerResults{}, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
+		return tool.HandlerResults{}, fmt.Errorf("invalid or empty 'prompt' argument for web_fetch")
 	}
 
 	registry, err := llm.ModelsFromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
 	}
 
 	// Resolve subagents for web fetch tasks
 	modelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentWebFetchTask)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s): %w", params.ModelName, err)
+		return tool.HandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch (model: %s): %w", params.ModelName, err)
 	}
 	fallbackModelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentWebFetchFallbackTask)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch_fallback (model: %s): %w", params.ModelName, err)
+		return tool.HandlerResults{}, fmt.Errorf("LLM provider not initialized for web_fetch_fallback (model: %s): %w", params.ModelName, err)
 	}
 
 	return executeWebFetch(ctx, prompt, modelProvider, fallbackModelProvider)
 }
 
-var webFetchToolDefinition = ToolDefinition{
-	Name:        "web_fetch",
-	Description: "Processes content from URL(s). If no URLs are provided, it automatically performs a DuckDuckGo search using your prompt as the query. Your prompt and instructions are forwarded to an internal AI agent that fetches and interprets the content. While not a direct search engine, it can retrieve content from HTML-only search result pages (e.g., `https://html.duckduckgo.com/html?q=query`). Without explicit instructions, the agent may summarize or extract key data for efficient information retrieval. Clear directives are required to obtain the original or full content.",
-	Parameters: &Schema{
-		Type: TypeObject,
-		Properties: map[string]*Schema{
-			"prompt": {
-				Type:        TypeString,
-				Description: "A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content (e.g., \"Summarize https://example.com/article and extract key points from https://another.com/data\"). If no URLs are provided, this prompt will be used as a search query for DuckDuckGo. To retrieve the full, unsummarized content, you must include explicit instructions such as 'return full content', 'do not summarize', or 'provide original text'. Must contain at least one URL starting with http:// or https://, or be a search query.",
+// registerWebFetchTools registers web fetch related tools
+func registerWebFetchTools(tools *tool.Tools) {
+	tools.Register(tool.Definition{
+		Name:        "web_fetch",
+		Description: "Processes content from URL(s). If no URLs are provided, it automatically performs a DuckDuckGo search using your prompt as the query. Your prompt and instructions are forwarded to an internal AI agent that fetches and interprets the content. While not a direct search engine, it can retrieve content from HTML-only search result pages (e.g., `https://html.duckduckgo.com/html?q=query`). Without explicit instructions, the agent may summarize or extract key data for efficient information retrieval. Clear directives are required to obtain the original or full content.",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"prompt": {
+					Type:        TypeString,
+					Description: "A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content (e.g., \"Summarize https://example.com/article and extract key points from https://another.com/data\"). If no URLs are provided, this prompt will be used as a search query for DuckDuckGo. To retrieve the full, unsummarized content, you must include explicit instructions such as 'return full content', 'do not summarize', or 'provide original text'. Must contain at least one URL starting with http:// or https://, or be a search query.",
+				},
 			},
+			Required: []string{"prompt"},
 		},
-		Required: []string{"prompt"},
-	},
-	Handler: WebFetchTool,
+		Handler: WebFetchTool,
+	})
 }

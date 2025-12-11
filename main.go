@@ -26,9 +26,20 @@ import (
 	"github.com/lifthrasiir/angel/filesystem"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/tool"
 )
 
 const dbPath = "angel.db"
+
+// initTools initializes all built-in tools
+func initTools(tools *tool.Tools) {
+	registerFSTools(tools)
+	registerWebFetchTools(tools)
+	registerTodoTools(tools)
+	registerShellTools(tools)
+	registerSearchChatTools(tools)
+	registerSubagentTools(tools)
+}
 
 // determineSandboxBaseDir determines the base directory for session sandboxes
 // based on the presence of go.mod file in the current directory
@@ -59,6 +70,10 @@ func getExecutableName() string {
 }
 
 func main() {
+	// Initialize tools registry
+	tools := tool.NewTools()
+	initTools(tools)
+
 	modelsRegistry, err := llm.LoadModels(modelsJSON)
 	if err != nil {
 		log.Fatalf("Failed to load models.json: %v", err)
@@ -106,7 +121,8 @@ func main() {
 		log.Println("Loaded CSRF key from DB.")
 	}
 
-	InitMCPManager(db)
+	// Initialize MCP connections
+	tools.InitMCPManager(db)
 
 	geminiAuth := llm.NewGeminiAuth("http://localhost:8080/oauth2callback")
 
@@ -117,7 +133,7 @@ func main() {
 	modelsRegistry.SetAngelEvalProvider(&llm.AngelEvalProvider{})
 
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(db, modelsRegistry, geminiAuth))
+	router.Use(makeContextMiddleware(db, modelsRegistry, geminiAuth, tools))
 
 	// Apply CSRF middleware.
 	// For production, ensure csrf.Secure(true) is used with HTTPS.
@@ -437,17 +453,18 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func contextWithGlobals(ctx context.Context, db *sql.DB, registry *llm.Models, ga *llm.GeminiAuth) context.Context {
+func contextWithGlobals(ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) context.Context {
 	ctx = database.ContextWith(ctx, db)
-	ctx = llm.ContextWithModels(ctx, registry)
+	ctx = llm.ContextWithModels(ctx, models)
 	ctx = llm.ContextWithGeminiAuth(ctx, ga)
+	ctx = tool.ContextWith(ctx, tools)
 	return ctx
 }
 
-func makeContextMiddleware(db *sql.DB, registry *llm.Models, ga *llm.GeminiAuth) func(next http.Handler) http.Handler {
+func makeContextMiddleware(db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(contextWithGlobals(r.Context(), db, registry, ga))
+			r = r.WithContext(contextWithGlobals(r.Context(), db, models, ga, tools))
 			r = csrf.PlaintextHTTPRequest(r) // Required because we are typically working on localhost
 
 			next.ServeHTTP(w, r)
@@ -465,12 +482,12 @@ func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
 }
 
 func getModelsRegistry(w http.ResponseWriter, r *http.Request) *llm.Models {
-	registry, err := llm.ModelsFromContext(r.Context())
+	models, err := llm.ModelsFromContext(r.Context())
 	if err != nil {
-		http.Error(w, "Internal Server Error: Models registry missing.", http.StatusInternalServerError)
+		http.Error(w, "Internal Server Error: Models missing.", http.StatusInternalServerError)
 		runtime.Goexit()
 	}
-	return registry
+	return models
 }
 
 func getGeminiAuth(w http.ResponseWriter, r *http.Request) *llm.GeminiAuth {
@@ -480,4 +497,13 @@ func getGeminiAuth(w http.ResponseWriter, r *http.Request) *llm.GeminiAuth {
 		runtime.Goexit()
 	}
 	return ga
+}
+
+func getTools(w http.ResponseWriter, r *http.Request) *tool.Tools {
+	tools, err := tool.FromContext(r.Context())
+	if err != nil {
+		http.Error(w, "Internal Server Error: Tools missing.", http.StatusInternalServerError)
+		runtime.Goexit()
+	}
+	return tools
 }

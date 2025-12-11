@@ -16,6 +16,7 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -60,9 +61,9 @@ func addTextWithSpacing(response *strings.Builder, text string) {
 }
 
 // SubagentTool handles the subagent tool call, allowing to spawn a new subagent or interact with an existing one.
-func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("subagent", args, "subagent_id", "system_prompt", "text"); err != nil {
-		return ToolHandlerResults{}, err
+func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
+	if err := tool.EnsureKnownKeys("subagent", args, "subagent_id", "system_prompt", "text"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 
 	subagentID, hasSubagentID := args["subagent_id"].(string)
@@ -70,27 +71,31 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 	text, hasText := args["text"].(string)
 
 	if hasSubagentID && hasSystemPrompt {
-		return ToolHandlerResults{}, fmt.Errorf("subagent tool: cannot provide both 'subagent_id' and 'system_prompt'")
+		return tool.HandlerResults{}, fmt.Errorf("subagent tool: cannot provide both 'subagent_id' and 'system_prompt'")
 	}
 	if !hasSubagentID && !hasSystemPrompt {
-		return ToolHandlerResults{}, fmt.Errorf("subagent tool: must provide either 'subagent_id' or 'system_prompt'")
+		return tool.HandlerResults{}, fmt.Errorf("subagent tool: must provide either 'subagent_id' or 'system_prompt'")
 	}
 	if !hasText {
-		return ToolHandlerResults{}, fmt.Errorf("subagent tool: must provide 'text'")
+		return tool.HandlerResults{}, fmt.Errorf("subagent tool: must provide 'text'")
 	}
 
 	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, err
+		return tool.HandlerResults{}, err
 	}
 	registry, err := llm.ModelsFromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, err
+		return tool.HandlerResults{}, err
+	}
+	tools, err := tool.FromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
 	}
 
 	// Check if the current session is already a subagent session
 	if strings.Contains(params.SessionId, ".") {
-		return ToolHandlerResults{}, errors.New("subagent tool cannot be called from a subagent session")
+		return tool.HandlerResults{}, errors.New("subagent tool cannot be called from a subagent session")
 	}
 
 	if hasSystemPrompt {
@@ -100,50 +105,50 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params ToolH
 
 		_, err = database.CreateSession(db, subsessionID, systemPrompt, "")
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to create new subagent session with ID %s: %w", subsessionID, err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to create new subagent session with ID %s: %w", subsessionID, err)
 		}
 
 		// Now send the initial message to the newly spawned subagent
 		// This part is similar to the beginning of SubagentTurnTool
 		session, err := database.GetSession(db, subsessionID)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found after creation: %w", subsessionID, err)
+			return tool.HandlerResults{}, fmt.Errorf("subagent session with ID %s not found after creation: %w", subsessionID, err)
 		}
 
 		mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
 		}
 
 		// Initial message for a new subagent session will have generation 0
 		mc.LastMessageModel = params.ModelName
 		if _, err = mc.Add(ctx, db, Message{Type: TypeUserText, Text: text}); err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to add initial user message to new subagent session: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to add initial user message to new subagent session: %w", err)
 		}
 
 		// Proceed with LLM turn for the new subagent
-		return handleSubagentTurn(ctx, db, registry, subsessionID, &session, params, agentID, mc)
+		return handleSubagentTurn(ctx, db, registry, tools, subsessionID, &session, params, agentID, mc)
 	} else {
 		// Interact with an existing subagent
 		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, subagentID)
 
 		session, err := database.GetSession(db, subsessionID)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
+			return tool.HandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
 		}
 
 		mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
 		}
 
 		// For existing subagent sessions, the generation will be determined within handleSubagentTurn
 		mc.LastMessageModel = params.ModelName
 		if _, err = mc.Add(ctx, db, Message{Type: TypeUserText, Text: text}); err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
 		}
 
-		return handleSubagentTurn(ctx, db, registry, subsessionID, &session, params, "", mc)
+		return handleSubagentTurn(ctx, db, registry, tools, subsessionID, &session, params, "", mc)
 	}
 }
 
@@ -152,28 +157,29 @@ func handleSubagentTurn(
 	ctx context.Context,
 	db *sql.DB,
 	registry *llm.Models,
+	tools *tool.Tools,
 	subsessionID string,
 	session *Session,
-	params ToolHandlerParams,
+	params tool.HandlerParams,
 	agentID string,
 	mc *database.MessageChain,
-) (ToolHandlerResults, error) {
+) (tool.HandlerResults, error) {
 	// Get main session environment
 	mainSessionEnvRoots, _, err := database.GetLatestSessionEnv(db, params.SessionId)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get main session environment: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get main session environment: %w", err)
 	}
 
 	// Get subagent session environment
 	subSessionEnvRoots, subSessionGeneration, err := database.GetLatestSessionEnv(db, subsessionID)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get subagent session environment: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get subagent session environment: %w", err)
 	}
 
 	// Check if roots have actually changed
 	rootsChanged, err := calculateRootsChanged(subSessionEnvRoots, mainSessionEnvRoots)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to calculate roots changed for subagent: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to calculate roots changed for subagent: %w", err)
 	}
 
 	// Only add env_changed message if roots have actually changed (added or removed)
@@ -183,18 +189,18 @@ func handleSubagentTurn(
 		// Marshal envChanged into JSON
 		envChangedJSON, err := json.Marshal(envChanged)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to marshal envChanged for subagent: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to marshal envChanged for subagent: %w", err)
 		}
 
 		// Add env_changed message to subagent session with the new generation
 		mc.LastMessageGeneration = subSessionGeneration
 		if _, err = mc.Add(ctx, db, Message{Type: TypeEnvChanged, Text: string(envChangedJSON)}); err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to add env_changed message to subagent session: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to add env_changed message to subagent session: %w", err)
 		}
 		// Add new subagent session environment in DB
 		_, err = database.AddSessionEnv(db, subsessionID, mainSessionEnvRoots)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to add new subagent session environment: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to add new subagent session environment: %w", err)
 		}
 	}
 
@@ -202,14 +208,14 @@ func handleSubagentTurn(
 	// GetSessionHistoryContext returns []FrontendMessage.
 	frontendMessages, err := database.GetSessionHistoryContext(db, subsessionID, session.PrimaryBranchID)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get messages for subagent session %s: %w", subsessionID, err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get messages for subagent session %s: %w", subsessionID, err)
 	}
 	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
 	modelProvider, err := registry.ResolveSubagent(params.ModelName, "")
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
 
 	// Update LastMessageModel to use the actual provider's model name
@@ -233,7 +239,7 @@ func handleSubagentTurn(
 		seq, closer, err := modelProvider.SendMessageStream(llmCtx, *sessionParams)
 		if err != nil {
 			cancel() // Ensure context is cancelled on error
-			return ToolHandlerResults{}, fmt.Errorf("failed to get streaming response from subagent LLM: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to get streaming response from subagent LLM: %w", err)
 		}
 
 		hasFunctionCall := false // Track if a function call occurred in this turn
@@ -262,7 +268,7 @@ func handleSubagentTurn(
 						}
 
 						// Execute the tool
-						toolResults, err := CallToolFunction(ctx, fc, ToolHandlerParams{
+						toolResults, err := tools.Call(ctx, fc, tool.HandlerParams{
 							ModelName: params.ModelName,
 							SessionId: subsessionID,
 							BranchId:  session.PrimaryBranchID,
@@ -310,7 +316,7 @@ func handleSubagentTurn(
 	// Add the final model response message to the database
 	if fullResponseText.Len() > 0 {
 		if _, err = mc.Add(ctx, db, Message{Type: TypeModelText, Text: fullResponseText.String()}); err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to add final model response to subagent session: %w", err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to add final model response to subagent session: %w", err)
 		}
 	}
 
@@ -324,21 +330,21 @@ func handleSubagentTurn(
 		result["error"] = FinishReasonMessage(firstFinishReason)
 	}
 
-	return ToolHandlerResults{Value: result}, nil
+	return tool.HandlerResults{Value: result}, nil
 }
 
 // GenerateImageTool handles the generate_image tool call, allowing to generate images using a subagent with image generation capabilities.
-func GenerateImageTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+func GenerateImageTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
 	// Accept and discard want_image for backward compatibility
-	if err := EnsureKnownKeys("generate_image", args, "text", "input_hashes", "want_image"); err != nil {
-		return ToolHandlerResults{}, err
+	if err := tool.EnsureKnownKeys("generate_image", args, "text", "input_hashes", "want_image"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 
 	text, hasText := args["text"].(string)
 	inputHashesInterface, hasInputHashes := args["input_hashes"].([]interface{})
 
 	if !hasText {
-		return ToolHandlerResults{}, fmt.Errorf("generate_image tool: must provide 'text'")
+		return tool.HandlerResults{}, fmt.Errorf("generate_image tool: must provide 'text'")
 	}
 
 	// Convert input_hashes from []interface{} to []string
@@ -349,14 +355,14 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 			if hashStr, ok := hash.(string); ok {
 				inputHashes[i] = hashStr
 			} else {
-				return ToolHandlerResults{}, fmt.Errorf("generate_image tool: input_hashes must be strings")
+				return tool.HandlerResults{}, fmt.Errorf("generate_image tool: input_hashes must be strings")
 			}
 		}
 	}
 
 	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, err
+		return tool.HandlerResults{}, err
 	}
 
 	// Create a subsession for image generation
@@ -367,30 +373,30 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	systemPrompt := "Generate images based on the user's request. The output should contain the generated images."
 	_, err = database.CreateSession(db, subsessionID, systemPrompt, "")
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to create image generation subsession with ID %s: %w", subsessionID, err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to create image generation subsession with ID %s: %w", subsessionID, err)
 	}
 
 	// Get session for message chain creation
 	session, err := database.GetSession(db, subsessionID)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("image generation subsession with ID %s not found after creation: %w", subsessionID, err)
+		return tool.HandlerResults{}, fmt.Errorf("image generation subsession with ID %s not found after creation: %w", subsessionID, err)
 	}
 
 	// Create message chain for the subsession
 	mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to create message chain for image generation subsession: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to create message chain for image generation subsession: %w", err)
 	}
 
 	// Get LLM client for image generation using the new task first to determine the correct model
 	registry, err := llm.ModelsFromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
 	}
 
 	imageModelProvider, err := registry.ResolveSubagent(params.ModelName, llm.SubagentImageGenerationTask)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
 
 	// Set the last message model to use the actual provider's model name
@@ -402,7 +408,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		if hash != "" {
 			attachment, err := database.GetBlobAsFileAttachment(db, hash)
 			if err != nil {
-				return ToolHandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
+				return tool.HandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
 			}
 			userMessageAttachments = append(userMessageAttachments, attachment)
 		}
@@ -413,7 +419,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		Text:        text,
 		Attachments: userMessageAttachments,
 	}); err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to add user message to image generation subsession: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to add user message to image generation subsession: %w", err)
 	}
 
 	// Prepare the content for image generation
@@ -433,7 +439,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 			// Retrieve blob data for the hash
 			blobData, err := database.GetBlob(db, hash)
 			if err != nil {
-				return ToolHandlerResults{}, fmt.Errorf("failed to retrieve blob for hash %s: %w", hash, err)
+				return tool.HandlerResults{}, fmt.Errorf("failed to retrieve blob for hash %s: %w", hash, err)
 			}
 
 			// Determine MIME type by detecting content type
@@ -465,7 +471,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	// Stream LLM response
 	seq, closer, err := imageModelProvider.SendMessageStream(llmCtx, *sessionParams)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get streaming response from image generation LLM: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get streaming response from image generation LLM: %w", err)
 	}
 	defer closer.Close()
 
@@ -550,12 +556,12 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Always return with attachments
-	return ToolHandlerResults{Value: result, Attachments: generatedAttachments}, nil
+	return tool.HandlerResults{Value: result, Attachments: generatedAttachments}, nil
 }
 
-func init() {
-	// Define tool definitions locally within init function
-	subagentToolDefinition := ToolDefinition{
+// registerSubagentTools registers subagent and image generation tools
+func registerSubagentTools(tools *tool.Tools) {
+	tools.Register(tool.Definition{
 		Name:        "subagent",
 		Description: "Spawns a new subagent session with a given system prompt, or sends a text message to an existing subagent session (identified by its session-local ID) and returns its text response. Exactly one of 'subagent_id' or 'system_prompt' must be provided. 'subagent_id' is returned only when 'system_prompt' is provided.",
 		Parameters: &Schema{
@@ -577,10 +583,9 @@ func init() {
 			Required: []string{"text"},
 		},
 		Handler: SubagentTool,
-	}
+	})
 
-	// Define generate_image tool
-	generateImageToolDefinition := ToolDefinition{
+	tools.Register(tool.Definition{
 		Name:        "generate_image",
 		Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). Returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking, and the generated images are always returned as attachments for direct assessment.",
 		Parameters: &Schema{
@@ -601,9 +606,5 @@ func init() {
 			Required: []string{"text"},
 		},
 		Handler: GenerateImageTool,
-	}
-
-	// Register tool definitions with availableTools map
-	availableTools["subagent"] = subagentToolDefinition
-	availableTools["generate_image"] = generateImageToolDefinition
+	})
 }

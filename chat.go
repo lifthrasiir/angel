@@ -38,6 +38,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 	registry := getModelsRegistry(w, r)
 	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
 
 	var requestBody struct {
 		Message      string           `json:"message"`
@@ -183,7 +184,7 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, registry, ga, initialState, sseW, mc, true, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(db, registry, ga, tools, initialState, sseW, mc, true, time.Now(), historyContext); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}
@@ -194,6 +195,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 	registry := getModelsRegistry(w, r)
 	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -367,7 +369,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
 
-	if err := streamLLMResponse(db, registry, ga, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, registry, ga, tools, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
 		sendInternalServerError(w, r, err, "Error streaming LLM response")
 		return
 	}

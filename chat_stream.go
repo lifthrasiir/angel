@@ -16,6 +16,7 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -24,8 +25,9 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 // Helper function to stream LLM response
 func streamLLMResponse(
 	db *sql.DB,
-	registry *llm.Models,
+	models *llm.Models,
 	ga *llm.GeminiAuth,
+	tools *tool.Tools,
 	initialState InitialState,
 	sseW *sseWriter,
 	mc *database.MessageChain,
@@ -40,8 +42,8 @@ func streamLLMResponse(
 
 	// Create a cancellable context for the LLM call
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()                                  // Ensure context is cancelled when function exits
-	ctx = contextWithGlobals(ctx, db, registry, ga) // Set all required context values
+	defer cancel()                                       // Ensure context is cancelled when function exits
+	ctx = contextWithGlobals(ctx, db, models, ga, tools) // Set all required context values
 
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {
@@ -57,7 +59,7 @@ func streamLLMResponse(
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
 	modelMessageID := -1
 
-	modelProvider, err := registry.GetModelProvider(mc.LastMessageModel)
+	modelProvider, err := models.GetModelProvider(mc.LastMessageModel)
 	if err != nil {
 		return err
 	}
@@ -158,7 +160,7 @@ func streamLLMResponse(
 					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsJson))
 					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
 
-					toolResults, err := CallToolFunction(ctx, fc, ToolHandlerParams{
+					toolResults, err := tools.Call(ctx, fc, tool.HandlerParams{
 						ModelName: mc.LastMessageModel,
 						SessionId: initialState.SessionId,
 						BranchId:  initialState.PrimaryBranchID,
@@ -460,7 +462,7 @@ func streamLLMResponse(
 				if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
 					userMsg = initialState.History[0].Parts[0].Text
 				}
-				inferAndSetSessionName(db, registry, ga, initialState.SessionId, userMsg, sseW, mc.LastMessageModel)
+				inferAndSetSessionName(db, models, ga, tools, initialState.SessionId, userMsg, sseW, mc.LastMessageModel)
 			}()
 		}
 	}
@@ -485,7 +487,7 @@ func streamLLMResponse(
 	return nil
 }
 
-func appendAttachmentParts(db *sql.DB, toolResults ToolHandlerResults, partsForContent []Part) []Part {
+func appendAttachmentParts(db *sql.DB, toolResults tool.HandlerResults, partsForContent []Part) []Part {
 	for _, attachment := range toolResults.Attachments {
 		// Retrieve blob data from DB using hash
 		blobData, err := database.GetBlob(db, attachment.Hash)
@@ -558,7 +560,16 @@ func checkStreamCancellation(
 }
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
-func inferAndSetSessionName(db *sql.DB, registry *llm.Models, ga *llm.GeminiAuth, sessionId string, userMessage string, sseW *sseWriter, modelToUse string) {
+func inferAndSetSessionName(
+	db *sql.DB,
+	registry *llm.Models,
+	ga *llm.GeminiAuth,
+	tools *tool.Tools,
+	sessionId string,
+	userMessage string,
+	sseW *sseWriter,
+	modelToUse string,
+) {
 	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)
 
 	var inferredName string // Initialize to empty string
@@ -612,7 +623,7 @@ func inferAndSetSessionName(db *sql.DB, registry *llm.Models, ga *llm.GeminiAuth
 	})
 
 	// Create new context with database connection for subagent
-	subagentCtx := contextWithGlobals(context.Background(), db, registry, ga)
+	subagentCtx := contextWithGlobals(context.Background(), db, registry, ga, tools)
 	subagentCtx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 

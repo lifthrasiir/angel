@@ -19,6 +19,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -484,7 +485,11 @@ func (c *OpenAIClient) SendMessageStream(ctx context.Context, modelName string, 
 	var openAITools []OpenAITool
 	if params.ToolConfig == nil {
 		// If no specific tool config, include all available tools
-		geminiTools := GetToolsForGemini()
+		tools, err := tool.FromContext(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		geminiTools := tools.ForGemini()
 		openAITools = convertGeminiToolsToOpenAI(geminiTools)
 	}
 

@@ -20,6 +20,7 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/tool"
 )
 
 // Helper function to set up the test environment
@@ -39,7 +40,10 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 		}
 	}
 
-	InitMCPManager(testDB)
+	// Initialize tools registry
+	tools := tool.NewTools()
+	initTools(tools)
+	tools.InitMCPManager(testDB)
 
 	// Initialize ModelsRegistry by loading models.json
 	modelsData, err := os.ReadFile("models.json")
@@ -47,7 +51,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 		t.Fatalf("Failed to read models.json: %v", err)
 	}
 
-	modelsRegistry, err := llm.LoadModels(modelsData)
+	models, err := llm.LoadModels(modelsData)
 	if err != nil {
 		t.Fatalf("Failed to load models: %v", err)
 	}
@@ -68,14 +72,14 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 			return 1048576 // Mocked max tokens
 		},
 	}
-	modelsRegistry.SetGeminiProvider(mockLLMProvider)
+	models.SetGeminiProvider(mockLLMProvider)
 
 	// Initialize GeminiAuth
 	geminiAuth := llm.NewGeminiAuth("")
 
 	// Create a new router for testing
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(testDB, modelsRegistry, geminiAuth))
+	router.Use(makeContextMiddleware(testDB, models, geminiAuth, tools))
 	InitRouter(router)
 
 	// Ensure the database connection is closed after the test
@@ -85,7 +89,7 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 		}
 	})
 
-	return router, testDB, modelsRegistry
+	return router, testDB, models
 }
 
 type Sse struct {

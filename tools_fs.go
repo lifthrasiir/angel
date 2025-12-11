@@ -14,6 +14,7 @@ import (
 	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -104,24 +105,24 @@ func releaseSessionFS(sessionId string) {
 }
 
 // ReadFileTool handles the read_file tool call.
-func ReadFileTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("read_file", args, "file_path"); err != nil {
-		return ToolHandlerResults{}, err
+func ReadFileTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
+	if err := tool.EnsureKnownKeys("read_file", args, "file_path"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 	absolutePath, ok := args["file_path"].(string)
 	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid file_path argument for read_file")
+		return tool.HandlerResults{}, fmt.Errorf("invalid file_path argument for read_file")
 	}
 
 	sf, err := getSessionFS(ctx, params.SessionId)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get SessionFS for read_file: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for read_file: %w", err)
 	}
 	defer releaseSessionFS(params.SessionId)
 
 	content, err := sf.ReadFile(absolutePath)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to read file %s: %w", absolutePath, err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to read file %s: %w", absolutePath, err)
 	}
 
 	// Determine MIME type
@@ -133,12 +134,12 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params ToolH
 	if isBinary {
 		db, err := database.FromContext(ctx)
 		if err != nil {
-			return ToolHandlerResults{}, err
+			return tool.HandlerResults{}, err
 		}
 
 		hash, err := database.SaveBlob(ctx, db, content)
 		if err != nil {
-			return ToolHandlerResults{}, fmt.Errorf("failed to save blob for %s: %w", absolutePath, err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to save blob for %s: %w", absolutePath, err)
 		}
 
 		fileName := filepath.Base(absolutePath)
@@ -164,37 +165,37 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params ToolH
 
 		content := fmt.Sprintf("(%s, %d bytes)", contentType, len(content))
 
-		return ToolHandlerResults{
+		return tool.HandlerResults{
 			Value:       map[string]interface{}{"content": content, "note": note},
 			Attachments: []FileAttachment{attachment},
 		}, nil
 	} else {
 		// It's a text file
-		return ToolHandlerResults{
+		return tool.HandlerResults{
 			Value: map[string]interface{}{"content": string(content)},
 		}, nil
 	}
 }
 
 // WriteFileTool handles the write_file tool call.
-func WriteFileTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("write_file", args, "file_path", "content"); err != nil {
-		return ToolHandlerResults{}, err
+func WriteFileTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
+	if err := tool.EnsureKnownKeys("write_file", args, "file_path", "content"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 	filePath, ok := args["file_path"].(string)
 	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid file_path argument for write_file")
+		return tool.HandlerResults{}, fmt.Errorf("invalid file_path argument for write_file")
 	}
 	newContentStr, ok := args["content"].(string)
 	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid content argument for write_file")
+		return tool.HandlerResults{}, fmt.Errorf("invalid content argument for write_file")
 	}
 
 	// Check if the path is absolute
 	if !params.ConfirmationReceived && filepath.IsAbs(filePath) {
 		// If it's an absolute path, signal for user confirmation
 		// We don't perform the write here, it will be done after confirmation
-		return ToolHandlerResults{}, &PendingConfirmation{
+		return tool.HandlerResults{}, &PendingConfirmation{
 			Data: map[string]interface{}{
 				"tool":      "write_file",
 				"file_path": filePath,
@@ -205,7 +206,7 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params Tool
 
 	sf, err := getSessionFS(ctx, params.SessionId)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get SessionFS for write_file: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for write_file: %w", err)
 	}
 	defer releaseSessionFS(params.SessionId)
 
@@ -214,7 +215,7 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params Tool
 	oldContentBytes, err := sf.ReadFile(filePath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return ToolHandlerResults{}, fmt.Errorf("failed to read old content of file %s: %w", filePath, err)
+			return tool.HandlerResults{}, fmt.Errorf("failed to read old content of file %s: %w", filePath, err)
 		}
 		// File does not exist, oldContentStr remains empty
 	} else {
@@ -224,34 +225,34 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params Tool
 	// 2. Write new content
 	err = sf.WriteFile(filePath, []byte(newContentStr))
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to write file %s: %w", filePath, err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to write file %s: %w", filePath, err)
 	}
 
 	// 3. Calculate diff using the new editor package
 	unifiedDiff := editor.Diff([]byte(oldContentStr), []byte(newContentStr), 3)
 
-	return ToolHandlerResults{Value: map[string]interface{}{"status": "success", "unified_diff": unifiedDiff}}, nil
+	return tool.HandlerResults{Value: map[string]interface{}{"status": "success", "unified_diff": unifiedDiff}}, nil
 }
 
 // ListDirectoryTool handles the list_directory tool call.
-func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
-	if err := EnsureKnownKeys("list_directory", args, "path"); err != nil {
-		return ToolHandlerResults{}, err
+func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
+	if err := tool.EnsureKnownKeys("list_directory", args, "path"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 	path, ok := args["path"].(string)
 	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid path argument for list_directory")
+		return tool.HandlerResults{}, fmt.Errorf("invalid path argument for list_directory")
 	}
 
 	sf, err := getSessionFS(ctx, params.SessionId)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get SessionFS for list_directory: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for list_directory: %w", err)
 	}
 	defer releaseSessionFS(params.SessionId)
 
 	entries, err := sf.ReadDir(path)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to list directory %s: %w", path, err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to list directory %s: %w", path, err)
 	}
 
 	var fileNames []string
@@ -263,11 +264,12 @@ func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params 
 		fileNames = append(fileNames, name)
 	}
 
-	return ToolHandlerResults{Value: map[string]interface{}{"files": fileNames}}, nil
+	return tool.HandlerResults{Value: map[string]interface{}{"files": fileNames}}, nil
 }
 
-var (
-	listDirectoryToolDefinition = ToolDefinition{
+// registerFSTools registers filesystem-related tools
+func registerFSTools(tools *tool.Tools) {
+	tools.Register(tool.Definition{
 		Name:        "list_directory",
 		Description: "Lists a directory. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
 		Parameters: &Schema{
@@ -281,8 +283,9 @@ var (
 			Required: []string{"path"},
 		},
 		Handler: ListDirectoryTool,
-	}
-	readFileToolDefinition = ToolDefinition{
+	})
+
+	tools.Register(tool.Definition{
 		Name:        "read_file",
 		Description: "Reads a file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`. Image, audio, video and PDF files are automatically converted to a readable format if possible.",
 		Parameters: &Schema{
@@ -296,8 +299,9 @@ var (
 			Required: []string{"file_path"},
 		},
 		Handler: ReadFileTool,
-	}
-	writeFileToolDefinition = ToolDefinition{
+	})
+
+	tools.Register(tool.Definition{
 		Name:        "write_file",
 		Description: "Writes content to a specified file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md` to keep track of things. Any updates return a unified diff, which is crucial for verifying your edits and, more importantly, implicitly reveals any unexpected external modifications, allowing for swift detection and adaptation.",
 		Parameters: &Schema{
@@ -315,5 +319,5 @@ var (
 			Required: []string{"file_path", "content"},
 		},
 		Handler: WriteFileTool,
-	}
-)
+	})
+}

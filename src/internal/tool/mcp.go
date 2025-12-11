@@ -1,4 +1,4 @@
-package main
+package tool
 
 import (
 	"context"
@@ -16,32 +16,9 @@ import (
 
 // MCPManager manages all MCP connections.
 type MCPManager struct {
-	connections        map[string]*MCPConnection
-	mu                 sync.RWMutex
-	mcpToolNameMapping map[string]string // MappedName -> OriginalName
-}
-
-func (m *MCPManager) UpdateToolNameMapping(builtinToolNames map[string]bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.mcpToolNameMapping = make(map[string]string)
-
-	for mcpName, conn := range m.connections {
-		if conn.IsEnabled && conn.Session != nil {
-			toolsIterator := conn.Session.Tools(context.Background(), nil)
-			for tool, err := range toolsIterator {
-				if err != nil {
-					log.Printf("Failed to list tools from MCP server %s for mapping: %v", mcpName, err)
-					continue
-				}
-				mappedName := tool.Name
-				if _, exists := builtinToolNames[tool.Name]; exists {
-					mappedName = mcpName + "__" + tool.Name
-				}
-				m.mcpToolNameMapping[mappedName] = tool.Name
-			}
-		}
-	}
+	connections map[string]*MCPConnection
+	mu          sync.RWMutex
+	tools       *Tools // Reference to parent Tools instance
 }
 
 // MCPConnection represents a single connection to an MCP server.
@@ -51,12 +28,10 @@ type MCPConnection struct {
 	IsEnabled bool
 }
 
-var mcpManager *MCPManager
-
-func InitMCPManager(db *sql.DB) {
-	mcpManager = &MCPManager{
-		connections: make(map[string]*MCPConnection),
-	}
+// init initializes MCP connections from database
+func (m *MCPManager) init(tools *Tools, db *sql.DB) {
+	m.connections = make(map[string]*MCPConnection)
+	m.tools = tools
 
 	configs, err := database.GetMCPServerConfigs(db)
 	if err != nil {
@@ -66,13 +41,14 @@ func InitMCPManager(db *sql.DB) {
 
 	for _, config := range configs {
 		if config.Enabled {
-			mcpManager.startConnection(config)
+			m.StartConnection(config)
 		}
 	}
 	log.Println("MCP Manager initialized.")
 }
 
-func (m *MCPManager) startConnection(config MCPServerConfig) {
+// StartConnection starts a connection to an MCP server
+func (m *MCPManager) StartConnection(config MCPServerConfig) {
 	log.Printf("Attempting to connect to MCP server: %s", config.Name)
 
 	var connDetails struct {
@@ -108,7 +84,8 @@ func (m *MCPManager) startConnection(config MCPServerConfig) {
 	log.Printf("MCP connection '%s' to %s established.", config.Name, connDetails.Endpoint)
 }
 
-func (m *MCPManager) stopConnection(name string) {
+// StopConnection stops a connection to an MCP server
+func (m *MCPManager) StopConnection(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

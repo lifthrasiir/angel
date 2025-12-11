@@ -11,6 +11,7 @@ import (
 	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -86,24 +87,24 @@ func updateCmdStateFromProcessState(db database.DbOrTx, cmdID string, rc *filesy
 }
 
 // RunShellCommandTool handles the run_shell_command tool call.
-func RunShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+func RunShellCommandTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
 	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, err
+		return tool.HandlerResults{}, err
 	}
 
 	sfs, err := getSessionFS(ctx, params.SessionId) // Get SessionFS from tools_fs.go
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("failed to get SessionFS: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS: %w", err)
 	}
 	defer releaseSessionFS(params.SessionId) // Release SessionFS reference
 
-	if err := EnsureKnownKeys("run_shell_command", args, "command", "directory"); err != nil {
-		return ToolHandlerResults{}, err
+	if err := tool.EnsureKnownKeys("run_shell_command", args, "command", "directory"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 	commandStr, ok := args["command"].(string)
 	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid command argument for run_shell_command")
+		return tool.HandlerResults{}, fmt.Errorf("invalid command argument for run_shell_command")
 	}
 
 	workingDir := ""
@@ -113,7 +114,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 
 	if !params.ConfirmationReceived {
 		// If not confirmed, return a confirmation request
-		return ToolHandlerResults{}, &PendingConfirmation{
+		return tool.HandlerResults{}, &PendingConfirmation{
 			Data: map[string]interface{}{
 				"tool":      "run_shell_command",
 				"command":   commandStr,
@@ -138,7 +139,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 	rc, err := sfs.Run(cmdCtx, commandStr, workingDir)
 	if err != nil {
 		log.Printf("RunShellCommandTool: Error preparing command execution for cmdID %s: %v", cmdID, err)
-		return ToolHandlerResults{}, fmt.Errorf("failed to prepare command execution: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to prepare command execution: %w", err)
 	}
 	log.Printf("RunShellCommandTool: Command %s (ID: %s) started.", commandStr, cmdID)
 
@@ -158,7 +159,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 	// Insert into DB immediately to ensure the record exists for updateCmdStateFromProcessState
 	if err := database.InsertShellCommand(db, cmdDB); err != nil {
 		rc.Close() // rc.Close() calls rc.Cancel(), which is redundant with deferred cancel() but safe
-		return ToolHandlerResults{}, fmt.Errorf("failed to insert shell command into DB: %w", err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to insert shell command into DB: %w", err)
 	}
 
 	// Store running command and its completion channel in memory
@@ -188,7 +189,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		if finalCmd.ErrorMessage.Valid {
 			result["error_message"] = finalCmd.ErrorMessage.String
 		}
-		return ToolHandlerResults{Value: result}, nil
+		return tool.HandlerResults{Value: result}, nil
 	case <-time.After(InitialPollDelayInSeconds * time.Second):
 		log.Printf("RunShellCommandTool: Command '%s' (ID: %s) still running after initial delay.", commandStr, cmdID)
 
@@ -216,7 +217,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		if len(initialStderr) > 0 {
 			result["stderr"] = string(initialStderr)
 		}
-		return ToolHandlerResults{Value: result}, nil
+		return tool.HandlerResults{Value: result}, nil
 	}
 }
 
@@ -233,23 +234,23 @@ func getBranchShellLock(branchID string) *sync.Mutex {
 }
 
 // PollShellCommandTool handles the poll_shell_command tool call.
-func PollShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+func PollShellCommandTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
 	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, err
+		return tool.HandlerResults{}, err
 	}
 
-	if err := EnsureKnownKeys("poll_shell_command", args, "command_id"); err != nil {
-		return ToolHandlerResults{}, err
+	if err := tool.EnsureKnownKeys("poll_shell_command", args, "command_id"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 	cmdID, ok := args["command_id"].(string)
 	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid command_id argument for poll_shell_command")
+		return tool.HandlerResults{}, fmt.Errorf("invalid command_id argument for poll_shell_command")
 	}
 
 	cmdDB, err := database.GetShellCommandByID(db, cmdID)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
+		return tool.HandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
 	}
 
 	// If the command is still running, wait for the NextPollDelay
@@ -381,31 +382,31 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		}
 		result["elapsed_seconds"] = cmdDB.EndTime.Int64 - cmdDB.StartTime
 	}
-	return ToolHandlerResults{Value: result}, nil
+	return tool.HandlerResults{Value: result}, nil
 }
 
 // KillShellCommandTool handles the kill_shell_command tool call.
-func KillShellCommandTool(ctx context.Context, args map[string]interface{}, params ToolHandlerParams) (ToolHandlerResults, error) {
+func KillShellCommandTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
 	db, err := database.FromContext(ctx)
 	if err != nil {
-		return ToolHandlerResults{}, err
+		return tool.HandlerResults{}, err
 	}
 
-	if err := EnsureKnownKeys("kill_shell_command", args, "command_id"); err != nil {
-		return ToolHandlerResults{}, err
+	if err := tool.EnsureKnownKeys("kill_shell_command", args, "command_id"); err != nil {
+		return tool.HandlerResults{}, err
 	}
 	cmdID, ok := args["command_id"].(string)
 	if !ok {
-		return ToolHandlerResults{}, fmt.Errorf("invalid command_id argument for kill_shell_command")
+		return tool.HandlerResults{}, fmt.Errorf("invalid command_id argument for kill_shell_command")
 	}
 
 	cmdDB, err := database.GetShellCommandByID(db, cmdID)
 	if err != nil {
-		return ToolHandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
+		return tool.HandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
 	}
 
 	if cmdDB.Status != "running" {
-		return ToolHandlerResults{Value: map[string]interface{}{
+		return tool.HandlerResults{Value: map[string]interface{}{
 			"command_id": cmdID,
 			"status":     cmdDB.Status,
 			"message":    fmt.Sprintf("Command %s is not running (status: %s). No action taken.", cmdID, cmdDB.Status),
@@ -427,7 +428,7 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		if err := database.UpdateShellCommand(db, *cmdDB); err != nil {
 			log.Printf("Error updating DB for missing command on kill attempt %s: %v", cmdID, err)
 		}
-		return ToolHandlerResults{Value: map[string]interface{}{
+		return tool.HandlerResults{Value: map[string]interface{}{
 			"command_id": cmdID,
 			"status":     "failed",
 			"message":    "Command process not found in memory, status updated in DB.",
@@ -443,7 +444,7 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		if err := database.UpdateShellCommand(db, *cmdDB); err != nil {
 			log.Printf("Error updating DB for kill failure %s: %v", cmdID, err)
 		}
-		return ToolHandlerResults{}, fmt.Errorf("failed to kill command %s: %w", cmdID, err)
+		return tool.HandlerResults{}, fmt.Errorf("failed to kill command %s: %w", cmdID, err)
 	}
 
 	// Update DB status to killed
@@ -463,14 +464,15 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 
 	log.Printf("Command ID %s killed successfully.", cmdID)
 
-	return ToolHandlerResults{Value: map[string]interface{}{
+	return tool.HandlerResults{Value: map[string]interface{}{
 		"command_id": cmdID,
 		"status":     "killed",
 	}}, nil
 }
 
-var (
-	runShellCommandToolDefinition = ToolDefinition{
+// registerShellTools registers shell command tools
+func registerShellTools(tools *tool.Tools) {
+	tools.Register(tool.Definition{
 		Name:        "run_shell_command",
 		Description: "Executes a shell command asynchronously. It returns a command ID and the current status of the command. If the command completes immediately, its status will be 'completed' and full output will be included. **CRITICAL: If the command's status is 'running', the agent *must immediately and continuously* monitor its final outcome (status, output, and exit code) by calling `poll_shell_command` with the returned command ID. This polling *must* continue without interruption until the command explicitly reaches a 'completed' or 'failed' state, at which point the agent will notify the user.**",
 		Parameters: &Schema{
@@ -488,8 +490,9 @@ var (
 			Required: []string{"command"},
 		},
 		Handler: RunShellCommandTool,
-	}
-	pollShellCommandToolDefinition = ToolDefinition{
+	})
+
+	tools.Register(tool.Definition{
 		Name:        "poll_shell_command",
 		Description: "Polls the status, output (stdout/stderr), and exit code of a previously run shell command using its command ID. This is how the final results of a command initiated by `run_shell_command` are retrieved if it did not complete immediately upon execution.",
 		Parameters: &Schema{
@@ -503,8 +506,9 @@ var (
 			Required: []string{"command_id"},
 		},
 		Handler: PollShellCommandTool,
-	}
-	killShellCommandToolDefinition = ToolDefinition{
+	})
+
+	tools.Register(tool.Definition{
 		Name:        "kill_shell_command",
 		Description: "Terminates a running shell command using its command ID.",
 		Parameters: &Schema{
@@ -518,5 +522,5 @@ var (
 			Required: []string{"command_id"},
 		},
 		Handler: KillShellCommandTool,
-	}
-)
+	})
+}
