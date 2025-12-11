@@ -16,8 +16,11 @@ import (
 	"golang.org/x/oauth2"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/chat"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/prompts"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -497,10 +500,10 @@ func handleCall(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		isActive := hasActiveCall(sessionId)
+		isActive := chat.HasActiveCall(sessionId)
 		sendJSONResponse(w, map[string]bool{"isActive": isActive})
 	case "DELETE":
-		if err := cancelCall(sessionId); err != nil {
+		if err := chat.CancelCall(sessionId); err != nil {
 			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to cancel call for session %s", sessionId))
 			return
 		}
@@ -533,7 +536,7 @@ func handleEvaluatePrompt(w http.ResponseWriter, r *http.Request) {
 		workspaceName = workspace.Name
 	}
 
-	data := PromptData{workspaceName: workspaceName}
+	data := prompts.NewPromptData(workspaceName)
 	evaluatedPrompt, err := data.EvaluatePrompt(requestBody.Template)
 	if err != nil {
 		sendBadRequestError(w, r, fmt.Sprintf("Error evaluating prompt template: %v", err))
@@ -656,24 +659,13 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "MCP config deleted successfully"})
 }
 
-type wrappedBadRequestError struct{ error }
-type wrappedNotFoundError struct{ error }
-
-func badRequestError(format string, args ...interface{}) error {
-	return wrappedBadRequestError{fmt.Errorf(format, args...)}
-}
-
-func notFoundError(format string, args ...interface{}) error {
-	return wrappedNotFoundError{fmt.Errorf(format, args...)}
-}
-
 // sendInternalServerError logs the error and sends a 500 Internal Server Error response.
-// As special cases, badRequestError and notFoundError types are handled to send 400 and 404 responses respectively.
+// As special cases, BadRequestError and NotFoundError types are handled to send 400 and 404 responses respectively.
 func sendInternalServerError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	switch err.(type) {
-	case wrappedBadRequestError:
+	case chat.BadRequestError:
 		sendBadRequestError(w, r, err.Error())
-	case wrappedNotFoundError:
+	case chat.NotFoundError:
 		sendNotFoundError(w, r, err.Error())
 	default:
 		log.Printf("%s: %v", msg, err)
@@ -759,7 +751,7 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Calculate EnvChanged
-	rootsChanged, err := calculateRootsChanged(oldRoots, requestBody.Roots)
+	rootsChanged, err := env.CalculateRootsChanged(oldRoots, requestBody.Roots)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to calculate environment changes")
 		return

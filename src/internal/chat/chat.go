@@ -1,24 +1,21 @@
-package main
+package chat
 
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"math"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
-
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/prompts"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -32,43 +29,7 @@ type InitialState struct {
 	Roots                  []string          `json:"roots"`
 	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"`
 	PendingConfirmation    string            `json:"pendingConfirmation,omitempty"`
-	EnvChanged             *EnvChanged       `json:"envChanged,omitempty"`
-}
-
-// New session and message handler
-func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	models := getModels(w, r)
-	ga := getGeminiAuth(w, r)
-	tools := getTools(w, r)
-
-	var requestBody struct {
-		Message      string           `json:"message"`
-		SystemPrompt string           `json:"systemPrompt"`
-		Attachments  []FileAttachment `json:"attachments"`
-		WorkspaceID  string           `json:"workspaceId"`
-		Model        string           `json:"model"`
-		FetchLimit   int              `json:"fetchLimit"`
-		InitialRoots []string         `json:"initialRoots"`
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
-		return
-	}
-
-	sessionId := database.GenerateID()
-	ew := newSseWriter(r.Context(), sessionId, w)
-	if ew == nil {
-		return
-	}
-
-	if err := NewSessionAndMessage(
-		r.Context(), db, models, ga, tools,
-		ew, sessionId, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
-		requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
-	); err != nil {
-		sendInternalServerError(w, r, err, "Failed to create new session and message")
-	}
+	EnvChanged             *env.EnvChanged   `json:"envChanged,omitempty"`
 }
 
 func NewSessionAndMessage(
@@ -86,7 +47,7 @@ func NewSessionAndMessage(
 	}
 
 	// Evaluate system prompt
-	data := PromptData{workspaceName: workspaceName}
+	data := prompts.NewPromptData(workspaceName)
 	systemPrompt, err := data.EvaluatePrompt(systemPrompt)
 	if err != nil {
 		return fmt.Errorf("failed to evaluate system prompt: %w", err)
@@ -106,13 +67,13 @@ func NewSessionAndMessage(
 		}
 
 		// Calculate EnvChanged from empty to initial roots
-		rootsChanged, err := calculateRootsChanged([]string{}, initialRoots)
+		rootsChanged, err := env.CalculateRootsChanged([]string{}, initialRoots)
 		if err != nil {
 			log.Printf("newSessionAndMessage: Failed to calculate roots changed for initial roots: %v", err)
 			// Non-fatal, continue without adding env change to prompt
 		} else {
-			envChanged := EnvChanged{Roots: &rootsChanged}
-			envChangeContext := GetEnvChangeContext(envChanged)
+			envChanged := env.EnvChanged{Roots: &rootsChanged}
+			envChangeContext := prompts.GetEnvChangeContext(envChanged)
 			systemPrompt = systemPrompt + "\n" + envChangeContext // Append to system prompt
 		}
 	}
@@ -192,44 +153,6 @@ func NewSessionAndMessage(
 	return nil
 }
 
-// Chat message handler
-func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	models := getModels(w, r)
-	ga := getGeminiAuth(w, r)
-	tools := getTools(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	if sessionId == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	var requestBody struct {
-		Message     string           `json:"message"`
-		Attachments []FileAttachment `json:"attachments"`
-		Model       string           `json:"model"`
-		FetchLimit  int              `json:"fetchLimit"`
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
-		return
-	}
-
-	ew := newSseWriter(r.Context(), sessionId, w)
-	if ew == nil {
-		return
-	}
-
-	if err := NewChatMessage(
-		r.Context(), db, models, ga, tools,
-		ew, sessionId, requestBody.Message, requestBody.Attachments, requestBody.Model, requestBody.FetchLimit,
-	); err != nil {
-		sendInternalServerError(w, r, err, "Failed to process chat message")
-	}
-}
-
 func NewChatMessage(
 	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, sessionId string, userMessage string, attachments []FileAttachment, modelToUse string, fetchLimit int,
@@ -284,13 +207,13 @@ func NewChatMessage(
 			// Non-fatal, continue with user message
 		}
 
-		rootsChanged, err := calculateRootsChanged(oldRoots, newRoots)
+		rootsChanged, err := env.CalculateRootsChanged(oldRoots, newRoots)
 		if err != nil {
 			log.Printf("chatMessage: Failed to calculate roots changed: %v", err)
 			// Non-fatal, continue with user message
 		}
 
-		envChanged := EnvChanged{Roots: &rootsChanged}
+		envChanged := env.EnvChanged{Roots: &rootsChanged}
 
 		// Marshal envChanged into JSON
 		envChangedJSON, err := json.Marshal(envChanged) // Use = instead of :=
@@ -381,63 +304,6 @@ func NewChatMessage(
 	return nil
 }
 
-// New endpoint to load chat session history
-func loadChatSessionHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	if sessionId == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	// Parse pagination parameters
-	beforeMessageIDStr := r.URL.Query().Get("beforeMessageId")
-	fetchLimitStr := r.URL.Query().Get("fetchLimit")
-
-	beforeMessageID := 0 // Default to 0, meaning fetch from the latest
-	if beforeMessageIDStr != "" {
-		parsedID, err := strconv.Atoi(beforeMessageIDStr)
-		if err != nil {
-			sendBadRequestError(w, r, "Invalid beforeMessageId parameter")
-			return
-		}
-		beforeMessageID = parsedID
-	}
-
-	fetchLimit := math.MaxInt // Default fetch limit
-	if fetchLimitStr != "" {
-		parsedLimit, err := strconv.Atoi(fetchLimitStr)
-		if err != nil {
-			sendBadRequestError(w, r, "Invalid fetchLimit parameter")
-			return
-		}
-		fetchLimit = parsedLimit
-	}
-
-	// Optionally initialize EventWriter
-	var ew EventWriter
-	if r.Header.Get("Accept") == "text/event-stream" {
-		sseW := newSseWriter(r.Context(), sessionId, w)
-		if sseW == nil {
-			return
-		}
-		ew = sseW // Avoid nil interface
-	}
-
-	initialState, err := LoadChatSession(r.Context(), db, ew, sessionId, beforeMessageID, fetchLimit)
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to load chat session")
-		return
-	}
-
-	if ew == nil {
-		// Original JSON response for non-SSE requests
-		sendJSONResponse(w, initialState)
-	}
-}
-
 func LoadChatSession(ctx context.Context, db *sql.DB, ew EventWriter, sessionId string, beforeMessageID int, fetchLimit int) (initialState InitialState, err error) {
 	// Check if session exists
 	exists, err := database.SessionExists(db, sessionId)
@@ -503,19 +369,19 @@ func LoadChatSession(ctx context.Context, db *sql.DB, ew EventWriter, sessionId 
 		}
 	}
 
-	var initialStateEnvChanged *EnvChanged
+	var initialStateEnvChanged *env.EnvChanged
 	if currentGeneration > lastMessageGenerationInHistory {
 		oldRoots, err := database.GetSessionEnv(db, sessionId, lastMessageGenerationInHistory)
 		if err != nil {
 			log.Printf("loadChatSession: Failed to get old session environment for generation %d: %v", lastMessageGenerationInHistory, err)
 			// Non-fatal, continue
 		}
-		rootsChanged, err := calculateRootsChanged(oldRoots, currentRoots)
+		rootsChanged, err := env.CalculateRootsChanged(oldRoots, currentRoots)
 		if err != nil {
 			log.Printf("loadChatSession: Failed to calculate roots changed for initial state: %v", err)
 			// Non-fatal, continue
 		}
-		initialStateEnvChanged = &EnvChanged{Roots: &rootsChanged}
+		initialStateEnvChanged = &env.EnvChanged{Roots: &rootsChanged}
 	}
 
 	// Prepare initial state as a single JSON object
@@ -541,7 +407,7 @@ func LoadChatSession(ctx context.Context, db *sql.DB, ew EventWriter, sessionId 
 
 	// If it's an SSE request, handle streaming. Otherwise, send regular JSON response.
 	if ew != nil {
-		if hasActiveCall(sessionId) {
+		if HasActiveCall(sessionId) {
 			callStartTime, ok := GetCallStartTime(sessionId)
 			if ok {
 				initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
@@ -571,266 +437,4 @@ func LoadChatSession(ctx context.Context, db *sql.DB, ew EventWriter, sessionId 
 	}
 
 	return
-}
-
-func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-
-	workspaceID := r.URL.Query().Get("workspaceId")
-
-	wsWithSessions, err := database.GetWorkspaceAndSessions(db, workspaceID)
-	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to retrieve sessions for workspace %s", workspaceID))
-		return
-	}
-
-	sendJSONResponse(w, wsWithSessions)
-}
-
-// calculateNewSessionEnvChangedHandler calculates EnvChanged for a new session.
-// It expects newRoots as a JSON string in the query parameter.
-func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request) {
-	// No authentication needed for this endpoint as it's for pre-session calculation
-	// and doesn't modify any session state.
-
-	newRootsJSON := r.URL.Query().Get("newRoots")
-	if newRootsJSON == "" {
-		sendBadRequestError(w, r, "newRoots query parameter is required")
-		return
-	}
-
-	var newRoots []string
-	if err := json.Unmarshal([]byte(newRootsJSON), &newRoots); err != nil {
-		sendBadRequestError(w, r, "Invalid newRoots JSON")
-		return
-	}
-
-	// oldRoots is always empty for a new session's initial environment calculation
-	oldRoots := []string{}
-
-	rootsChanged, err := calculateRootsChanged(oldRoots, newRoots)
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to calculate environment changes")
-		return
-	}
-
-	envChanged := EnvChanged{Roots: &rootsChanged}
-	sendJSONResponse(w, envChanged)
-}
-
-// New endpoint to delete a chat session
-func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	if sessionId == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	sandboxBaseDir := determineSandboxBaseDir()
-	if err := database.DeleteSession(db, sessionId, sandboxBaseDir); err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete session %s", sessionId))
-		return
-	}
-
-	sendJSONResponse(w, map[string]string{"status": "success", "message": "Session deleted successfully"})
-}
-
-// Helper function to convert FrontendMessage to Content for LLM
-func convertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMessage) []Content {
-	var contents []Content
-	// Apply curation rules before converting to Content
-	curatedMessages := applyCurationRules(frontendMessages)
-
-	for _, fm := range curatedMessages {
-		var parts []Part
-
-		if fm.Type == TypeCommand {
-			continue // Command messages are only visible to users
-		}
-
-		// Add text part if present
-		if len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
-			parts = append(parts, Part{
-				Text:             fm.Parts[0].Text,
-				ThoughtSignature: fm.Parts[0].ThoughtSignature,
-			})
-		}
-
-		// Add attachments as InlineData with preceding hash information
-		hasBinaryAttachments := false
-		for _, att := range fm.Attachments {
-			if att.Hash != "" { // Only process if hash exists
-				if att.Omitted {
-					// Attachment was omitted due to clearblobs command
-					parts = append(parts,
-						Part{Text: fmt.Sprintf("[Binary with hash %s is currently **UNPROCESSED**. You **MUST** use recall(query='%[1]s') to gain access to its content for internal analysis. **Until recalled, you have NO information about this binary's content, and any attempt to describe or act upon it will be pure guesswork.**]", att.Hash)},
-					)
-				} else {
-					// Normal blob processing
-					blobData, err := database.GetBlob(db, att.Hash)
-					if err != nil {
-						log.Printf("Error retrieving blob data for hash %s: %v", att.Hash, err)
-						// Decide how to handle this error: skip attachment, return error, etc.
-						// For now, we'll skip this attachment to avoid breaking the whole message.
-						continue
-					}
-					hasBinaryAttachments = true
-					parts = append(parts,
-						Part{Text: fmt.Sprintf("[Binary with hash %s follows:]", att.Hash)},
-						Part{
-							InlineData: &InlineData{
-								MimeType: att.MimeType,
-								Data:     base64.StdEncoding.EncodeToString(blobData),
-							},
-						},
-					)
-				}
-			}
-		}
-
-		// Add warning message after all binary attachments have been displayed
-		if hasBinaryAttachments {
-			parts = append(parts, Part{Text: "[IMPORTANT: The hashes shown above are explicitly for SHA-512/256 hash-accepting tools only and must never be exposed to users without explicit request.]"})
-		}
-
-		// Handle function calls and responses (these should override text/attachments for their specific message types)
-		if fm.Type == TypeFunctionCall && len(fm.Parts) > 0 && fm.Parts[0].FunctionCall != nil {
-			fc := fm.Parts[0].FunctionCall
-			if fc.Name == llm.GeminiCodeExecutionToolName {
-				var ec ExecutableCode
-				// fc.Args is map[string]interface{}, need to marshal then unmarshal
-				argsBytes, err := json.Marshal(fc.Args)
-				if err != nil {
-					log.Printf("Error marshaling FunctionCall args to JSON for ExecutableCode: %v", err)
-					parts = append(parts, Part{FunctionCall: fc, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
-				} else if err := json.Unmarshal(argsBytes, &ec); err != nil {
-					log.Printf("Error unmarshaling ExecutableCode from FunctionCall args: %v", err)
-					parts = append(parts, Part{FunctionCall: fc, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
-				} else {
-					parts = append(parts, Part{ExecutableCode: &ec, ThoughtSignature: fm.Parts[0].ThoughtSignature})
-				}
-			} else {
-				parts = append(parts, Part{FunctionCall: fc, ThoughtSignature: fm.Parts[0].ThoughtSignature})
-			}
-		} else if fm.Type == TypeFunctionResponse && len(fm.Parts) > 0 && fm.Parts[0].FunctionResponse != nil {
-			fr := fm.Parts[0].FunctionResponse
-			if fr.Name == llm.GeminiCodeExecutionToolName {
-				var cer CodeExecutionResult
-				// fr.Response is interface{}, need to marshal then unmarshal
-				responseBytes, err := json.Marshal(fr.Response)
-				if err != nil {
-					log.Printf("Error marshaling FunctionResponse.Response to JSON for CodeExecutionResult: %v", err)
-					parts = append(parts, Part{FunctionResponse: fr, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
-				} else if err := json.Unmarshal(responseBytes, &cer); err != nil {
-					log.Printf("Error unmarshaling CodeExecutionResult from FunctionResponse.Response: %v", err)
-					parts = append(parts, Part{FunctionResponse: fr, ThoughtSignature: fm.Parts[0].ThoughtSignature}) // Fallback
-				} else {
-					parts = append(parts, Part{CodeExecutionResult: &cer, ThoughtSignature: fm.Parts[0].ThoughtSignature})
-				}
-			} else {
-				parts = append(parts, Part{FunctionResponse: fr, ThoughtSignature: fm.Parts[0].ThoughtSignature})
-			}
-		} else if (fm.Type == TypeSystemPrompt || fm.Type == TypeEnvChanged) && len(fm.Parts) > 0 && fm.Parts[0].Text != "" {
-			// System_prompt should expand to *two* `Content`s
-			prompt := fm.Parts[0].Text
-			if fm.Type == TypeEnvChanged {
-				var envChanged EnvChanged
-				err := json.Unmarshal([]byte(prompt), &envChanged)
-				if err != nil {
-					log.Printf("Error unmarshalling envChanged JSON: %v", err)
-				} else {
-					prompt = GetEnvChangeContext(envChanged)
-				}
-			}
-			contents = append(contents,
-				Content{
-					Role: RoleModel,
-					Parts: []Part{{
-						FunctionCall: &FunctionCall{
-							Name: "new_system_prompt",
-							Args: map[string]interface{}{},
-						},
-						ThoughtSignature: fm.Parts[0].ThoughtSignature,
-					}},
-				},
-				Content{
-					Role: RoleUser,
-					Parts: []Part{{
-						FunctionResponse: &FunctionResponse{
-							Name:     "new_system_prompt",
-							Response: map[string]interface{}{"prompt": prompt},
-						},
-					}},
-				},
-			)
-			continue
-		}
-
-		// If parts is still empty, add an empty text part to satisfy Gemini API requirements
-		if len(parts) == 0 {
-			parts = append(parts, Part{Text: ""})
-		}
-
-		contents = append(contents, Content{
-			Role:  fm.Type.Role(),
-			Parts: parts,
-		})
-	}
-	return contents
-}
-
-// applyCurationRules applies the specified curation rules to a slice of FrontendMessage.
-func applyCurationRules(messages []FrontendMessage) []FrontendMessage {
-	var curated []FrontendMessage
-	for i := 0; i < len(messages); i++ {
-		currentMsg := messages[i]
-
-		// Rule 1: Remove consecutive user text messages
-		// If current is user text and next is user text (ignoring errors in between)
-		if currentMsg.Type == TypeUserText {
-			nextUserTextIndex := -1
-			for j := i + 1; j < len(messages); j++ {
-				if messages[j].Type == TypeError || messages[j].Type == TypeModelError {
-					continue // Ignore errors for continuity
-				}
-				if messages[j].Type == TypeUserText {
-					nextUserTextIndex = j
-					break
-				}
-				// If we find any other type of message, it breaks the "consecutive user text" chain
-				break
-			}
-			if nextUserTextIndex != -1 {
-				// This 'currentMsg' is followed by another user text message, so skip it.
-				continue
-			}
-		}
-
-		// Rule 2: Remove function_call if not followed by function_response
-		// If current is model function_call
-		if currentMsg.Type == TypeFunctionCall {
-			foundResponse := false
-			for j := i + 1; j < len(messages); j++ {
-				if messages[j].Type == TypeThought {
-					continue // Ignore thoughts and errors for continuity
-				}
-				if messages[j].Type == TypeFunctionResponse {
-					foundResponse = true
-					break
-				}
-				// If we find any other type of message, it means no immediate function response
-				break
-			}
-			if !foundResponse {
-				// This 'currentMsg' (function_call) is not followed by a function_response, so skip it.
-				continue
-			}
-		}
-
-		curated = append(curated, currentMsg)
-	}
-	return curated
 }

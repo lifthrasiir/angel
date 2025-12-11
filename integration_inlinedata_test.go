@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/chat"
 	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -113,8 +114,9 @@ func TestInlineDataStreaming(t *testing.T) {
 		for event := range parseSseStream(t, resp) {
 			switch event.Type {
 			case EventInitialState:
-				var initialState InitialState
+				var initialState chat.InitialState
 				err := json.Unmarshal([]byte(event.Payload), &initialState)
+
 				if err != nil {
 					t.Fatalf("Failed to unmarshal initialState: %v", err)
 				}
@@ -165,33 +167,6 @@ func TestInlineDataStreaming(t *testing.T) {
 			t.Errorf("Expected at least 2 inline data messages, got %d", inlineDataMessageCount)
 		}
 	})
-}
-
-// TestInlineDataFilenameGeneration tests the filename generation function
-func TestInlineDataFilenameGeneration(t *testing.T) {
-	testCases := []struct {
-		mimeType     string
-		counter      int
-		expectedFile string
-	}{
-		{"image/png", 1, "generated_image_001.png"},
-		{"image/jpeg", 10, "generated_image_010.jpg"},
-		{"image/gif", 999, "generated_image_999.gif"},
-		{"application/pdf", 42, "generated_document_042.pdf"},
-		{"text/plain", 5, "generated_text_005.txt"},
-		{"application/json", 100, "generated_data_100.json"},
-		{"unknown/type", 7, "generated_file_007"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.mimeType, func(t *testing.T) {
-			result := generateFilenameFromMimeType(tc.mimeType, tc.counter)
-			if result != tc.expectedFile {
-				t.Errorf("generateFilenameFromMimeType(%s, %d) = %s, expected %s",
-					tc.mimeType, tc.counter, result, tc.expectedFile)
-			}
-		})
-	}
 }
 
 // TestInlineDataCounterReset tests that the inlineData counter resets for each streaming session
@@ -251,7 +226,7 @@ func TestInlineDataCounterReset(t *testing.T) {
 		var firstSessionId string
 		for event := range parseSseStream(t, resp1) {
 			if event.Type == EventInitialState {
-				var initialState InitialState
+				var initialState chat.InitialState
 				err := json.Unmarshal([]byte(event.Payload), &initialState)
 				if err != nil {
 					t.Fatalf("Failed to unmarshal initialState: %v", err)
@@ -272,7 +247,7 @@ func TestInlineDataCounterReset(t *testing.T) {
 		var secondSessionId string
 		for event := range parseSseStream(t, resp2) {
 			if event.Type == EventInitialState {
-				var initialState InitialState
+				var initialState chat.InitialState
 				err := json.Unmarshal([]byte(event.Payload), &initialState)
 				if err != nil {
 					t.Fatalf("Failed to unmarshal initialState: %v", err)

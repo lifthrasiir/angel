@@ -14,7 +14,9 @@ import (
 	"unicode"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/chat"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
@@ -177,14 +179,14 @@ func handleSubagentTurn(
 	}
 
 	// Check if roots have actually changed
-	rootsChanged, err := calculateRootsChanged(subSessionEnvRoots, mainSessionEnvRoots)
+	rootsChanged, err := env.CalculateRootsChanged(subSessionEnvRoots, mainSessionEnvRoots)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to calculate roots changed for subagent: %w", err)
 	}
 
 	// Only add env_changed message if roots have actually changed (added or removed)
 	if rootsChanged.HasChanges() {
-		envChanged := EnvChanged{Roots: &rootsChanged}
+		envChanged := env.EnvChanged{Roots: &rootsChanged}
 
 		// Marshal envChanged into JSON
 		envChangedJSON, err := json.Marshal(envChanged)
@@ -210,7 +212,7 @@ func handleSubagentTurn(
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get messages for subagent session %s: %w", subsessionID, err)
 	}
-	currentHistory := convertFrontendMessagesToContent(db, frontendMessages)
+	currentHistory := chat.ConvertFrontendMessagesToContent(db, frontendMessages)
 
 	// Get LLM client for the subagent
 	modelProvider, err := models.ResolveSubagent(params.ModelName, "")
@@ -298,7 +300,7 @@ func handleSubagentTurn(
 						// Add FunctionCall and FunctionResponse (with attachments) to currentHistory for next LLM turn
 						currentHistory = append(currentHistory,
 							Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}},
-							Content{Role: RoleUser, Parts: appendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
+							Content{Role: RoleUser, Parts: chat.AppendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
 						)
 					}
 				}
@@ -507,7 +509,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 					addHashWithSpacing(&fullResponseText, hash)
 
 					// Generate filename with counter for generated images
-					filename := generateFilenameFromMimeType(part.InlineData.MimeType, imageCounter)
+					filename := chat.GenerateFilenameFromMimeType(part.InlineData.MimeType, imageCounter)
 					imageCounter++
 
 					// Immediately save the image as a separate message to preserve blob

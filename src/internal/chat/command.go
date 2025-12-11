@@ -1,65 +1,14 @@
-package main
+package chat
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
-
-	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
-
-// commandHandler handles POST requests for /api/chat/{sessionId}/command
-func commandHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-
-	vars := mux.Vars(r)
-	sessionID := vars["sessionId"]
-	if sessionID == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	var requestBody struct {
-		Command string `json:"command"`
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "commandHandler") {
-		return
-	}
-
-	if requestBody.Command == "" {
-		sendBadRequestError(w, r, "Command is required")
-		return
-	}
-
-	// Execute the command
-	var commandMessageID int
-	var err error
-
-	switch requestBody.Command {
-	case "clear", "clearblobs":
-		commandMessageID, err = ExecuteClearCommand(r.Context(), db, sessionID, requestBody.Command)
-	default:
-		sendBadRequestError(w, r, fmt.Sprintf("Unknown command: %s", requestBody.Command))
-		return
-	}
-
-	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to execute command: %s", requestBody.Command))
-		return
-	}
-
-	sendJSONResponse(w, map[string]interface{}{
-		"status":           "success",
-		"message":          fmt.Sprintf("Command %s executed successfully", requestBody.Command),
-		"commandMessageId": commandMessageID,
-	})
-}
 
 // ExecuteClearCommand executes clear or clearblobs command by creating a command message
 func ExecuteClearCommand(ctx context.Context, db database.DbOrTx, sessionID, command string) (int, error) {

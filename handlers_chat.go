@@ -1,0 +1,475 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"net/http"
+	"strconv"
+
+	"github.com/gorilla/mux"
+
+	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/chat"
+	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
+	. "github.com/lifthrasiir/angel/internal/types"
+)
+
+// New session and message handler
+func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	models := getModels(w, r)
+	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
+
+	var requestBody struct {
+		Message      string           `json:"message"`
+		SystemPrompt string           `json:"systemPrompt"`
+		Attachments  []FileAttachment `json:"attachments"`
+		WorkspaceID  string           `json:"workspaceId"`
+		Model        string           `json:"model"`
+		FetchLimit   int              `json:"fetchLimit"`
+		InitialRoots []string         `json:"initialRoots"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "newSessionAndMessage") {
+		return
+	}
+
+	sessionId := database.GenerateID()
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
+
+	if err := chat.NewSessionAndMessage(
+		r.Context(), db, models, ga, tools,
+		ew, sessionId, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
+		requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
+	); err != nil {
+		sendInternalServerError(w, r, err, "Failed to create new session and message")
+	}
+}
+
+// Chat message handler
+func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	models := getModels(w, r)
+	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	var requestBody struct {
+		Message     string           `json:"message"`
+		Attachments []FileAttachment `json:"attachments"`
+		Model       string           `json:"model"`
+		FetchLimit  int              `json:"fetchLimit"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "chatMessage") {
+		return
+	}
+
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
+
+	if err := chat.NewChatMessage(
+		r.Context(), db, models, ga, tools,
+		ew, sessionId, requestBody.Message, requestBody.Attachments, requestBody.Model, requestBody.FetchLimit,
+	); err != nil {
+		sendInternalServerError(w, r, err, "Failed to process chat message")
+	}
+}
+
+// New endpoint to load chat session history
+func loadChatSessionHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	// Parse pagination parameters
+	beforeMessageIDStr := r.URL.Query().Get("beforeMessageId")
+	fetchLimitStr := r.URL.Query().Get("fetchLimit")
+
+	beforeMessageID := 0 // Default to 0, meaning fetch from the latest
+	if beforeMessageIDStr != "" {
+		parsedID, err := strconv.Atoi(beforeMessageIDStr)
+		if err != nil {
+			sendBadRequestError(w, r, "Invalid beforeMessageId parameter")
+			return
+		}
+		beforeMessageID = parsedID
+	}
+
+	fetchLimit := math.MaxInt // Default fetch limit
+	if fetchLimitStr != "" {
+		parsedLimit, err := strconv.Atoi(fetchLimitStr)
+		if err != nil {
+			sendBadRequestError(w, r, "Invalid fetchLimit parameter")
+			return
+		}
+		fetchLimit = parsedLimit
+	}
+
+	// Optionally initialize EventWriter
+	var ew EventWriter
+	if r.Header.Get("Accept") == "text/event-stream" {
+		sseW := newSseWriter(r.Context(), sessionId, w)
+		if sseW == nil {
+			return
+		}
+		ew = sseW // Avoid nil interface
+	}
+
+	initialState, err := chat.LoadChatSession(r.Context(), db, ew, sessionId, beforeMessageID, fetchLimit)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to load chat session")
+		return
+	}
+
+	if ew == nil {
+		// Original JSON response for non-SSE requests
+		sendJSONResponse(w, initialState)
+	}
+}
+
+func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	workspaceID := r.URL.Query().Get("workspaceId")
+
+	wsWithSessions, err := database.GetWorkspaceAndSessions(db, workspaceID)
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to retrieve sessions for workspace %s", workspaceID))
+		return
+	}
+
+	sendJSONResponse(w, wsWithSessions)
+}
+
+// calculateNewSessionEnvChangedHandler calculates EnvChanged for a new session.
+// It expects newRoots as a JSON string in the query parameter.
+func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request) {
+	// No authentication needed for this endpoint as it's for pre-session calculation
+	// and doesn't modify any session state.
+
+	newRootsJSON := r.URL.Query().Get("newRoots")
+	if newRootsJSON == "" {
+		sendBadRequestError(w, r, "newRoots query parameter is required")
+		return
+	}
+
+	var newRoots []string
+	if err := json.Unmarshal([]byte(newRootsJSON), &newRoots); err != nil {
+		sendBadRequestError(w, r, "Invalid newRoots JSON")
+		return
+	}
+
+	// oldRoots is always empty for a new session's initial environment calculation
+	oldRoots := []string{}
+
+	rootsChanged, err := env.CalculateRootsChanged(oldRoots, newRoots)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to calculate environment changes")
+		return
+	}
+
+	envChanged := env.EnvChanged{Roots: &rootsChanged}
+	sendJSONResponse(w, envChanged)
+}
+
+// New endpoint to delete a chat session
+func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	sandboxBaseDir := determineSandboxBaseDir()
+	if err := database.DeleteSession(db, sessionId, sandboxBaseDir); err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete session %s", sessionId))
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"status": "success", "message": "Session deleted successfully"})
+}
+
+// createBranchHandler creates a new branch from a given parent message.
+func createBranchHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	models := getModels(w, r)
+	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	var requestBody struct {
+		UpdatedMessageID int    `json:"updatedMessageId"`
+		NewMessageText   string `json:"newMessageText"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "createBranchHandler") {
+		return
+	}
+
+	// Check if this is a retry request
+	isRetry := r.URL.Query().Get("retry") == "1"
+
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
+
+	var err error
+	if isRetry && requestBody.NewMessageText == "" {
+		err = chat.RetryBranch(r.Context(), db, models, ga, tools, ew, sessionId, requestBody.UpdatedMessageID)
+	} else {
+		err = chat.CreateBranch(r.Context(), db, models, ga, tools, ew, sessionId, requestBody.UpdatedMessageID, requestBody.NewMessageText)
+	}
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to create branch")
+	}
+}
+
+// switchBranchHandler switches the primary branch of a session.
+func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	var requestBody struct {
+		NewPrimaryBranchID string `json:"newPrimaryBranchId"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "switchBranchHandler") {
+		return
+	}
+
+	if err := chat.SwitchBranch(db, sessionId, requestBody.NewPrimaryBranchID); err != nil {
+		sendInternalServerError(w, r, err, "Failed to switch primary branch")
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{
+		"status":          "success",
+		"primaryBranchId": requestBody.NewPrimaryBranchID,
+	})
+}
+
+// confirmBranchHandler handles the confirmation of a pending action on a branch.
+func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	models := getModels(w, r)
+	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	branchId := vars["branchId"]
+	if sessionId == "" || branchId == "" {
+		sendBadRequestError(w, r, "Session ID and Branch ID are required")
+		return
+	}
+
+	var requestBody struct {
+		Approved     bool                   `json:"approved"`
+		ModifiedData map[string]interface{} `json:"modifiedData"` // Optional: tool arguments if modified
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "confirmBranchHandler") {
+		return
+	}
+
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
+
+	if err := chat.ConfirmBranch(
+		r.Context(), db, models, ga, tools,
+		ew, sessionId, branchId, requestBody.Approved, requestBody.ModifiedData,
+	); err != nil {
+		sendInternalServerError(w, r, err, "Failed to confirm branch")
+		return
+	}
+}
+
+// retryErrorBranchHandler handles retry-error requests for a branch by removing error messages and resuming streaming.
+func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	models := getModels(w, r)
+	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	branchId := vars["branchId"]
+
+	if sessionId == "" || branchId == "" {
+		sendBadRequestError(w, r, "Session ID and Branch ID are required")
+		return
+	}
+
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
+
+	if err := chat.RetryErrorBranch(r.Context(), db, models, ga, tools, ew, sessionId, branchId); err != nil {
+		sendInternalServerError(w, r, err, "Failed to retry error branch")
+		return
+	}
+}
+
+// commandHandler handles POST requests for /api/chat/{sessionId}/command
+func commandHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionID := vars["sessionId"]
+	if sessionID == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	var requestBody struct {
+		Command string `json:"command"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "commandHandler") {
+		return
+	}
+
+	if requestBody.Command == "" {
+		sendBadRequestError(w, r, "Command is required")
+		return
+	}
+
+	// Execute the command
+	var commandMessageID int
+	var err error
+
+	switch requestBody.Command {
+	case "clear", "clearblobs":
+		commandMessageID, err = chat.ExecuteClearCommand(r.Context(), db, sessionID, requestBody.Command)
+	default:
+		sendBadRequestError(w, r, fmt.Sprintf("Unknown command: %s", requestBody.Command))
+		return
+	}
+
+	if err != nil {
+		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to execute command: %s", requestBody.Command))
+		return
+	}
+
+	sendJSONResponse(w, map[string]interface{}{
+		"status":           "success",
+		"message":          fmt.Sprintf("Command %s executed successfully", requestBody.Command),
+		"commandMessageId": commandMessageID,
+	})
+}
+
+func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	models := getModels(w, r)
+
+	vars := mux.Vars(r)
+	sessionID := vars["sessionId"]
+	if sessionID == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	result, err := chat.CompressSession(r.Context(), db, models, sessionID, DefaultGeminiModel)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to compress session")
+		return
+	}
+
+	sendJSONResponse(w, map[string]interface{}{
+		"status":                  "success",
+		"message":                 "Chat history compressed successfully",
+		"originalTokenCount":      result.OriginalTokenCount,
+		"newTokenCount":           result.NewTokenCount,
+		"compressionMessageId":    result.CompressionMsgID,
+		"compressedUpToMessageId": result.CompressedUpToMessageID,
+		"extractedSummary":        result.ExtractedSummary,
+	})
+}
+
+// extractSessionHandler extracts messages from a specific branch up to a given message and creates a new session.
+func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	var requestBody struct {
+		MessageID string `json:"messageId"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "extractSessionHandler") {
+		return
+	}
+
+	if requestBody.MessageID == "" {
+		sendBadRequestError(w, r, "Message ID is required")
+		return
+	}
+
+	// Parse message ID
+	targetMessageID, err := strconv.Atoi(requestBody.MessageID)
+	if err != nil {
+		sendBadRequestError(w, r, "Invalid message ID")
+		return
+	}
+
+	newSessionId, newSessionName, err := chat.ExtractSession(r.Context(), db, sessionId, targetMessageID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to extract session")
+		return
+	}
+
+	// Return the new session link
+	response := map[string]string{
+		"status":      "success",
+		"sessionId":   newSessionId,
+		"sessionName": newSessionName,
+		"link":        fmt.Sprintf("/%s", newSessionId),
+		"message":     "Session extracted successfully",
+	}
+
+	sendJSONResponse(w, response)
+}

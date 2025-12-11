@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/lifthrasiir/angel/internal/chat"
 	"github.com/lifthrasiir/angel/internal/database"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -107,7 +108,7 @@ func TestBranchingLogic(t *testing.T) {
 		var newBranchID string
 		for event := range parseSseStream(t, resp) {
 			if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
-				var initialState InitialState
+				var initialState chat.InitialState
 				if err := json.Unmarshal([]byte(event.Payload), &initialState); err != nil {
 					t.Fatalf("could not unmarshal initial state: %v", err)
 				}
@@ -478,7 +479,7 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 		var tempBranchID string
 		for event := range parseSseStream(t, resp) {
 			if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
-				var initialState InitialState
+				var initialState chat.InitialState
 				if err := json.Unmarshal([]byte(event.Payload), &initialState); err != nil {
 					t.Fatalf("could not unmarshal initial state: %v", err)
 				}

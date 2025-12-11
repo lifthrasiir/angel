@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"context"
@@ -8,11 +8,8 @@ import (
 	"fmt"
 	"log"
 	"maps"
-	"net/http"
 	"strings"
 	"time"
-
-	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
@@ -20,48 +17,6 @@ import (
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
-
-// createBranchHandler creates a new branch from a given parent message.
-func createBranchHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	models := getModels(w, r)
-	ga := getGeminiAuth(w, r)
-	tools := getTools(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	if sessionId == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	var requestBody struct {
-		UpdatedMessageID int    `json:"updatedMessageId"`
-		NewMessageText   string `json:"newMessageText"`
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "createBranchHandler") {
-		return
-	}
-
-	// Check if this is a retry request
-	isRetry := r.URL.Query().Get("retry") == "1"
-
-	ew := newSseWriter(r.Context(), sessionId, w)
-	if ew == nil {
-		return
-	}
-
-	var err error
-	if isRetry && requestBody.NewMessageText == "" {
-		err = RetryBranch(r.Context(), db, models, ga, tools, ew, sessionId, requestBody.UpdatedMessageID)
-	} else {
-		err = CreateBranch(r.Context(), db, models, ga, tools, ew, sessionId, requestBody.UpdatedMessageID, requestBody.NewMessageText)
-	}
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to create branch")
-	}
-}
 
 func RetryBranch(
 	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
@@ -303,36 +258,6 @@ func CreateBranch(
 	return nil
 }
 
-// switchBranchHandler switches the primary branch of a session.
-func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	if sessionId == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	var requestBody struct {
-		NewPrimaryBranchID string `json:"newPrimaryBranchId"`
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "switchBranchHandler") {
-		return
-	}
-
-	if err := SwitchBranch(db, sessionId, requestBody.NewPrimaryBranchID); err != nil {
-		sendInternalServerError(w, r, err, "Failed to switch primary branch")
-		return
-	}
-
-	sendJSONResponse(w, map[string]string{
-		"status":          "success",
-		"primaryBranchId": requestBody.NewPrimaryBranchID,
-	})
-}
-
 func SwitchBranch(db *sql.DB, sessionId string, newPrimaryBranchID string) error {
 	// Get current session to retrieve old primary branch ID
 	session, err := database.GetSession(db, sessionId)
@@ -460,44 +385,6 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 			log.Printf("switchBranchHandler: Failed to update chosen_first_id for session %s: %v", sessionID, err)
 			// Non-fatal, continue
 		}
-	}
-}
-
-// confirmBranchHandler handles the confirmation of a pending action on a branch.
-func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	models := getModels(w, r)
-	ga := getGeminiAuth(w, r)
-	tools := getTools(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	branchId := vars["branchId"]
-	if sessionId == "" || branchId == "" {
-		sendBadRequestError(w, r, "Session ID and Branch ID are required")
-		return
-	}
-
-	var requestBody struct {
-		Approved     bool                   `json:"approved"`
-		ModifiedData map[string]interface{} `json:"modifiedData"` // Optional: tool arguments if modified
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "confirmBranchHandler") {
-		return
-	}
-
-	ew := newSseWriter(r.Context(), sessionId, w)
-	if ew == nil {
-		return
-	}
-
-	if err := ConfirmBranch(
-		r.Context(), db, models, ga, tools,
-		ew, sessionId, branchId, requestBody.Approved, requestBody.ModifiedData,
-	); err != nil {
-		sendInternalServerError(w, r, err, "Failed to confirm branch")
-		return
 	}
 }
 
@@ -726,33 +613,6 @@ func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
 
 	log.Printf("Deleted %d error messages from branch %s", deletedCount, branchID)
 	return nil
-}
-
-// retryErrorBranchHandler handles retry-error requests for a branch by removing error messages and resuming streaming.
-func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	models := getModels(w, r)
-	ga := getGeminiAuth(w, r)
-	tools := getTools(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	branchId := vars["branchId"]
-
-	if sessionId == "" || branchId == "" {
-		sendBadRequestError(w, r, "Session ID and Branch ID are required")
-		return
-	}
-
-	ew := newSseWriter(r.Context(), sessionId, w)
-	if ew == nil {
-		return
-	}
-
-	if err := RetryErrorBranch(r.Context(), db, models, ga, tools, ew, sessionId, branchId); err != nil {
-		sendInternalServerError(w, r, err, "Failed to retry error branch")
-		return
-	}
 }
 
 func RetryErrorBranch(

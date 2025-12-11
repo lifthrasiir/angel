@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"context"
@@ -7,32 +7,32 @@ import (
 	"time"
 )
 
-// GeminiCallStatus enum defines the status of a Gemini API call.
-type GeminiCallStatus string
+// CallStatus enum defines the status of an API call.
+type CallStatus string
 
 const (
-	GeminiCallStatusRunning   GeminiCallStatus = "running"
-	GeminiCallStatusCancelled GeminiCallStatus = "cancelled"
-	GeminiCallStatusCompleted GeminiCallStatus = "completed"
-	GeminiCallStatusError     GeminiCallStatus = "error"
+	CallStatusRunning   CallStatus = "running"
+	CallStatusCancelled CallStatus = "cancelled"
+	CallStatusCompleted CallStatus = "completed"
+	CallStatusError     CallStatus = "error"
 )
 
-// GeminiCall struct represents an ongoing Gemini API call.
-type GeminiCall struct {
+// Call struct represents an ongoing API call.
+type Call struct {
 	SessionID  string             `json:"sessionId"`
 	CancelFunc context.CancelFunc `json:"-"` // context.CancelFunc cannot be marshaled to JSON
-	Status     GeminiCallStatus   `json:"status"`
+	Status     CallStatus         `json:"status"`
 	StartTime  time.Time          `json:"startTime"`
 	EndTime    *time.Time         `json:"endTime,omitempty"`
 	Error      string             `json:"error,omitempty"`
 }
 
 var (
-	activeCalls = make(map[string]*GeminiCall)
+	activeCalls = make(map[string]*Call)
 	callsMutex  sync.Mutex
 )
 
-// startGeminiCall registers a new Gemini API call.
+// startCall registers a new API call.
 func startCall(sessionId string, cancelFunc context.CancelFunc) error {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()
@@ -41,17 +41,17 @@ func startCall(sessionId string, cancelFunc context.CancelFunc) error {
 		return fmt.Errorf("a call for session ID %s is already active", sessionId)
 	}
 
-	activeCalls[sessionId] = &GeminiCall{
+	activeCalls[sessionId] = &Call{
 		SessionID:  sessionId,
 		CancelFunc: cancelFunc,
-		Status:     GeminiCallStatusRunning,
+		Status:     CallStatusRunning,
 		StartTime:  time.Now(),
 	}
 	return nil
 }
 
-// cancelGeminiCall cancels an active Gemini API call and updates its status.
-func cancelCall(sessionId string) error {
+// CancelCall cancels an active API call and updates its status.
+func CancelCall(sessionId string) error {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()
 
@@ -60,9 +60,9 @@ func cancelCall(sessionId string) error {
 		return fmt.Errorf("no active call found for session ID: %s", sessionId)
 	}
 
-	if call.Status == GeminiCallStatusRunning {
+	if call.Status == CallStatusRunning {
 		call.CancelFunc()
-		call.Status = GeminiCallStatusCancelled
+		call.Status = CallStatusCancelled
 		now := time.Now()
 		call.EndTime = &now
 		return nil
@@ -70,31 +70,31 @@ func cancelCall(sessionId string) error {
 	return fmt.Errorf("call for session ID %s is not running (current status: %s)", sessionId, call.Status)
 }
 
-// completeGeminiCall marks a Gemini API call as completed.
+// completeCall marks an API call as completed.
 func completeCall(sessionId string) {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()
 
 	if call, ok := activeCalls[sessionId]; ok {
-		if call.Status == GeminiCallStatusRunning {
-			call.Status = GeminiCallStatusCompleted
+		if call.Status == CallStatusRunning {
+			call.Status = CallStatusCompleted
 			now := time.Now()
 			call.EndTime = &now
 		}
 	} else {
 		// This might happen if the call was cancelled and removed before completion
-		// Or if it was never registered (shouldn't happen if startGeminiCall is always used)
+		// Or if it was never registered (shouldn't happen if startCall is always used)
 	}
 }
 
-// failGeminiCall marks a Gemini API call as failed with an error message.
+// failCall marks an API call as failed with an error message.
 func failCall(sessionId string, err error) {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()
 
 	if call, ok := activeCalls[sessionId]; ok {
-		if call.Status == GeminiCallStatusRunning {
-			call.Status = GeminiCallStatusError
+		if call.Status == CallStatusRunning {
+			call.Status = CallStatusError
 			call.Error = err.Error()
 			now := time.Now()
 			call.EndTime = &now
@@ -104,15 +104,15 @@ func failCall(sessionId string, err error) {
 	}
 }
 
-// hasActiveCall checks if there is an active call for the given session ID.
-func hasActiveCall(sessionId string) bool {
+// HasActiveCall checks if there is an active call for the given session ID.
+func HasActiveCall(sessionId string) bool {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()
 	_, ok := activeCalls[sessionId]
 	return ok
 }
 
-// removeGeminiCall removes a call from the active list (e.g., after completion or final error handling).
+// removeCall removes a call from the active list (e.g., after completion or final error handling).
 func removeCall(sessionId string) {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()

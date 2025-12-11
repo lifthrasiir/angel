@@ -1,8 +1,8 @@
-package main
+package env
 
 import (
 	"encoding/json"
-	"fmt" // Added for debugging
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -117,8 +117,8 @@ func osReadDirN(path string, n int) ([]string, error) {
 	return entries, nil
 }
 
-// calculateRootsChanged compares old and new roots and generates RootsChanged data.
-func calculateRootsChanged(oldRoots, newRoots []string) (RootsChanged, error) {
+// CalculateRootsChanged compares old and new roots and generates RootsChanged data.
+func CalculateRootsChanged(oldRoots, newRoots []string) (RootsChanged, error) {
 	rootsChanged := RootsChanged{
 		Value: newRoots,
 	}

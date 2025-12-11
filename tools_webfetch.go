@@ -16,6 +16,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/prompts"
 	"github.com/lifthrasiir/angel/internal/tool"
 )
 
@@ -103,7 +104,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider l
 
 	htmlContent, err := fetchWithTimeout(ctx, urlToFetch, URL_FETCH_TIMEOUT_MS*time.Millisecond)
 	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("Error during fallback fetch for %s: %v", urlToFetch, err)
+		return tool.HandlerResults{}, fmt.Errorf("error during fallback fetch for %s: %v", urlToFetch, err)
 	}
 
 	textContent := html2text.HTML2Text(htmlContent)
@@ -111,7 +112,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider l
 		textContent = textContent[:MAX_CONTENT_LENGTH]
 	}
 
-	fallbackPrompt := executePromptTemplate("web-fetch-fallback.md", map[string]any{
+	fallbackPrompt := prompts.ExecuteTemplate("web-fetch-fallback.md", map[string]any{
 		"Prompt":      prompt,
 		"TextContent": textContent,
 	})
@@ -122,7 +123,7 @@ func executeWebFetchFallback(ctx context.Context, prompt string, modelProvider l
 
 	oneShotResult, err := modelProvider.GenerateContentOneShot(ctx, sessionParams)
 	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("Error during LLM processing of fallback content: %v", err)
+		return tool.HandlerResults{}, fmt.Errorf("error during LLM processing of fallback content: %v", err)
 	}
 
 	llmContent := oneShotResult.Text

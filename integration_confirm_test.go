@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/chat"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
@@ -50,7 +51,7 @@ func setupSessionWithPendingConfirmation(
 		case EventAcknowledge:
 			// We don't need userMessageID for this test, so we ignore it.
 		case EventInitialState:
-			var initialState InitialState
+			var initialState chat.InitialState
 			err := json.Unmarshal([]byte(event.Payload), &initialState)
 			if err != nil {
 				t.Fatalf("Failed to unmarshal initialState: %v", err)

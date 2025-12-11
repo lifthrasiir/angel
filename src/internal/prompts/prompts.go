@@ -1,4 +1,4 @@
-package main
+package prompts
 
 import (
 	"bytes"
@@ -9,16 +9,18 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/lifthrasiir/angel/internal/env"
 )
 
-//go:embed prompts/*.md
+//go:embed *.md
 var promptsDir embed.FS
 
-func TodayInPrompt() string {
+func Today() string {
 	return time.Now().Format("January 2, 2006")
 }
 
-func PlatformInPrompt() string {
+func Platform() string {
 	platform, _, _ := strings.Cut(runtime.GOOS, "/")
 	switch platform {
 	case "darwin":
@@ -33,6 +35,10 @@ type PromptData struct {
 	workspaceName string
 }
 
+func NewPromptData(workspaceName string) PromptData {
+	return PromptData{workspaceName: workspaceName}
+}
+
 func (PromptData) String() string {
 	return `Available methods:
 
@@ -44,8 +50,8 @@ func (PromptData) String() string {
 }
 
 func (d PromptData) Builtin() BuiltinPrompts    { return BuiltinPrompts{data: d} }
-func (d PromptData) Today() string              { return TodayInPrompt() }
-func (d PromptData) Platform() string           { return PlatformInPrompt() }
+func (d PromptData) Today() string              { return Today() }
+func (d PromptData) Platform() string           { return Platform() }
 func (d PromptData) Workspace() PromptWorkspace { return PromptWorkspace{data: d} }
 
 // BuiltinPrompts holds references to the default system prompts.
@@ -62,20 +68,20 @@ func (BuiltinPrompts) String() string {
 
 func (p BuiltinPrompts) systemPromptArgs() map[string]any {
 	return map[string]any{
-		"Today":         TodayInPrompt(),
-		"Platform":      PlatformInPrompt(),
+		"Today":         Today(),
+		"Platform":      Platform(),
 		"WorkspaceName": p.data.workspaceName,
 	}
 }
 
 func (p BuiltinPrompts) SystemPrompt() string {
-	return executePromptTemplate("system-prompt-minimal.md", p.systemPromptArgs())
+	return ExecuteTemplate("system-prompt-minimal.md", p.systemPromptArgs())
 }
 func (p BuiltinPrompts) SystemPromptForCoding() string {
-	return executePromptTemplate("system-prompt-coding.md", p.systemPromptArgs())
+	return ExecuteTemplate("system-prompt-coding.md", p.systemPromptArgs())
 }
 func (p BuiltinPrompts) DynamicPromptTool() string {
-	return executePromptTemplate("tool-dynamic-prompt.md", nil)
+	return ExecuteTemplate("tool-dynamic-prompt.md", nil)
 }
 
 // PromptWorkspace holds the current workspace information.
@@ -106,9 +112,9 @@ func (d PromptData) EvaluatePrompt(promptContent string) (string, error) {
 	return buf.String(), nil
 }
 
-func executePromptTemplate(filename string, data map[string]any) string {
+func ExecuteTemplate(filename string, data map[string]any) string {
 	// FuncMap is no longer needed here for formatRootContents
-	tmpl, err := template.New("").ParseFS(promptsDir, "prompts/*.md")
+	tmpl, err := template.New("").ParseFS(promptsDir, "*.md")
 	if err != nil {
 		log.Printf("Error parsing template files: %v", err)
 		return ""
@@ -129,7 +135,7 @@ func executePromptTemplate(filename string, data map[string]any) string {
 }
 
 // GetEnvChangeContext formats EnvChanged into a plain text string using a template.
-func GetEnvChangeContext(envChanged EnvChanged) string {
+func GetEnvChangeContext(envChanged env.EnvChanged) string {
 	// Create a new map to hold the data for the template
 	templateData := make(map[string]any)
 
@@ -137,7 +143,7 @@ func GetEnvChangeContext(envChanged EnvChanged) string {
 		// Create a temporary structure to hold the data for the template
 		// This allows us to add the FormattedContents field
 		type TempRootAdded struct {
-			RootAdded
+			env.RootAdded
 			FormattedContents string
 		}
 
@@ -159,11 +165,11 @@ func GetEnvChangeContext(envChanged EnvChanged) string {
 		}
 	}
 
-	return executePromptTemplate("environment-change.md", templateData)
+	return ExecuteTemplate("environment-change.md", templateData)
 }
 
 // formatRootContents recursively formats RootContents for display in a tree-like structure.
-func formatRootContents(builder *strings.Builder, contents []RootContents, prefix string) {
+func formatRootContents(builder *strings.Builder, contents []env.RootContents, prefix string) {
 	for i, content := range contents {
 		isLast := (i == len(contents)-1)
 		var currentPrefix string

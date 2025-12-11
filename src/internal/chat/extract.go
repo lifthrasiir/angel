@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"context"
@@ -8,66 +8,14 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/gorilla/mux"
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
-
-// extractSessionHandler extracts messages from a specific branch up to a given message and creates a new session.
-func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-
-	vars := mux.Vars(r)
-	sessionId := vars["sessionId"]
-	if sessionId == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	var requestBody struct {
-		MessageID string `json:"messageId"`
-	}
-
-	if !decodeJSONRequest(r, w, &requestBody, "extractSessionHandler") {
-		return
-	}
-
-	if requestBody.MessageID == "" {
-		sendBadRequestError(w, r, "Message ID is required")
-		return
-	}
-
-	// Parse message ID
-	targetMessageID, err := strconv.Atoi(requestBody.MessageID)
-	if err != nil {
-		sendBadRequestError(w, r, "Invalid message ID")
-		return
-	}
-
-	newSessionId, newSessionName, err := ExtractSession(r.Context(), db, sessionId, targetMessageID)
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to extract session")
-		return
-	}
-
-	// Return the new session link
-	response := map[string]string{
-		"status":      "success",
-		"sessionId":   newSessionId,
-		"sessionName": newSessionName,
-		"link":        fmt.Sprintf("/%s", newSessionId),
-		"message":     "Session extracted successfully",
-	}
-
-	sendJSONResponse(w, response)
-}
 
 func ExtractSession(ctx context.Context, db *sql.DB, sessionId string, targetMessageID int) (newSessionId string, newSessionName string, err error) {
 	// Get the original session to validate existence

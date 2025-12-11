@@ -5,8 +5,11 @@ use (
 	./src/editor
 	./src/filesystem
 	./src/gemini
+	./src/internal/chat
 	./src/internal/database
+	./src/internal/env
 	./src/internal/llm
+	./src/internal/prompts
 	./src/internal/tool
 	./src/internal/types
 )

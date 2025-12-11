@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/prompts"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -30,12 +31,17 @@ func streamLLMResponse(
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
 	var inlineDataCounter int = 0 // Counter for sequential inlineData filenames
-	currentHistory := convertFrontendMessagesToContent(db, fullHistoryForLLM)
+	currentHistory := ConvertFrontendMessagesToContent(db, fullHistoryForLLM)
 
 	// Create a cancellable context for the LLM call
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()                                       // Ensure context is cancelled when function exits
-	ctx = contextWithGlobals(ctx, db, models, ga, tools) // Set all required context values
+	defer cancel()
+
+	// Set all required context values
+	ctx = database.ContextWith(ctx, db)
+	ctx = llm.ContextWithModels(ctx, models)
+	ctx = llm.ContextWithGeminiAuth(ctx, ga)
+	ctx = tool.ContextWith(ctx, tools)
 
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {
@@ -157,7 +163,7 @@ func streamLLMResponse(
 					if err != nil {
 						log.Printf("Error executing function %s: %v", fc.Name, err)
 
-						var pendingConfirmation *PendingConfirmation
+						var pendingConfirmation *tool.PendingConfirmation
 						if errors.As(err, &pendingConfirmation) {
 							return handlePendingConfirmation(db, ew, initialState, pendingConfirmation)
 						} else {
@@ -199,7 +205,7 @@ func streamLLMResponse(
 					// Add to current history for later execution
 					currentHistory = append(currentHistory,
 						Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc, ThoughtSignature: state}}},
-						Content{Role: RoleUser, Parts: appendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
+						Content{Role: RoleUser, Parts: AppendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
 					)
 					continue // Continue processing other parts in the same caResp
 				} else if part.ExecutableCode != nil {
@@ -281,7 +287,7 @@ func streamLLMResponse(
 
 					// Create attachment from inlineData with a generated filename
 					attachment := FileAttachment{
-						FileName: generateFilenameFromMimeType(inlineData.MimeType, inlineDataCounter),
+						FileName: GenerateFilenameFromMimeType(inlineData.MimeType, inlineDataCounter),
 						MimeType: inlineData.MimeType,
 						Data:     data,
 					}
@@ -476,27 +482,7 @@ func streamLLMResponse(
 	return nil
 }
 
-func appendAttachmentParts(db *sql.DB, toolResults tool.HandlerResults, partsForContent []Part) []Part {
-	for _, attachment := range toolResults.Attachments {
-		// Retrieve blob data from DB using hash
-		blobData, err := database.GetBlob(db, attachment.Hash)
-		if err != nil {
-			log.Printf("Failed to retrieve blob data for hash %s: %v", attachment.Hash, err)
-			continue // Skip this attachment
-		}
-
-		// Add inlineData part with Base64 encoded blob data
-		partsForContent = append(partsForContent, Part{
-			InlineData: &InlineData{
-				MimeType: attachment.MimeType,
-				Data:     base64.StdEncoding.EncodeToString(blobData),
-			},
-		})
-	}
-	return partsForContent
-}
-
-func handlePendingConfirmation(db *sql.DB, ew EventWriter, initialState InitialState, pendingConfirmation *PendingConfirmation) error {
+func handlePendingConfirmation(db *sql.DB, ew EventWriter, initialState InitialState, pendingConfirmation *tool.PendingConfirmation) error {
 	confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
 	if marshalErr != nil {
 		ew.Broadcast(EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
@@ -595,14 +581,19 @@ func inferAndSetSessionName(
 	}
 
 	// Existing LLM inference logic (only for non-angel-eval models)
-	nameSystemPrompt := executePromptTemplate("session-name-prompt.md", nil)
-	nameInputPrompt := executePromptTemplate("session-name-input.md", map[string]any{
+	nameSystemPrompt := prompts.ExecuteTemplate("session-name-prompt.md", nil)
+	nameInputPrompt := prompts.ExecuteTemplate("session-name-input.md", map[string]any{
 		"UserMessage":  userMessage,
 		"AgentMessage": "",
 	})
 
 	// Create new context with database connection for subagent
-	subagentCtx := contextWithGlobals(context.Background(), db, models, ga, tools)
+	subagentCtx := context.Background()
+	subagentCtx = database.ContextWith(subagentCtx, db)
+	subagentCtx = llm.ContextWithModels(subagentCtx, models)
+	subagentCtx = llm.ContextWithGeminiAuth(subagentCtx, ga)
+	subagentCtx = tool.ContextWith(subagentCtx, tools)
+
 	subagentCtx, cancel := context.WithTimeout(subagentCtx, 60*time.Second)
 	defer cancel()
 
@@ -642,65 +633,6 @@ func inferAndSetSessionName(
 		return
 	}
 	log.Printf("inferAndSetSessionName: Finished for session %s. Inferred name: %s", sessionId, inferredName)
-}
-
-// generateFilenameFromMimeType generates a filename based on MIME type with sequential numbering
-func generateFilenameFromMimeType(mimeType string, counter int) string {
-	var extension, prefix string
-
-	switch mimeType {
-	case "image/png":
-		extension = ".png"
-		prefix = "generated_image"
-	case "image/jpeg":
-		extension = ".jpg"
-		prefix = "generated_image"
-	case "image/gif":
-		extension = ".gif"
-		prefix = "generated_image"
-	case "image/webp":
-		extension = ".webp"
-		prefix = "generated_image"
-	case "image/svg+xml":
-		extension = ".svg"
-		prefix = "generated_image"
-	case "audio/mpeg":
-		extension = ".mp3"
-		prefix = "generated_audio"
-	case "audio/wav":
-		extension = ".wav"
-		prefix = "generated_audio"
-	case "audio/ogg":
-		extension = ".ogg"
-		prefix = "generated_audio"
-	case "video/mp4":
-		extension = ".mp4"
-		prefix = "generated_video"
-	case "video/webm":
-		extension = ".webm"
-		prefix = "generated_video"
-	case "application/pdf":
-		extension = ".pdf"
-		prefix = "generated_document"
-	case "text/plain":
-		extension = ".txt"
-		prefix = "generated_text"
-	case "text/markdown":
-		extension = ".md"
-		prefix = "generated_text"
-	case "application/json":
-		extension = ".json"
-		prefix = "generated_data"
-	case "text/csv":
-		extension = ".csv"
-		prefix = "generated_data"
-	default:
-		// For unknown MIME types, generate a generic filename
-		extension = ""
-		prefix = "generated_file"
-	}
-
-	return fmt.Sprintf("%s_%03d%s", prefix, counter, extension)
 }
 
 // logAndErrorf logs an error and returns a new error that wraps the original.

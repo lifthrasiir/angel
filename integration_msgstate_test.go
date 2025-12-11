@@ -14,6 +14,7 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/chat"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
 	. "github.com/lifthrasiir/angel/internal/types"
@@ -116,7 +117,7 @@ func TestThoughtSignatureHandling(t *testing.T) {
 	for event := range sseStream {
 		switch event.Type {
 		case EventInitialState:
-			var initialState InitialState
+			var initialState chat.InitialState
 			if err := json.Unmarshal([]byte(event.Payload), &initialState); err != nil {
 				t.Fatalf("Failed to unmarshal initial state: %v", err)
 			}

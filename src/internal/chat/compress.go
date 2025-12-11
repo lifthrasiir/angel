@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"context"
@@ -7,16 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/gorilla/mux"
-
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/prompts"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -32,34 +30,6 @@ type CompressResult struct {
 	CompressionMsgID        int
 	CompressedUpToMessageID int
 	ExtractedSummary        string
-}
-
-func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
-	db := getDb(w, r)
-	models := getModels(w, r)
-
-	vars := mux.Vars(r)
-	sessionID := vars["sessionId"]
-	if sessionID == "" {
-		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	result, err := CompressSession(r.Context(), db, models, sessionID, DefaultGeminiModel)
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to compress session")
-		return
-	}
-
-	sendJSONResponse(w, map[string]interface{}{
-		"status":                  "success",
-		"message":                 "Chat history compressed successfully",
-		"originalTokenCount":      result.OriginalTokenCount,
-		"newTokenCount":           result.NewTokenCount,
-		"compressionMessageId":    result.CompressionMsgID,
-		"compressedUpToMessageId": result.CompressedUpToMessageID,
-		"extractedSummary":        result.ExtractedSummary,
-	})
 }
 
 var stateSnapshotPattern = regexp.MustCompile(`(?s)<state_snapshot>(.*?)</state_snapshot>`)
@@ -181,8 +151,8 @@ func CompressSession(ctx context.Context, db *sql.DB, models *llm.Models, sessio
 	}
 
 	// 5. Construct LLM request with historyToCompress and getCompressionPrompt().
-	systemPrompt := executePromptTemplate("compression-prompt.md", nil)
-	triggerPrompt := executePromptTemplate("compression-trigger.md", nil)
+	systemPrompt := prompts.ExecuteTemplate("compression-prompt.md", nil)
+	triggerPrompt := prompts.ExecuteTemplate("compression-trigger.md", nil)
 	llmRequestContents := historyToCompress // Start with the history to compress
 	llmRequestContents = append(llmRequestContents, Content{
 		Role: RoleUser,

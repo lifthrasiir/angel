@@ -114,7 +114,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 
 	if !params.ConfirmationReceived {
 		// If not confirmed, return a confirmation request
-		return tool.HandlerResults{}, &PendingConfirmation{
+		return tool.HandlerResults{}, &tool.PendingConfirmation{
 			Data: map[string]interface{}{
 				"tool":      "run_shell_command",
 				"command":   commandStr,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/chat"
 	"github.com/lifthrasiir/angel/internal/database"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -283,13 +284,13 @@ func TestLoadChatSession(t *testing.T) {
 
 		// Parse SSE events mirroring client-side logic
 		// Use a channel to signal when the initial state is found
-		initialStateChan := make(chan InitialState, 1)
+		initialStateChan := make(chan chat.InitialState, 1)
 		errorChan := make(chan error, 1)
 
 		go func() {
 			for event := range parseSseStream(t, rr) {
 				if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
-					var initialState InitialState
+					var initialState chat.InitialState
 					err := json.Unmarshal([]byte(event.Payload), &initialState)
 					if err != nil {
 						errorChan <- fmt.Errorf("failed to unmarshal initialState payload: %v", err)

@@ -13,6 +13,15 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
+// PendingConfirmation is a special error type used to signal that user confirmation is required.
+type PendingConfirmation struct {
+	Data any
+}
+
+func (e *PendingConfirmation) Error() string {
+	return "user confirmation required"
+}
+
 // HandlerParams contains parameters passed to a tool's handler function.
 type HandlerParams struct {
 	ModelName            string
