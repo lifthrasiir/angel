@@ -21,6 +21,7 @@ import (
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/tool"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // Helper function to set up the test environment

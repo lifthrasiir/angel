@@ -12,48 +12,12 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
-type EventType rune
-
 const (
 	// Ping interval - send ping if no other messages for 15 seconds
 	PingInterval = 15 * time.Second
 )
 
-const (
-	// SSE Event Types
-	//
-	// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
-	// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
-	// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
-	EventWorkspaceHint       EventType = 'W' // Workspace ID hint (sent before initial state)
-	EventInitialState        EventType = '0' // Initial state with history (for active call)
-	EventInitialStateNoCall  EventType = '1' // Initial state with history (for load session when no active call)
-	EventAcknowledge         EventType = 'A' // Acknowledge message ID
-	EventThought             EventType = 'T' // Thought process
-	EventModelMessage        EventType = 'M' // Model message (text)
-	EventFunctionCall        EventType = 'F' // Function call
-	EventFunctionResponse    EventType = 'R' // Function response
-	EventInlineData          EventType = 'I' // Inline file/image data with hash keys
-	EventComplete            EventType = 'Q' // Query complete
-	EventSessionName         EventType = 'N' // Session name inferred/updated
-	EventCumulTokenCount     EventType = 'C' // Cumulative token count update
-	EventPendingConfirmation EventType = 'P' // Pending confirmation exists for the last message which is EventFunctionCall
-	EventGenerationChanged   EventType = 'G' // Generation changed event
-	EventPing                EventType = '.' // Ping message for connection keep-alive
-	EventError               EventType = 'E' // Error message
-)
-
-// FunctionResponsePayload defines the structure for the EventFunctionResponse payload
-type FunctionResponsePayload struct {
-	Response    map[string]interface{} `json:"response"`
-	Attachments []FileAttachment       `json:"attachments,omitempty"`
-}
-
-// InlineDataPayload defines the structure for the EventInlineData payload
-type InlineDataPayload struct {
-	MessageId   string           `json:"messageId"`
-	Attachments []FileAttachment `json:"attachments"`
-}
+var _ EventWriter = (*sseWriter)(nil)
 
 // sseWriter wraps http.ResponseWriter and http.Flusher to handle client disconnections gracefully.
 //
@@ -68,40 +32,51 @@ type sseWriter struct {
 	http.Flusher
 	mu           sync.Mutex
 	disconnected bool
+	headersSent  bool
 	ctx          context.Context
-	sessionId    string // Add sessionId to sseWriter
+	sessionId    string
 	refCount     int
 	lastPingSent time.Time // Track when ping was last sent
 	pingTimer    *time.Timer
 	pingMutex    sync.Mutex
 }
 
-func newSseWriter(sessionId string, w http.ResponseWriter, r *http.Request) *sseWriter {
-	header := w.Header()
-	header.Set("Content-Type", "text/event-stream")
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Connection", "keep-alive")
-	header.Set("Access-Control-Allow-Origin", "*")
-	header.Set("X-Accel-Buffering", "no") // For nginx
-
+func newSseWriter(ctx context.Context, sessionId string, w http.ResponseWriter) *sseWriter {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		sendInternalServerError(w, r, nil, "Streaming unsupported!")
+		sendInternalServerError(w, nil, nil, "Streaming unsupported!")
 		return nil
 	}
 
 	sseW := &sseWriter{
 		ResponseWriter: w,
 		Flusher:        flusher,
-		ctx:            r.Context(),
+		ctx:            ctx,
 		sessionId:      sessionId,
-		lastPingSent:   time.Now(),
 	}
 
-	// Start the ping timer
+	return sseW
+}
+
+// initSseWriter gets called on the first acquisition or message sent, whichever is earlier.
+// This initialization can't be done in newSseWriter because
+// sseWriter has to be injected from the caller before the initial acquisition.
+func (sseW *sseWriter) postInitUnsafe() {
+	if sseW.headersSent {
+		return
+	}
+
+	header := sseW.ResponseWriter.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+	header.Set("Access-Control-Allow-Origin", "*")
+	header.Set("X-Accel-Buffering", "no") // For nginx
+
+	sseW.lastPingSent = time.Now()
 	sseW.startPingTimer()
 
-	return sseW
+	sseW.headersSent = true
 }
 
 // Close marks the sseWriter as disconnected and removes it from the active writers.
@@ -111,7 +86,7 @@ func (s *sseWriter) Close() {
 	if !s.disconnected {
 		s.disconnected = true
 		s.stopPingTimer()
-		removeSseWriter(s.sessionId, s)
+		s.Release()
 	}
 }
 
@@ -127,19 +102,20 @@ var (
 	sseWritersMutex  sync.Mutex
 )
 
-// addSseWriter adds an sseWriter to the activeSseWriters map.
-func addSseWriter(sessionId string, sseW *sseWriter) {
+// Acquire adds an sseWriter to the activeSseWriters map.
+func (sseW *sseWriter) Acquire() {
 	sseWritersMutex.Lock()
 	defer sseWritersMutex.Unlock()
 
 	if sseW.refCount == 0 {
-		activeSseWriters[sessionId] = append(activeSseWriters[sessionId], sseW)
+		sseW.postInitUnsafe()
+		activeSseWriters[sseW.sessionId] = append(activeSseWriters[sseW.sessionId], sseW)
 	}
 	sseW.refCount++
 }
 
-// removeSseWriter removes an sseWriter from the activeSseWriters map.
-func removeSseWriter(sessionId string, sseW *sseWriter) {
+// Release removes an sseWriter from the activeSseWriters map.
+func (sseW *sseWriter) Release() {
 	sseWritersMutex.Lock()
 	defer sseWritersMutex.Unlock()
 
@@ -148,24 +124,26 @@ func removeSseWriter(sessionId string, sseW *sseWriter) {
 		return
 	}
 
-	writers := activeSseWriters[sessionId]
+	writers := activeSseWriters[sseW.sessionId]
 	for i, w := range writers {
 		if w == sseW {
-			activeSseWriters[sessionId] = append(writers[:i], writers[i+1:]...)
+			activeSseWriters[sseW.sessionId] = append(writers[:i], writers[i+1:]...)
 			return
 		}
 	}
 }
 
-// broadcastToSession sends an event to all active sseWriters for a given session.
-func broadcastToSession(sessionId string, eventType EventType, data string) {
+// Broadcast sends an event to all active sseWriters for a given session.
+func (sseW *sseWriter) Broadcast(eventType EventType, data string) {
 	sseWritersMutex.Lock()
 	defer sseWritersMutex.Unlock()
 
-	writers, ok := activeSseWriters[sessionId]
+	writers, ok := activeSseWriters[sseW.sessionId]
 	if !ok || len(writers) == 0 {
 		return
 	}
+
+	sseW.postInitUnsafe()
 
 	// Prepare the event data once
 	eventData := prepareSSEEventData(eventType, data)
@@ -178,7 +156,7 @@ func broadcastToSession(sessionId string, eventType EventType, data string) {
 				sseW.flushUnsafe()
 			}
 		} else {
-			log.Printf("Skipping broadcast to disconnected sseWriter for session %s", sessionId)
+			log.Printf("Skipping broadcast to disconnected sseWriter for session %s", sseW.sessionId)
 		}
 		sseW.mu.Unlock()
 	}
@@ -233,13 +211,15 @@ func (s *sseWriter) flushUnsafe() {
 	s.Flusher.Flush()
 }
 
-func (sseW *sseWriter) sendServerEvent(eventType EventType, data string) {
+func (sseW *sseWriter) Send(eventType EventType, data string) {
 	sseW.mu.Lock()
 	defer sseW.mu.Unlock()
 
 	if sseW.disconnected {
 		return
 	}
+
+	sseW.postInitUnsafe()
 
 	// Don't reset timer for ping events themselves
 	if eventType != EventPing {

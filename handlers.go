@@ -656,10 +656,29 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]string{"status": "success", "message": "MCP config deleted successfully"})
 }
 
+type wrappedBadRequestError struct{ error }
+type wrappedNotFoundError struct{ error }
+
+func badRequestError(format string, args ...interface{}) error {
+	return wrappedBadRequestError{fmt.Errorf(format, args...)}
+}
+
+func notFoundError(format string, args ...interface{}) error {
+	return wrappedNotFoundError{fmt.Errorf(format, args...)}
+}
+
 // sendInternalServerError logs the error and sends a 500 Internal Server Error response.
-func sendInternalServerError(w http.ResponseWriter, _ *http.Request, err error, msg string) {
-	log.Printf("%s: %v", msg, err)
-	http.Error(w, fmt.Sprintf("Internal Server Error: %s", msg), http.StatusInternalServerError)
+// As special cases, badRequestError and notFoundError types are handled to send 400 and 404 responses respectively.
+func sendInternalServerError(w http.ResponseWriter, r *http.Request, err error, msg string) {
+	switch err.(type) {
+	case wrappedBadRequestError:
+		sendBadRequestError(w, r, err.Error())
+	case wrappedNotFoundError:
+		sendNotFoundError(w, r, err.Error())
+	default:
+		log.Printf("%s: %v", msg, err)
+		http.Error(w, fmt.Sprintf("Internal Server Error: %s", msg), http.StatusInternalServerError)
+	}
 }
 
 // sendBadRequestError sends a 400 Bad Request response.
@@ -667,7 +686,7 @@ func sendBadRequestError(w http.ResponseWriter, _ *http.Request, msg string) {
 	http.Error(w, msg, http.StatusBadRequest)
 }
 
-// sendNotFoundError sends a 4.04 Not Found response.
+// sendNotFoundError sends a 404 Not Found response.
 func sendNotFoundError(w http.ResponseWriter, _ *http.Request, msg string) {
 	http.Error(w, msg, http.StatusNotFound)
 }

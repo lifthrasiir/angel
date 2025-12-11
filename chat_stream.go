@@ -24,16 +24,8 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 
 // Helper function to stream LLM response
 func streamLLMResponse(
-	db *sql.DB,
-	models *llm.Models,
-	ga *llm.GeminiAuth,
-	tools *tool.Tools,
-	initialState InitialState,
-	sseW *sseWriter,
-	mc *database.MessageChain,
-	inferSessionName bool,
-	callStartTime time.Time,
-	fullHistoryForLLM []FrontendMessage,
+	db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
+	ew EventWriter, mc *database.MessageChain, inferSessionName bool, callStartTime time.Time, fullHistoryForLLM []FrontendMessage,
 ) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
@@ -48,7 +40,7 @@ func streamLLMResponse(
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {
 		log.Printf("streamLLMResponse: Failed to start call for session %s: %v", initialState.SessionId, err)
-		broadcastToSession(initialState.SessionId, EventError, err.Error())
+		ew.Broadcast(EventError, err.Error())
 		return err
 	}
 	defer removeCall(initialState.SessionId) // Ensure call is removed from manager when function exits
@@ -66,7 +58,7 @@ func streamLLMResponse(
 
 	var firstFinishReason string
 	for {
-		if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, func() {}); err != nil {
+		if err := checkStreamCancellation(ctx, initialState, db, ew, modelMessageID, agentResponseText, func() {}); err != nil {
 			return err
 		}
 
@@ -93,7 +85,7 @@ func streamLLMResponse(
 				}
 			}
 			// Send error to frontend
-			broadcastToSession(initialState.SessionId, EventError, errorMessage)
+			ew.Broadcast(EventError, errorMessage)
 			return fmt.Errorf("CodeAssist API call failed: %w", err)
 		}
 		defer closer.Close() // This closes the server-initiated API request.
@@ -110,14 +102,11 @@ func streamLLMResponse(
 					if err := database.UpdateMessageTokens(db, mc.LastMessageID, lastUsageMetadata.PromptTokenCount); err != nil {
 						log.Printf("Failed to update cumul_token_count for user message %d: %v", mc.LastMessageID, err)
 					}
-					broadcastToSession(
-						initialState.SessionId,
-						EventCumulTokenCount,
-						fmt.Sprintf("%d\n%d", mc.LastMessageID, lastUsageMetadata.PromptTokenCount))
+					ew.Broadcast(EventCumulTokenCount, fmt.Sprintf("%d\n%d", mc.LastMessageID, lastUsageMetadata.PromptTokenCount))
 				}
 			}
 
-			if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, func() {}); err != nil {
+			if err := checkStreamCancellation(ctx, initialState, db, ew, modelMessageID, agentResponseText, func() {}); err != nil {
 				return err
 			}
 
@@ -158,7 +147,7 @@ func streamLLMResponse(
 
 					argsJson, _ := json.Marshal(fc.Args)
 					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsJson))
-					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
+					ew.Broadcast(EventFunctionCall, formattedData)
 
 					toolResults, err := tools.Call(ctx, fc, tool.HandlerParams{
 						ModelName: mc.LastMessageModel,
@@ -170,7 +159,7 @@ func streamLLMResponse(
 
 						var pendingConfirmation *PendingConfirmation
 						if errors.As(err, &pendingConfirmation) {
-							return handlePendingConfirmation(db, initialState, pendingConfirmation)
+							return handlePendingConfirmation(db, ew, initialState, pendingConfirmation)
 						} else {
 							toolResults.Value = map[string]interface{}{"error": err.Error()}
 						}
@@ -205,7 +194,7 @@ func streamLLMResponse(
 						payloadJson = []byte("{}") // Send empty object on error
 					}
 					formattedData = fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(payloadJson))
-					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
+					ew.Broadcast(EventFunctionResponse, formattedData)
 
 					// Add to current history for later execution
 					currentHistory = append(currentHistory,
@@ -236,7 +225,7 @@ func streamLLMResponse(
 						return logAndErrorf(err, "Failed to save executable code message")
 					}
 					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fc.Name, string(argsBytes))
-					broadcastToSession(initialState.SessionId, EventFunctionCall, formattedData)
+					ew.Broadcast(EventFunctionCall, formattedData)
 
 					currentHistory = append(currentHistory, Content{
 						Role:  RoleModel,
@@ -272,7 +261,7 @@ func streamLLMResponse(
 						payloadJson = []byte("{}") // Send empty object on error
 					}
 					formattedData := fmt.Sprintf("%d\n%s\n%s", newMessage.ID, fr.Name, string(payloadJson))
-					broadcastToSession(initialState.SessionId, EventFunctionResponse, formattedData)
+					ew.Broadcast(EventFunctionResponse, formattedData)
 
 					currentHistory = append(currentHistory, Content{Role: RoleUser, Parts: []Part{{FunctionResponse: &fr}}})
 					continue
@@ -331,7 +320,7 @@ func streamLLMResponse(
 					}
 
 					// Broadcast inline data event with hash keys
-					broadcastToSession(initialState.SessionId, EventInlineData, string(payloadJson))
+					ew.Broadcast(EventInlineData, string(payloadJson))
 
 					// Add to current history
 					currentHistory = append(currentHistory, Content{
@@ -360,7 +349,7 @@ func streamLLMResponse(
 						log.Printf("Failed to save thought message: %v", err)
 					}
 					// Broadcast thought immediately
-					broadcastToSession(initialState.SessionId, EventThought, fmt.Sprintf("%d\n%s", newMessage.ID, thoughtText))
+					ew.Broadcast(EventThought, fmt.Sprintf("%d\n%s", newMessage.ID, thoughtText))
 				} else {
 					if modelMessageID < 0 {
 						if state != "" {
@@ -388,7 +377,7 @@ func streamLLMResponse(
 					}
 
 					// Send only the current text chunk to the frontend
-					broadcastToSession(initialState.SessionId, EventModelMessage, fmt.Sprintf("%d\n%s", modelMessageID, part.Text))
+					ew.Broadcast(EventModelMessage, fmt.Sprintf("%d\n%s", modelMessageID, part.Text))
 				}
 			}
 		}
@@ -401,7 +390,7 @@ func streamLLMResponse(
 		}
 
 		// Check if context was cancelled after stream ended
-		if err := checkStreamCancellation(ctx, initialState, db, modelMessageID, agentResponseText, addCancelErrorMessage); err != nil {
+		if err := checkStreamCancellation(ctx, initialState, db, ew, modelMessageID, agentResponseText, addCancelErrorMessage); err != nil {
 			return err
 		}
 
@@ -422,9 +411,9 @@ func streamLLMResponse(
 		}
 
 		// Send error completion instead of normal completion
-		broadcastToSession(initialState.SessionId, EventError, errorMessage)
+		ew.Broadcast(EventError, errorMessage)
 	} else {
-		broadcastToSession(initialState.SessionId, EventComplete, "")
+		ew.Broadcast(EventComplete, "")
 	}
 
 	// Small delay to allow all clients to receive the final event before removeCall is executed
@@ -452,17 +441,17 @@ func streamLLMResponse(
 			inferWg.Add(1)
 			// Infer session name after streaming is complete
 			go func() {
-				addSseWriter(initialState.SessionId, sseW) // Increases the reference count and prevents it from being closed early
+				ew.Acquire() // Increases the reference count and prevents it from being closed early
 				defer func() {
 					inferWg.Done()
-					removeSseWriter(initialState.SessionId, sseW)
+					ew.Release()
 				}()
 
 				userMsg := ""
 				if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
 					userMsg = initialState.History[0].Parts[0].Text
 				}
-				inferAndSetSessionName(db, models, ga, tools, initialState.SessionId, userMsg, sseW, mc.LastMessageModel)
+				inferAndSetSessionName(db, models, ga, tools, initialState.SessionId, userMsg, ew, mc.LastMessageModel)
 			}()
 		}
 	}
@@ -479,7 +468,7 @@ func streamLLMResponse(
 		if err := database.UpdateMessageTokens(db, modelMessageID, *finalTotalTokenCount); err != nil {
 			log.Printf("Failed to update final message tokens: %v", err)
 		}
-		broadcastToSession(initialState.SessionId, EventCumulTokenCount, fmt.Sprintf("%d\n%d", modelMessageID, *finalTotalTokenCount))
+		ew.Broadcast(EventCumulTokenCount, fmt.Sprintf("%d\n%d", modelMessageID, *finalTotalTokenCount))
 	}
 
 	completeCall(initialState.SessionId) // Mark the call as completed
@@ -507,34 +496,30 @@ func appendAttachmentParts(db *sql.DB, toolResults tool.HandlerResults, partsFor
 	return partsForContent
 }
 
-func handlePendingConfirmation(db *sql.DB, initialState InitialState, pendingConfirmation *PendingConfirmation) error {
+func handlePendingConfirmation(db *sql.DB, ew EventWriter, initialState InitialState, pendingConfirmation *PendingConfirmation) error {
 	confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
 	if marshalErr != nil {
-		broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
+		ew.Broadcast(EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
 		return logAndErrorf(marshalErr, "Failed to marshal pending confirmation data")
 	}
 	confirmationData := string(confirmationDataBytes)
 
 	// Update branch pending_confirmation
 	if err := database.UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
-		broadcastToSession(initialState.SessionId, EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
+		ew.Broadcast(EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
 		return logAndErrorf(err, "Failed to update branch pending_confirmation")
 	}
 
 	// Send P event to frontend
-	broadcastToSession(initialState.SessionId, EventPendingConfirmation, confirmationData)
+	ew.Broadcast(EventPendingConfirmation, confirmationData)
 
 	// Stop streaming
 	return fmt.Errorf("user confirmation pending")
 }
 
 func checkStreamCancellation(
-	ctx context.Context,
-	initialState InitialState,
-	db *sql.DB,
-	modelMessageID int,
-	agentResponseText string,
-	cancelCallback func(),
+	ctx context.Context, initialState InitialState, db *sql.DB,
+	ew EventWriter, modelMessageID int, agentResponseText string, cancelCallback func(),
 ) error {
 	select {
 	case <-ctx.Done():
@@ -551,7 +536,7 @@ func checkStreamCancellation(
 		cancelCallback()
 
 		// Send error to frontend
-		broadcastToSession(initialState.SessionId, EventError, "user canceled request")
+		ew.Broadcast(EventError, "user canceled request")
 		return ctx.Err()
 	default:
 		// Continue with the LLM call
@@ -561,14 +546,8 @@ func checkStreamCancellation(
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
 func inferAndSetSessionName(
-	db *sql.DB,
-	models *llm.Models,
-	ga *llm.GeminiAuth,
-	tools *tool.Tools,
-	sessionId string,
-	userMessage string,
-	sseW *sseWriter,
-	modelToUse string,
+	db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	sessionId string, userMessage string, ew EventWriter, modelToUse string,
 ) {
 	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)
 
@@ -577,7 +556,7 @@ func inferAndSetSessionName(
 	defer func() {
 		// This defer will execute at the end of the function, ensuring 'N' is sent.
 		// If inferredName is still empty, it means inference failed or was skipped.
-		sseW.sendServerEvent(EventSessionName, fmt.Sprintf("%s\n%s", sessionId, inferredName))
+		ew.Send(EventSessionName, fmt.Sprintf("%s\n%s", sessionId, inferredName))
 	}()
 
 	if db == nil {

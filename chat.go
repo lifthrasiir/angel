@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -34,7 +36,7 @@ type InitialState struct {
 }
 
 // New session and message handler
-func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
+func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
@@ -55,42 +57,56 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionId := database.GenerateID()
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
 
+	if err := NewSessionAndMessage(
+		r.Context(), db, models, ga, tools,
+		ew, sessionId, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
+		requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
+	); err != nil {
+		sendInternalServerError(w, r, err, "Failed to create new session and message")
+	}
+}
+
+func NewSessionAndMessage(
+	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ew EventWriter, sessionId string, userMessage string, systemPrompt string, attachments []FileAttachment,
+	workspaceId string, modelToUse string, fetchLimit int, initialRoots []string,
+) error {
 	var workspaceName string
-	if requestBody.WorkspaceID != "" {
-		workspace, err := database.GetWorkspace(db, requestBody.WorkspaceID)
+	if workspaceId != "" {
+		workspace, err := database.GetWorkspace(db, workspaceId)
 		if err != nil {
-			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get workspace %s", requestBody.WorkspaceID))
-			return
+			return fmt.Errorf("failed to get workspace %s: %w", workspaceId, err)
 		}
 		workspaceName = workspace.Name
 	}
 
 	// Evaluate system prompt
 	data := PromptData{workspaceName: workspaceName}
-	systemPrompt, err := data.EvaluatePrompt(requestBody.SystemPrompt)
+	systemPrompt, err := data.EvaluatePrompt(systemPrompt)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to evaluate system prompt")
-		return
+		return fmt.Errorf("failed to evaluate system prompt: %w", err)
 	}
 
 	// Determine the model to use
-	modelToUse := requestBody.Model
 	if modelToUse == "" {
 		modelToUse = DefaultGeminiModel // Default model for new sessions
 	}
 
 	// Handle InitialRoots if provided
-	if len(requestBody.InitialRoots) > 0 {
+	if len(initialRoots) > 0 {
 		// Set initial roots as generation 0 environment
-		err := database.SetInitialSessionEnv(db, sessionId, requestBody.InitialRoots)
+		err := database.SetInitialSessionEnv(db, sessionId, initialRoots)
 		if err != nil {
-			sendInternalServerError(w, r, err, "Failed to set initial session environment")
-			return
+			return fmt.Errorf("failed to set initial session environment: %w", err)
 		}
 
 		// Calculate EnvChanged from empty to initial roots
-		rootsChanged, err := calculateRootsChanged([]string{}, requestBody.InitialRoots)
+		rootsChanged, err := calculateRootsChanged([]string{}, initialRoots)
 		if err != nil {
 			log.Printf("newSessionAndMessage: Failed to calculate roots changed for initial roots: %v", err)
 			// Non-fatal, continue without adding env change to prompt
@@ -102,28 +118,23 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session with primary_branch_id (moved after InitialRoots handling)
-	primaryBranchID, err := database.CreateSession(db, sessionId, systemPrompt, requestBody.WorkspaceID)
+	primaryBranchID, err := database.CreateSession(db, sessionId, systemPrompt, workspaceId)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to create new session")
-		return
+		return fmt.Errorf("failed to create new session: %w", err)
 	}
 
-	userMessage := requestBody.Message
-
 	// Create a new message chain
-	mc, err := database.NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(ctx, db, sessionId, primaryBranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to create new message chain")
-		return
+		return fmt.Errorf("failed to create new message chain: %w", err)
 	}
 
 	// Add user message to the chain
 	mc.LastMessageModel = modelToUse
 	mc.LastMessageGeneration = 0 // New session starts with generation 0
-	userMsg, err := mc.Add(r.Context(), db, Message{Text: userMessage, Type: TypeUserText, Attachments: requestBody.Attachments})
+	userMsg, err := mc.Add(ctx, db, Message{Text: userMessage, Type: TypeUserText, Attachments: attachments})
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to save user message")
-		return
+		return fmt.Errorf("failed to save user message: %w", err)
 	}
 
 	// Update last_updated_at for the new session
@@ -132,44 +143,36 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal error, continue with response
 	}
 
-	sseW := newSseWriter(sessionId, w, r)
-	if sseW == nil {
-		return
-	}
-
 	// Send acknowledgement for user message ID to frontend
-	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
+	ew.Send(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
 
 	// Add this sseWriter to the active list for broadcasting subsequent events
-	addSseWriter(sessionId, sseW)
-	defer removeSseWriter(sessionId, sseW)
+	ew.Acquire()
+	defer ew.Release()
 
 	// Retrieve session history from DB for LLM (full context)
 	historyContext, err := database.GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
-		return
+		return fmt.Errorf("failed to retrieve full session history for LLM: %w", err)
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
-	frontendHistory, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
+	frontendHistory, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, fetchLimit)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
-		return
+		return fmt.Errorf("failed to retrieve paginated session history for frontend: %w", err)
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
 	currentRoots, _, err := database.GetLatestSessionEnv(db, sessionId) // Generation is guaranteed to be 0
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to get latest session environment")
-		return
+		return fmt.Errorf("failed to get latest session environment: %w", err)
 	}
 
 	initialState := InitialState{
 		SessionId:       sessionId,
 		History:         frontendHistory,
 		SystemPrompt:    systemPrompt,
-		WorkspaceID:     requestBody.WorkspaceID,
+		WorkspaceID:     workspaceId,
 		PrimaryBranchID: primaryBranchID,
 		Roots:           currentRoots,
 	}
@@ -177,21 +180,20 @@ func newSessionAndMessage(w http.ResponseWriter, r *http.Request) {
 	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
 	initialStateJSON, err := json.Marshal(initialState)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to marshal initial state")
-		return
+		return fmt.Errorf("failed to marshal initial state: %w", err)
 	}
-	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
+	ew.Send(EventInitialState, string(initialStateJSON))
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, models, ga, tools, initialState, sseW, mc, true, time.Now(), historyContext); err != nil {
-		sendInternalServerError(w, r, err, "Error streaming LLM response")
-		return
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, true, time.Now(), historyContext); err != nil {
+		return fmt.Errorf("error streaming LLM response: %w", err)
 	}
+	return nil
 }
 
 // Chat message handler
-func chatMessage(w http.ResponseWriter, r *http.Request) {
+func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
@@ -215,17 +217,33 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
+
+	if err := NewChatMessage(
+		r.Context(), db, models, ga, tools,
+		ew, sessionId, requestBody.Message, requestBody.Attachments, requestBody.Model, requestBody.FetchLimit,
+	); err != nil {
+		sendInternalServerError(w, r, err, "Failed to process chat message")
+	}
+}
+
+func NewChatMessage(
+	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ew EventWriter, sessionId string, userMessage string, attachments []FileAttachment, modelToUse string, fetchLimit int,
+) error {
 	session, err := database.GetSession(db, sessionId)
 	if err != nil {
 		log.Printf("chatMessage: Failed to load session %s: %v", sessionId, err)
 		if errors.Is(err, sql.ErrNoRows) ||
 			err.Error() == "sql: no rows in result set" ||
 			strings.Contains(err.Error(), "no such table") {
-			sendNotFoundError(w, r, "Session not found")
+			return notFoundError("session not found")
 		} else {
-			sendInternalServerError(w, r, err, "Failed to load session")
+			return fmt.Errorf("failed to load session: %w", err)
 		}
-		return
 	}
 	systemPrompt := session.SystemPrompt
 	primaryBranchID := session.PrimaryBranchID // Get primary branch ID from session
@@ -233,23 +251,21 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	var envChangedEventPayload string
 
 	// Create a new message chain
-	mc, err := database.NewMessageChain(r.Context(), db, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(ctx, db, sessionId, primaryBranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to create message chain")
-		return
+		return fmt.Errorf("failed to create message chain: %w", err)
 	}
 
 	// Override the model to use the one specified in the request
-	if requestBody.Model != "" {
-		mc.LastMessageModel = requestBody.Model
+	if modelToUse != "" {
+		mc.LastMessageModel = modelToUse
 	} else if mc.LastMessageModel == "" {
 		mc.LastMessageModel = DefaultGeminiModel
 	}
 
 	_, currentGeneration, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
-		return
+		return fmt.Errorf("failed to get latest session environment for session %s: %w", sessionId, err)
 	}
 
 	// Check for environment changes and add system message to chain if needed
@@ -283,7 +299,7 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 			// Non-fatal, continue with user message
 		}
 
-		systemMsg, err := mc.Add(r.Context(), db, Message{
+		systemMsg, err := mc.Add(ctx, db, Message{
 			Text:            string(envChangedJSON),
 			Type:            TypeEnvChanged,
 			Attachments:     nil,
@@ -298,15 +314,14 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add user message to the chain
-	userMsg, err := mc.Add(r.Context(), db, Message{
-		Text:            requestBody.Message,
+	userMsg, err := mc.Add(ctx, db, Message{
+		Text:            userMessage,
 		Type:            TypeUserText,
-		Attachments:     requestBody.Attachments,
+		Attachments:     attachments,
 		CumulTokenCount: nil,
 	})
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to save user message")
-		return
+		return fmt.Errorf("failed to save user message: %w", err)
 	}
 
 	// Update last_updated_at for the session
@@ -315,40 +330,32 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal error, continue with response
 	}
 
-	sseW := newSseWriter(sessionId, w, r)
-	if sseW == nil {
-		return
-	}
-
 	// Add this sseWriter to the active list for broadcasting subsequent events
-	addSseWriter(sessionId, sseW)
-	defer removeSseWriter(sessionId, sseW)
+	ew.Acquire()
+	defer ew.Release()
 
 	if envChangedEventPayload != "" {
-		sseW.sendServerEvent(EventGenerationChanged, envChangedEventPayload)
+		ew.Send(EventGenerationChanged, envChangedEventPayload)
 	}
 
 	// Send acknowledgement for user message ID to frontend
-	sseW.sendServerEvent(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
+	ew.Send(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
 
 	// Retrieve session history from DB for LLM (full context)
 	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, sessionId, primaryBranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to retrieve full session history for LLM")
-		return
+		return fmt.Errorf("failed to retrieve full session history for LLM: %w", err)
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
-	frontendHistoryForInitialState, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, requestBody.FetchLimit)
+	frontendHistoryForInitialState, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, fetchLimit)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to retrieve paginated session history for frontend")
-		return
+		return fmt.Errorf("failed to retrieve paginated session history for frontend: %w", err)
 	}
 
 	roots, _, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
-		return
+		return fmt.Errorf("failed to get latest session environment for session %s: %w", sessionId, err)
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
@@ -364,42 +371,24 @@ func chatMessage(w http.ResponseWriter, r *http.Request) {
 	// Send initial state as a single SSE event (Event type 0: active call, broadcasting will start)
 	initialStateJSON, err := json.Marshal(initialState)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to prepare initial state")
-		return
+		return fmt.Errorf("failed to marshal initial state: %w", err)
 	}
-	sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
+	ew.Send(EventInitialState, string(initialStateJSON))
 
-	if err := streamLLMResponse(db, models, ga, tools, initialState, sseW, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
-		sendInternalServerError(w, r, err, "Error streaming LLM response")
-		return
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+		return fmt.Errorf("failed to stream LLM response: %w", err)
 	}
+	return nil
 }
 
 // New endpoint to load chat session history
-func loadChatSession(w http.ResponseWriter, r *http.Request) {
+func loadChatSessionHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
 	if sessionId == "" {
 		sendBadRequestError(w, r, "Session ID is required")
-		return
-	}
-
-	// Check if session exists
-	exists, err := database.SessionExists(db, sessionId)
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to check session existence")
-		return
-	}
-	if !exists {
-		sendNotFoundError(w, r, "Session not found")
-		return
-	}
-
-	session, err := database.GetSession(db, sessionId)
-	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to load session")
 		return
 	}
 
@@ -427,25 +416,59 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 		fetchLimit = parsedLimit
 	}
 
-	// Check if it's an SSE request and initialize sseW early
-	var sseW *sseWriter
+	// Optionally initialize EventWriter
+	var ew EventWriter
 	if r.Header.Get("Accept") == "text/event-stream" {
-		sseW = newSseWriter(sessionId, w, r)
+		sseW := newSseWriter(r.Context(), sessionId, w)
 		if sseW == nil {
 			return
 		}
+		ew = sseW // Avoid nil interface
+	}
 
+	initialState, err := LoadChatSession(r.Context(), db, ew, sessionId, beforeMessageID, fetchLimit)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to load chat session")
+		return
+	}
+
+	if ew == nil {
+		// Original JSON response for non-SSE requests
+		sendJSONResponse(w, initialState)
+	}
+}
+
+func LoadChatSession(ctx context.Context, db *sql.DB, ew EventWriter, sessionId string, beforeMessageID int, fetchLimit int) (initialState InitialState, err error) {
+	// Check if session exists
+	exists, err := database.SessionExists(db, sessionId)
+	if err != nil {
+		err = fmt.Errorf("failed to check session existence: %w", err)
+		return
+	}
+	if !exists {
+		err = notFoundError("session not found")
+		return
+	}
+
+	session, err := database.GetSession(db, sessionId)
+	if err != nil {
+		err = fmt.Errorf("failed to load session: %w", err)
+		return
+	}
+
+	// Check if it's an SSE request and initialize ew early
+	if ew != nil {
 		// Send WorkspaceID hint to frontend as early as possible
-		sseW.sendServerEvent(EventWorkspaceHint, session.WorkspaceID)
+		ew.Send(EventWorkspaceHint, session.WorkspaceID)
 
-		addSseWriter(sessionId, sseW)
-		defer removeSseWriter(sessionId, sseW)
+		ew.Acquire()
+		defer ew.Release()
 	}
 
 	// Use automatic branch detection to load history with pagination
 	history, actualBranchID, err := database.GetSessionHistoryPaginatedWithAutoBranch(db, sessionId, beforeMessageID, fetchLimit)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to load session history")
+		err = fmt.Errorf("failed to load session history: %w", err)
 		return
 	}
 
@@ -456,7 +479,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 	currentRoots, currentGeneration, err := database.GetLatestSessionEnv(db, sessionId)
 	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get latest session environment for session %s", sessionId))
+		err = fmt.Errorf("failed to get latest session environment for session %s: %w", sessionId, err)
 		return
 	}
 
@@ -496,7 +519,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prepare initial state as a single JSON object
-	initialState := InitialState{
+	initialState = InitialState{
 		SessionId:       sessionId,
 		History:         history,
 		SystemPrompt:    session.SystemPrompt,
@@ -508,7 +531,7 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 
 	branch, err := database.GetBranch(db, actualBranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get branch %s", actualBranchID))
+		err = fmt.Errorf("failed to get branch %s: %w", actualBranchID, err)
 		return
 	}
 
@@ -517,38 +540,37 @@ func loadChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If it's an SSE request, handle streaming. Otherwise, send regular JSON response.
-	if sseW != nil {
+	if ew != nil {
 		if hasActiveCall(sessionId) {
 			callStartTime, ok := GetCallStartTime(sessionId)
 			if ok {
 				initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
 			}
-			initialStateJSON, err := json.Marshal(initialState)
-			if err != nil {
-				sendInternalServerError(w, r, err, "Failed to marshal initial state with elapsed time")
+			initialStateJSON, err2 := json.Marshal(initialState)
+			if err2 != nil {
+				err = fmt.Errorf("failed to marshal initial state with elapsed time: %w", err2)
 				return
 			}
-			sseW.sendServerEvent(EventInitialState, string(initialStateJSON))
+			ew.Send(EventInitialState, string(initialStateJSON))
 
 			// Keep the connection open until client disconnects.
 			// sseW will get any broadcasted messages over the course.
-			<-r.Context().Done()
+			<-ctx.Done()
 		} else {
-			initialStateJSON, err := json.Marshal(initialState)
-			if err != nil {
-				sendInternalServerError(w, r, err, "Failed to marshal initial state")
+			initialStateJSON, err2 := json.Marshal(initialState)
+			if err2 != nil {
+				err = fmt.Errorf("failed to marshal initial state: %w", err2)
 				return
 			}
 
 			// If no active call, close the SSE connection after sending initial state
-			sseW.sendServerEvent(EventInitialStateNoCall, string(initialStateJSON))
+			ew.Send(EventInitialStateNoCall, string(initialStateJSON))
 			time.Sleep(10 * time.Millisecond) // Give some time for the event to be processed
-			sseW.Close()
+			ew.Close()
 		}
-	} else {
-		// Original JSON response for non-SSE requests
-		sendJSONResponse(w, initialState)
 	}
+
+	return
 }
 
 func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
@@ -597,7 +619,7 @@ func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request
 }
 
 // New endpoint to delete a chat session
-func deleteSession(w http.ResponseWriter, r *http.Request) {
+func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
 	vars := mux.Vars(r)

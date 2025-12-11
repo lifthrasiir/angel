@@ -51,13 +51,32 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	newSessionId, newSessionName, err := ExtractSession(r.Context(), db, sessionId, targetMessageID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to extract session")
+		return
+	}
+
+	// Return the new session link
+	response := map[string]string{
+		"status":      "success",
+		"sessionId":   newSessionId,
+		"sessionName": newSessionName,
+		"link":        fmt.Sprintf("/%s", newSessionId),
+		"message":     "Session extracted successfully",
+	}
+
+	sendJSONResponse(w, response)
+}
+
+func ExtractSession(ctx context.Context, db *sql.DB, sessionId string, targetMessageID int) (newSessionId string, newSessionName string, err error) {
 	// Get the original session to validate existence
 	originalSession, err := database.GetSession(db, sessionId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			sendNotFoundError(w, r, "Session not found")
+			err = notFoundError("session not found")
 		} else {
-			sendInternalServerError(w, r, err, "Failed to get session")
+			err = fmt.Errorf("failed to get session: %w", err)
 		}
 		return
 	}
@@ -66,16 +85,16 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	targetMessage, err := database.GetMessageByID(db, targetMessageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			sendNotFoundError(w, r, "Target message not found")
+			err = notFoundError("target message not found")
 		} else {
-			sendInternalServerError(w, r, err, "Failed to get target message")
+			err = fmt.Errorf("failed to get target message: %w", err)
 		}
 		return
 	}
 
 	// Validate that the target message belongs to the session
 	if targetMessage.SessionID != sessionId {
-		sendBadRequestError(w, r, "Target message does not belong to the specified session")
+		err = badRequestError("target message does not belong to the specified session")
 		return
 	}
 
@@ -83,7 +102,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	// Use GetSessionHistory to get the complete message chain without alterations
 	completeMessages, err := database.GetSessionHistory(db, sessionId, targetMessage.BranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to get messages from branch")
+		err = fmt.Errorf("failed to get messages from branch: %w", err)
 		return
 	}
 
@@ -112,7 +131,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a new session
-	newSessionId := database.GenerateID()
+	newSessionId = database.GenerateID()
 
 	// Collect subsession IDs from subagent FunctionResponse messages
 	subsessionIDs := collectSubsessionIDs(processedMessages)
@@ -127,7 +146,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate a name for the new session
-	newSessionName := generateCopySessionName(originalSession.Name)
+	newSessionName = generateCopySessionName(originalSession.Name)
 
 	// Use the already evaluated system prompt from original session
 	// originalSession.SystemPrompt is already evaluated, so use it directly
@@ -135,7 +154,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	// Create the new session
 	newPrimaryBranchID, err := database.CreateSession(db, newSessionId, originalSession.SystemPrompt, originalSession.WorkspaceID)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to create new session")
+		err = fmt.Errorf("failed to create new session: %w", err)
 		return
 	}
 
@@ -146,25 +165,25 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a new message chain for the new session
-	mc, err := database.NewMessageChain(r.Context(), db, newSessionId, newPrimaryBranchID)
+	mc, err := database.NewMessageChain(ctx, db, newSessionId, newPrimaryBranchID)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to create new message chain")
+		err = fmt.Errorf("failed to create new message chain: %w", err)
 		return
 	}
 
 	// Add processed messages to the new session by finding original messages and copying all fields
 	for _, processedMsg := range processedMessages {
 		// Convert FrontendMessage ID back to integer to find original message
-		originalMsgID, err := strconv.Atoi(processedMsg.ID)
-		if err != nil {
-			log.Printf("extractSessionHandler: Failed to parse message ID %s: %v", processedMsg.ID, err)
+		originalMsgID, err2 := strconv.Atoi(processedMsg.ID)
+		if err2 != nil {
+			log.Printf("extractSessionHandler: Failed to parse message ID %s: %v", processedMsg.ID, err2)
 			continue
 		}
 
 		// Get the original message to preserve all fields
-		originalMsg, err := database.GetMessageByID(db, originalMsgID)
-		if err != nil {
-			log.Printf("extractSessionHandler: Failed to get original message %d: %v", originalMsgID, err)
+		originalMsg, err2 := database.GetMessageByID(db, originalMsgID)
+		if err2 != nil {
+			log.Printf("extractSessionHandler: Failed to get original message %d: %v", originalMsgID, err2)
 			continue
 		}
 
@@ -176,9 +195,9 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 		// Update text content from processed message (in case compression remapping occurred)
 		// Convert parts back to proper Message.Text and State format
 		if len(processedMsg.Parts) > 0 {
-			text, state, err := frontendMessageToText(originalMsg.Type, processedMsg.Parts)
-			if err != nil {
-				log.Printf("extractSessionHandler: Failed to convert parts to text for message %d: %v", originalMsgID, err)
+			text, state, err2 := frontendMessageToText(originalMsg.Type, processedMsg.Parts)
+			if err2 != nil {
+				log.Printf("extractSessionHandler: Failed to convert parts to text for message %d: %v", originalMsgID, err2)
 				// Fall back to original text if conversion fails
 			} else if text != "" {
 				originalMsg.Text = text
@@ -195,9 +214,9 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 		originalMsg.Indexed = 0           // Reset indexed to 0 to trigger reindex when needed
 
 		// Add the message to the new session with all original fields preserved
-		_, err = mc.Add(r.Context(), db, *originalMsg)
-		if err != nil {
-			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to add message %d to new session", originalMsgID))
+		_, err2 = mc.Add(ctx, db, *originalMsg)
+		if err2 != nil {
+			err = fmt.Errorf("failed to add message %d to new session: %w", originalMsgID, err2)
 			return
 		}
 	}
@@ -208,16 +227,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal error, continue with response
 	}
 
-	// Return the new session link
-	response := map[string]string{
-		"status":      "success",
-		"sessionId":   newSessionId,
-		"sessionName": newSessionName,
-		"link":        fmt.Sprintf("/%s", newSessionId),
-		"message":     "Session extracted successfully",
-	}
-
-	sendJSONResponse(w, response)
+	return
 }
 
 // processCompressionRemapping processes compression messages and remaps their content
