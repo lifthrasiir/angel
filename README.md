@@ -7,7 +7,7 @@ An experimental web-based personal LLM agent based on [gemini-cli]. Your mileage
 ## Features
 
 * Model selection between Gemini 2.5 Flash and Pro among others
-  - Leverages the free tier available through Gemini Code Assist via Google
+  - Leverages the free tier available through Gemini Code Assist via Gemini CLI and Google Antigravity
   - OpenAI-compatible API support (Ollama, custom endpoints)
 * Multiple sessions and workspaces
   - Configurable system prompt per session

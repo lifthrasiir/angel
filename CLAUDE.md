@@ -20,20 +20,20 @@
 ## Go Backend
 
 - **Authentication (`src/gemini/code_assist.go`, `src/gemini/google_login.go`)**: Manages user authentication. It supports two main methods: Google OAuth for the free-tier Code Assist API and direct API key authentication for the Gemini API.
-- **Database (`src/database`)**: Uses SQLite (`angel.db`) for persistent storage of sessions, messages, and other configurations. The `messages` table utilizes `parent_message_id`, `chosen_next_id`, and `branch_id` to manage conversation threads and branching. The `blobs` table stores file data with automatic reference counting via triggers. Functions like `AddMessageToSession` and `UpdateMessageContent` are crucial for message management. The database includes full-text search capabilities for chat history and periodic WAL checkpointing for performance optimization.
-- **Chat Logic (`chat_*.go`)**: Includes `chat_branch.go`, `chat_command.go`, `chat_stream.go` and so on for better modularity.
-- **Gemini API Interaction (`src/gemini/gemini_api.go`, `llm.go`, `models.go`)**:
+- **Database (`src/internal/database`)**: Uses SQLite (`angel.db`) for persistent storage of sessions, messages, and other configurations. The `messages` table utilizes `parent_message_id`, `chosen_next_id`, and `branch_id` to manage conversation threads and branching. The `blobs` table stores file data with automatic reference counting via triggers. Functions like `AddMessageToSession` and `UpdateMessageContent` are crucial for message management. The database includes full-text search capabilities for chat history and periodic WAL checkpointing for performance optimization.
+- **Chat Logic (`src/internal/chat`)**: Includes `branch.go`, `command.go`, `stream.go` and so on for better modularity.
+- **Gemini API Interaction (`src/gemini/gemini_api.go`, `src/internal/llm/llm.go`, `src/internal/llm/models.go`)**:
   - Defines the `LLMProvider` interface in `llm.go` for abstracting interactions with various Large Language Models, including methods like `SendMessageStream` (for streaming responses), `GenerateContentOneShot` (for single-shot responses), `CountTokens` and `MaxTokens`.
   - `SessionParams` in `llm.go` holds all parameters for an LLM chat session, including `Contents`, `ModelName`, `SystemPrompt`, `IncludeThoughts`, `GenerationParams` (e.g., Temperature, TopK, TopP), and `ToolConfig`.
   - `src/gemini/types.go` strictly defines official Gemini API types such as `Content`, `Part`, `Schema`, etc.
   - The `CodeAssistClient` and a new `GeminiClient` in the `src/gemini/` directory facilitate communication with Google's APIs.
-- **Model Management (`models.go`, `models.json`)**: Model definitions (names, token limits, capabilities) are loaded at startup from `models.json`. The `Models` in `models.go` manages access to these model definitions.
-- **OpenAI-Compatible LLM Support (`openai.go`)**: The `OpenAIClient` implements the `LLMProvider` interface for OpenAI-compatible APIs, supporting streaming chat completions, function calling, and automatic context length probing for models like Ollama. The system can dynamically register multiple OpenAI models from database configurations.
+- **Model Management (`src/internal/llm/models.go`, `models.json`)**: Model definitions (names, token limits, capabilities) are loaded at startup from `models.json`. The `Models` in `models.go` manages access to these model definitions.
+- **OpenAI-Compatible LLM Support (`src/internal/llm/openai.go`)**: The `OpenAIClient` implements the `LLMProvider` interface for OpenAI-compatible APIs, supporting streaming chat completions, function calling, and automatic context length probing for models like Ollama. The system can dynamically register multiple OpenAI models from database configurations.
 - **Model Context Protocol (MCP) Management (`src/internal/tool/mcp.go`)**: The `MCPManager` in `mcp.go` handles connections to multiple MCP servers. It resolves naming conflicts between built-in and MCP tools by prefixing MCP tool names (e.g., `mcpName__toolName`) and dispatches tool calls via `DispatchCall`.
-- **Server-Sent Events (SSE) Implementation (`sse.go`)**: The `sseWriter` in `sse.go` streams real-time updates to clients. It defines various `EventType`s (e.g., `EventInitialState`, `EventThought`, `EventModelMessage`, `EventFunctionCall`, `EventFunctionResponse`, `EventComplete`, `EventSessionName`, `EventCumulTokenCount`, `EventError`) and supports broadcasting events to active SSE clients. The streaming protocol is a custom JSON stream format, intentionally avoiding the `event:` prefix.
-- **Tool Definition and Management (`src/internal/tool/tools.go`, `tools_*.go`)**: `tools.go` defines the core framework for tool management, including `Tools` registry and `Definition` (which specifies tool name, description, parameters, and handler). Built-in tools like `list_directory`, `read_file`, `web_fetch` (implemented in `tools_webfetch.go`), `subagent`, `generate_image` (implemented in `tools_subagent.go`), `search_chat` and `recall` (implemented in `tools_search_chat.go`) are managed here. `Tools.ForGemini` method prepares tools for the Gemini API, and `Tools.Call` method in `tools.go` dispatches calls to either local or MCP tools.
-- **Prompt Management (`prompts.go`, `prompts_builtin.go`)**: Uses Go templating for evaluating prompts via the `EvaluatePrompt` function in `prompts.go`. `prompts_builtin.go` defines built-in prompt templates for core agent behavior (`GetDefaultSystemPrompt`), conversation summarization (`GetCompressionPrompt`), and session name inference (`GetSessionNameInferencePrompts`).
-- **Project Entry Point (`main.go`)**: Initializes global state and services, including the database, MCP manager, and authentication. It also sets up the main HTTP router (`InitRouter`) and serves static files and SPA routes.
+- **Server-Sent Events (SSE) Implementation (`src/internal/server/sse.go`)**: The `sseWriter` in `sse.go` streams real-time updates to clients. It defines various `EventType`s (e.g., `EventInitialState`, `EventThought`, `EventModelMessage`, `EventFunctionCall`, `EventFunctionResponse`, `EventComplete`, `EventSessionName`, `EventCumulTokenCount`, `EventError`) and supports broadcasting events to active SSE clients. The streaming protocol is a custom JSON stream format, intentionally avoiding the `event:` prefix.
+- **Tool Definition and Management (`src/internal/tool`)**: `src/internal/tool/tools.go` defines the core framework for tool management, including `Tools` registry and `Definition` (which specifies tool name, description, parameters, and handler). Built-in tools like `list_directory`, `read_file`, `web_fetch` (`webfetch` subpackage), `subagent`, `generate_image` (`subagent` subpackage), `search_chat` and `recall` (`search_chat` subpackage) are managed here. `Tools.ForGemini` method prepares tools for the Gemini API, and `Tools.Call` method in `tools.go` dispatches calls to either local or MCP tools.
+- **Prompt Management (`src/internal/prompts`)**: Uses Go templating for evaluating prompts via the `EvaluatePrompt` function in `src/internal/prompts/prompts.go`. It also defines built-in prompt templates for core agent behavior, conversation summarization, and session name inference as Markdown files.
+- **Project Entry Point (`main.go` and `src/internal/server/main.go`)**: Initializes global state and services, including the database, MCP manager, and authentication. It also sets up the main HTTP router (`InitRouter`) and serves static files and SPA routes.
 
 ## React/TypeScript Frontend
 
@@ -56,7 +56,7 @@
 
 - **Language**: Code and comments are in English. User responses should be in the requested language (currently Korean).
 - **Build:** Always use `npm run build`. Consider using `npm run build-frontend` and `npm run build-backend` for faster iteration during development.
-- **Tests:** `npm run test` (backend-only). The backend tests cover various functionalities. Use `npm run test-backend -- -run <TestName>` for specific tests.
+- **Tests:** `npm run test` (or `npm run test-backend`) is MANDATORY, as `go test` won't do anything. The backend tests cover various functionalities. Use `npm run test-backend -- -run <TestName>` for specific tests.
 - **File Operations (`replace`, `write_file`)**:
   - `old_string`/`new_string` must exactly match, including all whitespace, indentation, and newlines.
   - For complex modifications, prefer `write_file` (read file, modify in memory, then overwrite).
@@ -104,7 +104,7 @@ This mechanism informs the LLM and the user about changes to the file system "ro
 ### Message Transmission and Streaming Endpoint Flow
 Angel utilizes Server-Sent Events (SSE) for real-time, interactive conversations with the LLM.
 
-- **SSE Backend (`sse.go`)**: The `sseWriter` manages SSE connections, sends specific events (`sendServerEvent`), and broadcasts events to all active connections for a given session (`broadcastToSession`).
+- **SSE Backend (`src/internal/server/sse.go`)**: The `sseWriter` manages SSE connections, sends specific events (`sendServerEvent`), and broadcasts events to all active connections for a given session (`broadcastToSession`).
 - **Frontend Hooks**: `useSessionLoader.ts` and `useMessageSending.ts` are crucial custom hooks that manage SSE connections on the client side and process incoming events to update the UI in real time.
 
 **Key Scenario Flows**:
