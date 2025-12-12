@@ -61,11 +61,13 @@ func NewTools() *Tools {
 	}
 }
 
-// Register registers a built-in tool
-func (t *Tools) Register(def Definition) {
+// Register registers built-in tools
+func (t *Tools) Register(defs ...Definition) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.builtinTools[def.Name] = def
+	for _, def := range defs {
+		t.builtinTools[def.Name] = def
+	}
 }
 
 // BuiltinNames returns a set of all built-in tool names

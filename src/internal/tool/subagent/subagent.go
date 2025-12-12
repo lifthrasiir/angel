@@ -1,4 +1,4 @@
-package main
+package subagent
 
 import (
 	"context"
@@ -561,52 +561,54 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	return tool.HandlerResults{Value: result, Attachments: generatedAttachments}, nil
 }
 
-// registerSubagentTools registers subagent and image generation tools
-func registerSubagentTools(tools *tool.Tools) {
-	tools.Register(tool.Definition{
-		Name:        "subagent",
-		Description: "Spawns a new subagent session with a given system prompt, or sends a text message to an existing subagent session (identified by its session-local ID) and returns its text response. Exactly one of 'subagent_id' or 'system_prompt' must be provided. 'subagent_id' is returned only when 'system_prompt' is provided.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"subagent_id": {
-					Type:        TypeString,
-					Description: "The session-local ID of the subagent session to interact with. Required if 'system_prompt' is not provided.",
-				},
-				"system_prompt": {
-					Type:        TypeString,
-					Description: "The system prompt for the new subagent session. Required if 'subagent_id' is not provided.",
-				},
-				"text": {
-					Type:        TypeString,
-					Description: "The text message to send to the subagent.",
-				},
+var subagentTool = tool.Definition{
+	Name:        "subagent",
+	Description: "Spawns a new subagent session with a given system prompt, or sends a text message to an existing subagent session (identified by its session-local ID) and returns its text response. Exactly one of 'subagent_id' or 'system_prompt' must be provided. 'subagent_id' is returned only when 'system_prompt' is provided.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"subagent_id": {
+				Type:        TypeString,
+				Description: "The session-local ID of the subagent session to interact with. Required if 'system_prompt' is not provided.",
 			},
-			Required: []string{"text"},
+			"system_prompt": {
+				Type:        TypeString,
+				Description: "The system prompt for the new subagent session. Required if 'subagent_id' is not provided.",
+			},
+			"text": {
+				Type:        TypeString,
+				Description: "The text message to send to the subagent.",
+			},
 		},
-		Handler: SubagentTool,
-	})
+		Required: []string{"text"},
+	},
+	Handler: SubagentTool,
+}
 
-	tools.Register(tool.Definition{
-		Name:        "generate_image",
-		Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). Returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking, and the generated images are always returned as attachments for direct assessment.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"text": {
-					Type:        TypeString,
-					Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied. Do not include image hashes in the text; use the input_hashes parameter instead.",
-				},
-				"input_hashes": {
-					Type:        TypeArray,
-					Description: "Array of SHA-512/256 hashes of input images to use for generation or as a base for modifications.",
-					Items: &Schema{
-						Type: TypeString,
-					},
+var generateImageTool = tool.Definition{
+	Name:        "generate_image",
+	Description: "Generates new images based on a text prompt. It can also be used for general image editing tasks by providing an `input_hashes` and a `text` prompt describing the desired modifications (e.g., 'change background to white', 'apply a sepia filter'). Returns the SHA-512/256 hash(es) of the generated image(s) for internal tracking, and the generated images are always returned as attachments for direct assessment.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"text": {
+				Type:        TypeString,
+				Description: "The text prompt for image generation, preferably in English. This prompt should clearly describe the desired image or the modifications to be applied. Do not include image hashes in the text; use the input_hashes parameter instead.",
+			},
+			"input_hashes": {
+				Type:        TypeArray,
+				Description: "Array of SHA-512/256 hashes of input images to use for generation or as a base for modifications.",
+				Items: &Schema{
+					Type: TypeString,
 				},
 			},
-			Required: []string{"text"},
 		},
-		Handler: GenerateImageTool,
-	})
+		Required: []string{"text"},
+	},
+	Handler: GenerateImageTool,
+}
+
+var AllTools = []tool.Definition{
+	subagentTool,
+	generateImageTool,
 }

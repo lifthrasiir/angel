@@ -11,5 +11,11 @@ use (
 	./src/internal/llm
 	./src/internal/prompts
 	./src/internal/tool
+	./src/internal/tool/file
+	./src/internal/tool/search_chat
+	./src/internal/tool/shell
+	./src/internal/tool/subagent
+	./src/internal/tool/todo
+	./src/internal/tool/webfetch
 	./src/internal/types
 )

@@ -27,29 +27,24 @@ import (
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/tool"
+	"github.com/lifthrasiir/angel/internal/tool/file"
+	"github.com/lifthrasiir/angel/internal/tool/search_chat"
+	"github.com/lifthrasiir/angel/internal/tool/shell"
+	"github.com/lifthrasiir/angel/internal/tool/subagent"
+	"github.com/lifthrasiir/angel/internal/tool/todo"
+	"github.com/lifthrasiir/angel/internal/tool/webfetch"
 )
 
 const dbPath = "angel.db"
 
 // initTools initializes all built-in tools
 func initTools(tools *tool.Tools) {
-	registerFSTools(tools)
-	registerWebFetchTools(tools)
-	registerTodoTools(tools)
-	registerShellTools(tools)
-	registerSearchChatTools(tools)
-	registerSubagentTools(tools)
-}
-
-// determineSandboxBaseDir determines the base directory for session sandboxes
-// based on the presence of go.mod file in the current directory
-func determineSandboxBaseDir() string {
-	if _, err := os.Stat("go.mod"); err == nil {
-		// go.mod exists in current directory, use _angel-data/sessions
-		return "_angel-data/sessions"
-	}
-	// No go.mod found, use angel-data/sessions
-	return "angel-data/sessions"
+	tools.Register(file.AllTools...)
+	tools.Register(search_chat.AllTools...)
+	tools.Register(shell.AllTools...)
+	tools.Register(subagent.AllTools...)
+	tools.Register(todo.AllTools...)
+	tools.Register(webfetch.AllTools...)
 }
 
 //go:embed frontend/dist
@@ -98,7 +93,7 @@ func main() {
 	defer db.Close()
 
 	// Start the shell command manager
-	StartShellCommandManager(db) // Pass the database connection
+	shell.StartShellCommandManager(db) // Pass the database connection
 
 	// Start WAL checkpoint manager
 	database.StartWALCheckpointManager(db)

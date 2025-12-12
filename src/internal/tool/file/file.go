@@ -1,99 +1,20 @@
-package main
+package file
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/lifthrasiir/angel/editor"
-	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
-
-// sessionFSEntry holds a SessionFS instance and its reference count.
-type sessionFSEntry struct {
-	sessionFS *filesystem.SessionFS
-	refCount  int
-}
-
-// sessionFSMap stores SessionFS instances per session ID with reference counts.
-var sessionFSMap = make(map[string]*sessionFSEntry)
-var sessionFSMutex sync.Mutex // Mutex to protect sessionFSMap
-
-// getSessionFS retrieves or creates a SessionFS instance for a given session ID.
-// It increments the reference count for the SessionFS instance.
-func getSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS, error) { // Modified signature
-	sessionFSMutex.Lock()
-	defer sessionFSMutex.Unlock()
-
-	entry, ok := sessionFSMap[sessionId]
-	if !ok {
-		// Determine the base directory for session sandboxes
-		baseDir := determineSandboxBaseDir()
-
-		sf, err := filesystem.NewSessionFS(sessionId, baseDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SessionFS for session %s: %w", sessionId, err)
-		}
-
-		// Get DB from context
-		db, err := database.FromContext(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		// Get the session environment to retrieve roots
-		roots, _, err := database.GetLatestSessionEnv(db, sessionId)
-		if err != nil {
-			log.Printf("getSessionFS: Failed to get session %s to retrieve roots: %v", sessionId, err)
-			return nil, fmt.Errorf("failed to get session roots for session %s: %w", sessionId, err)
-		}
-
-		// Set the roots for the new SessionFS instance
-		if err := sf.SetRoots(roots); err != nil {
-			return nil, fmt.Errorf("failed to set roots for SessionFS for session %s: %w", sessionId, err)
-		}
-
-		entry = &sessionFSEntry{
-			sessionFS: sf,
-			refCount:  0, // Will be incremented below
-		}
-		sessionFSMap[sessionId] = entry
-	}
-
-	entry.refCount++
-	return entry.sessionFS, nil
-}
-
-// releaseSessionFS decrements the reference count for a SessionFS instance.
-// If the reference count drops to 0, the SessionFS instance is closed and removed from the map.
-func releaseSessionFS(sessionId string) {
-	sessionFSMutex.Lock()
-	defer sessionFSMutex.Unlock()
-
-	entry, ok := sessionFSMap[sessionId]
-	if !ok {
-		log.Printf("Attempted to release SessionFS for non-existent session %s", sessionId)
-		return
-	}
-
-	entry.refCount--
-
-	if entry.refCount <= 0 {
-		if err := entry.sessionFS.Close(); err != nil {
-			log.Printf("Error closing SessionFS for session %s: %v", sessionId, err)
-		}
-		delete(sessionFSMap, sessionId)
-	}
-}
 
 // ReadFileTool handles the read_file tool call.
 func ReadFileTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
@@ -105,11 +26,11 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params tool.
 		return tool.HandlerResults{}, fmt.Errorf("invalid file_path argument for read_file")
 	}
 
-	sf, err := getSessionFS(ctx, params.SessionId)
+	sf, err := env.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for read_file: %w", err)
 	}
-	defer releaseSessionFS(params.SessionId)
+	defer env.ReleaseSessionFS(params.SessionId)
 
 	content, err := sf.ReadFile(absolutePath)
 	if err != nil {
@@ -195,11 +116,11 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params tool
 		}
 	}
 
-	sf, err := getSessionFS(ctx, params.SessionId)
+	sf, err := env.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for write_file: %w", err)
 	}
-	defer releaseSessionFS(params.SessionId)
+	defer env.ReleaseSessionFS(params.SessionId)
 
 	// 1. Read old content
 	oldContentStr := ""
@@ -235,11 +156,11 @@ func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params 
 		return tool.HandlerResults{}, fmt.Errorf("invalid path argument for list_directory")
 	}
 
-	sf, err := getSessionFS(ctx, params.SessionId)
+	sf, err := env.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for list_directory: %w", err)
 	}
-	defer releaseSessionFS(params.SessionId)
+	defer env.ReleaseSessionFS(params.SessionId)
 
 	entries, err := sf.ReadDir(path)
 	if err != nil {
@@ -258,57 +179,60 @@ func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params 
 	return tool.HandlerResults{Value: map[string]interface{}{"files": fileNames}}, nil
 }
 
-// registerFSTools registers filesystem-related tools
-func registerFSTools(tools *tool.Tools) {
-	tools.Register(tool.Definition{
-		Name:        "list_directory",
-		Description: "Lists a directory. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"path": {
-					Type:        TypeString,
-					Description: "The path to the directory to list. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
-				},
+var listDirectoryTool = tool.Definition{
+	Name:        "list_directory",
+	Description: "Lists a directory. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"path": {
+				Type:        TypeString,
+				Description: "The path to the directory to list. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
 			},
-			Required: []string{"path"},
 		},
-		Handler: ListDirectoryTool,
-	})
+		Required: []string{"path"},
+	},
+	Handler: ListDirectoryTool,
+}
 
-	tools.Register(tool.Definition{
-		Name:        "read_file",
-		Description: "Reads a file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`. Image, audio, video and PDF files are automatically converted to a readable format if possible.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"file_path": {
-					Type:        TypeString,
-					Description: "The path to the file to read. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
-				},
+var readFileTool = tool.Definition{
+	Name:        "read_file",
+	Description: "Reads a file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md`. Image, audio, video and PDF files are automatically converted to a readable format if possible.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"file_path": {
+				Type:        TypeString,
+				Description: "The path to the file to read. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
 			},
-			Required: []string{"file_path"},
 		},
-		Handler: ReadFileTool,
-	})
+		Required: []string{"file_path"},
+	},
+	Handler: ReadFileTool,
+}
 
-	tools.Register(tool.Definition{
-		Name:        "write_file",
-		Description: "Writes content to a specified file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md` to keep track of things. Any updates return a unified diff, which is crucial for verifying your edits and, more importantly, implicitly reveals any unexpected external modifications, allowing for swift detection and adaptation.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"file_path": {
-					Type:        TypeString,
-					Description: "The path to the file to write to. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
-				},
-				"content": {
-					Type:        TypeString,
-					Description: "The content to write to the file.",
-				},
+var writeFileTool = tool.Definition{
+	Name:        "write_file",
+	Description: "Writes content to a specified file. Can be also used to access the session-local anonymous working directory, which is useful for e.g. storing `NOTES.md` to keep track of things. Any updates return a unified diff, which is crucial for verifying your edits and, more importantly, implicitly reveals any unexpected external modifications, allowing for swift detection and adaptation.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"file_path": {
+				Type:        TypeString,
+				Description: "The path to the file to write to. Both absolute and relative paths are supported. Relative paths are resolved against the session's anonymous working directory.",
 			},
-			Required: []string{"file_path", "content"},
+			"content": {
+				Type:        TypeString,
+				Description: "The content to write to the file.",
+			},
 		},
-		Handler: WriteFileTool,
-	})
+		Required: []string{"file_path", "content"},
+	},
+	Handler: WriteFileTool,
+}
+
+var AllTools = []tool.Definition{
+	listDirectoryTool,
+	readFileTool,
+	writeFileTool,
 }

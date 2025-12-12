@@ -203,7 +203,7 @@ func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sandboxBaseDir := determineSandboxBaseDir()
+	sandboxBaseDir := env.SandboxBaseDir()
 	if err := database.DeleteSession(db, sessionId, sandboxBaseDir); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete session %s", sessionId))
 		return

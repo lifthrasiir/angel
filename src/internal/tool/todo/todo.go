@@ -1,4 +1,4 @@
-package main
+package todo
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/tool"
 )
 
@@ -84,11 +85,11 @@ var validPriorities = map[string]bool{
 
 // WriteTodoTool handles the write_todo tool call.
 func WriteTodoTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
-	sf, err := getSessionFS(ctx, params.SessionId)
+	sf, err := env.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for write_todo: %w", err)
 	}
-	defer releaseSessionFS(params.SessionId)
+	defer env.ReleaseSessionFS(params.SessionId)
 
 	action, ok := args["action"].(string)
 	if !ok || action == "" {
@@ -224,40 +225,41 @@ func WriteTodoTool(ctx context.Context, args map[string]interface{}, params tool
 	}
 }
 
-// registerTodoTools registers todo-related tools
-func registerTodoTools(tools *tool.Tools) {
-	tools.Register(tool.Definition{
-		Name:        "write_todo",
-		Description: "Manages the TODO list (available as `" + todoFilePath + "` at the anonymous working directory). Can add new TODOs, update status, priority, content, delete TODOs, or list all TODOs.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"action": {
-					Type:        TypeString,
-					Description: "Action to perform: \"add\", \"update\", \"delete\", or \"list\".",
-					Enum:        []string{"add", "update", "delete", "list"},
-				},
-				"id": {
-					Type:        TypeString,
-					Description: "ID of the TODO item. Required for 'update' and 'delete' actions.",
-				},
-				"content": {
-					Type:        TypeString,
-					Description: "Content of the TODO item. Required for 'add' action.",
-				},
-				"status": {
-					Type:        TypeString,
-					Description: "Status of the TODO item: 'pending', 'in_progress', or 'completed'.",
-					Enum:        []string{"pending", "in_progress", "completed"},
-				},
-				"priority": {
-					Type:        TypeString,
-					Description: "Priority of the TODO item: 'low', 'medium', or 'high'.",
-					Enum:        []string{"low", "medium", "high"},
-				},
+var writeTodoTool = tool.Definition{
+	Name:        "write_todo",
+	Description: "Manages the TODO list (available as `" + todoFilePath + "` at the anonymous working directory). Can add new TODOs, update status, priority, content, delete TODOs, or list all TODOs.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"action": {
+				Type:        TypeString,
+				Description: "Action to perform: \"add\", \"update\", \"delete\", or \"list\".",
+				Enum:        []string{"add", "update", "delete", "list"},
 			},
-			Required: []string{"action"},
+			"id": {
+				Type:        TypeString,
+				Description: "ID of the TODO item. Required for 'update' and 'delete' actions.",
+			},
+			"content": {
+				Type:        TypeString,
+				Description: "Content of the TODO item. Required for 'add' action.",
+			},
+			"status": {
+				Type:        TypeString,
+				Description: "Status of the TODO item: 'pending', 'in_progress', or 'completed'.",
+				Enum:        []string{"pending", "in_progress", "completed"},
+			},
+			"priority": {
+				Type:        TypeString,
+				Description: "Priority of the TODO item: 'low', 'medium', or 'high'.",
+				Enum:        []string{"low", "medium", "high"},
+			},
 		},
-		Handler: WriteTodoTool,
-	})
+		Required: []string{"action"},
+	},
+	Handler: WriteTodoTool,
+}
+
+var AllTools = []tool.Definition{
+	writeTodoTool,
 }

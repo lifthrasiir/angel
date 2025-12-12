@@ -1,4 +1,4 @@
-package main
+package shell
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -93,11 +94,11 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		return tool.HandlerResults{}, err
 	}
 
-	sfs, err := getSessionFS(ctx, params.SessionId) // Get SessionFS from tools_fs.go
+	sfs, err := env.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS: %w", err)
 	}
-	defer releaseSessionFS(params.SessionId) // Release SessionFS reference
+	defer env.ReleaseSessionFS(params.SessionId)
 
 	if err := tool.EnsureKnownKeys("run_shell_command", args, "command", "directory"); err != nil {
 		return tool.HandlerResults{}, err
@@ -470,57 +471,60 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	}}, nil
 }
 
-// registerShellTools registers shell command tools
-func registerShellTools(tools *tool.Tools) {
-	tools.Register(tool.Definition{
-		Name:        "run_shell_command",
-		Description: "Executes a shell command asynchronously. It returns a command ID and the current status of the command. If the command completes immediately, its status will be 'completed' and full output will be included. **CRITICAL: If the command's status is 'running', the agent *must immediately and continuously* monitor its final outcome (status, output, and exit code) by calling `poll_shell_command` with the returned command ID. This polling *must* continue without interruption until the command explicitly reaches a 'completed' or 'failed' state, at which point the agent will notify the user.**",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"command": {
-					Type:        TypeString,
-					Description: "The shell command to execute.",
-				},
-				"directory": {
-					Type:        TypeString,
-					Description: "Optional: The directory to run the command in. Can be absolute or relative to the anonymous root. If omitted, defaults to the anonymous root.",
-				},
+var runShellCommandTool = tool.Definition{
+	Name:        "run_shell_command",
+	Description: "Executes a shell command asynchronously. It returns a command ID and the current status of the command. If the command completes immediately, its status will be 'completed' and full output will be included. **CRITICAL: If the command's status is 'running', the agent *must immediately and continuously* monitor its final outcome (status, output, and exit code) by calling `poll_shell_command` with the returned command ID. This polling *must* continue without interruption until the command explicitly reaches a 'completed' or 'failed' state, at which point the agent will notify the user.**",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"command": {
+				Type:        TypeString,
+				Description: "The shell command to execute.",
 			},
-			Required: []string{"command"},
+			"directory": {
+				Type:        TypeString,
+				Description: "Optional: The directory to run the command in. Can be absolute or relative to the anonymous root. If omitted, defaults to the anonymous root.",
+			},
 		},
-		Handler: RunShellCommandTool,
-	})
+		Required: []string{"command"},
+	},
+	Handler: RunShellCommandTool,
+}
 
-	tools.Register(tool.Definition{
-		Name:        "poll_shell_command",
-		Description: "Polls the status, output (stdout/stderr), and exit code of a previously run shell command using its command ID. This is how the final results of a command initiated by `run_shell_command` are retrieved if it did not complete immediately upon execution.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"command_id": {
-					Type:        TypeString,
-					Description: "The ID of the command to poll.",
-				},
+var pollShellCommandTool = tool.Definition{
+	Name:        "poll_shell_command",
+	Description: "Polls the status, output (stdout/stderr), and exit code of a previously run shell command using its command ID. This is how the final results of a command initiated by `run_shell_command` are retrieved if it did not complete immediately upon execution.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"command_id": {
+				Type:        TypeString,
+				Description: "The ID of the command to poll.",
 			},
-			Required: []string{"command_id"},
 		},
-		Handler: PollShellCommandTool,
-	})
+		Required: []string{"command_id"},
+	},
+	Handler: PollShellCommandTool,
+}
 
-	tools.Register(tool.Definition{
-		Name:        "kill_shell_command",
-		Description: "Terminates a running shell command using its command ID.",
-		Parameters: &Schema{
-			Type: TypeObject,
-			Properties: map[string]*Schema{
-				"command_id": {
-					Type:        TypeString,
-					Description: "The ID of the command to kill.",
-				},
+var killShellCommandTool = tool.Definition{
+	Name:        "kill_shell_command",
+	Description: "Terminates a running shell command using its command ID.",
+	Parameters: &Schema{
+		Type: TypeObject,
+		Properties: map[string]*Schema{
+			"command_id": {
+				Type:        TypeString,
+				Description: "The ID of the command to kill.",
 			},
-			Required: []string{"command_id"},
 		},
-		Handler: KillShellCommandTool,
-	})
+		Required: []string{"command_id"},
+	},
+	Handler: KillShellCommandTool,
+}
+
+var AllTools = []tool.Definition{
+	runShellCommandTool,
+	pollShellCommandTool,
+	killShellCommandTool,
 }

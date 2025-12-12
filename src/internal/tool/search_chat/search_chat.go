@@ -1,4 +1,4 @@
-package main
+package search_chat
 
 import (
 	"context"
@@ -202,42 +202,44 @@ func RecallTool(ctx context.Context, args map[string]interface{}, params tool.Ha
 	}, nil
 }
 
-// registerSearchChatTools registers search and recall tools
-func registerSearchChatTools(tools *tool.Tools) {
-	tools.Register(tool.Definition{
-		Name:        "search_chat",
-		Description: "Search through chat history using keywords. Returns recent matching messages with context excerpts.",
-		Parameters: &Schema{
-			Type:        TypeObject,
-			Description: "Search for messages containing specific keywords",
-			Properties: map[string]*Schema{
-				"keywords": {
-					Type:        TypeString,
-					Description: "Keywords to search for in chat messages",
-				},
+var searchChatTool = tool.Definition{
+	Name:        "search_chat",
+	Description: "Search through chat history using keywords. Returns recent matching messages with context excerpts.",
+	Parameters: &Schema{
+		Type:        TypeObject,
+		Description: "Search for messages containing specific keywords",
+		Properties: map[string]*Schema{
+			"keywords": {
+				Type:        TypeString,
+				Description: "Keywords to search for in chat messages",
 			},
-			Required: []string{"keywords"},
 		},
-		Handler: SearchChatTool,
-	})
+		Required: []string{"keywords"},
+	},
+	Handler: SearchChatTool,
+}
 
-	tools.Register(tool.Definition{
-		Name: "recall",
-		Description: `**Retrieves content for binary hashes that are NOT directly rendered or explicitly described in the chat.**
+var recallTool = tool.Definition{
+	Name: "recall",
+	Description: `**Retrieves content for binary hashes that are NOT directly rendered or explicitly described in the chat.**
 When binary content (e.g., images, audio, PDFs) is provided directly in the chat with a hash reference (e.g., '[Binary with hash ... follows:]' immediately followed by the rendered content), you can directly perceive and understand its details. In such cases, 'recall' is generally NOT required for basic comprehension.
 However, 'recall' is **ESSENTIAL** when you encounter messages explicitly stating that a binary with a given hash is **UNPROCESSED** (e.g., 'Binary with hash xyz is currently **UNPROCESSED**') and its content has not been rendered or described for you. In these situations, you **MUST** use 'recall' to access the content's details for internal analysis and understanding.
 This tool recovers previously un-perceived or raw data from SHA-512/256 hashes, enabling you to accurately comprehend content details, formulate precise responses, or perform further processing.`,
-		Parameters: &Schema{
-			Type:        TypeObject,
-			Description: "Recall unprocessed binary content for internal AI processing",
-			Properties: map[string]*Schema{
-				"query": {
-					Type:        TypeString,
-					Description: "The SHA-512/256 hash of the unprocessed binary content required for your internal comprehension and subsequent actions.",
-				},
+	Parameters: &Schema{
+		Type:        TypeObject,
+		Description: "Recall unprocessed binary content for internal AI processing",
+		Properties: map[string]*Schema{
+			"query": {
+				Type:        TypeString,
+				Description: "The SHA-512/256 hash of the unprocessed binary content required for your internal comprehension and subsequent actions.",
 			},
-			Required: []string{"query"},
 		},
-		Handler: RecallTool,
-	})
+		Required: []string{"query"},
+	},
+	Handler: RecallTool,
+}
+
+var AllTools = []tool.Definition{
+	searchChatTool,
+	recallTool,
 }

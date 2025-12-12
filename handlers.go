@@ -727,12 +727,12 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the SessionFS instance for this session
-	sessionFS, err := getSessionFS(r.Context(), sessionId)
+	sessionFS, err := env.GetSessionFS(r.Context(), sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get SessionFS for session %s", sessionId))
 		return
 	}
-	defer releaseSessionFS(sessionId)
+	defer env.ReleaseSessionFS(sessionId)
 
 	// Get current roots before update for EnvChanged calculation
 	oldRoots := sessionFS.Roots()
