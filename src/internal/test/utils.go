@@ -1,10 +1,11 @@
-package main
+package test
 
 import (
 	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
 	"io"
 	"iter"
@@ -20,6 +21,7 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/server"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -43,11 +45,11 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 
 	// Initialize tools registry
 	tools := tool.NewTools()
-	initTools(tools)
+	server.InitTools(tools)
 	tools.InitMCPManager(testDB)
 
 	// Initialize Models by loading models.json
-	modelsData, err := os.ReadFile("models.json")
+	modelsData, err := os.ReadFile("../../../models.json")
 	if err != nil {
 		t.Fatalf("Failed to read models.json: %v", err)
 	}
@@ -80,8 +82,8 @@ func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
 
 	// Create a new router for testing
 	router := mux.NewRouter()
-	router.Use(makeContextMiddleware(testDB, models, geminiAuth, tools))
-	InitRouter(router)
+	router.Use(server.MakeContextMiddleware(testDB, models, geminiAuth, tools))
+	server.InitRouter(router, embed.FS{})
 
 	// Ensure the database connection is closed after the test
 	t.Cleanup(func() {

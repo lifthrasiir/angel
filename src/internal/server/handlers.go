@@ -1,8 +1,9 @@
-package main
+package server
 
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -126,7 +127,8 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Account logged out successfully")
 }
-func handleSessionPage(w http.ResponseWriter, r *http.Request) {
+
+func handleSessionPage(embeddedFiles embed.FS, w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
 	vars := mux.Vars(r)
@@ -148,7 +150,7 @@ func handleSessionPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serveSPAIndex(w, r)
+	serveSPAIndex(embeddedFiles, w, r)
 }
 
 // listAccountsHandler returns a list of all OAuth accounts (geminicli, antigravity, etc.) associated with the user

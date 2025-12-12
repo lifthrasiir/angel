@@ -10,6 +10,8 @@ use (
 	./src/internal/env
 	./src/internal/llm
 	./src/internal/prompts
+	./src/internal/server
+	./src/internal/test
 	./src/internal/tool
 	./src/internal/tool/file
 	./src/internal/tool/search_chat

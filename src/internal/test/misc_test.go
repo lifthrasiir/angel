@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/llm"
+	"github.com/lifthrasiir/angel/internal/server"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -101,7 +102,7 @@ func TestGetMCPConfigsHandler(t *testing.T) {
 
 	rr := testRequest(t, router, "GET", "/api/mcp/configs", nil, http.StatusOK)
 
-	var configs []FrontendMCPConfig
+	var configs []server.FrontendMCPConfig
 	err := json.Unmarshal(rr.Body.Bytes(), &configs)
 	if err != nil {
 		t.Fatalf("could not unmarshal response: %v", err)
