@@ -813,6 +813,28 @@ func (r *Models) SetAngelEvalProvider(provider LLMProvider) {
 	defer r.mutex.Unlock()
 
 	r.providers[AngelEvalModelName] = provider
+
+	// Create the angel-eval model
+	angelEvalModel := &Model{
+		Name:               AngelEvalModelName,
+		Providers:          []string{},
+		ModelName:          AngelEvalModelName,
+		GenParams:          GenerationParams{},
+		Fallback:           nil,
+		Subagents:          make(map[string]*Model),
+		IgnoreSystemPrompt: false,
+		ThoughtEnabled:     true,
+		ToolSupported:      true,
+		ResponseModalities: []string{"TEXT", "IMAGE"},
+		MaxTokens:          1024,
+		InheritanceChain:   []string{AngelEvalModelName},
+	}
+
+	// Add to builtinModels
+	r.builtinModels[AngelEvalModelName] = angelEvalModel
+
+	// Set image_generation to reference itself (self-reference)
+	angelEvalModel.Subagents[SubagentImageGenerationTask] = angelEvalModel
 }
 
 // ResetGeminiProvider creates and sets the Gemini provider.

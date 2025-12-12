@@ -2,11 +2,16 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"iter"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -176,6 +181,128 @@ func (p *AngelEvalProvider) CountTokens(ctx context.Context, modelName string, c
 // MaxTokens is a placeholder for angel-eval.
 func (p *AngelEvalProvider) MaxTokens(modelName string) int {
 	return 1024 // A reasonable default for a simple eval model
+}
+
+// generateTestImage creates a test image based on seed string
+func generateTestImage(seed string) ([]byte, error) {
+	// Create a 512x512 image
+	img := image.NewRGBA(image.Rect(0, 0, 512, 512))
+
+	// Generate seed from string
+	hash := hashString(seed)
+
+	// Create gradient background based on hash
+	for y := range 512 {
+		for x := range 512 {
+			r := uint8((hash*x/50 + hash*y/50) % 256)
+			g := uint8((hash*x/100 + hash*y/100 + 50) % 256)
+			b := uint8((hash + x*y/1000) % 256)
+			img.Set(x, y, color.RGBA{r, g, b, 255})
+		}
+	}
+
+	// Add patterns based on seed
+	bounds := img.Bounds()
+	centerX, centerY := bounds.Dx()/2, bounds.Dy()/2
+	numElements := (len(seed) % 5) + 3
+	switch hash % 4 {
+	case 0:
+		for i := range numElements {
+			radius := 20 + (i*30 + hash%20)
+			colorVal := uint8((hash + i*50) % 256)
+			for y := range bounds.Dy() {
+				for x := range bounds.Dx() {
+					dx := x - centerX
+					dy := y - centerY
+					distance := math.Sqrt(float64(dx*dx + dy*dy))
+					if math.Abs(distance-float64(radius)) < 3 {
+						img.Set(x, y, color.RGBA{colorVal, 255 - colorVal, 128, 255})
+					}
+				}
+			}
+		}
+	case 1:
+		for i := range numElements {
+			w := 50 + (hash+i*30)%100
+			h := 50 + (hash+i*40)%100
+			x := centerX - w/2 + (hash*i)%50
+			y := centerY - h/2 + (hash*i*2)%50
+			colorVal := uint8((hash + i*60) % 256)
+			for dy := range h {
+				for dx := range w {
+					px, py := x+dx, y+dy
+					if px >= 0 && px < bounds.Dx() && py >= 0 && py < bounds.Dy() {
+						if dx < 3 || dx >= w-3 || dy < 3 || dy >= h-3 {
+							img.Set(px, py, color.RGBA{colorVal, 255 - colorVal, 128, 255})
+						}
+					}
+				}
+			}
+		}
+	case 2:
+		for i := range numElements {
+			amplitude := 20 + (hash+i*15)%30
+			colorVal := uint8((hash + i*70) % 256)
+			offset := (hash * i * 10) % 100
+			for x := range bounds.Dx() {
+				y := centerY + offset + int(float64(amplitude)*math.Sin(float64(x)/60.0+float64(hash*i)/60.0))
+				if y >= 0 && y < bounds.Dy() {
+					for thickness := -2; thickness <= 2; thickness++ {
+						ny := y + thickness
+						if ny >= 0 && ny < bounds.Dy() {
+							img.Set(x, ny, color.RGBA{colorVal, 255 - colorVal, 128, 255})
+						}
+					}
+				}
+			}
+		}
+	case 3:
+		colorVal := uint8(hash % 256)
+		for angle := 0; angle < 720; angle += 8 {
+			r := angle / 6
+			x := centerX + int(float64(r)*math.Cos(float64(angle+hash)*math.Pi/180))
+			y := centerY + int(float64(r)*math.Sin(float64(angle+hash)*math.Pi/180))
+			if x >= 0 && x < bounds.Dx() && y >= 0 && y < bounds.Dy() {
+				for thickness := -1; thickness <= 1; thickness++ {
+					for t := -1; t <= 1; t++ {
+						img.Set(x+thickness, y+t, color.RGBA{colorVal, 255 - colorVal, 128, 255})
+					}
+				}
+			}
+		}
+	}
+	if len(seed) > 0 {
+		firstChar := int(seed[0])
+		patternSize := 15 + (firstChar % 20)
+		sigColorVal := uint8((hash + firstChar) % 256)
+		for y := 0; y < patternSize && y < img.Bounds().Dy(); y++ {
+			for x := 0; x < patternSize && x < img.Bounds().Dx(); x++ {
+				if ((x+y)+(firstChar%2))%2 == 0 {
+					img.Set(x, y, color.RGBA{sigColorVal, sigColorVal / 2, 255 - sigColorVal, 200})
+				}
+			}
+		}
+	}
+
+	// Convert to bytes
+	var buf strings.Builder
+	err := png.Encode(&buf, img)
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(buf.String()), nil
+}
+
+func hashString(s string) int {
+	hash := 0
+	for i, c := range s {
+		hash = hash*31 + int(c) + i
+	}
+	if hash < 0 {
+		hash = -hash
+	}
+	return hash
 }
 
 // Helper functions for random generation
@@ -376,6 +503,41 @@ func parseAndExecute(ctx context.Context, input string, savedState *EvalState, y
 				case <-ctx.Done():
 					return ctx.Err() // Context was cancelled
 				}
+			case "image":
+				// Pop seed string
+				val, err := st.pop()
+				if err != nil {
+					return err
+				}
+				seedStr, ok := val.(string)
+				if !ok {
+					return fmt.Errorf("type mismatch: expected string for 'image' seed, got %T", val)
+				}
+
+				// Generate image based on seed
+				imageData, err := generateTestImage(seedStr)
+				if err != nil {
+					return fmt.Errorf("failed to generate image: %v", err)
+				}
+
+				// Convert image to base64
+				imageBase64 := base64.StdEncoding.EncodeToString(imageData)
+
+				// Create hash from image data (SHA-512/256)
+				hash := sha256.Sum256(imageData)
+				hashStr := fmt.Sprintf("%x", hash[:32]) // Use first 32 bytes for 256-bit hash
+
+				// Generate the image as InlineData part
+				if !yieldPart(Part{InlineData: &InlineData{
+					MimeType: "image/png",
+					Data:     imageBase64,
+				}}) {
+					return nil // Stop if yield returns false
+				}
+
+				// Also add hash to stack for potential concatenation
+				st.push(hashStr)
+
 			case "call":
 				// Pop args JSON string
 				argsVal, err := st.pop()
