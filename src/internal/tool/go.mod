@@ -1,6 +1,6 @@
 module github.com/lifthrasiir/angel/internal/tool
 
-go 1.24.4
+go 1.25
 
 require (
 	github.com/modelcontextprotocol/go-sdk v0.2.0
