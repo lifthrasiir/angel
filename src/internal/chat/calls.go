@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -50,24 +51,41 @@ func startCall(sessionId string, cancelFunc context.CancelFunc) error {
 	return nil
 }
 
-// CancelCall cancels an active API call and updates its status.
+// CancelCall cancels an active API call and all its subagent calls.
 func CancelCall(sessionId string) error {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()
 
-	call, ok := activeCalls[sessionId]
-	if !ok {
-		return fmt.Errorf("no active call found for session ID: %s", sessionId)
+	var cancelledCalls []string
+
+	// First, cancel the main session if it exists
+	if call, ok := activeCalls[sessionId]; ok {
+		if call.Status == CallStatusRunning {
+			call.CancelFunc()
+			call.Status = CallStatusCancelled
+			now := time.Now()
+			call.EndTime = &now
+			cancelledCalls = append(cancelledCalls, sessionId)
+		}
 	}
 
-	if call.Status == CallStatusRunning {
-		call.CancelFunc()
-		call.Status = CallStatusCancelled
-		now := time.Now()
-		call.EndTime = &now
-		return nil
+	// Then, cancel all subagent calls (sessions that start with sessionId + ".")
+	subsessionPrefix := sessionId + "."
+	for subsessionId, call := range activeCalls {
+		if call.Status == CallStatusRunning && strings.HasPrefix(subsessionId, subsessionPrefix) {
+			call.CancelFunc()
+			call.Status = CallStatusCancelled
+			now := time.Now()
+			call.EndTime = &now
+			cancelledCalls = append(cancelledCalls, subsessionId)
+		}
 	}
-	return fmt.Errorf("call for session ID %s is not running (current status: %s)", sessionId, call.Status)
+
+	if len(cancelledCalls) == 0 {
+		return fmt.Errorf("no active calls found for session ID: %s or its subagents", sessionId)
+	}
+
+	return nil
 }
 
 // completeCall marks an API call as completed.
@@ -104,12 +122,25 @@ func failCall(sessionId string, err error) {
 	}
 }
 
-// HasActiveCall checks if there is an active call for the given session ID.
+// HasActiveCall checks if there is an active call for the given session ID or any of its subagents.
 func HasActiveCall(sessionId string) bool {
 	callsMutex.Lock()
 	defer callsMutex.Unlock()
-	_, ok := activeCalls[sessionId]
-	return ok
+
+	// Check main session
+	if _, ok := activeCalls[sessionId]; ok {
+		return true
+	}
+
+	// Check all subagent sessions
+	subsessionPrefix := sessionId + "."
+	for subsessionId := range activeCalls {
+		if strings.HasPrefix(subsessionId, subsessionPrefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // removeCall removes a call from the active list (e.g., after completion or final error handling).

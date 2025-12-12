@@ -3,15 +3,11 @@ package subagent
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
-	"time"
-	"unicode"
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/chat"
@@ -22,44 +18,155 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
-// addHashWithSpacing adds a hash to the response with appropriate spacing to avoid
-// confusion with adjacent Unicode letters (\pL) or other hashes
-func addHashWithSpacing(response *strings.Builder, hash string) {
-	currentText := response.String()
-
-	// Check if we need to add space before the hash
-	if len(currentText) > 0 {
-		lastChar := rune(currentText[len(currentText)-1])
-		// Add space before if previous character is a Unicode letter or a digit
-		if unicode.IsLetter(lastChar) || unicode.IsDigit(lastChar) {
-			response.WriteString(" ")
-		}
-	}
-
-	// Add the hash
-	response.WriteString(hash)
+// SubagentResultCollector implements EventWriter to capture chat events and convert them to tool results
+type SubagentResultCollector struct {
+	responseText       strings.Builder
+	attachments        []FileAttachment
+	subagentID         string
+	functionCalls      []FunctionCall
+	hasError           bool
+	errorMessage       string
+	firstFinishReason  string
+	generationComplete bool
+	imageGeneration    bool // Flag for image_generation tasks that need hash output
+	lastItemWasHash    bool // Track if the last added item was a hash
 }
 
-// addTextWithSpacing adds text to the response with appropriate spacing to avoid
-// confusion with adjacent hashes
-func addTextWithSpacing(response *strings.Builder, text string) {
-	if text == "" {
-		return
-	}
-
-	currentText := response.String()
-
-	// Check if we need to add space before the text
-	if len(currentText) > 0 {
-		lastChar := rune(currentText[len(currentText)-1])
-		// Add space before if previous character looks like it could be part of a hash
-		if unicode.IsLetter(lastChar) || unicode.IsDigit(lastChar) {
-			response.WriteString(" ")
+// addWithSpacing adds content with proper spacing between hash and text
+func (src *SubagentResultCollector) addWithSpacing(content string, isHash bool) {
+	if src.responseText.Len() == 0 {
+		// First item, no spacing needed
+		src.responseText.WriteString(content)
+	} else {
+		// Check if we need to add space based on edge trigger
+		if src.lastItemWasHash || isHash {
+			src.responseText.WriteString(" ")
 		}
+		src.responseText.WriteString(content)
 	}
+	src.lastItemWasHash = isHash
+}
 
-	// Add the text
-	response.WriteString(text)
+// newSubagentResultCollector creates a new result collector for subagent operations
+func newSubagentResultCollector(subagentID string, imageGeneration bool) *SubagentResultCollector {
+	return &SubagentResultCollector{
+		subagentID:      subagentID,
+		attachments:     make([]FileAttachment, 0),
+		functionCalls:   make([]FunctionCall, 0),
+		imageGeneration: imageGeneration,
+	}
+}
+
+// Send implements EventWriter.Send
+func (src *SubagentResultCollector) Send(eventType EventType, payload string) {
+	src.processEvent(eventType, payload)
+}
+
+// Broadcast implements EventWriter.Broadcast
+func (src *SubagentResultCollector) Broadcast(eventType EventType, payload string) {
+	src.processEvent(eventType, payload)
+}
+
+// Acquire implements EventWriter.Acquire (no-op for subagent)
+func (src *SubagentResultCollector) Acquire() {}
+
+// Release implements EventWriter.Release (no-op for subagent)
+func (src *SubagentResultCollector) Release() {}
+
+// Close implements EventWriter.Close (no-op for subagent)
+func (src *SubagentResultCollector) Close() {}
+
+// processEvent handles different event types and collects relevant data
+func (src *SubagentResultCollector) processEvent(eventType EventType, payload string) {
+	switch eventType {
+	case EventWorkspaceHint, EventInitialState, EventInitialStateNoCall, EventAcknowledge:
+		// Ignore, we are not interested in the previous state
+	case EventModelMessage:
+		// Parse model message: "messageId\ntext"
+		if _, after, found := strings.Cut(payload, "\n"); found {
+			src.addWithSpacing(after, false) // Text is not a hash
+		}
+	case EventFunctionCall:
+		// Parse function call: [Function name, arguments JSON]
+		if name, argsStr, found := strings.Cut(payload, "\n"); found {
+			var args map[string]interface{}
+			if argsStr != "" {
+				if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+					log.Printf("Failed to parse function call args: %v", err)
+					args = make(map[string]interface{})
+				}
+			}
+			fc := FunctionCall{
+				Name: name,
+				Args: args,
+			}
+			src.functionCalls = append(src.functionCalls, fc)
+		}
+	case EventFunctionResponse:
+		// Parse function response to extract attachments
+		// Format: [Function name, FunctionResponsePayload JSON]
+		if _, responseStr, found := strings.Cut(payload, "\n"); found {
+			var response FunctionResponsePayload
+			if err := json.Unmarshal([]byte(responseStr), &response); err == nil {
+				src.attachments = append(src.attachments, response.Attachments...)
+			}
+		}
+	case EventInlineData:
+		// Parse inline data: [InlineDataPayload JSON]
+		var inlineData InlineDataPayload
+		if err := json.Unmarshal([]byte(payload), &inlineData); err == nil {
+			// Always add attachments to result
+			src.attachments = append(src.attachments, inlineData.Attachments...)
+
+			// For image_generation tasks, also add hash to response text
+			if src.imageGeneration {
+				for _, attachment := range inlineData.Attachments {
+					if attachment.Hash != "" {
+						src.addWithSpacing(attachment.Hash, true) // Hash is a hash
+					}
+				}
+			}
+		}
+	case EventPendingConfirmation:
+		// Handle pending confirmation - treat as error for subagent
+		src.hasError = true
+		src.errorMessage = "Tool execution requires user confirmation"
+	case EventError:
+		// Handle error events
+		src.hasError = true
+		src.errorMessage = payload
+	case EventComplete:
+		// Mark generation as complete
+		src.generationComplete = true
+	case EventThought, EventGenerationChanged, EventSessionName, EventCumulTokenCount:
+		// Thoughts and metadata are ignored for subagent results
+	}
+}
+
+func (src *SubagentResultCollector) SubagentID() string {
+	return src.subagentID
+}
+
+func (src *SubagentResultCollector) Response() string {
+	return src.responseText.String()
+}
+
+func (src *SubagentResultCollector) Attachments() []FileAttachment {
+	return src.attachments
+}
+
+func (src *SubagentResultCollector) FunctionCalls() []FunctionCall {
+	return src.functionCalls
+}
+
+func (src *SubagentResultCollector) ErrorMessage() string {
+	if src.hasError {
+		return src.errorMessage
+	} else if src.firstFinishReason != "" && src.firstFinishReason != FinishReasonStop {
+		return FinishReasonMessage(src.firstFinishReason)
+	} else {
+		return ""
+	}
 }
 
 // SubagentTool handles the subagent tool call, allowing to spawn a new subagent or interact with an existing one.
@@ -90,6 +197,10 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 	if err != nil {
 		return tool.HandlerResults{}, err
 	}
+	ga, err := llm.GeminiAuthFromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
 	tools, err := tool.FromContext(ctx)
 	if err != nil {
 		return tool.HandlerResults{}, err
@@ -100,239 +211,112 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 		return tool.HandlerResults{}, errors.New("subagent tool cannot be called from a subagent session")
 	}
 
+	var subsessionID string
+	var newAgentID string
+
 	if hasSystemPrompt {
 		// Spawn a new subagent
-		agentID := database.GenerateID()
-		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
+		newAgentID = database.GenerateID()
+		subsessionID = fmt.Sprintf("%s.%s", params.SessionId, newAgentID)
 
+		// Create new subagent session with the provided system prompt
 		_, err = database.CreateSession(db, subsessionID, systemPrompt, "")
 		if err != nil {
 			return tool.HandlerResults{}, fmt.Errorf("failed to create new subagent session with ID %s: %w", subsessionID, err)
 		}
-
-		// Now send the initial message to the newly spawned subagent
-		// This part is similar to the beginning of SubagentTurnTool
-		session, err := database.GetSession(db, subsessionID)
-		if err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("subagent session with ID %s not found after creation: %w", subsessionID, err)
-		}
-
-		mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
-		if err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
-		}
-
-		// Initial message for a new subagent session will have generation 0
-		mc.LastMessageModel = params.ModelName
-		if _, err = mc.Add(ctx, db, Message{Type: TypeUserText, Text: text}); err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to add initial user message to new subagent session: %w", err)
-		}
-
-		// Proceed with LLM turn for the new subagent
-		return handleSubagentTurn(ctx, db, models, tools, subsessionID, &session, params, agentID, mc)
 	} else {
 		// Interact with an existing subagent
-		subsessionID := fmt.Sprintf("%s.%s", params.SessionId, subagentID)
+		subsessionID = fmt.Sprintf("%s.%s", params.SessionId, subagentID)
 
-		session, err := database.GetSession(db, subsessionID)
+		// Verify the subagent session exists
+		_, err = database.GetSession(db, subsessionID)
 		if err != nil {
 			return tool.HandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
 		}
-
-		mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
-		if err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to create message chain for subagent: %w", err)
-		}
-
-		// For existing subagent sessions, the generation will be determined within handleSubagentTurn
-		mc.LastMessageModel = params.ModelName
-		if _, err = mc.Add(ctx, db, Message{Type: TypeUserText, Text: text}); err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to add user message to subagent session: %w", err)
-		}
-
-		return handleSubagentTurn(ctx, db, models, tools, subsessionID, &session, params, "", mc)
 	}
-}
 
-// handleSubagentTurn encapsulates the common logic for interacting with a subagent session.
-func handleSubagentTurn(
-	ctx context.Context,
-	db *sql.DB,
-	models *llm.Models,
-	tools *tool.Tools,
-	subsessionID string,
-	session *Session,
-	params tool.HandlerParams,
-	agentID string,
-	mc *database.MessageChain,
-) (tool.HandlerResults, error) {
-	// Get main session environment
-	mainSessionEnvRoots, _, err := database.GetLatestSessionEnv(db, params.SessionId)
+	// Copy environment from main session to subagent session
+	err = copyEnvironmentToSubagent(db, params.SessionId, subsessionID)
 	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to get main session environment: %w", err)
+		log.Printf("Failed to copy environment to subagent: %v", err)
+		// Non-fatal, continue with subagent execution
 	}
 
-	// Get subagent session environment
-	subSessionEnvRoots, subSessionGeneration, err := database.GetLatestSessionEnv(db, subsessionID)
-	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to get subagent session environment: %w", err)
-	}
-
-	// Check if roots have actually changed
-	rootsChanged, err := env.CalculateRootsChanged(subSessionEnvRoots, mainSessionEnvRoots)
-	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to calculate roots changed for subagent: %w", err)
-	}
-
-	// Only add env_changed message if roots have actually changed (added or removed)
-	if rootsChanged.HasChanges() {
-		envChanged := env.EnvChanged{Roots: &rootsChanged}
-
-		// Marshal envChanged into JSON
-		envChangedJSON, err := json.Marshal(envChanged)
-		if err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to marshal envChanged for subagent: %w", err)
-		}
-
-		// Add env_changed message to subagent session with the new generation
-		mc.LastMessageGeneration = subSessionGeneration
-		if _, err = mc.Add(ctx, db, Message{Type: TypeEnvChanged, Text: string(envChangedJSON)}); err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to add env_changed message to subagent session: %w", err)
-		}
-		// Add new subagent session environment in DB
-		_, err = database.AddSessionEnv(db, subsessionID, mainSessionEnvRoots)
-		if err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to add new subagent session environment: %w", err)
-		}
-	}
-
-	// Load conversation context for the subagent (using GetSessionHistoryContext function defined in db_chat.go)
-	// GetSessionHistoryContext returns []FrontendMessage.
-	frontendMessages, err := database.GetSessionHistoryContext(db, subsessionID, session.PrimaryBranchID)
-	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to get messages for subagent session %s: %w", subsessionID, err)
-	}
-	currentHistory := chat.ConvertFrontendMessagesToContent(db, frontendMessages)
-
-	// Get LLM client for the subagent
-	modelProvider, err := models.ResolveSubagent(params.ModelName, "")
+	// Resolve the model for general subagent tasks
+	subagentModelProvider, err := models.ResolveSubagent(params.ModelName, "")
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
 	}
 
-	// Update LastMessageModel to use the actual provider's model name
-	mc.LastMessageModel = modelProvider.Name
+	// Create result collector to capture chat events
+	resultCollector := newSubagentResultCollector(newAgentID, false)
 
-	var fullResponseText strings.Builder
-	var firstFinishReason string
+	// Use chat package's NewChatMessage to handle the subagent interaction
+	// with the resolved subagent model name
+	err = chat.NewChatMessage(
+		ctx,
+		db,
+		models,
+		ga,
+		tools,
+		resultCollector, // Custom EventWriter that captures events
+		subsessionID,
+		text,
+		nil,                        // No attachments for regular subagent
+		subagentModelProvider.Name, // Use the resolved subagent model
+		0,                          // fetchLimit is not needed for subagent
+	)
 
-	// Loop to continue LLM calls after tool execution
-	for {
-		// Configure SessionParams for LLM call
-		sessionParams := &llm.SessionParams{
-			SystemPrompt: session.SystemPrompt,
-			Contents:     currentHistory,
-		}
+	if err != nil {
+		return tool.HandlerResults{}, fmt.Errorf("subagent execution failed: %w", err)
+	}
 
-		// Use a context with a timeout for the LLM call
-		llmCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // 5 minute timeout for subagent turn
+	result := map[string]interface{}{
+		"response_text": resultCollector.Response(),
+	}
+	if subagentID := resultCollector.SubagentID(); subagentID != "" {
+		result["subagent_id"] = subagentID
+	}
+	if errorMessage := resultCollector.ErrorMessage(); errorMessage != "" {
+		result["error"] = errorMessage
+	}
 
-		// Stream LLM response
-		seq, closer, err := modelProvider.SendMessageStream(llmCtx, *sessionParams)
+	return tool.HandlerResults{
+		Value:       result,
+		Attachments: resultCollector.Attachments(),
+	}, nil
+}
+
+// copyEnvironmentToSubagent copies the environment configuration from main session to subagent session
+func copyEnvironmentToSubagent(db *sql.DB, mainSessionId, subSessionId string) error {
+	// Get main session environment
+	mainRoots, _, err := database.GetLatestSessionEnv(db, mainSessionId)
+	if err != nil {
+		return fmt.Errorf("failed to get main session environment: %w", err)
+	}
+
+	// Get subagent session environment
+	subRoots, _, err := database.GetLatestSessionEnv(db, subSessionId)
+	if err != nil {
+		return fmt.Errorf("failed to get subagent session environment: %w", err)
+	}
+
+	// Check if roots have actually changed
+	rootsChanged, err := env.CalculateRootsChanged(subRoots, mainRoots)
+	if err != nil {
+		return fmt.Errorf("failed to calculate roots changed for subagent: %w", err)
+	}
+
+	// Only update if roots have actually changed
+	if rootsChanged.HasChanges() {
+		// Add new subagent session environment in DB
+		_, err = database.AddSessionEnv(db, subSessionId, mainRoots)
 		if err != nil {
-			cancel() // Ensure context is cancelled on error
-			return tool.HandlerResults{}, fmt.Errorf("failed to get streaming response from subagent LLM: %w", err)
-		}
-
-		hasFunctionCall := false // Track if a function call occurred in this turn
-
-		for caResp := range seq {
-			if len(caResp.Candidates) > 0 {
-				candidate := caResp.Candidates[0]
-				// Capture the first finish reason (like in chat_stream.go)
-				if firstFinishReason == "" && candidate.FinishReason != "" {
-					firstFinishReason = candidate.FinishReason
-				}
-				for _, part := range candidate.Content.Parts {
-					if part.Text != "" {
-						fullResponseText.WriteString(part.Text)
-						// In a real streaming scenario, you would update the DB with partial text here
-						// For subagent_turn, we accumulate and save at the end of the outer loop.
-					} else if part.FunctionCall != nil {
-						hasFunctionCall = true
-						fc := *part.FunctionCall
-						log.Printf("Subagent LLM requested tool call: %s with args: %+v", fc.Name, fc.Args)
-
-						// Save FunctionCall message to DB
-						fcJson, _ := json.Marshal(fc)
-						if _, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson)}); err != nil {
-							log.Printf("Warning: Failed to add function call message to subagent session: %v", err)
-						}
-
-						// Execute the tool
-						toolResults, err := tools.Call(ctx, fc, tool.HandlerParams{
-							ModelName: params.ModelName,
-							SessionId: subsessionID,
-							BranchId:  session.PrimaryBranchID,
-						})
-						if err != nil {
-							log.Printf("Subagent LLM tool execution failed: %v", err)
-							toolResults.Value = map[string]interface{}{"error": err.Error()}
-						}
-
-						// Save FunctionResponse message to DB
-						frJson, _ := json.Marshal(FunctionResponse{
-							Name:     fc.Name,
-							Response: toolResults.Value,
-						})
-						_, err = mc.Add(ctx, db, Message{
-							Type:        TypeFunctionResponse,
-							Text:        string(frJson),
-							Attachments: toolResults.Attachments,
-						})
-						if err != nil {
-							log.Printf("Warning: Failed to add function response message to subagent session: %v", err)
-						}
-
-						// Create the initial FunctionResponse part
-						fr := FunctionResponse{Name: fc.Name, Response: toolResults.Value}
-
-						// Add FunctionCall and FunctionResponse (with attachments) to currentHistory for next LLM turn
-						currentHistory = append(currentHistory,
-							Content{Role: RoleModel, Parts: []Part{{FunctionCall: &fc}}},
-							Content{Role: RoleUser, Parts: chat.AppendAttachmentParts(db, toolResults, []Part{{FunctionResponse: &fr}})},
-						)
-					}
-				}
-			}
-		}
-		cancel()       // Ensure context is cancelled on error
-		closer.Close() // Close the stream for the current LLM call
-
-		if !hasFunctionCall {
-			// No function call in this turn, break the loop
-			break
+			return fmt.Errorf("failed to add new subagent session environment: %w", err)
 		}
 	}
 
-	// Add the final model response message to the database
-	if fullResponseText.Len() > 0 {
-		if _, err = mc.Add(ctx, db, Message{Type: TypeModelText, Text: fullResponseText.String()}); err != nil {
-			return tool.HandlerResults{}, fmt.Errorf("failed to add final model response to subagent session: %w", err)
-		}
-	}
-
-	result := map[string]interface{}{"response_text": fullResponseText.String()}
-	if agentID != "" {
-		result["subagent_id"] = agentID
-	}
-
-	// Handle finish reason errors
-	if firstFinishReason != "" && firstFinishReason != FinishReasonStop {
-		result["error"] = FinishReasonMessage(firstFinishReason)
-	}
-
-	return tool.HandlerResults{Value: result}, nil
+	return nil
 }
 
 // GenerateImageTool handles the generate_image tool call, allowing to generate images using a subagent with image generation capabilities.
@@ -366,6 +350,18 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	if err != nil {
 		return tool.HandlerResults{}, err
 	}
+	models, err := llm.ModelsFromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	ga, err := llm.GeminiAuthFromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	tools, err := tool.FromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
 
 	// Create a subsession for image generation
 	agentID := database.GenerateID()
@@ -378,187 +374,65 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		return tool.HandlerResults{}, fmt.Errorf("failed to create image generation subsession with ID %s: %w", subsessionID, err)
 	}
 
-	// Get session for message chain creation
-	session, err := database.GetSession(db, subsessionID)
-	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("image generation subsession with ID %s not found after creation: %w", subsessionID, err)
-	}
-
-	// Create message chain for the subsession
-	mc, err := database.NewMessageChain(ctx, db, subsessionID, session.PrimaryBranchID)
-	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to create message chain for image generation subsession: %w", err)
-	}
-
-	// Get LLM client for image generation using the new task first to determine the correct model
-	models, err := llm.ModelsFromContext(ctx)
-	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to get models registry from context: %w", err)
-	}
-
-	imageModelProvider, err := models.ResolveSubagent(params.ModelName, llm.SubagentImageGenerationTask)
-	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to resolve subagent: %w", err)
-	}
-
-	// Set the last message model to use the actual provider's model name
-	mc.LastMessageModel = imageModelProvider.Name
-
-	// Save user message to subsession with input image attachments
-	var userMessageAttachments []FileAttachment
+	// Convert input hashes to FileAttachments for the chat message
+	var inputAttachments []FileAttachment
 	for _, hash := range inputHashes {
 		if hash != "" {
 			attachment, err := database.GetBlobAsFileAttachment(db, hash)
 			if err != nil {
 				return tool.HandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
 			}
-			userMessageAttachments = append(userMessageAttachments, attachment)
+			inputAttachments = append(inputAttachments, attachment)
 		}
 	}
 
-	if _, err = mc.Add(ctx, db, Message{
-		Type:        TypeUserText,
-		Text:        text,
-		Attachments: userMessageAttachments,
-	}); err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to add user message to image generation subsession: %w", err)
-	}
-
-	// Prepare the content for image generation
-	var content []Content
-
-	// Add user text part
-	content = append(content, Content{
-		Role: RoleUser,
-		Parts: []Part{
-			{Text: text},
-		},
-	})
-
-	// Add input images as attachments if provided
-	for _, hash := range inputHashes {
-		if hash != "" {
-			// Retrieve blob data for the hash
-			blobData, err := database.GetBlob(db, hash)
-			if err != nil {
-				return tool.HandlerResults{}, fmt.Errorf("failed to retrieve blob for hash %s: %w", hash, err)
-			}
-
-			// Determine MIME type by detecting content type
-			mimeType := http.DetectContentType(blobData)
-			content = append(content, Content{
-				Role: RoleUser,
-				Parts: []Part{
-					{
-						InlineData: &InlineData{
-							MimeType: mimeType,
-							Data:     base64.StdEncoding.EncodeToString(blobData),
-						},
-					},
-				},
-			})
-		}
-	}
-
-	// Configure session params for image generation
-	sessionParams := &llm.SessionParams{
-		SystemPrompt: "Generate images based on the user's request. The output should contain the generated images.",
-		Contents:     content,
-	}
-
-	// Use a context with timeout for the image generation
-	llmCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
-	// Stream LLM response
-	seq, closer, err := imageModelProvider.SendMessageStream(llmCtx, *sessionParams)
+	// Copy environment from main session to image generation subagent
+	err = copyEnvironmentToSubagent(db, params.SessionId, subsessionID)
 	if err != nil {
-		return tool.HandlerResults{}, fmt.Errorf("failed to get streaming response from image generation LLM: %w", err)
-	}
-	defer closer.Close()
-
-	var fullResponseText strings.Builder
-	var generatedAttachments []FileAttachment
-	var firstFinishReason string
-	imageCounter := 1
-
-	// Process the response
-	for caResp := range seq {
-		if len(caResp.Candidates) > 0 {
-			candidate := caResp.Candidates[0]
-			// Capture the first finish reason (like in chat_stream.go)
-			if firstFinishReason == "" && candidate.FinishReason != "" {
-				firstFinishReason = candidate.FinishReason
-			}
-			for _, part := range candidate.Content.Parts {
-				if part.InlineData != nil {
-					// Convert generated image data to blob and get hash
-					imageData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
-					if err != nil {
-						log.Printf("Warning: Failed to decode generated image data: %v", err)
-						continue
-					}
-
-					hash, err := database.SaveBlob(ctx, db, imageData)
-					if err != nil {
-						log.Printf("Warning: Failed to save generated image blob: %v", err)
-						continue
-					}
-
-					// Add hash to response with proper spacing
-					addHashWithSpacing(&fullResponseText, hash)
-
-					// Generate filename with counter for generated images
-					filename := chat.GenerateFilenameFromMimeType(part.InlineData.MimeType, imageCounter)
-					imageCounter++
-
-					// Immediately save the image as a separate message to preserve blob
-					messageAttachments := []FileAttachment{{
-						Hash:     hash,
-						MimeType: part.InlineData.MimeType,
-						FileName: filename,
-					}}
-
-					if _, err = mc.Add(ctx, db, Message{
-						Type:        TypeModelText,
-						Text:        "",
-						Attachments: messageAttachments,
-					}); err != nil {
-						log.Printf("Warning: Failed to add image response to subsession: %v", err)
-					}
-
-					// Add to attachments
-					generatedAttachments = append(generatedAttachments, FileAttachment{
-						Hash:     hash,
-						MimeType: part.InlineData.MimeType,
-						FileName: filename,
-					})
-				} else {
-					// Add text to response with proper spacing and immediately save to message chain
-					addTextWithSpacing(&fullResponseText, part.Text)
-					if _, err = mc.Add(ctx, db, Message{
-						Type: TypeModelText,
-						Text: part.Text,
-					}); err != nil {
-						log.Printf("Warning: Failed to add text response to subsession: %v", err)
-					}
-				}
-			}
-		}
+		log.Printf("Failed to copy environment to image generation subagent: %v", err)
+		// Non-fatal, continue with image generation
 	}
 
-	// Prepare result
+	// Resolve the model for image generation
+	imageModelProvider, err := models.ResolveSubagent(params.ModelName, llm.SubagentImageGenerationTask)
+	if err != nil {
+		return tool.HandlerResults{}, fmt.Errorf("failed to resolve subagent for image generation: %w", err)
+	}
+
+	// Create result collector to capture chat events
+	resultCollector := newSubagentResultCollector(agentID, true)
+
+	// Use chat package's NewChatMessage to handle the image generation
+	// with the resolved image generation model name
+	err = chat.NewChatMessage(
+		ctx,
+		db,
+		models,
+		ga,
+		tools,
+		resultCollector, // Custom EventWriter that captures events
+		subsessionID,
+		text,
+		inputAttachments,        // Input images as attachments
+		imageModelProvider.Name, // Use the resolved image generation model
+		0,                       // fetchLimit is not needed for image generation
+	)
+
+	if err != nil {
+		return tool.HandlerResults{}, fmt.Errorf("image generation failed: %w", err)
+	}
+
 	result := map[string]interface{}{
-		"response": fullResponseText.String(),
+		"response": resultCollector.Response(),
+	}
+	if errorMessage := resultCollector.ErrorMessage(); errorMessage != "" {
+		result["error"] = errorMessage
 	}
 
-	// Handle finish reason errors
-	if firstFinishReason != "" && firstFinishReason != FinishReasonStop {
-		result["error"] = FinishReasonMessage(firstFinishReason)
-	}
-
-	// Always return with attachments
-	return tool.HandlerResults{Value: result, Attachments: generatedAttachments}, nil
+	return tool.HandlerResults{
+		Value:       result,
+		Attachments: resultCollector.Attachments(),
+	}, nil
 }
 
 var subagentTool = tool.Definition{

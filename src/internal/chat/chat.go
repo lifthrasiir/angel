@@ -145,9 +145,12 @@ func NewSessionAndMessage(
 	}
 	ew.Send(EventInitialState, string(initialStateJSON))
 
+	// New session gets its name inferred unless it's a subsession
+	inferSessionName := !strings.Contains(sessionId[1:], ".")
+
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, true, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, inferSessionName, time.Now(), historyContext); err != nil {
 		return fmt.Errorf("error streaming LLM response: %w", err)
 	}
 	return nil
@@ -407,11 +410,9 @@ func LoadChatSession(ctx context.Context, db *sql.DB, ew EventWriter, sessionId 
 
 	// If it's an SSE request, handle streaming. Otherwise, send regular JSON response.
 	if ew != nil {
-		if HasActiveCall(sessionId) {
-			callStartTime, ok := GetCallStartTime(sessionId)
-			if ok {
-				initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
-			}
+		if callStartTime, ok := GetCallStartTime(sessionId); ok {
+			initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
+
 			initialStateJSON, err2 := json.Marshal(initialState)
 			if err2 != nil {
 				err = fmt.Errorf("failed to marshal initial state with elapsed time: %w", err2)

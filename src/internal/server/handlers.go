@@ -505,11 +505,12 @@ func handleCall(w http.ResponseWriter, r *http.Request) {
 		isActive := chat.HasActiveCall(sessionId)
 		sendJSONResponse(w, map[string]bool{"isActive": isActive})
 	case "DELETE":
+		// Cancel main session and all subagent sessions
 		if err := chat.CancelCall(sessionId); err != nil {
-			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to cancel call for session %s", sessionId))
+			sendInternalServerError(w, r, err, fmt.Sprintf("Failed to cancel call for session %s and its subagents", sessionId))
 			return
 		}
-		sendJSONResponse(w, map[string]string{"status": "success", "message": "Call cancelled successfully"})
+		sendJSONResponse(w, map[string]string{"status": "success", "message": "Call and subagent calls cancelled successfully"})
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
