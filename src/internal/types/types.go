@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/lifthrasiir/angel/gemini"
@@ -118,6 +119,11 @@ type Session struct {
 	Name            string `json:"name"`
 	WorkspaceID     string `json:"workspace_id"`
 	PrimaryBranchID string `json:"primary_branch_id"`
+}
+
+// IsTemporary returns true if the session ID starts with a dot
+func (s *Session) IsTemporary() bool {
+	return strings.HasPrefix(s.ID, ".")
 }
 
 // Workspace struct to hold workspace data

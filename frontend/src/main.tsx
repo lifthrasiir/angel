@@ -26,6 +26,7 @@ const AppRoutes = () => (
         <Routes>
           <Route path="/" element={<Navigate to="/new" replace />} />
           <Route path="/new" element={<SessionPage />} />
+          <Route path="/temp" element={<SessionPage isTemporary={true} />} />
           <Route
             path="/w/new"
             element={

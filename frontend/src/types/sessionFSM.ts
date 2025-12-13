@@ -20,6 +20,7 @@ export type SessionState =
 // URL Path Types
 export type URLPath =
   | { type: 'new_global' }
+  | { type: 'new_temp' }
   | { type: 'new_workspace'; workspaceId: string }
   | { type: 'existing_session'; sessionId: string };
 

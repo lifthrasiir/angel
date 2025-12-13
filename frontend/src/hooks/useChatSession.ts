@@ -25,7 +25,7 @@ import { useDocumentTitle } from './useDocumentTitle';
 import { useMessageSending } from './useMessageSending';
 import { getAvailableModels, ModelInfo } from '../api/models';
 
-export const useChatSession = () => {
+export const useChatSession = (isTemporary: boolean = false) => {
   // Use sessionManager for sessionId and workspaceId
   const sessionManager = useSessionManagerContext();
   const chatSessionId = getSessionId(sessionManager.sessionState);
@@ -124,6 +124,7 @@ export const useChatSession = () => {
     primaryBranchId,
     selectedModel,
     sessionManager,
+    isTemporary,
   });
 
   const handleSetSelectedModel = (model: ModelInfo) => {

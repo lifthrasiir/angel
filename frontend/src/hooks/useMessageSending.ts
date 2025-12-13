@@ -57,6 +57,7 @@ interface UseMessageSendingProps {
   primaryBranchId: string;
   selectedModel: ModelInfo | null;
   sessionManager: SessionManager;
+  isTemporary?: boolean;
 }
 
 export const useMessageSending = ({
@@ -67,6 +68,7 @@ export const useMessageSending = ({
   primaryBranchId,
   selectedModel,
   sessionManager,
+  isTemporary = false,
 }: UseMessageSendingProps) => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -317,6 +319,8 @@ export const useMessageSending = ({
         primaryBranchId,
         selectedModel?.name,
         chatSessionId === null ? pendingRoots : undefined,
+        undefined,
+        isTemporary && chatSessionId === null,
       );
 
       if (response.status === 401) {

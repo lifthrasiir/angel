@@ -45,6 +45,14 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   const isInitializedRef = useRef(false);
   const lastSessionIdRef = useRef<string | null>(null);
 
+  // Helper function to check if current path represents anonymous workspace
+  const isAnonymousWorkspacePath = (pathname: string): boolean => {
+    return pathname === '/new' || pathname === '/' || pathname === '/temp';
+  };
+
+  // Check if we're on the /new page (to show "New Temporary Session" button)
+  const isNewPage = location.pathname === '/new';
+
   // Initialize active workspace ONLY on first load
   useEffect(() => {
     if (isInitializedRef.current) {
@@ -58,8 +66,8 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       // URL has workspace info (/w/:workspaceId/new)
       setActiveWorkspaceId(urlWorkspaceId);
       isInitializedRef.current = true;
-    } else if (location.pathname === '/new' || location.pathname === '/') {
-      // Explicitly on global/anonymous workspace
+    } else if (isAnonymousWorkspacePath(location.pathname)) {
+      // Explicitly on global/anonymous workspace (including temporary sessions)
       setActiveWorkspaceId(undefined);
       isInitializedRef.current = true;
     } else if (sessionWorkspaceId !== undefined) {
@@ -79,8 +87,8 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
     const urlWorkspaceId = extractWorkspaceId(location.pathname);
 
     // Update activeWorkspaceId when URL workspace changes
-    if (location.pathname === '/new' || location.pathname === '/') {
-      // Navigated to anonymous workspace
+    if (isAnonymousWorkspacePath(location.pathname)) {
+      // Navigated to anonymous workspace (including temporary sessions)
       if (activeWorkspaceId !== undefined) {
         setActiveWorkspaceId(undefined);
       }
@@ -194,7 +202,17 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       setPreserveSelectedFiles(filesToAdd);
 
       // Navigate to new session
-      const newPath = showWorkspaces ? '/w/new' : activeWorkspaceId ? `/w/${activeWorkspaceId}/new` : '/new';
+      let newPath: string;
+      if (showWorkspaces) {
+        newPath = '/w/new';
+      } else if (activeWorkspaceId) {
+        newPath = `/w/${activeWorkspaceId}/new`;
+      } else if (isNewPage) {
+        // On /new page, navigate to /temp for temporary session when files are dropped
+        newPath = '/temp';
+      } else {
+        newPath = '/new';
+      }
       handleNavigate(newPath);
     }
   };
@@ -364,9 +382,18 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             />
           )}
           <button
-            onClick={() =>
-              handleNavigate(showWorkspaces ? '/w/new' : activeWorkspaceId ? `/w/${activeWorkspaceId}/new` : '/new')
-            }
+            onClick={() => {
+              if (showWorkspaces) {
+                handleNavigate('/w/new');
+              } else if (activeWorkspaceId) {
+                handleNavigate(`/w/${activeWorkspaceId}/new`);
+              } else if (isNewPage) {
+                // On /new page, navigate to /temp for temporary session
+                handleNavigate('/temp');
+              } else {
+                handleNavigate('/new');
+              }
+            }}
             onDrop={handleNewSessionDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -387,10 +414,16 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
               backgroundColor: 'transparent',
               minHeight: 'var(--touch-target-size)',
             }}
-            aria-label={showWorkspaces ? 'Create New Workspace' : 'Create New Session'}
+            aria-label={
+              showWorkspaces
+                ? 'Create New Workspace'
+                : isNewPage
+                  ? 'Create New Temporary Session'
+                  : 'Create New Session'
+            }
           >
             <FaPlus style={{ marginRight: '5px' }} />
-            {showWorkspaces ? 'New Workspace' : 'New Session'}
+            {showWorkspaces ? 'New Workspace' : isNewPage ? 'New Temporary Session' : 'New Session'}
           </button>
         </div>
 

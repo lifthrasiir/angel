@@ -52,6 +52,42 @@ func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// New temporary session and message handler
+func newTempSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+	models := getModels(w, r)
+	ga := getGeminiAuth(w, r)
+	tools := getTools(w, r)
+
+	var requestBody struct {
+		Message      string           `json:"message"`
+		SystemPrompt string           `json:"systemPrompt"`
+		Attachments  []FileAttachment `json:"attachments"`
+		Model        string           `json:"model"`
+		FetchLimit   int              `json:"fetchLimit"`
+		InitialRoots []string         `json:"initialRoots"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "newTempSessionAndMessage") {
+		return
+	}
+
+	// Generate temporary session ID (starts with dot)
+	sessionId := "." + database.GenerateID()
+	ew := newSseWriter(r.Context(), sessionId, w)
+	if ew == nil {
+		return
+	}
+
+	if err := chat.NewSessionAndMessage(
+		r.Context(), db, models, ga, tools,
+		ew, sessionId, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
+		"", requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
+	); err != nil {
+		sendInternalServerError(w, r, err, "Failed to create new temporary session and message")
+	}
+}
+
 // Chat message handler
 func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)

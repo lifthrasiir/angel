@@ -4,7 +4,11 @@ import { apiFetch } from '../api/apiClient';
 import { hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/chatAtoms';
 import ChatLayout from '../components/ChatLayout';
 
-export const SessionPage: React.FC = () => {
+interface SessionPageProps {
+  isTemporary?: boolean;
+}
+
+export const SessionPage: React.FC<SessionPageProps> = ({ isTemporary = false }) => {
   const setHasConnectedAccounts = useSetAtom(hasConnectedAccountsAtom);
   const setHasApiKeys = useSetAtom(hasApiKeysAtom);
   const setIsAuthenticated = useSetAtom(isAuthenticatedAtom);
@@ -52,5 +56,5 @@ export const SessionPage: React.FC = () => {
 
   // Display loading spinner while checking authentication or loading session.
   // Assuming ChatLayout handles all loading states.
-  return <ChatLayout />;
+  return <ChatLayout isTemporary={isTemporary} />;
 };

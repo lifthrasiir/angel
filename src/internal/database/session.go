@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -308,4 +310,106 @@ func GenerateID() string {
 		}
 		// Otherwise, try again (very unlikely to happen multiple times)
 	}
+}
+
+// CleanupOldTemporarySessions deletes temporary sessions older than the specified duration
+func CleanupOldTemporarySessions(db *sql.DB, olderThan time.Duration, sandboxBaseDir string) error {
+	// Start a transaction to ensure atomicity
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Find old temporary sessions
+	cutoffTime := time.Now().Add(-olderThan)
+	rows, err := tx.Query(`
+		SELECT id FROM sessions
+		WHERE id LIKE '.%' AND last_updated_at < ?
+		ORDER BY last_updated_at ASC
+	`, cutoffTime.Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("failed to query old temporary sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessionIDsToDelete []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("failed to scan session ID: %w", err)
+		}
+		sessionIDsToDelete = append(sessionIDsToDelete, id)
+	}
+
+	if len(sessionIDsToDelete) == 0 {
+		return nil
+	}
+
+	log.Printf("Cleaning up %d old temporary sessions", len(sessionIDsToDelete))
+
+	// Delete messages associated with the sessions
+	placeholders := make([]string, len(sessionIDsToDelete))
+	args := make([]interface{}, len(sessionIDsToDelete))
+	for i, id := range sessionIDsToDelete {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM messages WHERE session_id IN (%s)
+	`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete messages for temporary sessions: %w", err)
+	}
+
+	// Delete shell commands associated with the sessions
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM shell_commands WHERE branch_id IN (
+			SELECT id FROM branches WHERE session_id IN (%s)
+		)
+	`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete shell commands for temporary sessions: %w", err)
+	}
+
+	// Delete session environments associated with the sessions
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM session_envs WHERE session_id IN (%s)
+	`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete session environments for temporary sessions: %w", err)
+	}
+
+	// Delete branches associated with the sessions
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM branches WHERE session_id IN (%s)
+	`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete branches for temporary sessions: %w", err)
+	}
+
+	// Delete the sessions themselves
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM sessions WHERE id IN (%s)
+	`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete temporary sessions: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit cleanup transaction: %w", err)
+	}
+
+	// Destroy the session's file system sandbox directories
+	for _, id := range sessionIDsToDelete {
+		sessionDir := filepath.Join(sandboxBaseDir, id)
+		if err := os.RemoveAll(sessionDir); err != nil {
+			log.Printf("Warning: Failed to destroy session FS for %s: %v", id, err)
+		}
+	}
+
+	log.Printf("Successfully cleaned up %d old temporary sessions", len(sessionIDsToDelete))
+	return nil
 }

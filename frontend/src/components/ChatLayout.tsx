@@ -15,9 +15,10 @@ import ToastMessage from './ToastMessage';
 import { isTextInputKey } from '../utils/navigationKeys';
 interface ChatLayoutProps {
   children?: React.ReactNode;
+  isTemporary?: boolean;
 }
 
-const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
+const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }) => {
   // Use shared sessionManager from context
   const sessionManager = useSessionManagerContext();
   const chatSessionId = getSessionId(sessionManager.sessionState);
@@ -44,7 +45,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children }) => {
     handleRetryMessage,
     handleRetryError,
     isSendDisabledByResizing,
-  } = useChatSession();
+  } = useChatSession(isTemporary);
 
   const { toastMessage, setToastMessage } = useEscToCancel({
     isProcessing,

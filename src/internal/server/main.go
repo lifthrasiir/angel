@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 
 	"github.com/lifthrasiir/angel/filesystem"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/tool"
 	"github.com/lifthrasiir/angel/internal/tool/file"
@@ -86,6 +88,9 @@ func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, mo
 
 	// Start WAL checkpoint manager
 	database.StartWALCheckpointManager(db)
+
+	// Start temporary session cleanup manager (every 10 minutes, delete sessions older than 48 hours)
+	StartTempSessionCleanupManager(db)
 
 	// Retrieve or generate CSRF key
 	csrfKey, err := database.GetAppConfig(db, database.CSRFKeyName)
@@ -181,6 +186,9 @@ func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, mo
 	// Stop WAL checkpoint manager
 	database.StopWALCheckpointManager()
 
+	// Stop temporary session cleanup manager
+	StopTempSessionCleanupManager()
+
 	// Perform final WAL checkpoint before shutdown
 	if err := database.PerformWALCheckpoint(db); err != nil {
 		log.Printf("Final WAL checkpoint failed: %v", err)
@@ -234,6 +242,7 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 	}).Methods("GET")
 
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
+	router.HandleFunc("/temp", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/search", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
 
@@ -254,6 +263,7 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 
 	router.HandleFunc("/api/chat", listSessionsByWorkspaceHandler).Methods("GET")
 	router.HandleFunc("/api/chat", newSessionAndMessageHandler).Methods("POST")
+	router.HandleFunc("/api/chat/temp", newTempSessionAndMessageHandler).Methods("POST")
 	router.HandleFunc("/api/chat/new/envChanged", calculateNewSessionEnvChangedHandler).Methods("GET")
 	router.HandleFunc("/api/chat/{sessionId}", chatMessageHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}", loadChatSessionHandler).Methods("GET")
@@ -500,4 +510,59 @@ func getTools(w http.ResponseWriter, r *http.Request) *tool.Tools {
 		runtime.Goexit()
 	}
 	return tools
+}
+
+var (
+	tempSessionCleanupTicker *time.Ticker
+	tempSessionCleanupMutex  sync.Mutex
+)
+
+// StartTempSessionCleanupManager starts a background goroutine to periodically clean up old temporary sessions
+func StartTempSessionCleanupManager(db *sql.DB) {
+	tempSessionCleanupMutex.Lock()
+	defer tempSessionCleanupMutex.Unlock()
+
+	// Stop existing ticker if running
+	if tempSessionCleanupTicker != nil {
+		tempSessionCleanupTicker.Stop()
+	}
+
+	// Create ticker to run cleanup every 10 minutes
+	tempSessionCleanupTicker = time.NewTicker(10 * time.Minute)
+
+	// Run cleanup immediately on startup
+	go func() {
+		cleanupOldTempSessions(db)
+	}()
+
+	// Then run periodically
+	go func() {
+		defer tempSessionCleanupTicker.Stop()
+		for range tempSessionCleanupTicker.C {
+			cleanupOldTempSessions(db)
+		}
+	}()
+}
+
+// StopTempSessionCleanupManager stops the temporary session cleanup ticker
+func StopTempSessionCleanupManager() {
+	tempSessionCleanupMutex.Lock()
+	defer tempSessionCleanupMutex.Unlock()
+
+	if tempSessionCleanupTicker != nil {
+		tempSessionCleanupTicker.Stop()
+		tempSessionCleanupTicker = nil
+		log.Println("Temporary session cleanup manager stopped")
+	}
+}
+
+// cleanupOldTempSessions performs the actual cleanup of old temporary sessions
+func cleanupOldTempSessions(db *sql.DB) {
+	// Delete sessions older than 48 hours
+	olderThan := 48 * time.Hour
+	sandboxBaseDir := env.SandboxBaseDir()
+
+	if err := database.CleanupOldTemporarySessions(db, olderThan, sandboxBaseDir); err != nil {
+		log.Printf("Failed to cleanup old temporary sessions: %v", err)
+	}
 }

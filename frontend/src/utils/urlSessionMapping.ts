@@ -10,6 +10,11 @@ export const parseURLPath = (pathname: string): URLPath => {
     return { type: 'new_global' };
   }
 
+  // Pattern: /temp -> new temporary session
+  if (segments.length === 1 && segments[0] === 'temp') {
+    return { type: 'new_temp' };
+  }
+
   // Pattern: /w/:workspaceId/new -> new workspace session
   if (segments.length === 3 && segments[0] === 'w' && segments[2] === 'new' && segments[1]) {
     return { type: 'new_workspace', workspaceId: segments[1] };
@@ -29,6 +34,9 @@ export const urlPathToURL = (urlPath: URLPath): string => {
   switch (urlPath.type) {
     case 'new_global':
       return '/new';
+
+    case 'new_temp':
+      return '/temp';
 
     case 'new_workspace':
       return `/w/${urlPath.workspaceId}/new`;
@@ -68,5 +76,5 @@ export const isExistingSessionURL = (pathname: string): boolean => {
 // Helper function to check if URL represents a new session
 export const isNewSessionURL = (pathname: string): boolean => {
   const urlPath = parseURLPath(pathname);
-  return urlPath.type === 'new_global' || urlPath.type === 'new_workspace';
+  return urlPath.type === 'new_global' || urlPath.type === 'new_temp' || urlPath.type === 'new_workspace';
 };

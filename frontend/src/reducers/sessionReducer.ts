@@ -18,6 +18,12 @@ export const sessionReducer = (state: SessionState, action: SessionAction): Sess
             workspaceId: undefined,
           };
 
+        case 'new_temp':
+          return {
+            status: 'no_session',
+            workspaceId: undefined,
+          };
+
         case 'new_workspace':
           return {
             status: 'no_session',

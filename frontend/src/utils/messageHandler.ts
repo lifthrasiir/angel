@@ -19,6 +19,7 @@ export const sendMessage = async (
   model?: string,
   initialRoots?: string[],
   beforeMessageId?: string,
+  isTemporary?: boolean,
 ) => {
   let apiUrl = '';
   let requestBody: any = {};
@@ -33,7 +34,8 @@ export const sendMessage = async (
       requestBody.primaryBranchId = primaryBranchId;
     }
   } else {
-    apiUrl = '/api/chat';
+    // Use /api/chat/temp for temporary sessions
+    apiUrl = isTemporary ? '/api/chat/temp' : '/api/chat';
     requestBody = {
       message: inputMessage,
       systemPrompt: systemPrompt,
@@ -41,7 +43,7 @@ export const sendMessage = async (
       attachments,
       model,
     };
-    if (workspaceId) {
+    if (workspaceId && !isTemporary) {
       requestBody.workspaceId = workspaceId;
     }
     if (initialRoots) {
