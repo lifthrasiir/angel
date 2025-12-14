@@ -19,9 +19,7 @@ export type SessionState =
 
 // URL Path Types
 export type URLPath =
-  | { type: 'new_global' }
-  | { type: 'new_temp' }
-  | { type: 'new_workspace'; workspaceId: string }
+  | { type: 'new_session'; workspaceId: string; isTemporary: boolean }
   | { type: 'existing_session'; sessionId: string };
 
 // FSM Action Types - handles session identification and related state changes

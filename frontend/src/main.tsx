@@ -37,6 +37,7 @@ const AppRoutes = () => (
           />
           <Route path="/w/:workspaceId" element={<Navigate to="new" replace />} />
           <Route path="/w/:workspaceId/new" element={<SessionPage />} />
+          <Route path="/w/:workspaceId/temp" element={<SessionPage isTemporary={true} />} />
           <Route path="/w/:workspaceId/:sessionId" element={<SessionRedirector />} />
           <Route path="/:sessionId" element={<SessionPage />} />
           <Route

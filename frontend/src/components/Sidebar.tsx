@@ -8,7 +8,7 @@ import type { Workspace } from '../types/chat';
 import { sessionsAtom, workspaceNameAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
 import { useSessionManagerContext } from '../hooks/SessionManagerContext';
 import { getSessionId } from '../utils/sessionStateHelpers';
-import { extractWorkspaceId } from '../utils/urlSessionMapping';
+import { extractWorkspaceId, isNewNonTemporarySessionURL } from '../utils/urlSessionMapping';
 import { fetchSessions } from '../utils/sessionManager';
 import LogoAnimation from './LogoAnimation';
 import SessionList from './SessionList';
@@ -45,13 +45,13 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   const isInitializedRef = useRef(false);
   const lastSessionIdRef = useRef<string | null>(null);
 
-  // Helper function to check if current path represents anonymous workspace
+  // Helper function to check if current path represents anonymous workspace (not workspaces)
   const isAnonymousWorkspacePath = (pathname: string): boolean => {
     return pathname === '/new' || pathname === '/' || pathname === '/temp';
   };
 
-  // Check if we're on the /new page (to show "New Temporary Session" button)
-  const isNewPage = location.pathname === '/new';
+  // Check if we're on a new non-temporary session page, to adjust "New Session" button label
+  const showTemporarySessionButton = isNewNonTemporarySessionURL(location.pathname);
 
   // Initialize active workspace ONLY on first load
   useEffect(() => {
@@ -205,13 +205,9 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       let newPath: string;
       if (showWorkspaces) {
         newPath = '/w/new';
-      } else if (activeWorkspaceId) {
-        newPath = `/w/${activeWorkspaceId}/new`;
-      } else if (isNewPage) {
-        // On /new page, navigate to /temp for temporary session when files are dropped
-        newPath = '/temp';
       } else {
-        newPath = '/new';
+        newPath =
+          (activeWorkspaceId ? `/w/${activeWorkspaceId}` : '') + (showTemporarySessionButton ? '/temp' : '/new');
       }
       handleNavigate(newPath);
     }
@@ -385,13 +381,11 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             onClick={() => {
               if (showWorkspaces) {
                 handleNavigate('/w/new');
-              } else if (activeWorkspaceId) {
-                handleNavigate(`/w/${activeWorkspaceId}/new`);
-              } else if (isNewPage) {
-                // On /new page, navigate to /temp for temporary session
-                handleNavigate('/temp');
               } else {
-                handleNavigate('/new');
+                handleNavigate(
+                  (activeWorkspaceId ? `/w/${activeWorkspaceId}` : '') +
+                    (showTemporarySessionButton ? '/temp' : '/new'),
+                );
               }
             }}
             onDrop={handleNewSessionDrop}
@@ -417,13 +411,13 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
             aria-label={
               showWorkspaces
                 ? 'Create New Workspace'
-                : isNewPage
+                : showTemporarySessionButton
                   ? 'Create New Temporary Session'
                   : 'Create New Session'
             }
           >
             <FaPlus style={{ marginRight: '5px' }} />
-            {showWorkspaces ? 'New Workspace' : isNewPage ? 'New Temporary Session' : 'New Session'}
+            {showWorkspaces ? 'New Workspace' : showTemporarySessionButton ? 'New Temporary Session' : 'New Session'}
           </button>
         </div>
 

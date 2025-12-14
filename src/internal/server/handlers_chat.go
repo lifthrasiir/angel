@@ -66,6 +66,7 @@ func newTempSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 		Model        string           `json:"model"`
 		FetchLimit   int              `json:"fetchLimit"`
 		InitialRoots []string         `json:"initialRoots"`
+		WorkspaceID  string           `json:"workspaceId"`
 	}
 
 	if !decodeJSONRequest(r, w, &requestBody, "newTempSessionAndMessage") {
@@ -82,7 +83,7 @@ func newTempSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 	if err := chat.NewSessionAndMessage(
 		r.Context(), db, models, ga, tools,
 		ew, sessionId, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
-		"", requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
+		requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
 	); err != nil {
 		sendInternalServerError(w, r, err, "Failed to create new temporary session and message")
 	}

@@ -252,6 +252,7 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 		http.Redirect(w, r, fmt.Sprintf("/w/%s/new", mux.Vars(r)["workspaceId"]), http.StatusFound)
 	}).Methods("GET")
 	router.HandleFunc("/w/{workspaceId}/new", serveSPAIndex).Methods("GET")
+	router.HandleFunc("/w/{workspaceId}/temp", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/w/{workspaceId}/{sessionId}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, fmt.Sprintf("/%s", mux.Vars(r)["sessionId"]), http.StatusFound)
 	}).Methods("GET")

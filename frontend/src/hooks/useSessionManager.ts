@@ -35,6 +35,7 @@ export interface SessionManager {
   handleError: (error: string) => void;
   resetSession: () => void;
   navigateToNewSession: (workspaceId?: string) => void;
+  navigateToTemporarySession: (workspaceId?: string) => void;
   navigateToSession: (sessionId: string) => void;
   setSessionWorkspaceId: (workspaceId: string) => void;
 
@@ -151,6 +152,15 @@ export const useSessionManager = () => {
     [navigate],
   );
 
+  // Navigate to temporary session
+  const navigateToTemporarySession = useCallback(
+    (workspaceId?: string) => {
+      const url = workspaceId ? `/w/${workspaceId}/temp` : '/temp';
+      navigate(url);
+    },
+    [navigate],
+  );
+
   // Navigate to existing session
   const navigateToSession = useCallback(
     (sessionId: string) => {
@@ -196,6 +206,7 @@ export const useSessionManager = () => {
     handleError,
     resetSession,
     navigateToNewSession,
+    navigateToTemporarySession,
     navigateToSession,
     setSessionWorkspaceId,
 

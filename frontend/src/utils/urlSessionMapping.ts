@@ -7,17 +7,22 @@ export const parseURLPath = (pathname: string): URLPath => {
 
   // Pattern: /new -> new global session
   if (segments.length === 1 && segments[0] === 'new') {
-    return { type: 'new_global' };
+    return { type: 'new_session', workspaceId: '', isTemporary: false };
   }
 
-  // Pattern: /temp -> new temporary session
+  // Pattern: /temp -> new global temporary session
   if (segments.length === 1 && segments[0] === 'temp') {
-    return { type: 'new_temp' };
+    return { type: 'new_session', workspaceId: '', isTemporary: true };
   }
 
   // Pattern: /w/:workspaceId/new -> new workspace session
   if (segments.length === 3 && segments[0] === 'w' && segments[2] === 'new' && segments[1]) {
-    return { type: 'new_workspace', workspaceId: segments[1] };
+    return { type: 'new_session', workspaceId: segments[1], isTemporary: false };
+  }
+
+  // Pattern: /w/:workspaceId/temp -> new workspace temporary session
+  if (segments.length === 3 && segments[0] === 'w' && segments[2] === 'temp' && segments[1]) {
+    return { type: 'new_session', workspaceId: segments[1], isTemporary: true };
   }
 
   // Pattern: /:sessionId -> existing session
@@ -26,20 +31,14 @@ export const parseURLPath = (pathname: string): URLPath => {
   }
 
   // Default fallback - treat as new global session
-  return { type: 'new_global' };
+  return { type: 'new_session', workspaceId: '', isTemporary: false };
 };
 
 // Convert URLPath back to a URL string (useful for navigation)
 export const urlPathToURL = (urlPath: URLPath): string => {
   switch (urlPath.type) {
-    case 'new_global':
-      return '/new';
-
-    case 'new_temp':
-      return '/temp';
-
-    case 'new_workspace':
-      return `/w/${urlPath.workspaceId}/new`;
+    case 'new_session':
+      return (urlPath.workspaceId ? `/w/${urlPath.workspaceId}` : '') + (urlPath.isTemporary ? '/temp' : '/new');
 
     case 'existing_session':
       return `/${urlPath.sessionId}`;
@@ -52,13 +51,13 @@ export const urlPathToURL = (urlPath: URLPath): string => {
 // Helper function to check if a URL represents a workspace context
 export const isWorkspaceURL = (pathname: string): boolean => {
   const urlPath = parseURLPath(pathname);
-  return urlPath.type === 'new_workspace';
+  return urlPath.type === 'new_session' && !!urlPath.workspaceId;
 };
 
 // Helper function to extract workspace ID from URL
-export const extractWorkspaceId = (pathname: string): string | undefined => {
+export const extractWorkspaceId = (pathname: string): string => {
   const urlPath = parseURLPath(pathname);
-  return urlPath.type === 'new_workspace' ? urlPath.workspaceId : undefined;
+  return urlPath.type === 'new_session' ? urlPath.workspaceId : '';
 };
 
 // Helper function to extract session ID from URL
@@ -76,5 +75,11 @@ export const isExistingSessionURL = (pathname: string): boolean => {
 // Helper function to check if URL represents a new session
 export const isNewSessionURL = (pathname: string): boolean => {
   const urlPath = parseURLPath(pathname);
-  return urlPath.type === 'new_global' || urlPath.type === 'new_temp' || urlPath.type === 'new_workspace';
+  return urlPath.type === 'new_session';
+};
+
+// Helper function to check if URL represents a non-temporary new session
+export const isNewNonTemporarySessionURL = (pathname: string): boolean => {
+  const urlPath = parseURLPath(pathname);
+  return urlPath.type === 'new_session' && !urlPath.isTemporary;
 };
