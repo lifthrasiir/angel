@@ -1240,9 +1240,11 @@ pre .hljs {
 
   .sidebar-session-button {
     padding: calc(var(--spacing-unit) * 0.3) calc(var(--spacing-unit) * 0.5);
+    padding-right: 0;
+    min-height: var(--touch-target-size);
   }
 
-  .session-menu-trigger {
+  .sidebar-session-item .session-menu-trigger {
     min-height: var(--touch-target-size);
     min-width: var(--touch-target-size);
   }
