@@ -112,6 +112,11 @@ export const addSessionAtom = atom(null, (_get, set, newSession: Session) => {
 
 // Derived atom for setting session name
 export const setSessionNameAtom = atom(null, (_get, set, payload: { sessionId: string; name: string }) => {
+  // Ignore session name updates for temporary sessions (sessions starting with '.')
+  if (payload.sessionId.startsWith('.')) {
+    return;
+  }
+
   const currentSessions = _get(sessionsAtom);
   set(
     sessionsAtom,
