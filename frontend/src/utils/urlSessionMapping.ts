@@ -78,8 +78,14 @@ export const isNewSessionURL = (pathname: string): boolean => {
   return urlPath.type === 'new_session';
 };
 
-// Helper function to check if URL represents a non-temporary new session
+// Helper function to check if URL represents a new non-temporary session
 export const isNewNonTemporarySessionURL = (pathname: string): boolean => {
   const urlPath = parseURLPath(pathname);
   return urlPath.type === 'new_session' && !urlPath.isTemporary;
+};
+
+// Helper function to check if URL represents a new temporary session
+export const isNewTemporarySessionURL = (pathname: string): boolean => {
+  const urlPath = parseURLPath(pathname);
+  return urlPath.type === 'new_session' && urlPath.isTemporary;
 };

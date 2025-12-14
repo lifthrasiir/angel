@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
+import { useLocation } from 'react-router-dom';
 import type { ChatMessage as ChatMessageType } from '../types/chat';
 import ChatMessage from './ChatMessage';
 import SystemPromptEditor from './SystemPromptEditor';
@@ -27,6 +28,7 @@ import { useSessionLoader } from '../hooks/useSessionLoader';
 import { useSessionManagerContext } from '../hooks/SessionManagerContext';
 import { useScrollAdjustment } from '../hooks/useScrollAdjustment';
 import { getSessionId, getWorkspaceId, isLoading, hasMoreMessages, isLoadComplete } from '../utils/sessionStateHelpers';
+import { isNewTemporarySessionURL } from '../utils/urlSessionMapping';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -86,6 +88,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const workspaceId = getWorkspaceId(sessionManager.sessionState);
   const isLoadingState = isLoading(sessionManager.sessionState);
   const hasMoreMessagesState = hasMoreMessages(sessionManager.sessionState);
+  const location = useLocation();
 
   const { loadMoreMessages } = useSessionLoader({
     chatSessionId: sessionId,
@@ -102,9 +105,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
   const temporaryEnvChangeMessage = useAtomValue(temporaryEnvChangeMessageAtom);
 
+  // State for temporary session notice
+  const [showTempSessionNotice, setShowTempSessionNotice] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef(messages.length);
   const prevIsPriorSessionLoadingRef = useRef(isPriorSessionLoading); // New ref
+
+  // Check if this is a temporary session and show notice if needed
+  useEffect(() => {
+    // Show notice for temporary session URLs: /temp, /w/:workspaceId/temp, or /.xxx sessions
+    const isTempURL = isNewTemporarySessionURL(location.pathname);
+    const isTempID = sessionId && sessionId.startsWith('.');
+
+    setShowTempSessionNotice(isTempURL || !!isTempID);
+  }, [sessionId, location.pathname]);
 
   useEffect(() => {
     const wasLoadingPrior = prevIsPriorSessionLoadingRef.current; // Get previous state
@@ -444,6 +459,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     availableModels,
     processingStartTime,
     temporaryEnvChangeMessage,
+    showTempSessionNotice,
+    hasMoreMessagesState,
     handleEditMessage,
     handleBranchSwitch,
     handleRetryMessage,
@@ -492,17 +509,37 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           }}
         >
           {!hasMoreMessagesState && (
-            <SystemPromptEditor
-              key={sessionId || 'new'}
-              initialPrompt={systemPrompt}
-              currentLabel={currentSystemPromptLabel}
-              onPromptUpdate={(updatedPrompt) => {
-                setSystemPrompt(updatedPrompt.value);
-              }}
-              isEditing={isSystemPromptEditing}
-              predefinedPrompts={globalPrompts}
-              workspaceId={workspaceId}
-            />
+            <>
+              {showTempSessionNotice && (
+                <div
+                  key="temp-session-notice"
+                  style={{
+                    textAlign: 'center',
+                    padding: '20px',
+                    margin: '0 0 20px 0',
+                    backgroundColor: '#fff3cd',
+                    border: '1px solid #ffeaa7',
+                    borderRadius: '8px',
+                    color: '#856404',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                  }}
+                >
+                  This is a temporary session, to be deleted after 48 hours of inactivity.
+                </div>
+              )}
+              <SystemPromptEditor
+                key={sessionId || 'new'}
+                initialPrompt={systemPrompt}
+                currentLabel={currentSystemPromptLabel}
+                onPromptUpdate={(updatedPrompt) => {
+                  setSystemPrompt(updatedPrompt.value);
+                }}
+                isEditing={isSystemPromptEditing}
+                predefinedPrompts={globalPrompts}
+                workspaceId={workspaceId}
+              />
+            </>
           )}
 
           {isPriorSessionLoading && (

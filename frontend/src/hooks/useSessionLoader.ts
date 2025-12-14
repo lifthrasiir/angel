@@ -40,6 +40,7 @@ import {
 import { useScrollAdjustment } from './useScrollAdjustment';
 import { isLoading, hasMoreMessages } from '../utils/sessionStateHelpers';
 import { SessionManager } from './useSessionManager';
+import { isNewSessionURL } from '../utils/urlSessionMapping';
 
 interface UseSessionLoaderProps {
   chatSessionId: string | null;
@@ -246,7 +247,7 @@ export const useSessionLoader = ({
     const loadChatSession = async () => {
       const currentSessionId = urlSessionId;
 
-      if (location.pathname.endsWith('/new') && !currentSessionId) {
+      if (isNewSessionURL(location.pathname) && !currentSessionId) {
         // Handle preserveSelectedFiles before resetting state
         if (preserveSelectedFiles.length > 0) {
           setSelectedFiles(preserveSelectedFiles);
