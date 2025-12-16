@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ncruces/go-sqlite3"
 	_ "github.com/ncruces/go-sqlite3/driver"
+
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // See https://github.com/ncruces/sqlite-vec-go/tree/main for rebuilding this binary.
@@ -21,11 +22,6 @@ var sqliteBinary []byte
 func init() {
 	sqlite3.Binary = sqliteBinary
 }
-
-var (
-	walCheckpointTicker *time.Ticker
-	walCheckpointMutex  sync.Mutex
-)
 
 // InitDB initializes the SQLite database connection and creates tables if they don't exist.
 // This is the main database initialization function for production use.
@@ -49,6 +45,7 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 		"PRAGMA mmap_size=268435456",
 		"PRAGMA temp_store=MEMORY",
 		"PRAGMA foreign_keys=ON",
+		"PRAGMA auto_vacuum=INCREMENTAL",
 	}
 
 	for _, pragma := range pragmas {
@@ -401,46 +398,62 @@ func syncFTSOnStartup(db *sql.DB) error {
 	return nil
 }
 
-// StartWALCheckpointManager starts a background goroutine to periodically run WAL checkpoints
-func StartWALCheckpointManager(db *sql.DB) {
-	walCheckpointMutex.Lock()
-	defer walCheckpointMutex.Unlock()
-
-	// Stop existing ticker if running
-	if walCheckpointTicker != nil {
-		walCheckpointTicker.Stop()
-	}
-
-	// Create ticker to run checkpoint every 10 minutes
-	walCheckpointTicker = time.NewTicker(10 * time.Minute)
-
-	go func() {
-		defer walCheckpointTicker.Stop()
-		for range walCheckpointTicker.C {
-			if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-				log.Printf("WAL checkpoint failed: %v", err)
-			}
-		}
-	}()
+type databaseJob struct {
+	db *sql.DB
 }
 
-// StopWALCheckpointManager stops the WAL checkpoint ticker
-func StopWALCheckpointManager() {
-	walCheckpointMutex.Lock()
-	defer walCheckpointMutex.Unlock()
-
-	if walCheckpointTicker != nil {
-		walCheckpointTicker.Stop()
-		walCheckpointTicker = nil
-		log.Println("WAL checkpoint manager stopped")
-	}
+// Job returns a housekeeping job that performs periodic database maintenance tasks.
+func Job(db *sql.DB) HousekeepingJob {
+	return &databaseJob{db: db}
 }
 
-// PerformWALCheckpoint manually triggers a WAL checkpoint
+func (job *databaseJob) Name() string {
+	return "Periodic database maintenance"
+}
+
+func (job *databaseJob) First() error {
+	// XXX: Full vacuum can panic due to the OOM
+	if err := PerformVacuum(job.db, 1000); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (job *databaseJob) Sometimes() error {
+	if err := PerformWALCheckpoint(job.db); err != nil {
+		return err
+	}
+	if err := PerformVacuum(job.db, 100); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (job *databaseJob) Last() error {
+	if err := PerformWALCheckpoint(job.db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// PerformWALCheckpoint triggers a WAL checkpoint.
 func PerformWALCheckpoint(db *sql.DB) error {
 	if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 		return fmt.Errorf("failed to perform WAL checkpoint: %w", err)
 	}
-	log.Println("Manual WAL checkpoint completed successfully")
+	return nil
+}
+
+// PerformVacuum performs a full or incremental vacuum to reclaim space.
+func PerformVacuum(db *sql.DB, npages int) error {
+	if npages <= 0 {
+		if _, err := db.Exec("VACUUM"); err != nil {
+			return fmt.Errorf("failed to perform full vacuum: %w", err)
+		}
+	} else {
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA incremental_vacuum(%d)", npages)); err != nil {
+			return fmt.Errorf("failed to perform incremental vacuum: %w", err)
+		}
+	}
 	return nil
 }

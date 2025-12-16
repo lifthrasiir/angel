@@ -17,7 +17,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/lifthrasiir/angel/internal/tool/subagent"
 	"github.com/lifthrasiir/angel/internal/tool/todo"
 	"github.com/lifthrasiir/angel/internal/tool/webfetch"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // InitTools initializes all built-in tools
@@ -86,11 +86,16 @@ func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, mo
 	// Start the shell command manager
 	shell.StartShellCommandManager(db) // Pass the database connection
 
-	// Start WAL checkpoint manager
-	database.StartWALCheckpointManager(db)
+	jobs := []HousekeepingJob{
+		database.Job(db),
+		&tempSessionCleanupJob{
+			db:             db,
+			olderThan:      48 * time.Hour,
+			sandboxBaseDir: env.SandboxBaseDir(),
+		},
+	}
 
-	// Start temporary session cleanup manager (every 10 minutes, delete sessions older than 48 hours)
-	StartTempSessionCleanupManager(db)
+	StartHousekeepingJobs(jobs)
 
 	// Retrieve or generate CSRF key
 	csrfKey, err := database.GetAppConfig(db, database.CSRFKeyName)
@@ -183,16 +188,7 @@ func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, mo
 	<-quit
 	log.Println("Shutting down server...")
 
-	// Stop WAL checkpoint manager
-	database.StopWALCheckpointManager()
-
-	// Stop temporary session cleanup manager
-	StopTempSessionCleanupManager()
-
-	// Perform final WAL checkpoint before shutdown
-	if err := database.PerformWALCheckpoint(db); err != nil {
-		log.Printf("Final WAL checkpoint failed: %v", err)
-	}
+	StopHousekeepingJobs()
 
 	// Shutdown server with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -511,59 +507,4 @@ func getTools(w http.ResponseWriter, r *http.Request) *tool.Tools {
 		runtime.Goexit()
 	}
 	return tools
-}
-
-var (
-	tempSessionCleanupTicker *time.Ticker
-	tempSessionCleanupMutex  sync.Mutex
-)
-
-// StartTempSessionCleanupManager starts a background goroutine to periodically clean up old temporary sessions
-func StartTempSessionCleanupManager(db *sql.DB) {
-	tempSessionCleanupMutex.Lock()
-	defer tempSessionCleanupMutex.Unlock()
-
-	// Stop existing ticker if running
-	if tempSessionCleanupTicker != nil {
-		tempSessionCleanupTicker.Stop()
-	}
-
-	// Create ticker to run cleanup every 10 minutes
-	tempSessionCleanupTicker = time.NewTicker(10 * time.Minute)
-
-	// Run cleanup immediately on startup
-	go func() {
-		cleanupOldTempSessions(db)
-	}()
-
-	// Then run periodically
-	go func() {
-		defer tempSessionCleanupTicker.Stop()
-		for range tempSessionCleanupTicker.C {
-			cleanupOldTempSessions(db)
-		}
-	}()
-}
-
-// StopTempSessionCleanupManager stops the temporary session cleanup ticker
-func StopTempSessionCleanupManager() {
-	tempSessionCleanupMutex.Lock()
-	defer tempSessionCleanupMutex.Unlock()
-
-	if tempSessionCleanupTicker != nil {
-		tempSessionCleanupTicker.Stop()
-		tempSessionCleanupTicker = nil
-		log.Println("Temporary session cleanup manager stopped")
-	}
-}
-
-// cleanupOldTempSessions performs the actual cleanup of old temporary sessions
-func cleanupOldTempSessions(db *sql.DB) {
-	// Delete sessions older than 48 hours
-	olderThan := 48 * time.Hour
-	sandboxBaseDir := env.SandboxBaseDir()
-
-	if err := database.CleanupOldTemporarySessions(db, olderThan, sandboxBaseDir); err != nil {
-		log.Printf("Failed to cleanup old temporary sessions: %v", err)
-	}
 }
