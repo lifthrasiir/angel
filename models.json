@@ -93,6 +93,21 @@
             "extends": "gemini-2.5-flash",
             "genParams": "@subagent"
         },
+        "gemini-3-flash": {
+            "extends": "$chat",
+            "providers": [
+                "antigravity"
+            ],
+            "modelName": "gemini-3-flash",
+            "fallback": "gemini-2.5-flash",
+            "thoughtEnabled": true,
+            "toolSupported": true,
+            "maxTokens": 1048576
+        },
+        "gemini-3-flash/subagent": {
+            "extends": "gemini-2.5-flash",
+            "genParams": "@subagent"
+        },
         "gemini-3-pro": {
             "extends": "$chat",
             "providers": [
@@ -218,6 +233,7 @@
     },
     "displayOrder": [
         "gemini-2.5-flash",
+        "gemini-3-flash",
         "gemini-3-pro+low",
         "gemini-3-pro+high",
         "gemini-2.5-pro",
