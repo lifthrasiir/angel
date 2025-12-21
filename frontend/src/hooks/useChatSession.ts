@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { handleFilesSelected, handleRemoveFile } from '../utils/fileHandler';
 import { useAttachmentResize } from './useAttachmentResize';
@@ -10,7 +10,6 @@ import {
   inputMessageAtom,
   sessionsAtom,
   lastAutoDisplayedThoughtIdAtom,
-  processingStartTimeAtom,
   systemPromptAtom,
   isSystemPromptEditingAtom,
   selectedFilesAtom,
@@ -22,7 +21,7 @@ import {
   isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
-import { useMessageSending } from './useMessageSending';
+import { useSessionFSM } from './useSessionFSM';
 import { getAvailableModels, ModelInfo } from '../api/models';
 
 export const useChatSession = (isTemporary: boolean = false) => {
@@ -40,7 +39,6 @@ export const useChatSession = (isTemporary: boolean = false) => {
   }, [inputMessage]);
   const sessions = useAtomValue(sessionsAtom);
   const lastAutoDisplayedThoughtId = useAtomValue(lastAutoDisplayedThoughtIdAtom);
-  const processingStartTime = useAtomValue(processingStartTimeAtom);
   const systemPrompt = useAtomValue(systemPromptAtom);
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const selectedFiles = useAtomValue(selectedFilesAtom);
@@ -107,29 +105,82 @@ export const useChatSession = (isTemporary: boolean = false) => {
 
   // workspaceId is now managed by FSM - no need to set it here
 
-  const {
-    handleSendMessage,
-    cancelStreamingCall,
-    cancelActiveStreams,
-    sendConfirmation,
-    handleEditMessage,
-    handleBranchSwitch,
-    handleRetryMessage,
-    handleRetryError,
-  } = useMessageSending({
-    inputMessage,
-    selectedFiles: attachmentResize.getFilesForSending(),
-    chatSessionId,
-    systemPrompt,
-    primaryBranchId,
-    selectedModel,
-    sessionManager,
-    isTemporary,
-  });
+  const { sendMessage, cancelCurrentOperation, confirmTool, switchBranch, retryMessage, editMessage, retryError } =
+    useSessionFSM();
 
   const handleSetSelectedModel = (model: ModelInfo) => {
     setSelectedModel(model);
   };
+
+  // Adapter functions to match old interface
+  const isProcessing =
+    sessionManager.sessionState.activeOperation !== 'none' && sessionManager.sessionState.activeOperation !== 'loading';
+
+  const handleSendMessage = useCallback(
+    (messageContent?: string) => {
+      // Accept optional message content parameter
+      // If not provided, fall back to the ref value
+      const currentInput = messageContent !== undefined ? messageContent : inputMessageRef.current;
+      const currentFiles = attachmentResize.getFilesForSending();
+      sendMessage(
+        currentInput,
+        currentFiles,
+        selectedModel,
+        systemPrompt,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        isTemporary,
+      );
+    },
+    [sendMessage, selectedModel, systemPrompt, isTemporary, attachmentResize],
+  );
+
+  const sendConfirmation = useCallback(
+    async (approved: boolean, _sessionId: string, branchId: string, modifiedData?: Record<string, any>) => {
+      if (approved) {
+        confirmTool(branchId, modifiedData);
+      }
+    },
+    [confirmTool],
+  );
+
+  const handleBranchSwitch = useCallback(
+    async (newBranchId: string) => {
+      switchBranch(newBranchId);
+    },
+    [switchBranch],
+  );
+
+  const handleRetryMessage = useCallback(
+    async (originalMessageId: string) => {
+      await retryMessage(originalMessageId);
+    },
+    [retryMessage],
+  );
+
+  const handleEditMessage = useCallback(
+    async (originalMessageId: string, editedText: string) => {
+      await editMessage(originalMessageId, editedText);
+    },
+    [editMessage],
+  );
+
+  const handleRetryError = useCallback(
+    async (errorMessageId: string) => {
+      await retryError(errorMessageId);
+    },
+    [retryError],
+  );
+
+  const cancelStreamingCall = useCallback(() => {
+    cancelCurrentOperation();
+  }, [cancelCurrentOperation]);
+
+  const cancelActiveStreams = useCallback(() => {
+    cancelCurrentOperation();
+  }, [cancelCurrentOperation]);
 
   return {
     chatSessionId,
@@ -137,7 +188,7 @@ export const useChatSession = (isTemporary: boolean = false) => {
     inputMessage,
     sessions,
     lastAutoDisplayedThoughtId,
-    isProcessing: processingStartTime !== null,
+    isProcessing,
     systemPrompt,
     isSystemPromptEditing,
     selectedFiles,

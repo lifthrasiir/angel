@@ -1,10 +1,9 @@
 import React from 'react';
 import type { PossibleNextMessage, ChatMessage } from '../types/chat';
-import { useAtom } from 'jotai';
-import { processingStartTimeAtom } from '../atoms/chatAtoms';
 import { FaEdit, FaRedo, FaTimes, FaPaperPlane } from 'react-icons/fa';
 import BranchDropdown from './BranchDropdown';
 import MessageMenu from './MessageMenu';
+import { useProcessingState } from '../hooks/useProcessingState';
 
 export interface MessageInfoProps {
   cumulTokenCount?: number | null;
@@ -44,9 +43,7 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     editAccessKey,
     retryAccessKey,
   }) => {
-    const [processingStartTime] = useAtom(processingStartTimeAtom);
-    const isProcessing = processingStartTime !== null;
-
+    const { isProcessing } = useProcessingState();
     const hasInfo =
       cumulTokenCount !== undefined ||
       (possibleBranches && possibleBranches.length > 0) ||

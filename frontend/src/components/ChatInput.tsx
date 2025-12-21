@@ -1,10 +1,9 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { FaPaperclip, FaPaperPlane, FaTimes } from 'react-icons/fa';
-import { useAtom, useSetAtom, useAtomValue } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import {
   inputMessageAtom,
-  processingStartTimeAtom,
   availableModelsAtom,
   selectedModelAtom,
   selectedFilesAtom,
@@ -12,6 +11,7 @@ import {
   isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
 import { useCommandProcessor } from '../hooks/useCommandProcessor';
+import { useProcessingState } from '../hooks/useProcessingState';
 import { handleEnterKey } from '../utils/enterKeyHandler';
 import { handleNavigationKeys } from '../utils/navigationKeys';
 
@@ -36,12 +36,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
   isSendDisabledByResizing,
   isDisabled = false,
 }) => {
+  const { isProcessing } = useProcessingState();
   const [inputMessage] = useAtom(inputMessageAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
 
   // Local state for typing performance
   const [localInput, setLocalInput] = useState(inputMessage);
-  const processingStartTime = useAtomValue(processingStartTimeAtom);
   const [availableModels] = useAtom(availableModelsAtom);
   const [selectedModel] = useAtom(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
@@ -177,7 +177,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleSendOrRunCommand = () => {
-    if (processingStartTime !== null) {
+    if (isProcessing) {
       handleCancelStreaming();
       return;
     }
@@ -312,7 +312,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
       {/* Send/Cancel button */}
       <div style={{ gridArea: isMobile ? '1 / 3' : '1 / 4' }}>
-        {processingStartTime !== null ? (
+        {isProcessing ? (
           <button
             onClick={handleCancelStreaming}
             style={{

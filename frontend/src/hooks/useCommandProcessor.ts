@@ -7,7 +7,6 @@ import {
   temporaryEnvChangeMessageAtom,
   primaryBranchIdAtom,
   pendingRootsAtom,
-  processingStartTimeAtom,
   addMessageAtom,
   compressAbortControllerAtom,
 } from '../atoms/chatAtoms';
@@ -29,7 +28,6 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
   const setPendingRoots = useSetAtom(pendingRootsAtom);
   const currentPendingRoots = useAtomValue(pendingRootsAtom);
-  const setProcessingStartTime = useSetAtom(processingStartTimeAtom);
   const addMessage = useSetAtom(addMessageAtom);
   const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
 
@@ -66,7 +64,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
     }
 
     setStatusMessage('Compressing chat history...');
-    setProcessingStartTime(Date.now());
+    // Note: Processing state is now managed by SessionState
     const abortController = new AbortController();
     setCompressAbortController(abortController);
 
@@ -103,7 +101,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
         console.error('Compression failed:', error);
       }
     } finally {
-      setProcessingStartTime(null);
+      // Note: Processing state is now managed by SessionState
       setCompressAbortController(null);
     }
   };

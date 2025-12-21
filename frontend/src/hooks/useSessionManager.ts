@@ -1,7 +1,8 @@
-import { useReducer, useCallback, useEffect } from 'react';
+import { useReducer, useCallback, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { sessionReducer } from '../reducers/sessionReducer';
 import { parseURLPath } from '../utils/urlSessionMapping';
+import { SessionOperationManager } from '../managers/SessionOperationManager';
 import {
   getSessionId,
   getWorkspaceId,
@@ -11,10 +12,11 @@ import {
   canLoadEarlier,
   getError,
 } from '../utils/sessionStateHelpers';
+import type { SessionState, SessionAction } from '../types/sessionFSM';
 
 export interface SessionManager {
   // FSM state
-  sessionState: any;
+  sessionState: SessionState;
 
   // Computed values
   sessionId: string | null;
@@ -24,8 +26,12 @@ export interface SessionManager {
   hasMoreMessages: boolean;
   canLoadEarlier: boolean;
   error: string | null;
+  activeOperation: 'none' | 'loading' | 'sending' | 'streaming';
 
   // Actions
+  dispatch: (action: SessionAction) => void;
+
+  // Legacy actions for backward compatibility
   startSessionLoading: (sessionId: string, workspaceId?: string) => void;
   completeSessionLoading: (sessionId: string, workspaceId?: string, hasMore?: boolean) => void;
   startStreaming: () => void;
@@ -39,53 +45,9 @@ export interface SessionManager {
   navigateToSession: (sessionId: string) => void;
   setSessionWorkspaceId: (workspaceId: string) => void;
 
-  // Global stream management
-  closeAllStreams: () => void;
-  setActiveEventSource: (es: EventSource | null) => void;
-  setActiveAbortController: (ac: AbortController | null) => void;
+  // Operation manager access
+  operationManager: SessionOperationManager;
 }
-
-// Global stream registry for centralized stream management
-const globalStreamRegistry = {
-  activeEventSource: null as EventSource | null,
-  activeAbortController: null as AbortController | null,
-
-  setEventSource: function (es: EventSource | null) {
-    if (
-      this.activeEventSource &&
-      this.activeEventSource !== es &&
-      this.activeEventSource.readyState !== EventSource.CLOSED
-    ) {
-      this.activeEventSource.close();
-    }
-    this.activeEventSource = es;
-  },
-
-  setAbortController: function (ac: AbortController | null) {
-    if (this.activeAbortController && this.activeAbortController !== ac && !this.activeAbortController.signal.aborted) {
-      this.activeAbortController.abort();
-    }
-    this.activeAbortController = ac;
-  },
-
-  closeAllStreams: function () {
-    // Close active EventSource
-    if (this.activeEventSource) {
-      if (this.activeEventSource.readyState !== EventSource.CLOSED) {
-        this.activeEventSource.close();
-      }
-      this.activeEventSource = null;
-    }
-
-    // Abort active fetch stream
-    if (this.activeAbortController) {
-      if (!this.activeAbortController.signal.aborted) {
-        this.activeAbortController.abort();
-      }
-      this.activeAbortController = null;
-    }
-  },
-};
 
 export const useSessionManager = () => {
   const location = useLocation();
@@ -95,7 +57,18 @@ export const useSessionManager = () => {
   const [sessionState, dispatch] = useReducer(sessionReducer, {
     status: 'no_session',
     workspaceId: undefined,
+    activeOperation: 'none',
   });
+
+  // Create operation manager instance
+  const operationManager = useMemo(
+    () =>
+      new SessionOperationManager({
+        dispatch,
+        sessionState,
+      }),
+    [],
+  );
 
   // Handle URL changes
   useEffect(() => {
@@ -105,22 +78,22 @@ export const useSessionManager = () => {
 
   // Start session loading
   const startSessionLoading = useCallback((sessionId: string, workspaceId?: string) => {
-    dispatch({ type: 'SESSION_LOADING', sessionId, workspaceId });
+    dispatch({ type: 'SESSION_LOADING', sessionId, workspaceId, activeOperation: 'loading' });
   }, []);
 
   // Complete session loading
   const completeSessionLoading = useCallback((sessionId: string, workspaceId?: string, hasEarlier?: boolean) => {
-    dispatch({ type: 'SESSION_LOADED', sessionId, workspaceId, hasEarlier });
+    dispatch({ type: 'SESSION_LOADED', sessionId, workspaceId, hasEarlier, activeOperation: 'none' });
   }, []);
 
   // Start streaming
   const startStreaming = useCallback(() => {
-    dispatch({ type: 'STREAM_STARTED' });
+    dispatch({ type: 'STREAM_STARTED', activeOperation: 'streaming' });
   }, []);
 
   // Complete streaming
   const completeStreaming = useCallback(() => {
-    dispatch({ type: 'STREAM_COMPLETED' });
+    dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
   }, []);
 
   // Start loading earlier messages
@@ -182,6 +155,12 @@ export const useSessionManager = () => {
   const hasMoreMessagesState = hasMoreMessages(sessionState);
   const canLoadEarlierState = canLoadEarlier(sessionState);
   const errorState = getError(sessionState);
+  const activeOperation =
+    sessionState.status === 'session_ready' ||
+    sessionState.status === 'session_loading' ||
+    sessionState.status === 'session_error'
+      ? sessionState.activeOperation
+      : 'none';
 
   return {
     // FSM state
@@ -195,8 +174,12 @@ export const useSessionManager = () => {
     hasMoreMessages: hasMoreMessagesState,
     canLoadEarlier: canLoadEarlierState,
     error: errorState,
+    activeOperation,
 
     // Actions
+    dispatch,
+
+    // Legacy actions for backward compatibility
     startSessionLoading,
     completeSessionLoading,
     startStreaming,
@@ -210,9 +193,7 @@ export const useSessionManager = () => {
     navigateToSession,
     setSessionWorkspaceId,
 
-    // Global stream management
-    closeAllStreams: globalStreamRegistry.closeAllStreams.bind(globalStreamRegistry),
-    setActiveEventSource: globalStreamRegistry.setEventSource.bind(globalStreamRegistry),
-    setActiveAbortController: globalStreamRegistry.setAbortController.bind(globalStreamRegistry),
+    // Operation manager access
+    operationManager,
   } as SessionManager;
 };

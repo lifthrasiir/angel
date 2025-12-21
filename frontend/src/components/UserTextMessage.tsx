@@ -3,7 +3,8 @@ import { useAtom } from 'jotai';
 import type { FileAttachment, ChatMessage } from '../types/chat';
 import FileAttachmentList from './FileAttachmentList';
 import ChatBubble, { type ChatBubbleRef } from './ChatBubble';
-import { editingMessageIdAtom, processingStartTimeAtom } from '../atoms/chatAtoms';
+import { editingMessageIdAtom } from '../atoms/chatAtoms';
+import { useProcessingState } from '../hooks/useProcessingState';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';
 import { isImageOnlyMessage } from '../utils/messageUtils';
@@ -32,10 +33,9 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   isMobile = false,
   isMostRecentUserMessage = false,
 }) => {
+  const { isProcessing } = useProcessingState();
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
-  const [processingStartTime] = useAtom(processingStartTimeAtom);
   const chatBubbleRef = useRef<ChatBubbleRef>(null);
-  const isProcessing = processingStartTime !== null;
 
   const isEditing = messageId === editingMessageId;
   const imageOnly = isImageOnlyMessage(text, attachments);

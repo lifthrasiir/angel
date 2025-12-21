@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { useProcessingState } from '../hooks/useProcessingState';
 
 interface ProcessingIndicatorProps {
-  startTime: number;
   isLastThoughtGroup: boolean;
   isLastModelMessage: boolean;
 }
@@ -24,20 +24,24 @@ const formatTime = (milliseconds: number): string => {
   return formattedTime.trim();
 };
 
-export const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({
-  startTime,
-  isLastThoughtGroup,
-  isLastModelMessage,
-}) => {
+export const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({ isLastThoughtGroup, isLastModelMessage }) => {
+  const { startTime } = useProcessingState();
   const [_, setForceUpdate] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
+    if (!startTime) return;
+
     const interval = setInterval(() => {
       setForceUpdate((prev) => prev + 1); // Force re-render every 100ms
     }, 100); // Check every 100ms for more accurate updates
 
     return () => clearInterval(interval);
   }, [startTime]); // Still depends on startTime to reset interval if processing starts/stops
+
+  // Don't render if there's no startTime (not processing)
+  if (!startTime) {
+    return null;
+  }
 
   const indicatorStyle: React.CSSProperties = {
     display: 'flex',

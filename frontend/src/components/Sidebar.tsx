@@ -6,8 +6,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Workspace } from '../types/chat';
 import { sessionsAtom, workspaceNameAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
-import { useSessionManagerContext } from '../hooks/SessionManagerContext';
-import { getSessionId } from '../utils/sessionStateHelpers';
+import { useSessionFSM } from '../hooks/useSessionFSM';
 import { extractWorkspaceId, isNewNonTemporarySessionURL } from '../utils/urlSessionMapping';
 import { fetchSessions } from '../utils/sessionManager';
 import LogoAnimation from './LogoAnimation';
@@ -25,12 +24,9 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   const location = useLocation();
   const [sessions, setSessions] = useAtom(sessionsAtom);
 
-  // Use shared sessionManager from context
-  const sessionManager = useSessionManagerContext();
-  const chatSessionId = getSessionId(sessionManager.sessionState);
-  // Use sessionManager.workspaceId to ensure reactivity
-  // Convert null to undefined for consistency
-  const sessionWorkspaceId = sessionManager.workspaceId ?? undefined;
+  // Use the new unified useSessionFSM hook
+  const sessionFSM = useSessionFSM();
+  const { sessionId: chatSessionId, workspaceId: sessionWorkspaceId } = sessionFSM;
 
   const [workspaceName, setWorkspaceName] = useAtom(workspaceNameAtom);
   const setSelectedFiles = useSetAtom(selectedFilesAtom);
@@ -72,7 +68,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       isInitializedRef.current = true;
     } else if (sessionWorkspaceId !== undefined) {
       // No URL workspace, but session has loaded with workspace (/:sessionId case)
-      setActiveWorkspaceId(sessionWorkspaceId);
+      setActiveWorkspaceId(sessionWorkspaceId || undefined);
       isInitializedRef.current = true;
     }
     // For /:sessionId path, wait until sessionWorkspaceId is available
@@ -116,7 +112,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
       // We navigated to a different session - update activeWorkspaceId from session's workspace
       // Only update if workspace actually changed to avoid unnecessary re-renders
       if (activeWorkspaceId !== sessionWorkspaceId) {
-        setActiveWorkspaceId(sessionWorkspaceId);
+        setActiveWorkspaceId(sessionWorkspaceId || undefined);
       }
       lastSessionIdRef.current = chatSessionId;
     } else if (!isSessionPath) {

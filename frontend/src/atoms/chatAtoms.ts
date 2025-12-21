@@ -10,7 +10,6 @@ export const messagesAtom = atom<ChatMessage[]>([]);
 export const inputMessageAtom = atom<string>('');
 export const sessionsAtom = atom<Session[]>([]);
 export const lastAutoDisplayedThoughtIdAtom = atom<string | null>(null);
-export const processingStartTimeAtom = atom<number | null>(null);
 export const statusMessageAtom = atom<string | null>(null);
 export const systemPromptAtom = atom<string>('{{.Builtin.SystemPrompt}}');
 export const isSystemPromptEditingAtom = atom<boolean>(false);
@@ -23,9 +22,6 @@ export const selectedModelAtom = atom<ModelInfo | null>(null);
 export const globalPromptsAtom = atom<PredefinedPrompt[]>([]);
 export const selectedGlobalPromptAtom = atom<string>('');
 export const isPickingDirectoryAtom = atom<boolean>(false);
-export const isPriorSessionLoadingAtom = atom(false);
-export const hasMoreMessagesAtom = atom(false);
-export const isPriorSessionLoadCompleteAtom = atom(false);
 export const pendingConfirmationAtom = atom<string | null>(null);
 export const temporaryEnvChangeMessageAtom = atom<ChatMessage | null>(null);
 export const pendingRootsAtom = atom<string[]>([]);
@@ -101,7 +97,6 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(pendingConfirmationAtom, null);
   set(temporaryEnvChangeMessageAtom, null);
   set(pendingRootsAtom, []);
-  set(processingStartTimeAtom, null);
 });
 
 // Derived atom for adding a new session

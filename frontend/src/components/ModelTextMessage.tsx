@@ -12,7 +12,6 @@ interface ModelTextMessageProps {
   className?: string;
   messageInfo?: React.ReactNode;
   isLastModelMessage?: boolean;
-  processingStartTime?: number | null;
   messageId?: string;
   attachments?: FileAttachment[];
   sessionId?: string;
@@ -26,7 +25,6 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   className,
   messageInfo,
   isLastModelMessage,
-  processingStartTime,
   messageId,
   attachments,
   sideContents,
@@ -51,9 +49,7 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
     >
       <FileAttachmentList attachments={attachments} isImageOnlyMessage={imageOnly} />
       {!imageOnly && <MarkdownRenderer content={text || ''} />}
-      {isLastModelMessage && processingStartTime !== null && (
-        <ProcessingIndicator startTime={processingStartTime!} isLastThoughtGroup={false} isLastModelMessage={true} />
-      )}
+      {isLastModelMessage && <ProcessingIndicator isLastThoughtGroup={false} isLastModelMessage={true} />}
     </ChatBubble>
   );
 };

@@ -17,17 +17,15 @@ import {
   systemPromptAtom,
   isSystemPromptEditingAtom,
   globalPromptsAtom,
-  processingStartTimeAtom,
   primaryBranchIdAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
 } from '../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
-import { useSessionLoader } from '../hooks/useSessionLoader';
-import { useSessionManagerContext } from '../hooks/SessionManagerContext';
+import { useSessionFSM } from '../hooks/useSessionFSM';
+import { useProcessingState } from '../hooks/useProcessingState';
 import { useScrollAdjustment } from '../hooks/useScrollAdjustment';
-import { getSessionId, getWorkspaceId, isLoading, hasMoreMessages, isLoadComplete } from '../utils/sessionStateHelpers';
 import { isNewTemporarySessionURL } from '../utils/urlSessionMapping';
 
 interface ChatAreaProps {
@@ -79,28 +77,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [systemPrompt, setSystemPrompt] = useAtom(systemPromptAtom);
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
-  const processingStartTime = useAtomValue(processingStartTimeAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
-
-  // Use FSM for session management - sessionId and workspaceId come from FSM
-  const sessionManager = useSessionManagerContext();
-  const sessionId = getSessionId(sessionManager.sessionState);
-  const workspaceId = getWorkspaceId(sessionManager.sessionState);
-  const isLoadingState = isLoading(sessionManager.sessionState);
-  const hasMoreMessagesState = hasMoreMessages(sessionManager.sessionState);
   const location = useLocation();
 
-  const { loadMoreMessages } = useSessionLoader({
-    chatSessionId: sessionId,
-    chatAreaRef,
-    sessionManager,
+  // Get processing state from custom hook
+  const { startTime } = useProcessingState();
+
+  // Use the new unified useSessionFSM hook
+  const sessionFSM = useSessionFSM({
     onSessionSwitch: handleCancelMessageStreams,
   });
-  const { scrollToBottom, handleContentLoad } = useScrollAdjustment({ chatAreaRef });
 
-  // Use FSM values instead of legacy atoms for consistency
-  const isPriorSessionLoading = isLoadingState;
-  const isPriorSessionLoadComplete = isLoadComplete(sessionManager.sessionState);
+  const {
+    sessionId,
+    workspaceId,
+    isLoading: isPriorSessionLoading,
+    hasMoreMessages: hasMoreMessagesState,
+    loadEarlierMessages,
+  } = sessionFSM;
   const [isDragging, setIsDragging] = useState(false); // State for drag and drop
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
   const temporaryEnvChangeMessage = useAtomValue(temporaryEnvChangeMessageAtom);
@@ -109,8 +103,115 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [showTempSessionNotice, setShowTempSessionNotice] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const prevMessagesLengthRef = useRef(messages.length);
-  const prevIsPriorSessionLoadingRef = useRef(isPriorSessionLoading); // New ref
+
+  // Scroll management
+  const { scrollToBottom, handleContentLoad, adjustScroll } = useScrollAdjustment({ chatAreaRef });
+  const lastMessageIdRef = useRef<string | null>(null);
+  const isInitialLoadRef = useRef(true);
+  const firstMessageIdRef = useRef<string | null>(null);
+  const scrollStateRef = useRef({ scrollHeight: 0, scrollTop: 0 });
+
+  // Reset initial load flag when session changes
+  useEffect(() => {
+    isInitialLoadRef.current = true;
+    lastMessageIdRef.current = null;
+    firstMessageIdRef.current = null;
+    scrollStateRef.current = { scrollHeight: 0, scrollTop: 0 };
+  }, [sessionId]);
+
+  // Auto-scroll to bottom on initial load
+  useEffect(() => {
+    if (messages.length > 0 && isInitialLoadRef.current) {
+      isInitialLoadRef.current = false;
+      scrollToBottom();
+    }
+  }, [messages.length, scrollToBottom]);
+
+  // Adjust scroll position when earlier messages are loaded (prepended)
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    const chatArea = chatAreaRef.current;
+    if (!chatArea) return;
+
+    const firstMessageId = messages[0].id;
+
+    // Save current scroll state BEFORE checking for changes
+    const currentScrollState = {
+      scrollHeight: chatArea.scrollHeight,
+      scrollTop: chatArea.scrollTop,
+    };
+
+    // If first message changed, earlier messages were loaded
+    if (firstMessageIdRef.current !== null && firstMessageIdRef.current !== firstMessageId) {
+      // Use the saved scroll state from PREVIOUS render (before new messages were added)
+      console.log('Adjusting scroll - old:', scrollStateRef.current, 'new:', currentScrollState);
+      adjustScroll(scrollStateRef.current.scrollHeight, scrollStateRef.current.scrollTop);
+    }
+
+    // Update refs for next render
+    firstMessageIdRef.current = firstMessageId;
+    scrollStateRef.current = currentScrollState;
+  }, [messages, chatAreaRef, adjustScroll]);
+
+  // Auto-scroll to bottom when new messages arrive at the end
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageId = lastMessage.id;
+
+    // Only scroll if the last message changed (new message at end)
+    if (lastMessageIdRef.current !== lastMessageId) {
+      lastMessageIdRef.current = lastMessageId;
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
+
+  // Setup content load handler for dynamic content (images, etc.)
+  useEffect(() => {
+    handleContentLoad();
+  }, [messages, handleContentLoad]);
+
+  // Load earlier messages when scrolling to top
+  useEffect(() => {
+    const chatArea = chatAreaRef.current;
+    if (!chatArea) return;
+
+    const handleScroll = () => {
+      // Update scroll state on every scroll event
+      scrollStateRef.current = {
+        scrollHeight: chatArea.scrollHeight,
+        scrollTop: chatArea.scrollTop,
+      };
+
+      const scrollTop = chatArea.scrollTop;
+      const scrollThreshold = 100; // Load when within 100px of top
+
+      if (scrollTop <= scrollThreshold && hasMoreMessagesState && !isPriorSessionLoading) {
+        console.log('Scroll event - loading earlier messages');
+        loadEarlierMessages();
+      }
+    };
+
+    chatArea.addEventListener('scroll', handleScroll);
+    return () => {
+      chatArea.removeEventListener('scroll', handleScroll);
+    };
+  }, [chatAreaRef, hasMoreMessagesState, isPriorSessionLoading, loadEarlierMessages]);
+
+  // Auto-load earlier messages if viewport isn't filled
+  useEffect(() => {
+    const chatArea = chatAreaRef.current;
+    if (!chatArea || !hasMoreMessagesState || isPriorSessionLoading) return;
+
+    // Check if content height is less than viewport height
+    const hasScroll = chatArea.scrollHeight > chatArea.clientHeight;
+    if (!hasScroll && messages.length > 0) {
+      console.log('Viewport not filled - auto-loading earlier messages');
+      loadEarlierMessages();
+    }
+  }, [chatAreaRef, messages.length, hasMoreMessagesState, isPriorSessionLoading, loadEarlierMessages]);
 
   // Check if this is a temporary session and show notice if needed
   useEffect(() => {
@@ -120,67 +221,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
     setShowTempSessionNotice(isTempURL || !!isTempID);
   }, [sessionId, location.pathname]);
-
-  useEffect(() => {
-    const wasLoadingPrior = prevIsPriorSessionLoadingRef.current; // Get previous state
-
-    // Only scroll to bottom if:
-    // 1. New messages are added to the end (messages.length increased)
-    // AND
-    // 2. We are NOT currently loading prior session messages (!isPriorSessionLoading)
-    // AND
-    // 3. We just finished loading prior session messages (wasLoadingPrior is true and isPriorSessionLoading is false)
-    //    OR we were never loading prior session messages (wasLoadingPrior is false)
-    // This complex condition aims to prevent scrolling to bottom when prior messages just finished loading.
-    if (
-      messages.length > prevMessagesLengthRef.current &&
-      !isPriorSessionLoading &&
-      !(wasLoadingPrior && !isPriorSessionLoading)
-    ) {
-      scrollToBottom();
-      // Also trigger content load handling for potential dynamic content in new messages
-      handleContentLoad();
-    }
-
-    prevMessagesLengthRef.current = messages.length;
-    prevIsPriorSessionLoadingRef.current = isPriorSessionLoading; // Update ref
-  }, [messages, isPriorSessionLoading, scrollToBottom, handleContentLoad]);
-
-  useEffect(() => {
-    const chatAreaElement = chatAreaRef.current;
-    if (!chatAreaElement) {
-      return;
-    }
-
-    const handleScroll = () => {
-      if (
-        chatAreaElement.scrollTop === 0 &&
-        !isPriorSessionLoading &&
-        hasMoreMessagesState &&
-        isPriorSessionLoadComplete
-      ) {
-        loadMoreMessages();
-      }
-    };
-
-    chatAreaElement.addEventListener('scroll', handleScroll);
-
-    return () => {
-      chatAreaElement.removeEventListener('scroll', handleScroll);
-    };
-  }, [chatAreaRef, isPriorSessionLoading, loadMoreMessages, isPriorSessionLoadComplete, hasMoreMessagesState]);
-
-  useEffect(() => {
-    const chatAreaElement = chatAreaRef.current;
-    if (chatAreaElement && hasMoreMessagesState && !isPriorSessionLoading) {
-      // Check if the content height is less than the visible height (no scrollbar)
-      // This indicates that all available messages might not have been loaded yet,
-      // especially in short sessions where initial messages don't fill the viewport.
-      if (chatAreaElement.scrollHeight <= chatAreaElement.clientHeight) {
-        loadMoreMessages();
-      }
-    }
-  }, [chatAreaRef, hasMoreMessagesState, isPriorSessionLoading, loadMoreMessages]);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -245,7 +285,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     messages: ChatMessageType[],
     currentIndex: number,
     availableModels: Map<string, { maxTokens: number }>,
-    processingStartTime: number | null,
     handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>,
     handleBranchSwitch: (newBranchId: string) => Promise<void>,
     handleRetryError?: (errorMessageId: string) => Promise<void>,
@@ -308,13 +347,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               responseAttachments={messages[currentIndex + 1].attachments}
               sessionId={currentMessage.sessionId}
             />
-            {isLastMessage && processingStartTime !== null && (
-              <ProcessingIndicator
-                startTime={processingStartTime}
-                isLastThoughtGroup={false}
-                isLastModelMessage={true}
-              />
-            )}
+            {isLastMessage && <ProcessingIndicator isLastThoughtGroup={false} isLastModelMessage={true} />}
           </>
         ),
         messagesConsumed: 2,
@@ -338,7 +371,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             isAutoDisplayMode={true}
             thoughts={thoughtGroup}
             isLastThoughtGroup={isLastThoughtGroup}
-            processingStartTime={processingStartTime}
           />
         ),
         messagesConsumed: j - currentIndex,
@@ -354,7 +386,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               message={currentMessage}
               maxTokens={currentModelMaxTokens}
               isLastModelMessage={isLastModelMessage}
-              processingStartTime={processingStartTime}
               onSaveEdit={handleEditMessage}
               onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
               onRetryError={
@@ -365,14 +396,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               onBranchSelect={handleBranchSwitch}
               isMostRecentUserMessage={currentMessage.id === mostRecentUserMessageId}
             />
-            {isLastMessage && processingStartTime !== null && !isLastModelMessage && (
-              <ProcessingIndicator
-                startTime={processingStartTime!}
-                isLastThoughtGroup={false}
-                isLastModelMessage={false}
-              />
-            )}
-            {/* For model messages, the indicator is now rendered inside ChatMessage/ModelTextMessage */}
           </>
         ),
         messagesConsumed: 1,
@@ -425,7 +448,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         messages,
         i,
         availableModels,
-        processingStartTime,
         handleEditMessage,
         handleBranchSwitch,
         handleRetryError,
@@ -443,7 +465,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           message={temporaryEnvChangeMessage}
           maxTokens={undefined} // Temporary messages don't have token limits
           isLastModelMessage={false}
-          processingStartTime={null}
           onSaveEdit={() => {}}
           onRetryClick={handleRetryMessage ? (messageId) => handleRetryMessage(messageId) : undefined}
           onRetryError={handleRetryError ? (errorMessageId) => handleRetryError(errorMessageId) : undefined}
@@ -453,11 +474,32 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       );
     }
 
+    // Check if we need to render ProcessingIndicator outside message list
+    const shouldRenderOutsideProcessingIndicator = () => {
+      if (!startTime) return false;
+
+      // If there are no messages, render outside
+      if (messages.length === 0) return true;
+
+      // Check if the last message is a model message or thought
+      const lastMessage = messages[messages.length - 1];
+      return (
+        !lastMessage.type || !(['model', 'model_error', 'error', 'thought'] as string[]).includes(lastMessage.type)
+      );
+    };
+
+    // Add ProcessingIndicator outside message list when needed
+    if (shouldRenderOutsideProcessingIndicator()) {
+      renderedElements.push(
+        <ProcessingIndicator key="processing-indicator" isLastThoughtGroup={false} isLastModelMessage={false} />,
+      );
+    }
+
     return renderedElements;
   }, [
     messages,
     availableModels,
-    processingStartTime,
+    startTime,
     temporaryEnvChangeMessage,
     showTempSessionNotice,
     hasMoreMessagesState,
@@ -537,7 +579,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 }}
                 isEditing={isSystemPromptEditing}
                 predefinedPrompts={globalPrompts}
-                workspaceId={workspaceId}
+                workspaceId={workspaceId || undefined}
               />
             </>
           )}

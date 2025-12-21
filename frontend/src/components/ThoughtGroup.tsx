@@ -11,11 +11,10 @@ interface ThoughtGroupProps {
   isAutoDisplayMode: boolean;
   thoughts: ChatMessage[];
   isLastThoughtGroup?: boolean;
-  processingStartTime?: number | null;
 }
 
 export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(
-  ({ groupId, isAutoDisplayMode, thoughts, isLastThoughtGroup, processingStartTime }) => {
+  ({ groupId, isAutoDisplayMode, thoughts, isLastThoughtGroup }) => {
     const [lastAutoDisplayedThoughtId] = useAtom(lastAutoDisplayedThoughtIdAtom);
 
     const [activeThoughtId, setActiveThoughtId] = useState<string | null>(null);
@@ -60,13 +59,7 @@ export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(
               aria-label={`Thought: ${getThoughtTitle(thought).split('\n')[0]}`}
             ></button>
           ))}
-          {isLastThoughtGroup && processingStartTime !== null && (
-            <ProcessingIndicator
-              startTime={processingStartTime!}
-              isLastThoughtGroup={true}
-              isLastModelMessage={false}
-            />
-          )}
+          {isLastThoughtGroup && <ProcessingIndicator isLastThoughtGroup={true} isLastModelMessage={false} />}
         </div>
         {activeThoughtId !== null && thoughts.find((thought) => thought.id === activeThoughtId) && (
           <ChatMessageComponent
