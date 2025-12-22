@@ -1,0 +1,132 @@
+@layer components.ChatMessage {
+  .chat-message-container,
+  .function-pair-combined-container {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 10px;
+  }
+
+  /* Message alignment */
+  .user-message,
+  .system-message,
+  .system-prompt-message,
+  .agent-function-response {
+    align-items: flex-end;
+  }
+
+  .agent-message,
+  .agent-error-message,
+  .agent-thought {
+    align-items: flex-start;
+  }
+
+  .function-pair-combined-container {
+    align-items: center;
+  }
+
+  /* Function message border adjustments */
+  .agent-function-call.chat-message-container {
+    border-left: 4px solid #1890ff;
+  }
+
+  .agent-function-response.chat-message-container {
+    border-left: 4px solid #52c41a;
+  }
+
+  /* Override for function messages where the title bar handles the top spacing */
+  .function-message-bubble p:first-child {
+    margin-top: 0;
+  }
+
+  /* Function code block styles */
+  .function-code-block {
+    background-color: rgba(0, 0, 0, 0.05); /* Slightly darker background for code */
+    padding: 10px;
+    border-radius: 5px;
+    overflow-x: auto; /* Enable horizontal scrolling for long lines */
+    font-family: monospace;
+    font-size: 0.9em;
+    margin: 0; /* Remove default pre margins */
+    max-height: min(30vh, 400px); /* Limit height to 30% of viewport height */
+    overflow-y: auto; /* Add vertical scrollbar if content exceeds max-height */
+  }
+
+  /* Function pair container */
+  .function-pair-container {
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .function-pair-container > .chat-message-container {
+    max-width: calc(50% - 15px);
+  }
+
+  .function-pair-container > .chat-message-container > .chat-bubble {
+    width: 100%;
+    max-width: calc(100% - 32px);
+  }
+
+  .function-pair-bar {
+    flex: 1;
+    height: 5px;
+    background-color: var(--color-combined-dark);
+    margin: calc(0.7em + 5px) auto auto auto;
+  }
+
+  /* Function pair mobile responsiveness */
+  @media (max-width: 768px) {
+    .chat-message-container,
+    .function-pair-combined-container {
+      margin-bottom: calc(var(--spacing-unit) * 0.8);
+    }
+
+    .function-pair-container {
+      flex-direction: column;
+      align-items: stretch;
+      gap: calc(var(--spacing-unit) * 0.5);
+    }
+
+    .function-pair-container > .chat-message-container {
+      max-width: 100%;
+      margin-bottom: calc(var(--spacing-unit) * 0.5);
+    }
+
+    .function-pair-bar {
+      display: none; /* Hide bar on mobile */
+    }
+  }
+
+  /* Mobile-friendly function pair combined container */
+  @media (max-width: 768px) {
+    .function-pair-combined-container {
+      align-items: stretch;
+      margin-bottom: calc(var(--spacing-unit) * 0.8);
+    }
+
+    .function-pair-combined-container > .chat-bubble {
+      max-width: 95%;
+    }
+  }
+
+  /* Command message styles */
+  .command-message {
+    margin: 1rem 0;
+    text-align: center;
+  }
+
+  .command-message hr {
+    border: none;
+    border-top: 1px solid #ccc;
+    margin: 0.5rem 0;
+  }
+
+  .command-text {
+    color: #666;
+    font-family: monospace;
+    font-size: 0.9em;
+    margin: 0.25rem 0;
+    font-style: italic;
+  }
+}

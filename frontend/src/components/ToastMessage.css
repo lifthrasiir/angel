@@ -1,0 +1,140 @@
+@layer components.ToastMessage {
+  @keyframes logoAnimation {
+    0% {
+      transform: scaleX(1);
+    }
+    1% {
+      transform: scaleX(0.9);
+    }
+    2% {
+      transform: scaleX(0.5);
+    }
+    3% {
+      transform: scaleX(-0.2);
+    }
+    3.5% {
+      transform: scaleX(-1);
+    }
+    4.8% {
+      transform: scaleX(1);
+    }
+    5.5% {
+      transform: scaleX(-1);
+    }
+    6% {
+      transform: scaleX(1);
+    }
+    6.33% {
+      transform: scaleX(-1);
+    }
+    6.67% {
+      transform: scaleX(1);
+    }
+    7% {
+      transform: scaleX(-1);
+    }
+    7.25% {
+      transform: scaleX(1);
+    }
+    7.5% {
+      transform: scaleX(-1);
+    }
+    7.75% {
+      transform: scaleX(1);
+    }
+    8% {
+      transform: scaleX(-1);
+    }
+    8.25% {
+      transform: scaleX(1);
+    }
+    8.5% {
+      transform: scaleX(-1);
+    }
+    8.75% {
+      transform: scaleX(1);
+    }
+    9% {
+      transform: scaleX(-1);
+    }
+    9.33% {
+      transform: scaleX(1);
+    }
+    9.67% {
+      transform: scaleX(-1);
+    }
+    10.2% {
+      transform: scaleX(1);
+    }
+    11.5% {
+      transform: scaleX(-1);
+    }
+    12% {
+      transform: scaleX(-0.2);
+    }
+    13% {
+      transform: scaleX(0.5);
+    }
+    14% {
+      transform: scaleX(0.9);
+    }
+    15% {
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes fadeInOut {
+    0% {
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    90% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  .toast-message {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 1000;
+    font-size: 0.9em;
+    opacity: 0;
+    animation: fadeInOut 3s forwards;
+  }
+
+  /* Mobile responsiveness */
+  @media (max-width: 768px) {
+    .toast-message {
+      bottom: calc(var(--spacing-unit) * 2);
+      left: var(--spacing-unit);
+      right: var(--spacing-unit);
+      transform: none;
+      font-size: 0.9em;
+    }
+  }
+
+  /* Spinner animation for loading states */
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+}

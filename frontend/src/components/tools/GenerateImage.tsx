@@ -10,6 +10,7 @@ import {
 } from '../../utils/functionMessageRegistry';
 import ChatBubble from '../ChatBubble';
 import BlobImage from './BlobImage';
+import './SubagentError.css';
 
 // Define the expected arguments for the generate_image tool call
 const argsKeys = {

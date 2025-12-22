@@ -1,0 +1,245 @@
+@layer components.AccountDetailsModal {
+  /* Account Details Modal Styles */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+
+  .modal-content {
+    background: white;
+    border-radius: 8px;
+    max-width: 1200px;
+    max-height: 85vh;
+    width: 95%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+
+  .account-details-modal .modal-header {
+    padding: 20px;
+    border-bottom: 1px solid #ddd;
+    position: relative;
+  }
+
+  .account-details-modal .modal-header h2 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    color: #333;
+  }
+
+  .quota-only-notice {
+    color: #f57c00;
+    font-size: 13px;
+    margin: 8px 0 0 0;
+    padding: 8px;
+    background-color: #fff3cd;
+    border-radius: 4px;
+    border: 1px solid #ffeaa7;
+  }
+
+  .close-button {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    background: none;
+    border: none;
+    font-size: 32px;
+    line-height: 1;
+    cursor: pointer;
+    color: #666;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color 0.2s;
+  }
+
+  .close-button:hover {
+    color: #000;
+  }
+
+  .modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .no-models-message {
+    text-align: center;
+    color: #666;
+    padding: 40px 20px;
+    font-size: 14px;
+  }
+
+  /* Table Wrapper and Styles */
+  .table-wrapper {
+    overflow-x: auto;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+  }
+
+  .models-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 700px;
+  }
+
+  .models-table thead {
+    position: sticky;
+    top: 0;
+    background-color: #f5f5f5;
+    z-index: 1;
+  }
+
+  .models-table th {
+    padding: 12px 10px;
+    text-align: left;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 2px solid #ddd;
+    border-right: 1px solid #eee;
+    white-space: nowrap;
+    transition: background-color 0.2s;
+  }
+
+  .models-table th:last-child {
+    border-right: none;
+  }
+
+  .models-table th:hover {
+    background-color: #e8e8e8;
+  }
+
+  .models-table td {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    border-right: 1px solid #eee;
+    vertical-align: top;
+  }
+
+  .models-table td:last-child {
+    border-right: none;
+  }
+
+  .models-table tbody tr {
+    transition: background-color 0.2s;
+  }
+
+  .models-table tbody tr:hover {
+    background-color: #f9f9f9;
+  }
+
+  .models-table tbody tr.recommended {
+    background-color: #f0f8ff;
+  }
+
+  .models-table tbody tr.recommended:hover {
+    background-color: #e6f2ff;
+  }
+
+  .model-id {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 11px;
+    color: #555;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .number-cell {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .center-cell {
+    text-align: center;
+    font-size: 16px;
+  }
+
+  .quota-cell {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .usages-cell {
+    font-size: 12px;
+    max-width: 200px;
+    word-wrap: break-word;
+  }
+
+  /* Mobile Responsive */
+  @media (max-width: 768px) {
+    .modal-overlay {
+      padding: 10px;
+    }
+
+    .modal-content {
+      max-height: 90vh;
+      width: 100%;
+    }
+
+    .account-details-modal .modal-header {
+      padding: 15px;
+    }
+
+    .account-details-modal .modal-header h2 {
+      font-size: 16px;
+      margin-right: 30px;
+    }
+
+    .close-button {
+      top: 10px;
+      right: 10px;
+      font-size: 28px;
+    }
+
+    .modal-body {
+      padding: 15px;
+    }
+
+    .models-table {
+      font-size: 12px;
+      min-width: 600px;
+    }
+
+    .models-table th,
+    .models-table td {
+      padding: 8px 6px;
+    }
+
+    .quota-only-notice {
+      font-size: 12px;
+      padding: 6px;
+    }
+  }
+
+  /* Tablet */
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .modal-content {
+      max-width: 95%;
+    }
+
+    .models-table {
+      font-size: 12px;
+    }
+
+    .models-table th,
+    .models-table td {
+      padding: 10px 8px;
+    }
+  }
+}

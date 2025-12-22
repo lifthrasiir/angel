@@ -55,7 +55,7 @@ const MessageMenu: React.FC<MessageMenuProps> = ({ message, sessionId, isMobile 
   return (
     <Dropdown
       trigger={
-        <button className={`session-menu-trigger ${className}`} title="Message options" aria-label="Message options">
+        <button className={`message-menu-trigger ${className}`} title="Message options" aria-label="Message options">
           <FaEllipsisH size={16} />
         </button>
       }

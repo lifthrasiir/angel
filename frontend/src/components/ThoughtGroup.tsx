@@ -5,6 +5,7 @@ import { lastAutoDisplayedThoughtIdAtom } from '../atoms/chatAtoms';
 import type { ChatMessage } from '../types/chat';
 import ChatMessageComponent from './ChatMessage';
 import { ProcessingIndicator } from './ProcessingIndicator';
+import './ThoughtGroup.css';
 
 interface ThoughtGroupProps {
   groupId: string; // Unique ID for this thought group

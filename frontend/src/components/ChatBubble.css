@@ -1,0 +1,259 @@
+@layer components.ChatBubble {
+  .chat-bubble {
+    max-width: var(--chat-bubble-max-width);
+    min-width: 200px; /* Minimum width to accommodate 4 buttons */
+    padding: calc(var(--spacing-unit) * 0.6) calc(var(--spacing-unit) * 0.9); /* Restore padding-top */
+    border-radius: var(--border-radius);
+    line-height: 1.4;
+    word-wrap: break-word;
+    overflow: hidden; /* Ensure border-radius clips content */
+  }
+
+  .chat-bubble-content > *:first-child {
+    margin-top: 0;
+  }
+
+  .chat-bubble-content > *:last-child {
+    margin-bottom: 0;
+  }
+
+  .chat-bubble-content h1 {
+    font-size: 160%;
+    font-weight: 700;
+    margin: 1.2rem 0 0.5rem 0;
+  }
+
+  .chat-bubble-content h2 {
+    font-size: 140%;
+    font-weight: 700;
+    margin: 1rem 0 0.5rem 0;
+  }
+
+  .chat-bubble-content h3 {
+    font-size: 120%;
+    font-weight: 700;
+    margin: 0.8rem 0 0.5rem 0;
+  }
+
+  .chat-bubble-content p {
+    margin: 0.5em 0;
+  }
+
+  .chat-bubble-content ul,
+  .chat-bubble-content ol {
+    margin: 0.5em 0;
+    padding-left: 20px;
+  }
+
+  .chat-bubble-content li {
+    margin-bottom: 0.25em;
+  }
+
+  .chat-bubble pre {
+    background-color: rgba(0, 0, 0, 0.05); /* Slightly darker background for code */
+    padding: 10px;
+    border-radius: 5px;
+    overflow-x: auto; /* Enable horizontal scrolling for long lines */
+    font-family: monospace;
+    font-size: 0.9em;
+    margin-top: 0.5em; /* Adjust to reduce space after a paragraph */
+    margin-bottom: 0;
+    max-height: 30vh; /* Limit height to 30% of viewport height */
+    overflow-y: auto; /* Add vertical scrollbar if content exceeds max-height */
+  }
+
+  .chat-bubble code {
+    background-color: rgba(0, 0, 0, 0.05); /* Subtle background for inline code */
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.9em;
+  }
+
+  .chat-bubble pre code {
+    background-color: transparent; /* Code inside pre should not have its own background */
+    padding: 0;
+    border-radius: 0;
+    font-size: 1em;
+  }
+
+  .chat-bubble-header {
+    padding: calc(var(--spacing-unit) * 0.3) calc(var(--spacing-unit) * 0.9) calc(var(--spacing-unit) * 0.6)
+      calc(var(--spacing-unit) * 0.9) !important; /* padding-bottom 추가 */
+    margin: calc(var(--spacing-unit) * -0.6) calc(var(--spacing-unit) * -0.9) calc(var(--spacing-unit) * 0.6)
+      calc(var(--spacing-unit) * -0.9) !important;
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+    font-weight: bold;
+    color: #333;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .chat-bubble-header.clickable-header {
+    cursor: pointer;
+  }
+
+  .chat-bubble-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1;
+  }
+
+  .chat-bubble-chevron {
+    margin-left: 10px;
+    font-size: 1.2em;
+    display: flex;
+    align-items: center;
+  }
+
+  .chat-bubble-header.expanded {
+    padding-bottom: 0 !important;
+  }
+
+  /* Title only */
+  .chat-bubble-header:has(+ .chat-bubble-content:empty) {
+    margin-bottom: -10px !important;
+    white-space: inherit;
+  }
+
+  .chat-bubble table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+  }
+
+  .chat-bubble th,
+  .chat-bubble td {
+    border: 1px solid #ccc;
+    padding: 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .chat-bubble th {
+    background-color: rgba(0, 0, 0, 0.05);
+  }
+
+  .chat-bubble.function-message-bubble {
+    background-color: #f0f0f0; /* Light gray for function messages */
+    border: 1px solid #ccc; /* Light gray border */
+  }
+
+  /* Chat bubble container styles */
+  .chat-bubble-container {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  /* User message bubble styles */
+  .user-message > .chat-bubble,
+  .user-message > .chat-bubble-container > .chat-bubble {
+    background-color: var(--color-user-light);
+    color: #333;
+    border: 2px solid var(--color-user-dark);
+  }
+
+  /* Agent message bubble styles */
+  .agent-message > .chat-bubble,
+  .agent-message > .chat-bubble-container > .chat-bubble {
+    background-color: var(--color-agent-light);
+    color: #333;
+    border: 2px solid var(--color-agent-dark);
+  }
+
+  /* Agent error message bubble styles */
+  .agent-error-message > .chat-bubble,
+  .agent-error-message > .chat-bubble-container > .chat-bubble {
+    background-color: var(--color-agent-dark);
+    color: #333;
+    border: 2px solid var(--color-agent-dark);
+  }
+
+  /* System message bubble styles */
+  .system-message > .chat-bubble,
+  .system-message > .chat-bubble-container > .chat-bubble {
+    background-color: var(--color-system-light);
+    color: #333;
+    border: 2px solid var(--color-system-dark);
+  }
+
+  /* Agent thought message bubble styles */
+  .agent-thought > .chat-bubble,
+  .agent-thought > .chat-bubble-container > .chat-bubble {
+    background-color: white;
+    border: 2px solid var(--color-agent-dark);
+    font-style: italic;
+    color: #555;
+  }
+
+  /* Function pair combined bubble styles */
+  .function-pair-combined-container > .chat-bubble,
+  .function-pair-combined-container > .chat-bubble-container > .chat-bubble {
+    background-color: var(--color-combined-light);
+    color: #333;
+    border: 2px solid var(--color-combined-dark);
+  }
+
+  /* Header colors based on message type */
+  .chat-message-container.user-message > .chat-bubble > .chat-bubble-header,
+  .chat-message-container.agent-function-response > .chat-bubble > .chat-bubble-header {
+    background-color: var(--color-user-dark);
+  }
+
+  .chat-message-container.agent-message > .chat-bubble > .chat-bubble-header,
+  .chat-message-container.agent-error-message > .chat-bubble > .chat-bubble-header,
+  .chat-message-container.agent-thought > .chat-bubble > .chat-bubble-header,
+  .chat-message-container.agent-function-call > .chat-bubble > .chat-bubble-header {
+    background-color: var(--color-agent-dark);
+  }
+
+  .chat-message-container.system-message > .chat-bubble > .chat-bubble-header {
+    background-color: var(--color-system-dark);
+  }
+
+  .function-pair-combined-container > .chat-bubble > .chat-bubble-header {
+    background-color: var(--color-combined-dark);
+  }
+
+  /* Chevron colors based on message type */
+  .user-message > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron,
+  .agent-function-response > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron {
+    color: var(--color-user-verydark);
+  }
+
+  .agent-message > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron,
+  .agent-error-message > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron,
+  .agent-thought > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron,
+  .agent-function-call > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron {
+    color: var(--color-agent-verydark);
+  }
+
+  .system-message > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron {
+    color: var(--color-system-verydark);
+  }
+
+  .function-pair-combined-container > .chat-bubble > .chat-bubble-header > .chat-bubble-chevron {
+    color: var(--color-combined-verydark);
+  }
+
+  /* Mobile responsiveness */
+  @media (max-width: 768px) {
+    .chat-bubble {
+      padding: calc(var(--spacing-unit) * 0.8);
+      font-size: 0.95em;
+    }
+  }
+
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .chat-bubble {
+      padding: calc(var(--spacing-unit) * 0.7) calc(var(--spacing-unit) * 0.85);
+    }
+  }
+}

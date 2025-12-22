@@ -10,6 +10,7 @@ import MessageInfo from './MessageInfo';
 import CompressionMessage from './CompressionMessage';
 import EnvChangedMessage from './EnvChangedMessage';
 import RetryErrorButton from './RetryErrorButton';
+import './ChatMessage.css';
 
 // Helper function to extract text content from a message
 const getMessageText = (message: ChatMessage): string => {

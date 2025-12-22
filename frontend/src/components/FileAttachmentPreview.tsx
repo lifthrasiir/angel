@@ -11,6 +11,7 @@ import {
   type ImageDimensions,
   type ImageResizeResult,
 } from '../utils/imageResize';
+import './FileAttachmentPreview.css';
 
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;

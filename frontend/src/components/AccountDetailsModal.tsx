@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { AccountDetailsResponse, ModelDetails, QuotaInfo } from '../api/apiClient';
+import './AccountDetailsModal.css';
 
 interface Props {
   accountEmail: string;

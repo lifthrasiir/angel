@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useHighlightCode } from '../utils/highlightUtils';
+import './PrettyDiff.css';
 
 interface PrettyDiffProps {
   diffContent: string;

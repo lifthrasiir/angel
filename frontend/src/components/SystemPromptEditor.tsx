@@ -4,6 +4,7 @@ import { apiFetch } from '../api/apiClient';
 import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
 import { useAtom } from 'jotai';
 import { messagesAtom } from '../atoms/chatAtoms';
+import './SystemPromptEditor.css';
 
 export interface PredefinedPrompt {
   label: string;

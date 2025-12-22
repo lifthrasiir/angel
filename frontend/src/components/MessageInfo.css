@@ -1,0 +1,214 @@
+@layer components.MessageInfo {
+  .message-info {
+    font-size: 80%;
+    padding: 0 1em;
+  }
+
+  /* MessageInfo button styles with accent colors */
+  .message-info > button,
+  .message-info > .dropdown > .dropdown-trigger > button {
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 1.1em;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 36px;
+    height: 28px;
+    justify-content: center;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: none;
+    border-radius: 0 0 8px 8px; /* Bottom corners only */
+    backdrop-filter: blur(4px);
+  }
+
+  .message-info > button:hover:not(:disabled),
+  .message-info > .dropdown > .dropdown-trigger > button:hover:not(:disabled) {
+    filter: brightness(0.9);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .message-info > button:disabled,
+  .message-info > .dropdown > .dropdown-trigger > button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Edit mode confirm/cancel button styles */
+  .message-info .edit-confirm-btn {
+    background: #007bff !important;
+    color: white !important;
+  }
+
+  .message-info .edit-confirm-btn:hover:not(:disabled) {
+    background: #0056b3 !important;
+  }
+
+  .message-info .edit-cancel-btn {
+    background: #dc3545 !important;
+    color: white !important;
+  }
+
+  .message-info .edit-cancel-btn:hover:not(:disabled) {
+    background: #c82333 !important;
+  }
+
+  /* Message menu trigger button styles */
+  .message-menu-trigger {
+    padding: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    min-height: 28px;
+    min-width: 28px;
+  }
+
+  .message-menu-trigger:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+    color: #333;
+  }
+
+  /* Message info colors based on message type */
+  .chat-message-container.user-message > .message-info,
+  .chat-message-container.agent-function-response > .message-info {
+    color: var(--color-user-verydark);
+  }
+
+  .chat-message-container.agent-message > .message-info,
+  .chat-message-container.agent-error-message > .message-info,
+  .chat-message-container.agent-thought > .message-info,
+  .chat-message-container.agent-function-call > .message-info {
+    color: var(--color-agent-verydark);
+  }
+
+  .chat-message-container.system-message > .message-info {
+    color: var(--color-system-verydark);
+  }
+
+  .function-pair-combined-container > .message-info {
+    color: var(--color-combined-verydark);
+  }
+
+  /* Set background colors based on message type */
+  .user-message > .message-info > button,
+  .user-message > .message-info > .dropdown > .dropdown-trigger > button,
+  .agent-function-response > .message-info > button {
+    background: var(--color-user-dark);
+    color: var(--color-user-verydark);
+  }
+
+  .agent-message > .message-info > button,
+  .agent-message > .message-info > .dropdown > .dropdown-trigger > button,
+  .agent-error-message > .message-info > button,
+  .agent-thought > .message-info > button,
+  .agent-function-call > .message-info > button {
+    background: var(--color-agent-dark);
+    color: var(--color-agent-verydark);
+  }
+
+  .agent-message > .message-info > button,
+  .agent-message > .message-info > .dropdown,
+  .agent-error-message > .message-info > button,
+  .agent-thought > .message-info > button,
+  .agent-function-call > .message-info > button {
+    order: -1;
+  }
+
+  .system-message > .message-info > button {
+    background: var(--color-system-dark);
+    color: var(--color-system-verydark);
+  }
+
+  .function-pair-combined-container > .message-info > button {
+    background: var(--color-combined-dark);
+    color: var(--color-combined-verydark);
+  }
+
+  /* BranchDropdown trigger button styles - same as MessageInfo buttons */
+  .branch-dropdown-trigger {
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 1.1em;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 36px;
+    height: 28px;
+    justify-content: center;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: none;
+    border-radius: 0 0 8px 8px; /* Bottom corners only */
+    backdrop-filter: blur(4px);
+    background: var(--color-agent-dark); /* Default background color */
+    color: var(--color-agent-verydark); /* Default text color */
+  }
+
+  .branch-dropdown-trigger:hover:not(:disabled) {
+    filter: brightness(0.9);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .branch-dropdown-trigger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Set BranchDropdown colors based on message type */
+  .user-message > .message-info .branch-dropdown-trigger,
+  .agent-function-response > .message-info .branch-dropdown-trigger {
+    background: var(--color-user-dark);
+    color: var(--color-user-verydark);
+  }
+
+  .agent-message > .message-info .branch-dropdown-trigger,
+  .agent-error-message > .message-info .branch-dropdown-trigger,
+  .agent-thought > .message-info .branch-dropdown-trigger,
+  .agent-function-call > .message-info .branch-dropdown-trigger {
+    background: var(--color-agent-dark);
+    color: var(--color-agent-verydark);
+  }
+
+  .system-message > .message-info .branch-dropdown-trigger {
+    background: var(--color-system-dark);
+    color: var(--color-system-verydark);
+  }
+
+  .function-pair-combined-container > .message-info .branch-dropdown-trigger {
+    background: var(--color-combined-dark);
+    color: var(--color-combined-verydark);
+  }
+
+  /* Branch count badge */
+  .branch-count {
+    margin-left: 0;
+    font-size: 0.8em;
+    font-weight: bold;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    background: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    vertical-align: middle;
+  }
+
+  /* Mobile responsiveness */
+  @media (max-width: 768px) {
+    .message-info {
+      font-size: 0.75em;
+      padding: 0 calc(var(--spacing-unit) * 0.8);
+    }
+  }
+}

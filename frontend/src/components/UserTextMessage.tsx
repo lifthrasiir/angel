@@ -8,6 +8,7 @@ import { useProcessingState } from '../hooks/useProcessingState';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';
 import { isImageOnlyMessage } from '../utils/messageUtils';
+import './UserTextMessage.css';
 
 interface UserTextMessageProps {
   text?: string;

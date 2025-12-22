@@ -8,6 +8,7 @@ import { useSessionManagerContext } from '../hooks/SessionManagerContext';
 import { getSessionId } from '../utils/sessionStateHelpers';
 import { extractFilesFromDrop } from '../utils/dragDropUtils';
 import SessionMenu from './SessionMenu';
+import './SessionList.css';
 
 interface SessionListProps {
   handleDeleteSession: (sessionId: string) => Promise<void>;

@@ -1,0 +1,13 @@
+@layer components.SubagentError {
+  /* Subagent and GenerateImage error message styling */
+  .subagent-error {
+    background-color: var(--color-error-bg, #ffebee);
+    border: 1px solid var(--color-error-border, #f44336);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 8px;
+    color: var(--color-error-text, #d32f2f);
+    font-size: 0.9em;
+    white-space: pre-wrap;
+  }
+}

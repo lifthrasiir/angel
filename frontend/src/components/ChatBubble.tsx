@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { FaChevronDown, FaChevronUp, FaChevronCircleDown, FaChevronCircleUp } from 'react-icons/fa';
 import { handleEnterKey } from '../utils/enterKeyHandler';
+import './ChatBubble.css';
 
 interface ChatBubbleProps {
   messageId?: string;

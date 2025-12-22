@@ -11,6 +11,7 @@ import {
 import SystemMessage from '../SystemMessage';
 import MarkdownRenderer from '../MarkdownRenderer';
 import ChatBubble from '../ChatBubble';
+import './SubagentError.css';
 
 // Define the expected arguments for the subagent tool call
 const argsKeys = {

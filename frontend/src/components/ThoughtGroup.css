@@ -1,0 +1,35 @@
+@layer components.ThoughtGroup {
+  .thought-circle {
+    width: 15px;
+    height: 15px;
+    min-width: auto !important;
+    border-radius: 50%;
+    background-color: rgba(255, 255, 255, 0.2); /* Unselected: 20% white */
+    border: 2px solid var(--color-agent-dark);
+    cursor: pointer;
+  }
+
+  .thought-circle.selected {
+    background-color: var(--color-agent-dark);
+  }
+
+  .thought-group-container {
+    margin-bottom: 10px;
+  }
+
+  .thought-circle-container {
+    display: flex;
+    max-width: 80%;
+    gap: 5px;
+    margin-bottom: 5px;
+    padding: 0 15px;
+    flex-wrap: wrap;
+  }
+
+  /* Mobile responsiveness */
+  @media (max-width: 768px) {
+    .thought-circle-container {
+      padding: 0 calc(var(--spacing-unit) * 0.8);
+    }
+  }
+}

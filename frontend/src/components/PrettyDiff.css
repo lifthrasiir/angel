@@ -1,0 +1,68 @@
+@layer components.PrettyDiff {
+  pre .hljs {
+    padding: 0 !important;
+  }
+
+  /* PrettyDiff container */
+  .pretty-diff-container {
+    font-family: "Fira Code", "Cascadia Code", "Consolas", "Monaco", monospace;
+    line-height: 1.4;
+    background-color: transparent !important;
+    padding: 0 !important;
+    overflow-x: auto;
+  }
+
+  /* Individual diff line */
+  .pretty-diff-line {
+    display: flex;
+    white-space: pre; /* Preserve whitespace */
+    padding: 0 0.5em;
+  }
+
+  /* Line prefixes (+, -, space) */
+  .pretty-diff-line-prefix {
+    width: 1em; /* Fixed width for prefix */
+    flex-shrink: 0;
+    text-align: center;
+    user-select: none; /* Prevent selection of prefix */
+  }
+
+  /* Added lines */
+  .pretty-diff-added {
+    background-color: rgba(0, 128, 0, 0.05); /* Green with transparency */
+  }
+  .pretty-diff-added .pretty-diff-line-prefix {
+    color: #5cb85c; /* Green color for '+' */
+  }
+
+  /* Removed lines */
+  .pretty-diff-removed {
+    background-color: rgba(255, 0, 0, 0.05); /* Red with transparency */
+  }
+  .pretty-diff-removed .pretty-diff-line-prefix {
+    color: #d9534f; /* Red color for '-' */
+  }
+
+  /* Context lines */
+  .pretty-diff-context {
+    background-color: transparent; /* No specific background */
+  }
+  .pretty-diff-context .pretty-diff-line-prefix {
+    color: #6c757d; /* Gray color for ' ' */
+  }
+
+  /* Header lines (@@ ...) */
+  .pretty-diff-header {
+    color: #6c757d;
+    font-weight: bold;
+  }
+  .pretty-diff-header .pretty-diff-line-prefix {
+    color: #6c757d;
+  }
+
+  /* No newline at end of file indicator */
+  .pretty-diff-no-newline {
+    color: #ffc107;
+    font-style: italic;
+  }
+}

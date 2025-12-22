@@ -3,6 +3,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
 import { FaSearch, FaSpinner } from 'react-icons/fa';
+import './SearchPage.css';
 
 interface SearchResult {
   message_id: number;

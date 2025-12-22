@@ -1,0 +1,43 @@
+@layer components.SystemPromptEditor {
+  .system-prompt-message > .chat-bubble {
+    background-color: var(--color-system-light); /* Light orange */
+    color: #333;
+    border: 2px solid var(--color-system-dark); /* Orange */
+  }
+
+  .system-prompt-message > .chat-bubble.expanded {
+    width: 80%;
+    min-height: 50px; /* 최소 높이 */
+  }
+
+  .system-prompt-message > .chat-bubble textarea {
+    background-color: transparent;
+    border: none;
+    resize: none;
+    margin: 0 auto;
+    min-height: 50px;
+  }
+
+  .system-prompt-textarea-editable {
+    max-height: min(50vh, 400px);
+    overflow-y: auto;
+  }
+
+  .system-prompt-display-non-editable {
+    max-height: min(20vh, 150px);
+    overflow-y: auto;
+  }
+
+  /* Mobile system prompt editor */
+  @media (max-width: 768px) {
+    .system-prompt-textarea-editable {
+      max-height: min(40vh, 300px);
+      font-size: 16px; /* Prevent zoom on iOS */
+    }
+
+    .system-prompt-display-non-editable {
+      max-height: min(15vh, 120px);
+      font-size: 0.9em;
+    }
+  }
+}
