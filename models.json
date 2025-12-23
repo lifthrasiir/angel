@@ -104,7 +104,22 @@
             "toolSupported": true,
             "maxTokens": 1048576
         },
+        "gemini-3-flash-preview": {
+            "extends": "gemini-3-flash",
+            "providers": [
+                "geminicli"
+            ],
+            "modelName": "gemini-3-flash-preview",
+            "fallback": "gemini-2.5-flash",
+            "thoughtEnabled": true,
+            "toolSupported": true,
+            "maxTokens": 1048576
+        },
         "gemini-3-flash/subagent": {
+            "extends": "gemini-2.5-flash",
+            "genParams": "@subagent"
+        },
+        "gemini-3-flash-preview/subagent": {
             "extends": "gemini-2.5-flash",
             "genParams": "@subagent"
         },
@@ -122,8 +137,22 @@
             "toolSupported": true,
             "maxTokens": 1048576
         },
-        "gemini-3-pro-preview": "gemini-3-pro",
+        "gemini-3-pro-preview": {
+            "extends": "gemini-3-pro",
+            "providers": [
+                "geminicli"
+            ],
+            "modelName": "gemini-3-pro-preview",
+            "fallback": "gemini-2.5-pro",
+            "thoughtEnabled": true,
+            "toolSupported": true,
+            "maxTokens": 1048576
+        },
         "gemini-3-pro/subagent": {
+            "extends": "gemini-2.5-flash",
+            "genParams": "@subagent"
+        },
+        "gemini-3-pro-preview/subagent": {
             "extends": "gemini-2.5-flash",
             "genParams": "@subagent"
         },
@@ -234,8 +263,10 @@
     "displayOrder": [
         "gemini-2.5-flash",
         "gemini-3-flash",
+        "gemini-3-flash-preview",
         "gemini-3-pro+low",
         "gemini-3-pro+high",
+        "gemini-3-pro-preview",
         "gemini-2.5-pro",
         "gemini-2.5-flash-lite",
         "gemini-3-pro-image",
