@@ -207,7 +207,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 	}
 
 	// Check if the current session is already a subagent session
-	if strings.Contains(params.SessionId, ".") {
+	if IsSubsessionId(params.SessionId) {
 		return tool.HandlerResults{}, errors.New("subagent tool cannot be called from a subagent session")
 	}
 

@@ -146,7 +146,7 @@ func NewSessionAndMessage(
 	ew.Send(EventInitialState, string(initialStateJSON))
 
 	// New session gets its name inferred unless it's a subsession
-	inferSessionName := !strings.Contains(sessionId[1:], ".")
+	inferSessionName := !IsSubsessionId(sessionId)
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lifthrasiir/angel/filesystem"
 	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // sessionFSEntry holds a SessionFS instance and its reference count.
@@ -22,7 +23,10 @@ var sessionFSMutex sync.Mutex // Mutex to protect sessionFSMap
 
 // GetSessionFS retrieves or creates a SessionFS instance for a given session ID.
 // It increments the reference count for the SessionFS instance.
-func GetSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS, error) { // Modified signature
+func GetSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS, error) {
+	// Subsessions share the main session's SessionFS
+	sessionId, _ = SplitSessionId(sessionId)
+
 	sessionFSMutex.Lock()
 	defer sessionFSMutex.Unlock()
 
@@ -68,6 +72,9 @@ func GetSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS,
 // ReleaseSessionFS decrements the reference count for a SessionFS instance.
 // If the reference count drops to 0, the SessionFS instance is closed and removed from the map.
 func ReleaseSessionFS(sessionId string) {
+	// Subsessions share the main session's SessionFS
+	sessionId, _ = SplitSessionId(sessionId)
+
 	sessionFSMutex.Lock()
 	defer sessionFSMutex.Unlock()
 

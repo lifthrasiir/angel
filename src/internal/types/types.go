@@ -121,9 +121,23 @@ type Session struct {
 	PrimaryBranchID string `json:"primary_branch_id"`
 }
 
-// IsTemporary returns true if the session ID starts with a dot
-func (s *Session) IsTemporary() bool {
-	return strings.HasPrefix(s.ID, ".")
+func SplitSessionId(sessionId string) (mainSessionId, suffix string) {
+	if sessionId == "" {
+		return "", ""
+	}
+	sep := strings.IndexByte(sessionId[1:], '.')
+	if sep < 0 {
+		return sessionId, ""
+	}
+	return sessionId[:sep+1], sessionId[sep+1:]
+}
+
+func IsSubsessionId(sessionId string) bool {
+	return sessionId != "" && strings.Contains(sessionId[1:], ".")
+}
+
+func IsTemporarySessionId(sessionId string) bool {
+	return strings.HasPrefix(sessionId, ".")
 }
 
 // Workspace struct to hold workspace data
