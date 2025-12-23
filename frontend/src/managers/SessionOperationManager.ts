@@ -11,6 +11,7 @@ import {
   parseSseEvent,
   EventInitialState,
   EventInitialStateNoCall,
+  EARLIER_MESSAGES_LOADED,
 } from '../types/events';
 
 export interface MessageSendParams {
@@ -409,14 +410,13 @@ export class SessionOperationManager {
         hasMore: hasMore,
       });
 
-      const syntheticEvent = {
-        type: 'EARLIER_MESSAGES_LOADED',
+      handlers?.onEvent?.({
+        type: EARLIER_MESSAGES_LOADED,
         data: {
           ...data,
           hasMore: hasMore,
         },
-      } as any;
-      handlers?.onEvent?.(syntheticEvent);
+      });
     } catch (error) {
       this._dispatch({ type: 'ERROR_OCCURRED', error: `Earlier messages load failed: ${error}` });
       handlers?.onError?.(error as Error);

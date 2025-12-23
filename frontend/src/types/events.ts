@@ -113,6 +113,13 @@ export type SseError = {
   error: string;
 };
 
+export type SseSyntheticEvent = {
+  type: number;
+  data: any;
+};
+
+export const EARLIER_MESSAGES_LOADED = 1000;
+
 export type SseEvent =
   | SseWorkspaceHint
   | SseInitialState
@@ -129,7 +136,8 @@ export type SseEvent =
   | SsePendingConfirmation
   | SseGenerationChanged
   | SsePing
-  | SseError;
+  | SseError
+  | SseSyntheticEvent;
 
 export function parseSseEvent(eventString: string): SseEvent {
   const [type, data] = splitOnceByNewline(eventString);

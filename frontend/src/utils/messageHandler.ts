@@ -39,7 +39,6 @@ export const sendMessage = async (
     requestBody = {
       message: inputMessage,
       systemPrompt: systemPrompt,
-      name: '',
       attachments,
       model,
     };

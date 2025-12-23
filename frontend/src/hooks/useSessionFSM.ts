@@ -38,6 +38,7 @@ import {
   EventGenerationChanged,
   EventPing,
   type SseEvent,
+  EARLIER_MESSAGES_LOADED,
 } from '../types/events';
 
 interface UseSessionFSMProps {
@@ -146,13 +147,13 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
           case EventWorkspaceHint:
             // Handle workspace hint event
-            console.log('Workspace hint received:', (event as any).workspaceId);
+            console.log('Workspace hint received:', event.workspaceId);
             // Workspace ID is already set in the initial state, so we don't need to do anything here
             break;
 
           case EventAcknowledge:
             // Handle message acknowledgement (message was sent successfully)
-            console.log('Message acknowledged:', (event as any).messageId);
+            console.log('Message acknowledged:', event.messageId);
             // No UI update needed - message already added optimistically
             break;
 
@@ -165,9 +166,9 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           case EventThought:
             // Handle thought message
             addMessage({
-              id: (event as any).messageId || `thought-${Date.now()}`,
+              id: event.messageId || `thought-${Date.now()}`,
               role: 'model',
-              parts: [{ text: (event as any).thoughtText }],
+              parts: [{ text: event.thoughtText }],
               type: 'thought',
               timestamp: new Date().toISOString(),
             } as ChatMessage);
@@ -175,11 +176,11 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
           case EventModelMessage:
             // Handle model message
-            if ((event as any).text) {
+            if (event.text) {
               updateAgentMessage({
-                messageId: (event as any).messageId,
-                text: (event as any).text,
-                modelName: (event as any).modelName,
+                messageId: event.messageId,
+                text: event.text,
+                // TODO: modelName
               });
             }
             break;
@@ -187,13 +188,13 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           case EventFunctionCall:
             // Handle function call
             addMessage({
-              id: (event as any).messageId || `function-${Date.now()}`,
+              id: event.messageId || `function-${Date.now()}`,
               role: 'model',
               parts: [
                 {
                   functionCall: {
-                    name: (event as any).functionName,
-                    args: (event as any).functionArgs,
+                    name: event.functionName,
+                    args: event.functionArgs,
                   },
                 },
               ],
@@ -205,13 +206,13 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           case EventFunctionResponse:
             // Handle function response
             addMessage({
-              id: (event as any).messageId || `function-response-${Date.now()}`,
+              id: event.messageId || `function-response-${Date.now()}`,
               role: 'model',
               parts: [
                 {
                   functionResponse: {
-                    name: (event as any).functionName,
-                    response: (event as any).functionResponse,
+                    name: event.functionName,
+                    response: event.response,
                   },
                 },
               ],
@@ -223,40 +224,40 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           case EventInlineData:
             // Handle inline data (attachments) - add as new message
             addMessage({
-              id: (event as any).messageId || `inline-${Date.now()}`,
+              id: event.messageId || `inline-${Date.now()}`,
               role: 'model',
               parts: [],
               type: 'model',
               timestamp: new Date().toISOString(),
-              attachments: (event as any).attachments,
+              attachments: event.attachments,
             } as ChatMessage);
             break;
 
           case EventCumulTokenCount:
             // Handle cumulative token count update
             setMessages((prevMessages) => {
-              const messageId = (event as any).messageId;
-              const cumulTokenCount = (event as any).cumulTokenCount;
+              const messageId = event.messageId;
+              const cumulTokenCount = event.cumulTokenCount;
               return prevMessages.map((msg) => (msg.id === messageId ? { ...msg, cumulTokenCount } : msg));
             });
             break;
 
           case EventPendingConfirmation:
             // Handle pending confirmation (tool approval needed)
-            const confirmationData = JSON.parse((event as any).data);
+            const confirmationData = JSON.parse(event.data);
             setPendingConfirmation(confirmationData);
             break;
 
           case EventGenerationChanged:
             // Handle generation changed (environment changes)
-            const envChanged = JSON.parse((event as any).envChangedJson);
+            const envChanged = JSON.parse(event.envChangedJson);
             setTemporaryEnvChangeMessage(envChanged);
             break;
 
           case EventSessionName:
             // Handle session name update
-            if ((event as any).newName) {
-              setSessionName((event as any).newName);
+            if (event.newName) {
+              setSessionName({ sessionId: event.sessionId, name: event.newName });
             }
             break;
 
@@ -352,8 +353,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
       ...eventHandlers,
       onEvent: (event: SseEvent) => {
         // Handle earlier messages loaded event
-        if ((event as any).type === 'EARLIER_MESSAGES_LOADED' && (event as any).data) {
-          const data = (event as any).data;
+        if (event.type === EARLIER_MESSAGES_LOADED && event.data) {
+          const data = event.data;
 
           // Prepend new messages to the existing ones
           setMessages((prevMessages) => [...(data.history || []), ...prevMessages]);
