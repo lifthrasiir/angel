@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getDirectoryListing, confirmDirectorySelection } from '../utils/dialogHelpers';
+import { Modal } from './Modal';
+import './DirectoryPicker.css';
 
 interface DirectoryPickerProps {
   isOpen: boolean;
@@ -136,278 +138,85 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   // Determine if select button should be enabled
   const canSelect = pathInput !== ''; // Enable if not in virtual root (empty string)
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 9999,
-        userSelect: 'none',
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-          width: '100%',
-          maxWidth: '672px',
-          maxHeight: '80vh',
-          display: 'flex',
-          flexDirection: 'column',
-          userSelect: 'none',
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '16px',
-            borderBottom: '1px solid #e5e7eb',
-          }}
-        >
-          <h2 style={{ fontSize: '18px', fontWeight: 600 }}>Select Directory</h2>
-          <button
-            onClick={onClose}
-            style={{
-              color: '#6b7280',
-              fontSize: '20px',
-              fontWeight: 'bold',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = '#374151')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = '#6b7280')}
-          >
-            ×
+    <Modal isOpen={isOpen} onClose={onClose} className="directory-picker" maxWidthPercentage="95%" maxWidth="672px">
+      <Modal.Header onClose={onClose}>
+        <h2>Select Directory</h2>
+      </Modal.Header>
+
+      <div className="directory-picker-path-section">
+        <div className="path-label">Current Path:</div>
+        <div className="path-input-row">
+          <input
+            type="text"
+            value={pathInput}
+            onChange={handlePathInputChange}
+            onKeyDown={handlePathInputSubmit}
+            placeholder="Enter directory path..."
+            className="path-input"
+          />
+          <button onClick={handleNavigateClick} className="navigate-button">
+            Navigate
           </button>
         </div>
+      </div>
 
-        {/* Current Path */}
-        <div
-          style={{
-            padding: '16px',
-            borderBottom: '1px solid #e5e7eb',
-            backgroundColor: '#f9fafb',
-          }}
-        >
-          <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Current Path:</div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              type="text"
-              value={pathInput}
-              onChange={handlePathInputChange}
-              onKeyDown={handlePathInputSubmit}
-              placeholder="Enter directory path..."
-              style={{
-                flex: 1,
-                fontSize: '14px',
-                fontFamily: 'monospace',
-                backgroundColor: 'white',
-                padding: '8px',
-                borderRadius: '4px',
-                border: '1px solid #d1d5db',
-                outline: 'none',
-              }}
-            />
-            <button
-              onClick={handleNavigateClick}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#2563eb')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#3b82f6')}
-            >
-              Navigate
-            </button>
-          </div>
-        </div>
+      {error && <div className="directory-picker-error">{error}</div>}
 
-        {/* Error Message */}
-        {error && (
-          <div
-            style={{
-              padding: '16px',
-              backgroundColor: '#fef2f2',
-              borderBottom: '1px solid #e5e7eb',
-            }}
-          >
-            <div style={{ fontSize: '14px', color: '#dc2626' }}>{error}</div>
-          </div>
-        )}
-
-        {/* Directory List */}
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          {loading ? (
-            <div
-              style={{
-                padding: '32px',
-                textAlign: 'center',
-                color: '#6b7280',
-              }}
-            >
-              Loading directories...
-            </div>
-          ) : !directories || directories.length === 0 ? (
-            <div
-              style={{
-                padding: '32px',
-                textAlign: 'center',
-                color: '#6b7280',
-              }}
-            >
-              No directories found
-            </div>
-          ) : directories && directories.length > 0 ? (
-            <div style={{ padding: '8px' }}>
-              {directories.map((dir, index) => (
-                <div
-                  key={index}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    backgroundColor: selectedPath === dir.path ? '#eff6ff' : 'transparent',
-                    border: selectedPath === dir.path ? '1px solid #3b82f6' : '1px solid transparent',
-                  }}
-                  onClick={() => handleDirectoryClick(dir)}
-                  onDoubleClick={() => handleDirectoryNavigate(dir)}
-                  onMouseEnter={(e) => {
-                    if (selectedPath !== dir.path) {
-                      e.currentTarget.style.backgroundColor = '#f3f4f6';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (selectedPath !== dir.path) {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }
-                  }}
-                >
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: '#9ca3af', marginRight: '12px' }}>{dir.isParent ? '↶' : '📁'}</span>
-                    <span
-                      style={{
-                        fontWeight: 500,
-                        color: dir.isParent ? '#6b7280' : '#111827',
-                        fontStyle: dir.isParent ? 'italic' : 'normal',
-                      }}
-                    >
-                      {dir.name}
-                    </span>
-                  </div>
-                  {!dir.isParent && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDirectoryNavigate(dir);
-                      }}
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '12px',
-                        backgroundColor: '#3b82f6',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        opacity: 0,
-                        transition: 'opacity 0.2s',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-                      onMouseLeave={(e) => (e.currentTarget.style.opacity = '0')}
-                    >
-                      Open
-                    </button>
-                  )}
+      <Modal.Body>
+        {loading ? (
+          <div className="directory-picker-loading">Loading directories...</div>
+        ) : !directories || directories.length === 0 ? (
+          <div className="directory-picker-empty">No directories found</div>
+        ) : directories && directories.length > 0 ? (
+          <div className="directory-list">
+            {directories.map((dir, index) => (
+              <div
+                key={index}
+                className={`directory-item ${selectedPath === dir.path ? 'selected' : ''}`}
+                onClick={() => handleDirectoryClick(dir)}
+                onDoubleClick={() => handleDirectoryNavigate(dir)}
+              >
+                <div className="directory-item-content">
+                  <span className={`directory-icon ${dir.isParent ? 'parent' : ''}`}>{dir.isParent ? '↶' : '📁'}</span>
+                  <span className={`directory-name ${dir.isParent ? 'parent' : ''}`}>{dir.name}</span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div
-              style={{
-                padding: '32px',
-                textAlign: 'center',
-                color: '#6b7280',
-              }}
-            >
-              No directories found
-            </div>
+                {!dir.isParent && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDirectoryNavigate(dir);
+                    }}
+                    className="open-button"
+                  >
+                    Open
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="directory-picker-empty">No directories found</div>
+        )}
+      </Modal.Body>
+
+      <Modal.Footer>
+        <div className="selected-path-display">
+          {(selectedPath || pathInput) && (
+            <span>
+              Selected: <span className="path-text">{selectedPath || pathInput}</span>
+            </span>
           )}
         </div>
-
-        {/* Footer */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '16px',
-            borderTop: '1px solid #e5e7eb',
-            backgroundColor: '#f9fafb',
-          }}
-        >
-          <div style={{ fontSize: '14px', color: '#6b7280' }}>
-            {(selectedPath || pathInput) && (
-              <span>
-                Selected: <span style={{ fontFamily: 'monospace' }}>{selectedPath || pathInput}</span>
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={onClose}
-              style={{
-                padding: '8px 16px',
-                color: '#4b5563',
-                backgroundColor: '#e5e7eb',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#d1d5db')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#e5e7eb')}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSelect}
-              disabled={!canSelect || loading}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: !canSelect || loading ? '#d1d5db' : '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: !canSelect || loading ? 'not-allowed' : 'pointer',
-                fontSize: '14px',
-              }}
-            >
-              Select
-            </button>
-          </div>
+        <div className="footer-buttons">
+          <button onClick={onClose} className="cancel-button">
+            Cancel
+          </button>
+          <button onClick={handleSelect} disabled={!canSelect || loading} className="select-button">
+            Select
+          </button>
         </div>
-      </div>
-    </div>
+      </Modal.Footer>
+    </Modal>
   );
 };

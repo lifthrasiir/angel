@@ -1,40 +1,8 @@
-@layer components.AccountDetailsModal {
-  /* Account Details Modal Styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-    padding: 20px;
-  }
-
-  .modal-content {
-    background: white;
-    border-radius: 8px;
-    max-width: 1200px;
-    max-height: 85vh;
-    width: 95%;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  }
-
-  .account-details-modal .modal-header {
-    padding: 20px;
-    border-bottom: 1px solid #ddd;
-    position: relative;
-  }
+@layer components.accountDetailsModal {
+  /* Account Details Modal Specific Styles */
 
   .account-details-modal .modal-header h2 {
     margin: 0 0 8px 0;
-    font-size: 18px;
-    color: #333;
   }
 
   .quota-only-notice {
@@ -45,35 +13,6 @@
     background-color: #fff3cd;
     border-radius: 4px;
     border: 1px solid #ffeaa7;
-  }
-
-  .close-button {
-    position: absolute;
-    top: 15px;
-    right: 20px;
-    background: none;
-    border: none;
-    font-size: 32px;
-    line-height: 1;
-    cursor: pointer;
-    color: #666;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    transition: color 0.2s;
-  }
-
-  .close-button:hover {
-    color: #000;
-  }
-
-  .modal-body {
-    padding: 20px;
-    overflow-y: auto;
-    flex: 1;
   }
 
   .no-models-message {
@@ -183,34 +122,6 @@
 
   /* Mobile Responsive */
   @media (max-width: 768px) {
-    .modal-overlay {
-      padding: 10px;
-    }
-
-    .modal-content {
-      max-height: 90vh;
-      width: 100%;
-    }
-
-    .account-details-modal .modal-header {
-      padding: 15px;
-    }
-
-    .account-details-modal .modal-header h2 {
-      font-size: 16px;
-      margin-right: 30px;
-    }
-
-    .close-button {
-      top: 10px;
-      right: 10px;
-      font-size: 28px;
-    }
-
-    .modal-body {
-      padding: 15px;
-    }
-
     .models-table {
       font-size: 12px;
       min-width: 600px;
@@ -229,10 +140,6 @@
 
   /* Tablet */
   @media (min-width: 769px) and (max-width: 1024px) {
-    .modal-content {
-      max-width: 95%;
-    }
-
     .models-table {
       font-size: 12px;
     }

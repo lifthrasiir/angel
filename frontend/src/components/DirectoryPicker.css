@@ -1,0 +1,185 @@
+@layer components.DirectoryPicker {
+  /* Directory Picker Specific Styles */
+
+  .directory-picker {
+    max-height: 80vh;
+  }
+
+  /* Path Section */
+  .directory-picker-path-section {
+    padding: 16px;
+    border-bottom: 1px solid #e5e7eb;
+    background-color: #f9fafb;
+  }
+
+  .path-label {
+    font-size: 14px;
+    color: #6b7280;
+    margin-bottom: 4px;
+  }
+
+  .path-input-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .path-input {
+    flex: 1;
+    font-size: 14px;
+    font-family: monospace;
+    background-color: white;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    outline: none;
+  }
+
+  .path-input:focus {
+    border-color: #3b82f6;
+  }
+
+  /* Buttons */
+  .navigate-button {
+    padding: 8px 16px;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  .navigate-button:hover {
+    background-color: #2563eb;
+  }
+
+  /* Error Message */
+  .directory-picker-error {
+    padding: 16px;
+    background-color: #fef2f2;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 14px;
+    color: #dc2626;
+  }
+
+  /* Directory List */
+  .directory-picker-loading,
+  .directory-picker-empty {
+    padding: 32px;
+    text-align: center;
+    color: #6b7280;
+  }
+
+  .directory-list {
+    padding: 8px;
+  }
+
+  .directory-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background-color 0.2s;
+  }
+
+  .directory-item:hover {
+    background-color: #f3f4f6;
+  }
+
+  .directory-item.selected {
+    background-color: #eff6ff;
+    border-color: #3b82f6;
+  }
+
+  .directory-item-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+  }
+
+  .directory-icon {
+    color: #9ca3af;
+    margin-right: 12px;
+  }
+
+  .directory-icon.parent {
+    color: #9ca3af;
+  }
+
+  .directory-name {
+    font-weight: 500;
+    color: #111827;
+  }
+
+  .directory-name.parent {
+    color: #6b7280;
+    font-style: italic;
+  }
+
+  .open-button {
+    padding: 4px 8px;
+    font-size: 12px;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .directory-item:hover .open-button {
+    opacity: 1;
+  }
+
+  /* Footer */
+  .selected-path-display {
+    font-size: 14px;
+    color: #6b7280;
+  }
+
+  .path-text {
+    font-family: monospace;
+  }
+
+  .footer-buttons {
+    display: flex;
+    gap: 8px;
+  }
+
+  .cancel-button {
+    padding: 8px 16px;
+    color: #4b5563;
+    background-color: #e5e7eb;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  .cancel-button:hover {
+    background-color: #d1d5db;
+  }
+
+  .select-button {
+    padding: 8px 16px;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  .select-button:hover:not(:disabled) {
+    background-color: #2563eb;
+  }
+
+  .select-button:disabled {
+    background-color: #d1d5db;
+    cursor: not-allowed;
+  }
+}

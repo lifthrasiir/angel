@@ -1,0 +1,127 @@
+@layer components.Modal {
+  /* Modal Overlay */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    padding: 20px;
+    user-select: none;
+  }
+
+  /* Modal Content */
+  .modal-content {
+    background: white;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Modal Header */
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid #e5e7eb;
+    position: relative;
+  }
+
+  .modal-header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+  }
+
+  /* Close Button */
+  .close-button {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    background: none;
+    border: none;
+    font-size: 32px;
+    line-height: 1;
+    cursor: pointer;
+    color: #6b7280;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color 0.2s;
+  }
+
+  .close-button:hover {
+    color: #374151;
+  }
+
+  /* Modal Body */
+  .modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  /* Modal Footer */
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-top: 1px solid #e5e7eb;
+    background-color: #f9fafb;
+    gap: 8px;
+  }
+
+  /* Mobile Responsive */
+  @media (max-width: 768px) {
+    .modal-overlay {
+      padding: 10px;
+    }
+
+    .modal-header {
+      padding: 15px;
+    }
+
+    .modal-header h2 {
+      font-size: 16px;
+      margin-right: 30px;
+    }
+
+    .close-button {
+      top: 10px;
+      right: 10px;
+      font-size: 28px;
+    }
+
+    .modal-body {
+      padding: 15px;
+    }
+
+    .modal-footer {
+      padding: 12px 16px;
+      flex-wrap: wrap;
+    }
+  }
+
+  /* Tablet */
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .modal-header {
+      padding: 16px;
+    }
+
+    .modal-header h2 {
+      font-size: 17px;
+    }
+  }
+}
