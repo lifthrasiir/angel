@@ -18,6 +18,7 @@ import {
   availableModelsAtom,
   selectedModelAtom,
   pendingConfirmationAtom,
+  pendingRootsAtom,
   isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
@@ -51,6 +52,8 @@ export const useChatSession = (isTemporary: boolean = false) => {
   const selectedModel = useAtomValue(selectedModelAtom);
   const setSelectedModel = useSetAtom(selectedModelAtom);
   const pendingConfirmation = useAtomValue(pendingConfirmationAtom);
+  const pendingRoots = useAtomValue(pendingRootsAtom);
+  const setPendingRoots = useSetAtom(pendingRootsAtom);
   const isModelManuallySelected = useAtomValue(isModelManuallySelectedAtom);
 
   // workspaceId is now managed by FSM, no need to get from URL params
@@ -122,19 +125,36 @@ export const useChatSession = (isTemporary: boolean = false) => {
       // If not provided, fall back to the ref value
       const currentInput = messageContent !== undefined ? messageContent : inputMessageRef.current;
       const currentFiles = attachmentResize.getFilesForSending();
+
+      // Send pendingRoots if available, then reset it
+      const initialRoots = pendingRoots.length > 0 ? pendingRoots : undefined;
+      if (initialRoots) {
+        setPendingRoots([]);
+      }
+
       sendMessage(
         currentInput,
         currentFiles,
         selectedModel,
         systemPrompt,
-        undefined,
-        undefined,
-        undefined,
+        stateWorkspaceId,
+        primaryBranchId,
+        initialRoots,
         undefined,
         isTemporary,
       );
     },
-    [sendMessage, selectedModel, systemPrompt, isTemporary, attachmentResize],
+    [
+      sendMessage,
+      selectedModel,
+      systemPrompt,
+      stateWorkspaceId,
+      primaryBranchId,
+      pendingRoots,
+      setPendingRoots,
+      isTemporary,
+      attachmentResize,
+    ],
   );
 
   const sendConfirmation = useCallback(

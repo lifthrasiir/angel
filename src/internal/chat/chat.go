@@ -58,7 +58,13 @@ func NewSessionAndMessage(
 		modelToUse = DefaultGeminiModel // Default model for new sessions
 	}
 
-	// Handle InitialRoots if provided
+	// Create session with primary_branch_id (must be before SetInitialSessionEnv for FK constraint)
+	primaryBranchID, err := database.CreateSession(db, sessionId, systemPrompt, workspaceId)
+	if err != nil {
+		return fmt.Errorf("failed to create new session: %w", err)
+	}
+
+	// Handle InitialRoots if provided (after session is created)
 	if len(initialRoots) > 0 {
 		// Set initial roots as generation 0 environment
 		err := database.SetInitialSessionEnv(db, sessionId, initialRoots)
@@ -76,12 +82,6 @@ func NewSessionAndMessage(
 			envChangeContext := prompts.GetEnvChangeContext(envChanged)
 			systemPrompt = systemPrompt + "\n" + envChangeContext // Append to system prompt
 		}
-	}
-
-	// Create session with primary_branch_id (moved after InitialRoots handling)
-	primaryBranchID, err := database.CreateSession(db, sessionId, systemPrompt, workspaceId)
-	if err != nil {
-		return fmt.Errorf("failed to create new session: %w", err)
 	}
 
 	// Create a new message chain
