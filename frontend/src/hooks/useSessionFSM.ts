@@ -5,6 +5,7 @@ import type { ChatMessage } from '../types/chat';
 import { ModelInfo } from '../api/models';
 import { convertFilesToAttachments } from '../utils/fileHandler';
 import { useSessionManagerContext } from './SessionManagerContext';
+import { parseURLPath } from '../utils/urlSessionMapping';
 import {
   addErrorMessageAtom,
   addMessageAtom,
@@ -114,7 +115,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           setPrimaryBranchId(data.primaryBranchId);
         }
 
-        // Note: hasMoreMessages and processing state are now managed by SessionState
+        // Set workspace ID, just in case (should have been already set by EventWorkspaceHint)
+        sessionManager.setSessionWorkspaceId(data.workspaceId);
 
         // Handle pending confirmation
         if (data.pendingConfirmation) {
@@ -152,7 +154,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           case EventWorkspaceHint:
             // Handle workspace hint event
             console.log('Workspace hint received:', event.workspaceId);
-            // Workspace ID is already set in the initial state, so we don't need to do anything here
+            // Set the workspace ID in session manager
+            sessionManager.setSessionWorkspaceId(event.workspaceId);
             break;
 
           case EventAcknowledge:
@@ -303,30 +306,20 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
     [sessionManager, operationManager, eventHandlers],
   );
 
-  // Auto-load session from URL
+  // Auto-load session from URL (or clear for new/temp pages)
   useEffect(() => {
-    // Check if URL contains sessionId (/:sessionId pattern)
     const pathname = location.pathname;
-    const sessionIdMatch = pathname.match(/^\/([^\/]+)$/);
-    const urlSessionId = sessionIdMatch ? sessionIdMatch[1] : null;
+    const urlPath = parseURLPath(pathname);
 
-    console.log('URL effect triggered:', { pathname, urlSessionId, sessionManagerId: sessionManager.sessionId });
-
-    // Reset chat state only when explicitly on /new or /temp WITHOUT a session
-    // This prevents resetting during URL transition after session creation
-    if (urlSessionId === 'new' || urlSessionId === 'temp') {
-      // Only reset if we don't have a session yet (to avoid resetting during URL transition)
-      if (sessionManager.sessionId === null) {
-        console.log('Resetting chat state for new session');
-        resetChatSessionState();
-      }
+    // For /new or /temp pages, clear chat state (like loading an empty session)
+    if (urlPath.type === 'new_session') {
+      resetChatSessionState();
       return;
     }
 
-    // Only proceed if we have a sessionId and it's different from current session
-    if (urlSessionId && urlSessionId !== sessionManager.sessionId) {
-      console.log('Loading session from URL:', urlSessionId);
-      loadSession(urlSessionId);
+    // For existing sessions, load if different from current
+    if (urlPath.type === 'existing_session' && urlPath.sessionId && urlPath.sessionId !== sessionManager.sessionId) {
+      loadSession(urlPath.sessionId);
     }
   }, [location.pathname, sessionManager.sessionId, loadSession, resetChatSessionState]);
 

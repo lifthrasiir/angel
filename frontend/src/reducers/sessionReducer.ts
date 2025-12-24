@@ -271,8 +271,8 @@ export const sessionReducer = (state: SessionState, action: SessionAction): Sess
     }
 
     case 'WORKSPACE_ID_HINT': {
-      // Only update workspaceId if it's currently undefined or null
-      if (state.workspaceId === undefined || state.workspaceId === null) {
+      // Update workspaceId if different (object identity optimization)
+      if (state.workspaceId !== action.workspaceId) {
         return {
           ...state,
           workspaceId: action.workspaceId,

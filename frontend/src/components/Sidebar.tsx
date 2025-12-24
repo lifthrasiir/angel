@@ -1,5 +1,4 @@
-import type React from 'react';
-import { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { FaArrowLeft, FaCog, FaFolder, FaPlus, FaBars, FaTimes, FaSearch } from 'react-icons/fa';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -39,7 +38,6 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   // Separate state for UI active workspace (decoupled from session's workspace)
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | undefined>(undefined);
   const isInitializedRef = useRef(false);
-  const lastSessionIdRef = useRef<string | null>(null);
 
   // Helper function to check if current path represents anonymous workspace (not workspaces)
   const isAnonymousWorkspacePath = (pathname: string): boolean => {
@@ -49,82 +47,55 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
   // Check if we're on a new non-temporary session page, to adjust "New Session" button label
   const showTemporarySessionButton = isNewNonTemporarySessionURL(location.pathname);
 
-  // Initialize active workspace ONLY on first load
+  // Initialize activeWorkspaceId on first load or when session loads
   useEffect(() => {
-    if (isInitializedRef.current) {
-      return;
-    }
-
-    // Try to get workspace from URL first
     const urlWorkspaceId = extractWorkspaceId(location.pathname);
 
-    if (urlWorkspaceId !== undefined) {
+    // Always handle URL-based workspace changes (including anonymous paths)
+    if (urlWorkspaceId) {
       // URL has workspace info (/w/:workspaceId/new)
       setActiveWorkspaceId(urlWorkspaceId);
-      isInitializedRef.current = true;
+      if (!isInitializedRef.current) {
+        isInitializedRef.current = true;
+      }
     } else if (isAnonymousWorkspacePath(location.pathname)) {
       // Explicitly on global/anonymous workspace (including temporary sessions)
-      setActiveWorkspaceId(undefined);
-      isInitializedRef.current = true;
-    } else if (sessionWorkspaceId !== undefined) {
-      // No URL workspace, but session has loaded with workspace (/:sessionId case)
-      setActiveWorkspaceId(sessionWorkspaceId || undefined);
-      isInitializedRef.current = true;
-    }
-    // For /:sessionId path, wait until sessionWorkspaceId is available
-  }, [location.pathname, sessionWorkspaceId]);
-
-  // Handle URL workspace changes (after initialization)
-  useEffect(() => {
-    if (!isInitializedRef.current) {
-      return;
-    }
-
-    const urlWorkspaceId = extractWorkspaceId(location.pathname);
-
-    // Update activeWorkspaceId when URL workspace changes
-    if (isAnonymousWorkspacePath(location.pathname)) {
-      // Navigated to anonymous workspace (including temporary sessions)
-      if (activeWorkspaceId !== undefined) {
-        setActiveWorkspaceId(undefined);
+      setActiveWorkspaceId('');
+      if (!isInitializedRef.current) {
+        isInitializedRef.current = true;
       }
-    } else if (urlWorkspaceId !== undefined && urlWorkspaceId !== activeWorkspaceId) {
-      // Navigated to a different workspace via URL
-      setActiveWorkspaceId(urlWorkspaceId);
+    } else if (!isInitializedRef.current && sessionWorkspaceId !== undefined) {
+      // Only wait for sessionWorkspaceId during initial load (/:sessionId case)
+      setActiveWorkspaceId(sessionWorkspaceId || '');
+      isInitializedRef.current = true;
     }
-  }, [location.pathname, activeWorkspaceId]);
+  }, [location.pathname, sessionWorkspaceId, setActiveWorkspaceId]);
 
-  // Handle navigation to existing session (/:sessionId)
-  // When navigating to a different session, update activeWorkspaceId from that session's workspace
+  // Reset activeWorkspaceId when a new session is loaded
+  // This copies the workspaceId from session state to sidebar state
   useEffect(() => {
-    if (!isInitializedRef.current) {
-      return;
-    }
-    if (chatSessionId === lastSessionIdRef.current) {
-      return;
-    }
-
-    // Check if we're on a /:sessionId path (not /w/:workspaceId/new or /new)
     const urlWorkspaceId = extractWorkspaceId(location.pathname);
-    const isSessionPath = chatSessionId && urlWorkspaceId === undefined && location.pathname !== '/new';
+    const isSessionPath = chatSessionId && !urlWorkspaceId && location.pathname !== '/new';
 
+    // When navigating to an existing session, update activeWorkspaceId from session's workspace
     if (isSessionPath && sessionWorkspaceId !== undefined) {
-      // We navigated to a different session - update activeWorkspaceId from session's workspace
-      // Only update if workspace actually changed to avoid unnecessary re-renders
-      if (activeWorkspaceId !== sessionWorkspaceId) {
-        setActiveWorkspaceId(sessionWorkspaceId || undefined);
+      setActiveWorkspaceId(sessionWorkspaceId || '');
+      // Mark as initialized once we have session workspace info
+      if (!isInitializedRef.current) {
+        isInitializedRef.current = true;
       }
-      lastSessionIdRef.current = chatSessionId;
-    } else if (!isSessionPath) {
-      // Update last session ID when leaving session view
-      lastSessionIdRef.current = chatSessionId;
     }
-  }, [chatSessionId, sessionWorkspaceId, location.pathname, activeWorkspaceId]);
+  }, [chatSessionId, sessionWorkspaceId, location.pathname, setActiveWorkspaceId]);
 
   // Load sessions when activeWorkspaceId changes
   // This is the ONLY place where session list should be loaded
   useEffect(() => {
     if (!isInitializedRef.current) {
+      return;
+    }
+
+    // Don't load if activeWorkspaceId is undefined (still initializing)
+    if (activeWorkspaceId === undefined) {
       return;
     }
 
