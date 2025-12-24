@@ -132,24 +132,13 @@ export const useChatSession = (isTemporary: boolean = false) => {
         setPendingRoots([]);
       }
 
-      sendMessage(
-        currentInput,
-        currentFiles,
-        selectedModel,
-        systemPrompt,
-        stateWorkspaceId,
-        primaryBranchId,
-        initialRoots,
-        undefined,
-        isTemporary,
-      );
+      sendMessage(currentInput, currentFiles, selectedModel, systemPrompt, stateWorkspaceId, initialRoots, isTemporary);
     },
     [
       sendMessage,
       selectedModel,
       systemPrompt,
       stateWorkspaceId,
-      primaryBranchId,
       pendingRoots,
       setPendingRoots,
       isTemporary,

@@ -42,6 +42,7 @@ export type SseInitialStateNoCall = {
 export type SseAcknowledge = {
   type: typeof EventAcknowledge;
   messageId: string;
+  temporaryMessageId?: string; // Synthesized from client side
 };
 
 export type SseThought = {

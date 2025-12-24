@@ -15,10 +15,8 @@ export const sendMessage = async (
   chatSessionId: string | null,
   systemPrompt: string,
   workspaceId?: string,
-  primaryBranchId?: string,
   model?: string,
   initialRoots?: string[],
-  beforeMessageId?: string,
   isTemporary?: boolean,
 ) => {
   let apiUrl = '';
@@ -26,13 +24,7 @@ export const sendMessage = async (
 
   if (chatSessionId) {
     apiUrl = `/api/chat/${chatSessionId}`;
-    if (beforeMessageId) {
-      apiUrl += `?beforeMessageID=${beforeMessageId}`;
-    }
     requestBody = { message: inputMessage, attachments, model };
-    if (primaryBranchId) {
-      requestBody.primaryBranchId = primaryBranchId;
-    }
   } else {
     // Use /api/chat/temp for temporary sessions, but support workspaceId parameter
     apiUrl = isTemporary ? '/api/chat/temp' : '/api/chat';

@@ -8,6 +8,7 @@ import {
   type SseEvent,
   EventComplete,
   EventError,
+  EventAcknowledge,
   parseSseEvent,
   EventInitialState,
   EventInitialStateNoCall,
@@ -20,9 +21,7 @@ export interface MessageSendParams {
   model: ModelInfo | null;
   systemPrompt?: string;
   workspaceId?: string;
-  primaryBranchId?: string;
   initialRoots?: string[];
-  beforeMessageId?: string;
   isTemporary?: boolean;
 }
 
@@ -123,9 +122,28 @@ export class SessionOperationManager {
     response: Response,
     sessionId: string | null,
     hasMoreMessages: boolean = false,
+    temporaryMessageId?: string,
   ): Promise<void> {
     this.activeOperation = 'streaming';
     this.currentAbortController = new AbortController();
+
+    // Wrap handlers to include temporaryMessageId
+    const wrappedHandlers: OperationEventHandlers = {
+      onInitialState: this.currentHandlers?.onInitialState,
+      onEvent: (event: SseEvent) => {
+        // Inject temporaryMessageId into EventAcknowledge
+        if (event.type === EventAcknowledge && temporaryMessageId) {
+          this.currentHandlers?.onEvent?.({
+            ...event,
+            temporaryMessageId,
+          });
+        } else {
+          this.currentHandlers?.onEvent?.(event);
+        }
+      },
+      onComplete: this.currentHandlers?.onComplete,
+      onError: this.currentHandlers?.onError,
+    };
 
     const eventHandlers: SseEventHandler = (event) => {
       // Only process events if this is still the active operation
@@ -133,7 +151,7 @@ export class SessionOperationManager {
         return;
       }
 
-      this.handleStreamingEvent(event, sessionId, hasMoreMessages);
+      this.handleStreamingEvent(event, sessionId, hasMoreMessages, wrappedHandlers);
     };
 
     await processStreamResponse(response, eventHandlers, this.currentAbortController.signal);
@@ -145,7 +163,12 @@ export class SessionOperationManager {
   /**
    * Handle streaming events with consolidated switch statement
    */
-  private handleStreamingEvent(event: SseEvent, sessionId: string | null, hasMoreMessages: boolean = false): void {
+  private handleStreamingEvent(
+    event: SseEvent,
+    sessionId: string | null,
+    hasMoreMessages: boolean = false,
+    handlers?: OperationEventHandlers,
+  ): void {
     switch (event.type) {
       case EventInitialState:
       case EventInitialStateNoCall: {
@@ -163,21 +186,21 @@ export class SessionOperationManager {
           isCallActive: event.type === EventInitialState,
           hasMore: hasMoreMessages,
         });
-        this.currentHandlers?.onInitialState?.(mappedData);
+        handlers?.onInitialState?.(mappedData);
         break;
       }
       case EventComplete:
         this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
-        this.currentHandlers?.onComplete?.();
+        handlers?.onComplete?.();
         this.activeOperation = 'none';
         break;
       case EventError:
         this._dispatch({ type: 'ERROR_OCCURRED', error: (event as any).error || 'Unknown error' });
-        this.currentHandlers?.onError?.(event);
+        handlers?.onError?.(event);
         this.activeOperation = 'none';
         break;
       default:
-        this.currentHandlers?.onEvent?.(event);
+        handlers?.onEvent?.(event);
     }
   }
 
@@ -300,6 +323,7 @@ export class SessionOperationManager {
     params: MessageSendParams,
     sessionId: string | null,
     handlers?: OperationEventHandlers,
+    temporaryMessageId?: string,
   ): Promise<void> {
     this.setupStreamingOperation(sessionId, handlers);
 
@@ -312,16 +336,14 @@ export class SessionOperationManager {
         sessionId,
         params.systemPrompt || '',
         params.workspaceId,
-        params.primaryBranchId,
         params.model?.name,
         params.initialRoots,
-        params.beforeMessageId,
         params.isTemporary,
       );
 
       if (this.validateResponse(response, 'Send')) return;
 
-      await this.startStreaming(response, sessionId, false);
+      await this.startStreaming(response, sessionId, false, temporaryMessageId);
     } catch (error) {
       this.handleOperationError(error, `Message send failed: ${error}`);
     }
@@ -431,20 +453,16 @@ export class SessionOperationManager {
   async handleMessageRetry(
     sessionId: string,
     originalMessageId: string,
-    content: string,
-    model: ModelInfo | null,
-    systemPrompt?: string,
     handlers?: OperationEventHandlers,
   ): Promise<void> {
     this.setupStreamingOperation(sessionId, handlers);
 
     try {
-      const requestBody: any = {
-        content,
-        model: model?.name || null,
-        systemPrompt: systemPrompt || '',
-        retry: 1,
-        originalMessageId,
+      this._dispatch({ type: 'STREAM_STARTED', activeOperation: 'streaming' });
+
+      const requestBody = {
+        updatedMessageId: parseInt(originalMessageId, 10), // Convert message ID to integer
+        newMessageText: '', // Empty text for retry (server will get original text)
       };
 
       const response = await apiFetch(`/api/chat/${sessionId}/branch?retry=1`, {
@@ -475,6 +493,8 @@ export class SessionOperationManager {
     this.setupStreamingOperation(sessionId, handlers);
 
     try {
+      this._dispatch({ type: 'STREAM_STARTED', activeOperation: 'streaming' });
+
       const requestBody = {
         updatedMessageId: parseInt(originalMessageId, 10),
         newMessageText: editedText,
@@ -503,6 +523,8 @@ export class SessionOperationManager {
     this.setupStreamingOperation(sessionId, handlers);
 
     try {
+      this._dispatch({ type: 'STREAM_STARTED', activeOperation: 'streaming' });
+
       const response = await apiFetch(`/api/chat/${sessionId}/branch/${branchId}/retry-error`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

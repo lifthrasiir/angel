@@ -21,6 +21,8 @@ import {
   preserveSelectedFilesAtom,
   setSessionNameAtom,
   inputMessageAtom,
+  editingMessageIdAtom,
+  updateUserMessageIdAtom,
 } from '../atoms/chatAtoms';
 import type { MessageSendParams, OperationEventHandlers } from '../managers/SessionOperationManager';
 import {
@@ -66,6 +68,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const setSessionName = useSetAtom(setSessionNameAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
+  const setEditingMessageId = useSetAtom(editingMessageIdAtom);
+  const updateUserMessageId = useSetAtom(updateUserMessageIdAtom);
 
   const messages = useAtomValue(messagesAtom);
   const selectedModel = useAtomValue(selectedModelAtom);
@@ -154,7 +158,11 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           case EventAcknowledge:
             // Handle message acknowledgement (message was sent successfully)
             console.log('Message acknowledged:', event.messageId);
-            // No UI update needed - message already added optimistically
+            // Update temporary message ID with actual server ID
+            const tempId = (event as any).temporaryMessageId;
+            if (tempId && event.messageId) {
+              updateUserMessageId({ temporaryId: tempId, newId: event.messageId });
+            }
             break;
 
           case EventComplete:
@@ -377,9 +385,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
       model: ModelInfo | null,
       systemPrompt?: string,
       workspaceId?: string,
-      primaryBranchId?: string,
       initialRoots?: string[],
-      beforeMessageId?: string,
       isTemporary?: boolean,
     ) => {
       if (!operationManager) return;
@@ -391,18 +397,19 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         model,
         systemPrompt,
         workspaceId,
-        primaryBranchId,
         initialRoots,
-        beforeMessageId,
         isTemporary,
       };
 
       // Get current session ID from session manager
       const sessionId = sessionManager.sessionId;
 
+      // Generate UUID for temporary message ID
+      const temporaryMessageId = crypto.randomUUID();
+
       // Add user message to state
       addMessage({
-        id: `user-${Date.now()}`,
+        id: temporaryMessageId,
         role: 'user',
         parts: [{ text: content }],
         type: 'user',
@@ -416,7 +423,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
       setPreserveSelectedFiles([]);
 
       // Delegate to operation manager
-      operationManager.handleMessageSend(params, sessionId, eventHandlers);
+      operationManager.handleMessageSend(params, sessionId, eventHandlers, temporaryMessageId);
     },
     [
       sessionManager,
@@ -471,31 +478,39 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         return;
       }
 
-      // Find the original message to get its content
-      const messageToRetry = messages.find((msg) => msg.id === originalMessageId);
-      if (!messageToRetry) {
-        addErrorMessage('Original message not found');
-        return;
-      }
+      setEditingMessageId(null); // Exit editing mode if active
 
-      const content = messageToRetry.parts.find((part) => part.text)?.text || '';
+      // Remove this message and all subsequent messages on the frontend
+      setMessages((prevMessages) => {
+        const updatedMessages = [...prevMessages];
+        const messageIndex = updatedMessages.findIndex((msg) => msg.id === originalMessageId);
+
+        if (messageIndex !== -1) {
+          // Remove all messages after the retry message
+          return updatedMessages.slice(0, messageIndex + 1);
+        }
+        return prevMessages; // If message not found, return previous state
+      });
+
       sessionManager.dispatch({
         type: 'SEND_MESSAGE',
-        content,
+        content: '',
         attachments: [],
         model: selectedModel,
         systemPrompt,
       });
-      await operationManager.handleMessageRetry(
-        sessionId,
-        originalMessageId,
-        content,
-        selectedModel,
-        systemPrompt,
-        eventHandlers,
-      );
+      await operationManager.handleMessageRetry(sessionId, originalMessageId, eventHandlers);
     },
-    [sessionManager, operationManager, addErrorMessage, messages, selectedModel, systemPrompt, eventHandlers],
+    [
+      sessionManager,
+      operationManager,
+      addErrorMessage,
+      selectedModel,
+      systemPrompt,
+      eventHandlers,
+      setEditingMessageId,
+      setMessages,
+    ],
   );
 
   const editMessage = useCallback(
@@ -507,6 +522,25 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         addErrorMessage('No session to edit message');
         return;
       }
+
+      setEditingMessageId(null); // Exit editing mode
+
+      // Update message content and remove subsequent messages on the frontend
+      setMessages((prevMessages) => {
+        const updatedMessages = [...prevMessages];
+        const messageIndex = updatedMessages.findIndex((msg) => msg.id === originalMessageId);
+
+        if (messageIndex !== -1) {
+          // Update message content
+          updatedMessages[messageIndex] = {
+            ...updatedMessages[messageIndex],
+            parts: [{ text: editedText }],
+          };
+          // Remove all messages after the edited message
+          return updatedMessages.slice(0, messageIndex + 1);
+        }
+        return prevMessages; // If message not found, return previous state
+      });
 
       sessionManager.dispatch({
         type: 'SEND_MESSAGE',
@@ -524,7 +558,16 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         eventHandlers,
       );
     },
-    [sessionManager, operationManager, addErrorMessage, selectedModel, systemPrompt, eventHandlers],
+    [
+      sessionManager,
+      operationManager,
+      addErrorMessage,
+      selectedModel,
+      systemPrompt,
+      eventHandlers,
+      setEditingMessageId,
+      setMessages,
+    ],
   );
 
   const retryError = useCallback(
@@ -536,6 +579,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         addErrorMessage('No session to retry error');
         return;
       }
+
+      setEditingMessageId(null); // Exit editing mode if active
 
       // Get current branch ID
       const currentBranchId = primaryBranchId;
@@ -579,7 +624,17 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
       });
       await operationManager.handleErrorRetry(sessionId, currentBranchId, eventHandlers);
     },
-    [sessionManager, operationManager, addErrorMessage, eventHandlers, setMessages],
+    [
+      sessionManager,
+      operationManager,
+      addErrorMessage,
+      eventHandlers,
+      setMessages,
+      setEditingMessageId,
+      primaryBranchId,
+      selectedModel,
+      systemPrompt,
+    ],
   );
 
   const cancelCurrentOperation = useCallback(() => {
