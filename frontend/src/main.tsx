@@ -12,7 +12,7 @@ import { WorkspaceProvider } from './hooks/WorkspaceContext';
 import { DirectoryPickerManager } from './components/DirectoryPickerManager';
 import { SessionManagerProvider } from './hooks/SessionManagerContext';
 
-import './components/tools/index.ts';
+import './components/chat/tools/index.ts';
 
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));

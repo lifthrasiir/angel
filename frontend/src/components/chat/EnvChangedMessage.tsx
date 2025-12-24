@@ -1,5 +1,5 @@
 import React from 'react';
-import { EnvChanged, RootContents, RootAdded, RootRemoved, RootPrompt } from '../types/chat';
+import { EnvChanged, RootContents, RootAdded, RootRemoved, RootPrompt } from '../../types/chat';
 import MarkdownRenderer from './MarkdownRenderer';
 import ChatBubble from './ChatBubble';
 

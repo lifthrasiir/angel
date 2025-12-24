@@ -1,6 +1,6 @@
 import React from 'react';
-import type { ChatMessage, EnvChanged } from '../types/chat';
-import { splitOnceByNewline } from '../utils/stringUtils';
+import type { ChatMessage, EnvChanged } from '../../types/chat';
+import { splitOnceByNewline } from '../../utils/stringUtils';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
 import ModelTextMessage from './ModelTextMessage';

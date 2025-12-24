@@ -1,6 +1,6 @@
 import React from 'react';
-import type { ChatMessage } from '../types/chat';
-import { splitOnceByNewline } from '../utils/stringUtils';
+import type { ChatMessage } from '../../types/chat';
+import { splitOnceByNewline } from '../../utils/stringUtils';
 import ChatBubble from './ChatBubble';
 
 interface CompressionMessageProps {

@@ -3,11 +3,11 @@ import { useEffect, useState, useRef } from 'react';
 import { apiFetch, fetchAccountDetails, AccountDetailsResponse } from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
-import MCPSettings from '../components/MCPSettings'; // Import the new component
-import OpenAISettings from '../components/OpenAISettings'; // Import OpenAI settings component
-import GeminiAPISettings from '../components/GeminiAPISettings'; // Import Gemini API settings component
-import SystemPromptEditor, { PredefinedPrompt } from '../components/SystemPromptEditor'; // Import SystemPromptEditor and PredefinedPrompt type
-import { AccountDetailsModal } from '../components/AccountDetailsModal'; // Import AccountDetailsModal
+import MCPSettings from '../components/settings/MCPSettings'; // Import the new component
+import OpenAISettings from '../components/settings/OpenAISettings'; // Import OpenAI settings component
+import GeminiAPISettings from '../components/settings/GeminiAPISettings'; // Import Gemini API settings component
+import SystemPromptEditor, { PredefinedPrompt } from '../components/chat/SystemPromptEditor'; // Import SystemPromptEditor and PredefinedPrompt type
+import { AccountDetailsModal } from '../components/settings/AccountDetailsModal'; // Import AccountDetailsModal
 
 import { globalPromptsAtom, hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/chatAtoms';
 

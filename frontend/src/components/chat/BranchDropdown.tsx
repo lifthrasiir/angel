@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import type { PossibleNextMessage } from '../types/chat';
+import type { PossibleNextMessage } from '../../types/chat';
 import { FaCodeBranch } from 'react-icons/fa';
 
 interface BranchDropdownProps {

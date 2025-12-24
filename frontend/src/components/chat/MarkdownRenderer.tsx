@@ -7,10 +7,10 @@ import remarkGfm from 'remark-gfm';
 import remarkHtml from 'remark-html';
 import 'katex/dist/katex.min.css';
 
-import { smartPreprocessMarkdown } from '../lib/markdown-preprocessor';
-import { rehypeHandleRawNodes } from '../lib/rehype/rehype-handle-raw-nodes';
-import { highlightJsCommonLoadedAtom } from '../atoms/highlightAtoms';
-import { loadHighlightJsCommon } from '../utils/highlightUtils'; // ADD
+import { smartPreprocessMarkdown } from '../../lib/markdown-preprocessor';
+import { rehypeHandleRawNodes } from '../../lib/rehype/rehype-handle-raw-nodes';
+import { highlightJsCommonLoadedAtom } from '../../atoms/highlightAtoms';
+import { loadHighlightJsCommon } from '../../utils/highlightUtils'; // ADD
 
 interface MarkdownRendererProps {
   content: string;

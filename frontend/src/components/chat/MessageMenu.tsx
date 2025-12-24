@@ -2,10 +2,10 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FaEllipsisH, FaCut } from 'react-icons/fa';
 import { useSetAtom } from 'jotai';
-import type { ChatMessage, Session } from '../types/chat';
-import Dropdown, { DropdownItem } from './Dropdown';
-import { extractSession, type ExtractResponse } from '../api/apiClient';
-import { addSessionAtom, resetChatSessionStateAtom } from '../atoms/chatAtoms';
+import type { ChatMessage, Session } from '../../types/chat';
+import Dropdown, { DropdownItem } from '../Dropdown';
+import { extractSession, type ExtractResponse } from '../../api/apiClient';
+import { addSessionAtom, resetChatSessionStateAtom } from '../../atoms/chatAtoms';
 
 export interface MessageMenuProps {
   message: ChatMessage;

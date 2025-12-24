@@ -2,13 +2,13 @@ import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { useLocation } from 'react-router-dom';
-import type { ChatMessage as ChatMessageType } from '../types/chat';
+import type { ChatMessage as ChatMessageType } from '../../types/chat';
 import ChatMessage from './ChatMessage';
 import SystemPromptEditor from './SystemPromptEditor';
-import InputArea from './InputArea';
+import InputArea from '../InputArea';
 import { ThoughtGroup } from './ThoughtGroup';
 import FunctionPairMessage from './FunctionPairMessage';
-import ConfirmationDialog from './ConfirmationDialog';
+import ConfirmationDialog from '../ConfirmationDialog';
 import {
   messagesAtom,
   selectedFilesAtom,
@@ -20,13 +20,13 @@ import {
   primaryBranchIdAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
-} from '../atoms/chatAtoms';
+} from '../../atoms/chatAtoms';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import MessageInfo from './MessageInfo';
-import { useSessionFSM } from '../hooks/useSessionFSM';
-import { useProcessingState } from '../hooks/useProcessingState';
-import { useScrollAdjustment } from '../hooks/useScrollAdjustment';
-import { isNewTemporarySessionURL } from '../utils/urlSessionMapping';
+import { useSessionFSM } from '../../hooks/useSessionFSM';
+import { useProcessingState } from '../../hooks/useProcessingState';
+import { useScrollAdjustment } from '../../hooks/useScrollAdjustment';
+import { isNewTemporarySessionURL } from '../../utils/urlSessionMapping';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;

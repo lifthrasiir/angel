@@ -1,9 +1,9 @@
 import React from 'react';
-import type { PossibleNextMessage, ChatMessage } from '../types/chat';
+import type { PossibleNextMessage, ChatMessage } from '../../types/chat';
 import { FaEdit, FaRedo, FaTimes, FaPaperPlane } from 'react-icons/fa';
 import BranchDropdown from './BranchDropdown';
 import MessageMenu from './MessageMenu';
-import { useProcessingState } from '../hooks/useProcessingState';
+import { useProcessingState } from '../../hooks/useProcessingState';
 import './MessageInfo.css';
 
 export interface MessageInfoProps {

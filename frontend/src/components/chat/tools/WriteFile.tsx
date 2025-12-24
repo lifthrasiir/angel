@@ -1,5 +1,5 @@
 import React from 'react';
-import { validateExactKeys } from '../../utils/functionMessageValidation';
+import { validateExactKeys } from '../../../utils/functionMessageValidation';
 import {
   registerFunctionCallComponent,
   registerFunctionResponseComponent,
@@ -7,10 +7,10 @@ import {
   FunctionCallMessageProps,
   FunctionResponseMessageProps,
   FunctionPairComponentProps,
-} from '../../utils/functionMessageRegistry';
+} from '../../../utils/functionMessageRegistry';
 import ChatBubble from '../ChatBubble';
-import PrettyDiff from '../PrettyDiff';
-import { getLanguageFromFilename, useHighlightCode } from '../../utils/highlightUtils';
+import PrettyDiff from '../../PrettyDiff';
+import { getLanguageFromFilename, useHighlightCode } from '../../../utils/highlightUtils';
 
 const argsKeys = { file_path: 'string', content: 'string' } as const;
 

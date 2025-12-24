@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { AccountDetailsResponse, ModelDetails, QuotaInfo } from '../api/apiClient';
-import { Modal } from './Modal';
+import { AccountDetailsResponse, ModelDetails, QuotaInfo } from '../../api/apiClient';
+import { Modal } from '../Modal';
 import './AccountDetailsModal.css';
 
 interface Props {

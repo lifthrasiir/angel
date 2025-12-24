@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import type { ChatMessage, Session } from '../types/chat';
 import { ModelInfo } from '../api/models';
-import { PredefinedPrompt } from '../components/SystemPromptEditor';
+import { PredefinedPrompt } from '../components/chat/SystemPromptEditor';
 
 export const hasConnectedAccountsAtom = atom<boolean>(false);
 export const hasApiKeysAtom = atom<boolean>(false);

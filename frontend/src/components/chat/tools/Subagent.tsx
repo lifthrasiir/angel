@@ -1,5 +1,5 @@
 import React from 'react';
-import { validateExactKeys } from '../../utils/functionMessageValidation';
+import { validateExactKeys } from '../../../utils/functionMessageValidation';
 import {
   registerFunctionCallComponent,
   registerFunctionResponseComponent,
@@ -7,7 +7,7 @@ import {
   FunctionCallMessageProps,
   FunctionResponseMessageProps,
   FunctionPairComponentProps,
-} from '../../utils/functionMessageRegistry';
+} from '../../../utils/functionMessageRegistry';
 import SystemMessage from '../SystemMessage';
 import MarkdownRenderer from '../MarkdownRenderer';
 import ChatBubble from '../ChatBubble';

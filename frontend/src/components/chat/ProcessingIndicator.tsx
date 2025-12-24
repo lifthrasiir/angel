@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useProcessingState } from '../hooks/useProcessingState';
+import { useProcessingState } from '../../hooks/useProcessingState';
 
 interface ProcessingIndicatorProps {
   isLastThoughtGroup: boolean;

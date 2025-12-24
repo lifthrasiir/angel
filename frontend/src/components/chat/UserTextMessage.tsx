@@ -1,13 +1,13 @@
 import React, { useRef } from 'react';
 import { useAtom } from 'jotai';
-import type { FileAttachment, ChatMessage } from '../types/chat';
-import FileAttachmentList from './FileAttachmentList';
+import type { FileAttachment, ChatMessage } from '../../types/chat';
+import FileAttachmentList from '../FileAttachmentList';
 import ChatBubble, { type ChatBubbleRef } from './ChatBubble';
-import { editingMessageIdAtom } from '../atoms/chatAtoms';
-import { useProcessingState } from '../hooks/useProcessingState';
+import { editingMessageIdAtom } from '../../atoms/chatAtoms';
+import { useProcessingState } from '../../hooks/useProcessingState';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';
-import { isImageOnlyMessage } from '../utils/messageUtils';
+import { isImageOnlyMessage } from '../../utils/messageUtils';
 import './UserTextMessage.css';
 
 interface UserTextMessageProps {

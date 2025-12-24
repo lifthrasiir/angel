@@ -1,9 +1,9 @@
 import type React from 'react';
 import { useState } from 'react';
-import PrettyJSON from './PrettyJSON';
-import { FunctionResponse, FileAttachment } from '../types/chat';
-import { getFunctionResponseComponent } from '../utils/functionMessageRegistry';
-import FileAttachmentList from './FileAttachmentList';
+import PrettyJSON from '../PrettyJSON';
+import { FunctionResponse, FileAttachment } from '../../types/chat';
+import { getFunctionResponseComponent } from '../../utils/functionMessageRegistry';
+import FileAttachmentList from '../FileAttachmentList';
 import ChatBubble from './ChatBubble';
 
 interface FunctionResponseMessageProps {

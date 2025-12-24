@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import FunctionCallMessage from './FunctionCallMessage';
 import FunctionResponseMessage from './FunctionResponseMessage';
-import { FileAttachment, FunctionCall, FunctionResponse } from '../types/chat';
-import { getFunctionPairComponent } from '../utils/functionMessageRegistry';
+import { FileAttachment, FunctionCall, FunctionResponse } from '../../types/chat';
+import { getFunctionPairComponent } from '../../utils/functionMessageRegistry';
 
 interface FunctionPairMessageProps {
   functionCall: FunctionCall;

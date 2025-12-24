@@ -1,5 +1,5 @@
 import React from 'react';
-import { validateExactKeys } from '../../utils/functionMessageValidation';
+import { validateExactKeys } from '../../../utils/functionMessageValidation';
 import {
   registerFunctionCallComponent,
   registerFunctionResponseComponent,
@@ -7,21 +7,14 @@ import {
   FunctionCallMessageProps,
   FunctionResponseMessageProps,
   FunctionPairComponentProps,
-} from '../../utils/functionMessageRegistry';
-import FileAttachmentList from '../FileAttachmentList';
+} from '../../../utils/functionMessageRegistry';
+import FileAttachmentList from '../../FileAttachmentList';
 import ChatBubble from '../ChatBubble';
+import { getLanguageFromFilename, useHighlightCode } from '../../../utils/highlightUtils';
 
-// Define the expected arguments for the recall tool call
-const argsKeys = {
-  query: 'string',
-} as const;
+const argsKeys = { file_path: 'string' } as const;
 
-// Define the expected response for the recall tool
-const responseKeys = {
-  response: 'string',
-} as const;
-
-const RecallCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messageId, messageInfo, children }) => {
+const ReadFileCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messageId, messageInfo, children }) => {
   const args = functionCall.args;
   if (!validateExactKeys(args, argsKeys)) {
     return children;
@@ -33,16 +26,18 @@ const RecallCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messageI
       containerClassName="agent-message"
       bubbleClassName="agent-function-call function-message-bubble"
       messageInfo={messageInfo}
-      title="Recalling..."
-      heighten={false}
-      collapsed={true}
-    >
-      <p>{args.query}</p>
-    </ChatBubble>
+      title={
+        <>
+          read_file: <code>{args.file_path}</code>
+        </>
+      }
+    />
   );
 };
 
-const RecallResponse: React.FC<FunctionResponseMessageProps> = ({
+const responseKeys = { content: 'string', note: 'string?' } as const;
+
+const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
   functionResponse,
   messageId,
   attachments,
@@ -54,23 +49,25 @@ const RecallResponse: React.FC<FunctionResponseMessageProps> = ({
     return children;
   }
 
+  const highlightedContent = useHighlightCode(response.content || '');
+
   return (
     <ChatBubble
       messageId={messageId}
       containerClassName="user-message"
       bubbleClassName="function-message-bubble"
       messageInfo={messageInfo}
-      title="Recalled"
-      heighten={false}
-      collapsed={true}
     >
-      <p>{response.response}</p>
+      <pre className="function-code-block">
+        <code dangerouslySetInnerHTML={{ __html: highlightedContent }} />
+      </pre>
+      {response.note && <p>{response.note}</p>}
       {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} />}
     </ChatBubble>
   );
 };
 
-const RecallPair: React.FC<FunctionPairComponentProps> = ({
+const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
   functionCall,
   functionResponse,
   onToggleView,
@@ -85,27 +82,35 @@ const RecallPair: React.FC<FunctionPairComponentProps> = ({
     return children;
   }
 
-  // Determine if we have a response (recalled content)
-  const hasResponse = response.response && response.response.trim() !== '';
-  const title = hasResponse ? 'Recalled' : 'Recalling...';
+  const filePath = args.file_path;
+  const language = getLanguageFromFilename(filePath);
+
+  const highlightedContent = useHighlightCode(response.content || '', language);
 
   return (
     <ChatBubble
       containerClassName="function-pair-combined-container"
       bubbleClassName="function-combined-bubble"
       messageInfo={responseMessageInfo}
-      title={title}
-      onHeaderClick={onToggleView}
       heighten={false}
       collapsed={true}
+      title={
+        <>
+          read_file: <code>{args.file_path}</code>
+        </>
+      }
       showHeaderToggle={true}
+      onHeaderClick={onToggleView}
     >
-      <p>{hasResponse ? response.response : args.query}</p>
+      <pre className="function-code-block">
+        <code dangerouslySetInnerHTML={{ __html: highlightedContent }} />
+      </pre>
+      {response.note && <p>{response.note}</p>}
       {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} />}
     </ChatBubble>
   );
 };
 
-registerFunctionCallComponent('recall', RecallCall);
-registerFunctionResponseComponent('recall', RecallResponse);
-registerFunctionPairComponent('recall', RecallPair);
+registerFunctionCallComponent('read_file', ReadFileCall);
+registerFunctionResponseComponent('read_file', ReadFileResponse);
+registerFunctionPairComponent('read_file', ReadFilePair);

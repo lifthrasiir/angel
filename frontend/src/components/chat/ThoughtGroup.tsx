@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAtom } from 'jotai';
 
-import { lastAutoDisplayedThoughtIdAtom } from '../atoms/chatAtoms';
-import type { ChatMessage } from '../types/chat';
+import { lastAutoDisplayedThoughtIdAtom } from '../../atoms/chatAtoms';
+import type { ChatMessage } from '../../types/chat';
 import ChatMessageComponent from './ChatMessage';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import './ThoughtGroup.css';

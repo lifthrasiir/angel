@@ -1,8 +1,8 @@
 import type React from 'react';
 import { useState } from 'react';
-import PrettyJSON from './PrettyJSON';
-import { FunctionCall } from '../types/chat';
-import { getFunctionCallComponent } from '../utils/functionMessageRegistry';
+import PrettyJSON from '../PrettyJSON';
+import { FunctionCall } from '../../types/chat';
+import { getFunctionCallComponent } from '../../utils/functionMessageRegistry';
 import ChatBubble from './ChatBubble';
 
 interface FunctionCallMessageProps {

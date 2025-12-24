@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useState, useEffect } from 'react';
-import { apiFetch } from '../api/apiClient';
+import { apiFetch } from '../../api/apiClient';
 
 interface GeminiAPIConfig {
   id: string;

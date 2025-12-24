@@ -2,10 +2,10 @@ import React from 'react';
 import MarkdownRenderer from './MarkdownRenderer';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import ChatBubble from './ChatBubble';
-import { FileAttachment, ChatMessage } from '../types/chat';
-import FileAttachmentList from './FileAttachmentList';
+import { FileAttachment, ChatMessage } from '../../types/chat';
+import FileAttachmentList from '../FileAttachmentList';
 import MessageInfo from './MessageInfo';
-import { isImageOnlyMessage } from '../utils/messageUtils';
+import { isImageOnlyMessage } from '../../utils/messageUtils';
 
 interface ModelTextMessageProps {
   text?: string;

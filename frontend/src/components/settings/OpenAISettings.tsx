@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { apiFetch } from '../api/apiClient';
+import { apiFetch } from '../../api/apiClient';
 
 interface OpenAIConfig {
   id: string;
