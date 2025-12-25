@@ -32,7 +32,7 @@ export function smartPreprocessMarkdown(markdownText: string): string {
       // `)**xxx` is not a valid right-flanking delimiter run in CommonMark which can't be preceded by punctuation,
       // but commonly occurs in the LLM-generated CJK text (cf. https://talk.commonmark.org/t/2528).
       // We relax the specification by allowing a certain closing punctuation before the delimiter run.
-      return part.replace(/([)\]])(\*\*|\*)(\p{L})/gu, '$1$2<!-- -->$3');
+      return part.replace(/([)\]]|(?<!\s)['"])(\*\*|\*)(\p{L})/gu, '$1$2<!-- -->$3');
     }
   });
 
