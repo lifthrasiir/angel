@@ -440,9 +440,9 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
       }
 
       sessionManager.dispatch({ type: 'SWITCH_BRANCH', branchId });
-      operationManager.handleBranchSwitch(sessionId, branchId);
+      operationManager.handleBranchSwitch(sessionId, branchId, eventHandlers);
     },
-    [sessionManager, operationManager, addErrorMessage],
+    [sessionManager, operationManager, addErrorMessage, eventHandlers],
   );
 
   const confirmTool = useCallback(

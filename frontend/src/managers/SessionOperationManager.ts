@@ -352,21 +352,23 @@ export class SessionOperationManager {
   /**
    * Handle branch switching operation
    */
-  async handleBranchSwitch(sessionId: string, branchId: string): Promise<void> {
+  async handleBranchSwitch(sessionId: string, branchId: string, handlers?: OperationEventHandlers): Promise<void> {
     this.cancelCurrentOperation();
 
     this.activeOperation = 'sending';
     this.currentSessionId = sessionId;
 
     try {
-      const response = await apiFetch(`/api/chat/${sessionId}/branch/${branchId}`, {
-        method: 'POST',
+      const response = await apiFetch(`/api/chat/${sessionId}/branch`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPrimaryBranchId: branchId }),
       });
 
       if (this.validateResponse(response, 'Branch switch')) return;
 
       // Load session after branch switch
-      await this.handleSessionLoad(sessionId);
+      await this.handleSessionLoad(sessionId, 50, handlers);
     } catch (error) {
       this.handleOperationError(error, `Branch switch failed: ${error}`);
     }
