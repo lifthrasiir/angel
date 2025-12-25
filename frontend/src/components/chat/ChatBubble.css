@@ -9,6 +9,10 @@
     overflow: hidden; /* Ensure border-radius clips content */
   }
 
+  .chat-bubble-container {
+    --chat-bubble-padding-top: calc(var(--spacing-unit) * 0.6); /* For copy button placement */
+  }
+
   .chat-bubble-content > *:first-child {
     margin-top: 0;
   }
@@ -152,6 +156,13 @@
     gap: 8px;
   }
 
+  /* Place side contents to the left whenever appropriate */
+  .user-message > .chat-bubble-container,
+  .system-message > .chat-bubble-container,
+  .agent-function-response > .chat-bubble-container {
+    flex-direction: row-reverse;
+  }
+
   /* User message bubble styles */
   .user-message > .chat-bubble,
   .user-message > .chat-bubble-container > .chat-bubble {
@@ -249,11 +260,17 @@
       padding: calc(var(--spacing-unit) * 0.8);
       font-size: 0.95em;
     }
+    .chat-bubble-container {
+      --chat-bubble-padding-top: calc(var(--spacing-unit) * 0.8);
+    }
   }
 
   @media (min-width: 769px) and (max-width: 1024px) {
     .chat-bubble {
       padding: calc(var(--spacing-unit) * 0.7) calc(var(--spacing-unit) * 0.85);
+    }
+    .chat-bubble-container {
+      --chat-bubble-padding-top: calc(var(--spacing-unit) * 0.7);
     }
   }
 }

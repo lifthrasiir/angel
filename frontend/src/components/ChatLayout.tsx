@@ -1,8 +1,8 @@
 import type React from 'react';
 import { useEffect, useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
-import { useSetAtom } from 'jotai';
-import { globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/chatAtoms';
+import { useAtom, useSetAtom } from 'jotai';
+import { globalPromptsAtom, selectedGlobalPromptAtom, toastMessageAtom } from '../atoms/chatAtoms';
 import { PredefinedPrompt } from './chat/SystemPromptEditor';
 import { useChatSession } from '../hooks/useChatSession';
 import { useSessionManagerContext } from '../hooks/SessionManagerContext';
@@ -47,7 +47,9 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
     isSendDisabledByResizing,
   } = useChatSession(isTemporary);
 
-  const { toastMessage, setToastMessage } = useEscToCancel({
+  const [toastMessage, setToastMessage] = useAtom(toastMessageAtom);
+
+  useEscToCancel({
     isProcessing,
     onCancel: cancelStreamingCall,
   });

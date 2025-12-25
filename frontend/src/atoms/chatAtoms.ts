@@ -11,6 +11,7 @@ export const inputMessageAtom = atom<string>('');
 export const sessionsAtom = atom<Session[]>([]);
 export const lastAutoDisplayedThoughtIdAtom = atom<string | null>(null);
 export const statusMessageAtom = atom<string | null>(null);
+export const toastMessageAtom = atom<string | null>(null);
 export const systemPromptAtom = atom<string>('{{.Builtin.SystemPrompt}}');
 export const isSystemPromptEditingAtom = atom<boolean>(false);
 export const selectedFilesAtom = atom<File[]>([]);

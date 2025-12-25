@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useSetAtom } from 'jotai';
+import { toastMessageAtom } from '../atoms/chatAtoms';
 
 interface UseEscToCancelProps {
   isProcessing: boolean;
@@ -7,7 +9,7 @@ interface UseEscToCancelProps {
 
 const useEscToCancel = ({ isProcessing, onCancel }: UseEscToCancelProps) => {
   const [lastEscPressTime, setLastEscPressTime] = useState(0);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const setToastMessage = useSetAtom(toastMessageAtom);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -29,9 +31,7 @@ const useEscToCancel = ({ isProcessing, onCancel }: UseEscToCancelProps) => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isProcessing, lastEscPressTime, onCancel]);
-
-  return { toastMessage, setToastMessage };
+  }, [isProcessing, lastEscPressTime, onCancel, setToastMessage]);
 };
 
 export default useEscToCancel;

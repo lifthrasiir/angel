@@ -6,6 +6,7 @@ import { FileAttachment, ChatMessage } from '../../types/chat';
 import FileAttachmentList from '../FileAttachmentList';
 import MessageInfo from './MessageInfo';
 import { isImageOnlyMessage } from '../../utils/messageUtils';
+import CopyButton from './CopyButton';
 
 interface ModelTextMessageProps {
   text?: string;
@@ -33,6 +34,9 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
 }) => {
   const imageOnly = isImageOnlyMessage(text, attachments);
 
+  // If there's already sideContents (e.g., RetryErrorButton), use it; otherwise add CopyButton
+  const finalSideContents = sideContents || (text && <CopyButton text={text} />);
+
   return (
     <ChatBubble
       messageId={messageId}
@@ -45,7 +49,7 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
             } as any)
           : messageInfo
       }
-      sideContents={sideContents}
+      sideContents={finalSideContents}
     >
       <FileAttachmentList attachments={attachments} isImageOnlyMessage={imageOnly} />
       {!imageOnly && <MarkdownRenderer content={text || ''} />}

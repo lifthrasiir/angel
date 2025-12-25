@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaEllipsisH, FaCut } from 'react-icons/fa';
+import { FaEllipsisH, FaCut, FaCopy } from 'react-icons/fa';
 import { useSetAtom } from 'jotai';
 import type { ChatMessage, Session } from '../../types/chat';
 import Dropdown, { DropdownItem } from '../Dropdown';
 import { extractSession, type ExtractResponse } from '../../api/apiClient';
 import { addSessionAtom, resetChatSessionStateAtom } from '../../atoms/chatAtoms';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 
 export interface MessageMenuProps {
   message: ChatMessage;
@@ -18,6 +19,7 @@ const MessageMenu: React.FC<MessageMenuProps> = ({ message, sessionId, isMobile 
   const navigate = useNavigate();
   const addSession = useSetAtom(addSessionAtom);
   const resetChatSessionState = useSetAtom(resetChatSessionStateAtom);
+  const { copyToClipboard } = useCopyToClipboard();
 
   const handleExtract = async () => {
     try {
@@ -42,8 +44,19 @@ const MessageMenu: React.FC<MessageMenuProps> = ({ message, sessionId, isMobile 
     }
   };
 
-  // Menu items with only extract action
+  const handleCopy = async () => {
+    const text = message.parts?.[0]?.text || '';
+    await copyToClipboard(text);
+  };
+
+  // Menu items with copy and extract actions
   const menuItems: DropdownItem[] = [
+    {
+      id: 'copy',
+      label: 'Copy',
+      icon: <FaCopy size={14} />,
+      onClick: handleCopy,
+    },
     {
       id: 'extract',
       label: 'Extract',

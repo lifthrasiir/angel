@@ -8,6 +8,7 @@ import { useProcessingState } from '../../hooks/useProcessingState';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';
 import { isImageOnlyMessage } from '../../utils/messageUtils';
+import CopyButton from './CopyButton';
 import './UserTextMessage.css';
 
 interface UserTextMessageProps {
@@ -94,6 +95,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
       isEditing={isEditing && !imageOnly}
       onEditSave={handleEditSave}
       onEditCancel={handleEditCancel}
+      sideContents={text && <CopyButton text={text} />}
     >
       <>
         {!imageOnly && text}

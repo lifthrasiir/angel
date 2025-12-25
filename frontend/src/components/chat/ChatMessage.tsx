@@ -117,7 +117,9 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           message={message}
           isMobile={isMobile}
           sideContents={
-            onRetryError && <RetryErrorButton messageId={message.id} onRetryError={onRetryError} isDisabled={false} />
+            onRetryError ? (
+              <RetryErrorButton messageId={message.id} onRetryError={onRetryError} isDisabled={false} />
+            ) : undefined
           }
         />
       );
