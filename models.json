@@ -120,7 +120,7 @@
             "genParams": "@subagent"
         },
         "gemini-3-flash-preview/subagent": {
-            "extends": "gemini-2.5-flash",
+            "extends": "gemini-3-flash-preview",
             "genParams": "@subagent"
         },
         "gemini-3-pro": {
@@ -153,7 +153,7 @@
             "genParams": "@subagent"
         },
         "gemini-3-pro-preview/subagent": {
-            "extends": "gemini-2.5-flash",
+            "extends": "gemini-3-flash-preview",
             "genParams": "@subagent"
         },
         "gemini-3-pro+low": {
