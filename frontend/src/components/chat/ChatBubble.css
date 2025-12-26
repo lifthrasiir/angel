@@ -10,6 +10,7 @@
   }
 
   .chat-bubble-container {
+    width: 100%;
     --chat-bubble-padding-top: calc(var(--spacing-unit) * 0.6); /* For copy button placement */
   }
 
