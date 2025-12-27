@@ -19,7 +19,7 @@ import (
 )
 
 func RetryBranch(
-	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, sessionId string, updatedMessageId int,
 ) error {
 	// For retry, get the original message text and attachments if not provided
@@ -36,7 +36,7 @@ func RetryBranch(
 }
 
 func CreateBranch(
-	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, sessionId string, updatedMessageID int, newMessageText string,
 ) error {
 	// Get the updated message's role, type, parent_message_id, and branch_id to validate branching and create new branch
@@ -258,7 +258,7 @@ func CreateBranch(
 	return nil
 }
 
-func SwitchBranch(db *sql.DB, sessionId string, newPrimaryBranchID string) error {
+func SwitchBranch(db *database.Database, sessionId string, newPrimaryBranchID string) error {
 	// Get current session to retrieve old primary branch ID
 	session, err := database.GetSession(db, sessionId)
 	if err != nil {
@@ -277,7 +277,7 @@ func SwitchBranch(db *sql.DB, sessionId string, newPrimaryBranchID string) error
 }
 
 // handleOldPrimaryBranchChosenNextID handles the chosen_next_id logic for the old primary branch.
-func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchID, newPrimaryBranchID string) {
+func handleOldPrimaryBranchChosenNextID(db *database.Database, sessionId, oldPrimaryBranchID, newPrimaryBranchID string) {
 	if oldPrimaryBranchID != "" && oldPrimaryBranchID != newPrimaryBranchID {
 		oldBranch, err := database.GetBranch(db, oldPrimaryBranchID)
 		if err != nil {
@@ -333,7 +333,7 @@ func handleOldPrimaryBranchChosenNextID(db *sql.DB, sessionId, oldPrimaryBranchI
 }
 
 // handleNewPrimaryBranchChosenNextID handles the chosen_next_id logic for the new primary branch.
-func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
+func handleNewPrimaryBranchChosenNextID(db *database.Database, newPrimaryBranchID string) {
 	// If the new primary branch is a branched branch, update its branch_from_message_id's chosen_next_id
 	// to point to the first message of this new primary branch.
 	newBranch, err := database.GetBranch(db, newPrimaryBranchID)
@@ -389,7 +389,7 @@ func handleNewPrimaryBranchChosenNextID(db *sql.DB, newPrimaryBranchID string) {
 }
 
 func ConfirmBranch(
-	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, sessionId string, branchId string, approved bool, modifiedData map[string]interface{},
 ) error {
 	// Clear pending_confirmation for the branch regardless of approval/denial
@@ -565,7 +565,7 @@ func ConfirmBranch(
 
 // deleteErrorMessages deletes error messages from the end of a branch starting from the last message.
 // It continues deleting messages backwards until it finds a non-error message.
-func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
+func deleteErrorMessages(db *database.Database, sessionID, branchID string) error {
 	// Get the last message in the branch
 	lastMessageID, _, _, err := database.GetLastMessageInBranch(db, sessionID, branchID)
 	if err != nil {
@@ -616,7 +616,7 @@ func deleteErrorMessages(db *sql.DB, sessionID, branchID string) error {
 }
 
 func RetryErrorBranch(
-	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, sessionId string, branchId string,
 ) error {
 	// Verify that the session exists

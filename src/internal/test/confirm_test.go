@@ -23,7 +23,7 @@ import (
 func setupSessionWithPendingConfirmation(
 	t *testing.T,
 	router *mux.Router,
-	db *sql.DB,
+	db *database.Database,
 	models *llm.Models,
 	toolName string,
 	toolArgs map[string]interface{},

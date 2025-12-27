@@ -35,7 +35,7 @@ func SaveBlob(ctx context.Context, db DbOrTx, data []byte) (string, error) {
 }
 
 // GetBlob retrieves a blob from the blobs table by its SHA-512/256 hash.
-func GetBlob(db *sql.DB, hashStr string) ([]byte, error) {
+func GetBlob(db *Database, hashStr string) ([]byte, error) {
 	var data []byte
 	err := db.QueryRow("SELECT data FROM blobs WHERE id = ?", hashStr).Scan(&data)
 	if err != nil {
@@ -48,7 +48,7 @@ func GetBlob(db *sql.DB, hashStr string) ([]byte, error) {
 }
 
 // GetBlobAsFileAttachment retrieves a blob and returns it as a FileAttachment with detected MIME type and appropriate filename.
-func GetBlobAsFileAttachment(db *sql.DB, hash string) (FileAttachment, error) {
+func GetBlobAsFileAttachment(db *Database, hash string) (FileAttachment, error) {
 	// Get blob data
 	blobData, err := GetBlob(db, hash)
 	if err != nil {

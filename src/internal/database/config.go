@@ -14,7 +14,7 @@ const CSRFKeyName = "csrf_key"
 
 // SaveGlobalPrompts saves a list of global prompts to the database.
 // It deletes all existing global prompts and then inserts the new ones.
-func SaveGlobalPrompts(db *sql.DB, prompts []PredefinedPrompt) error {
+func SaveGlobalPrompts(db *Database, prompts []PredefinedPrompt) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -57,7 +57,7 @@ func SaveGlobalPrompts(db *sql.DB, prompts []PredefinedPrompt) error {
 }
 
 // GetGlobalPrompts retrieves all global prompts from the database.
-func GetGlobalPrompts(db *sql.DB) ([]PredefinedPrompt, error) {
+func GetGlobalPrompts(db *Database) ([]PredefinedPrompt, error) {
 	rows, err := db.Query("SELECT label, value FROM global_prompts ORDER BY id ASC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query global prompts: %w", err)
@@ -80,7 +80,7 @@ func GetGlobalPrompts(db *sql.DB) ([]PredefinedPrompt, error) {
 }
 
 // GetAppConfig retrieves a configuration value from the app_configs table.
-func GetAppConfig(db *sql.DB, key string) ([]byte, error) {
+func GetAppConfig(db *Database, key string) ([]byte, error) {
 	var value []byte
 	err := db.QueryRow("SELECT value FROM app_configs WHERE key = ?", key).Scan(&value)
 	if err != nil {
@@ -93,7 +93,7 @@ func GetAppConfig(db *sql.DB, key string) ([]byte, error) {
 }
 
 // SetAppConfig saves a configuration value to the app_configs table.
-func SetAppConfig(db *sql.DB, key string, value []byte) error {
+func SetAppConfig(db *Database, key string, value []byte) error {
 	_, err := db.Exec("INSERT OR REPLACE INTO app_configs (key, value) VALUES (?, ?)", key, value)
 	if err != nil {
 		return fmt.Errorf("failed to set app config for key %s: %w", key, err)
@@ -102,7 +102,7 @@ func SetAppConfig(db *sql.DB, key string, value []byte) error {
 }
 
 // SaveMCPServerConfig saves an MCP server configuration to the database.
-func SaveMCPServerConfig(db *sql.DB, config MCPServerConfig) error {
+func SaveMCPServerConfig(db *Database, config MCPServerConfig) error {
 	_, err := db.Exec(`
 		INSERT OR REPLACE INTO mcp_configs (name, config_json, enabled)
 		VALUES (?, ?, ?)
@@ -114,7 +114,7 @@ func SaveMCPServerConfig(db *sql.DB, config MCPServerConfig) error {
 }
 
 // GetMCPServerConfigs retrieves all MCP server configurations from the database.
-func GetMCPServerConfigs(db *sql.DB) ([]MCPServerConfig, error) {
+func GetMCPServerConfigs(db *Database) ([]MCPServerConfig, error) {
 	rows, err := db.Query("SELECT name, config_json, enabled FROM mcp_configs")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query MCP server configs: %w", err)
@@ -138,7 +138,7 @@ func GetMCPServerConfigs(db *sql.DB) ([]MCPServerConfig, error) {
 }
 
 // DeleteMCPServerConfig deletes an MCP server configuration from the database.
-func DeleteMCPServerConfig(db *sql.DB, name string) error {
+func DeleteMCPServerConfig(db *Database, name string) error {
 	result, err := db.Exec("DELETE FROM mcp_configs WHERE name = ?", name)
 	if err != nil {
 		return fmt.Errorf("failed to delete MCP server config: %w", err)
@@ -157,7 +157,7 @@ func DeleteMCPServerConfig(db *sql.DB, name string) error {
 
 // getHighestOAuthTokenID returns the highest existing ID in oauth_tokens table
 // Returns 0 if table is empty
-func getHighestOAuthTokenID(db *sql.DB) (int, error) {
+func getHighestOAuthTokenID(db *Database) (int, error) {
 	var highestID int
 	err := db.QueryRow("SELECT COALESCE(MAX(id), 0) FROM oauth_tokens").Scan(&highestID)
 	if err != nil {
@@ -167,7 +167,7 @@ func getHighestOAuthTokenID(db *sql.DB) (int, error) {
 }
 
 // getNextOAuthTokenID returns the next available ID for new oauth tokens
-func getNextOAuthTokenID(db *sql.DB) (int, error) {
+func getNextOAuthTokenID(db *Database) (int, error) {
 	highestID, err := getHighestOAuthTokenID(db)
 	if err != nil {
 		return 0, err
@@ -177,7 +177,7 @@ func getNextOAuthTokenID(db *sql.DB) (int, error) {
 
 // SaveOAuthToken saves an OAuth token to the database.
 // Only token.TokenData, token.UserEmail, token.ProjectID and token.Kind are used.
-func SaveOAuthToken(db *sql.DB, token OAuthToken) error {
+func SaveOAuthToken(db *Database, token OAuthToken) error {
 	// Get the next available ID
 	nextID, err := getNextOAuthTokenID(db)
 	if err != nil {
@@ -201,7 +201,7 @@ func SaveOAuthToken(db *sql.DB, token OAuthToken) error {
 }
 
 // UpdateOAuthTokenData updates the token data for an existing OAuth token
-func UpdateOAuthTokenData(db *sql.DB, tokenID int, tokenJSON string) error {
+func UpdateOAuthTokenData(db *Database, tokenID int, tokenJSON string) error {
 	_, err := db.Exec(
 		"UPDATE oauth_tokens SET token_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 		tokenJSON, tokenID)
@@ -212,7 +212,7 @@ func UpdateOAuthTokenData(db *sql.DB, tokenID int, tokenJSON string) error {
 }
 
 // DeleteOAuthTokenByEmail deletes a specific OAuth token by user email and kind.
-func DeleteOAuthTokenByEmail(db *sql.DB, userEmail string, kind string) error {
+func DeleteOAuthTokenByEmail(db *Database, userEmail string, kind string) error {
 	_, err := db.Exec("DELETE FROM oauth_tokens WHERE user_email = ? AND kind = ?", userEmail, kind)
 	if err != nil {
 		return fmt.Errorf("failed to delete OAuth token for user %s: %w", userEmail, err)
@@ -221,7 +221,7 @@ func DeleteOAuthTokenByEmail(db *sql.DB, userEmail string, kind string) error {
 }
 
 // DeleteOAuthTokenByID deletes a specific OAuth token by ID.
-func DeleteOAuthTokenByID(db *sql.DB, id int) error {
+func DeleteOAuthTokenByID(db *Database, id int) error {
 	_, err := db.Exec("DELETE FROM oauth_tokens WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete OAuth token with ID %d: %w", id, err)
@@ -230,7 +230,7 @@ func DeleteOAuthTokenByID(db *sql.DB, id int) error {
 }
 
 // GetOAuthTokens retrieves all OAuth tokens from the database.
-func GetOAuthTokens(db *sql.DB) ([]OAuthToken, error) {
+func GetOAuthTokens(db *Database) ([]OAuthToken, error) {
 	rows, err := db.Query("SELECT id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at FROM oauth_tokens ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query OAuth tokens: %w", err)
@@ -277,7 +277,7 @@ func GetOAuthTokens(db *sql.DB) ([]OAuthToken, error) {
 }
 
 // GetOAuthTokensWithValidProjectID retrieves only OAuth tokens that have valid (non-empty) project IDs.
-func GetOAuthTokensWithValidProjectID(db *sql.DB) ([]OAuthToken, error) {
+func GetOAuthTokensWithValidProjectID(db *Database) ([]OAuthToken, error) {
 	rows, err := db.Query("SELECT id, token_data, user_email, project_id, kind, last_used_by_model, created_at, updated_at FROM oauth_tokens WHERE project_id IS NOT NULL AND project_id != '' ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query OAuth tokens with valid project IDs: %w", err)
@@ -324,7 +324,7 @@ func GetOAuthTokensWithValidProjectID(db *sql.DB) ([]OAuthToken, error) {
 }
 
 // UpdateOAuthTokenModelLastUsed updates the last used time for a specific model in the OAuth token.
-func UpdateOAuthTokenModelLastUsed(db *sql.DB, id int, modelName string) error {
+func UpdateOAuthTokenModelLastUsed(db *Database, id int, modelName string) error {
 	token, err := GetOAuthToken(db, id)
 	if err != nil {
 		return err
@@ -350,7 +350,7 @@ func UpdateOAuthTokenModelLastUsed(db *sql.DB, id int, modelName string) error {
 }
 
 // HandleOAuthRateLimit handles rate limiting for OAuth tokens by updating the model's last used time with a future timestamp.
-func HandleOAuthRateLimit(db *sql.DB, id int, modelName string, retryAfter time.Duration) error {
+func HandleOAuthRateLimit(db *Database, id int, modelName string, retryAfter time.Duration) error {
 	// Current time + retryAfter + buffer (30 seconds)
 	futureTime := time.Now().Add(retryAfter).Add(30 * time.Second)
 
@@ -380,7 +380,7 @@ func HandleOAuthRateLimit(db *sql.DB, id int, modelName string, retryAfter time.
 }
 
 // GetOAuthToken retrieves a specific OAuth token by ID.
-func GetOAuthToken(db *sql.DB, id int) (*OAuthToken, error) {
+func GetOAuthToken(db *Database, id int) (*OAuthToken, error) {
 	var token OAuthToken
 	var nullUserEmail sql.NullString
 	var nullProjectID sql.NullString
@@ -417,7 +417,7 @@ func GetOAuthToken(db *sql.DB, id int) (*OAuthToken, error) {
 }
 
 // SaveOpenAIConfig saves an OpenAI configuration to the database.
-func SaveOpenAIConfig(db *sql.DB, config OpenAIConfig) error {
+func SaveOpenAIConfig(db *Database, config OpenAIConfig) error {
 	_, err := db.Exec(`
 		INSERT OR REPLACE INTO openai_configs (id, name, endpoint, api_key, enabled, updated_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -429,7 +429,7 @@ func SaveOpenAIConfig(db *sql.DB, config OpenAIConfig) error {
 }
 
 // GetOpenAIConfigs retrieves all OpenAI configurations from the database.
-func GetOpenAIConfigs(db *sql.DB) ([]OpenAIConfig, error) {
+func GetOpenAIConfigs(db *Database) ([]OpenAIConfig, error) {
 	rows, err := db.Query("SELECT id, name, endpoint, api_key, enabled, created_at, updated_at FROM openai_configs ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query OpenAI configs: %w", err)
@@ -452,7 +452,7 @@ func GetOpenAIConfigs(db *sql.DB) ([]OpenAIConfig, error) {
 }
 
 // GetOpenAIConfig retrieves a single OpenAI configuration by its ID.
-func GetOpenAIConfig(db *sql.DB, id string) (*OpenAIConfig, error) {
+func GetOpenAIConfig(db *Database, id string) (*OpenAIConfig, error) {
 	var config OpenAIConfig
 	err := db.QueryRow("SELECT id, name, endpoint, api_key, enabled, created_at, updated_at FROM openai_configs WHERE id = ?", id).
 		Scan(&config.ID, &config.Name, &config.Endpoint, &config.APIKey, &config.Enabled, &config.CreatedAt, &config.UpdatedAt)
@@ -466,7 +466,7 @@ func GetOpenAIConfig(db *sql.DB, id string) (*OpenAIConfig, error) {
 }
 
 // DeleteOpenAIConfig deletes an OpenAI configuration from the database.
-func DeleteOpenAIConfig(db *sql.DB, id string) error {
+func DeleteOpenAIConfig(db *Database, id string) error {
 	result, err := db.Exec("DELETE FROM openai_configs WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete OpenAI config: %w", err)
@@ -484,7 +484,7 @@ func DeleteOpenAIConfig(db *sql.DB, id string) error {
 }
 
 // GetGeminiAPIConfigs retrieves all Gemini API configurations from the database.
-func GetGeminiAPIConfigs(db *sql.DB) ([]GeminiAPIConfig, error) {
+func GetGeminiAPIConfigs(db *Database) ([]GeminiAPIConfig, error) {
 	rows, err := db.Query("SELECT id, name, api_key, enabled, last_used_by_model, created_at, updated_at FROM gemini_api_configs ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query Gemini API configs: %w", err)
@@ -521,7 +521,7 @@ func GetGeminiAPIConfigs(db *sql.DB) ([]GeminiAPIConfig, error) {
 }
 
 // UpdateModelLastUsed updates the last used time for a specific model in the Gemini API configuration.
-func UpdateModelLastUsed(db *sql.DB, id, modelName string) error {
+func UpdateModelLastUsed(db *Database, id, modelName string) error {
 	config, err := GetGeminiAPIConfig(db, id)
 	if err != nil {
 		return err
@@ -549,7 +549,7 @@ func UpdateModelLastUsed(db *sql.DB, id, modelName string) error {
 }
 
 // HandleModelRateLimit handles rate limiting for a specific model by updating its last used time with a future timestamp.
-func HandleModelRateLimit(db *sql.DB, id, modelName string, retryAfter time.Duration) error {
+func HandleModelRateLimit(db *Database, id, modelName string, retryAfter time.Duration) error {
 	// Current time + retryAfter + buffer (30 seconds)
 	futureTime := time.Now().Add(retryAfter).Add(30 * time.Second)
 
@@ -581,7 +581,7 @@ func HandleModelRateLimit(db *sql.DB, id, modelName string, retryAfter time.Dura
 }
 
 // SaveGeminiAPIConfig saves a Gemini API configuration to the database.
-func SaveGeminiAPIConfig(db *sql.DB, config GeminiAPIConfig) error {
+func SaveGeminiAPIConfig(db *Database, config GeminiAPIConfig) error {
 	_, err := db.Exec(`
 		INSERT OR REPLACE INTO gemini_api_configs (id, name, api_key, enabled, updated_at)
 		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -593,7 +593,7 @@ func SaveGeminiAPIConfig(db *sql.DB, config GeminiAPIConfig) error {
 }
 
 // GetGeminiAPIConfig retrieves a single Gemini API configuration by its ID.
-func GetGeminiAPIConfig(db *sql.DB, id string) (*GeminiAPIConfig, error) {
+func GetGeminiAPIConfig(db *Database, id string) (*GeminiAPIConfig, error) {
 	var config GeminiAPIConfig
 	var lastUsedByModelStr sql.NullString
 	err := db.QueryRow("SELECT id, name, api_key, enabled, last_used_by_model, created_at, updated_at FROM gemini_api_configs WHERE id = ?", id).
@@ -623,7 +623,7 @@ func GetGeminiAPIConfig(db *sql.DB, id string) (*GeminiAPIConfig, error) {
 }
 
 // DeleteGeminiAPIConfig deletes a Gemini API configuration from the database.
-func DeleteGeminiAPIConfig(db *sql.DB, id string) error {
+func DeleteGeminiAPIConfig(db *Database, id string) error {
 	result, err := db.Exec("DELETE FROM gemini_api_configs WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete Gemini API config: %w", err)

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -454,7 +453,7 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func contextWithGlobals(ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) context.Context {
+func contextWithGlobals(ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) context.Context {
 	ctx = database.ContextWith(ctx, db)
 	ctx = llm.ContextWithModels(ctx, models)
 	ctx = llm.ContextWithGeminiAuth(ctx, ga)
@@ -462,7 +461,7 @@ func contextWithGlobals(ctx context.Context, db *sql.DB, models *llm.Models, ga 
 	return ctx
 }
 
-func MakeContextMiddleware(db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) func(next http.Handler) http.Handler {
+func MakeContextMiddleware(db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r = r.WithContext(contextWithGlobals(r.Context(), db, models, ga, tools))
@@ -473,7 +472,7 @@ func MakeContextMiddleware(db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, t
 	}
 }
 
-func getDb(w http.ResponseWriter, r *http.Request) *sql.DB {
+func getDb(w http.ResponseWriter, r *http.Request) *database.Database {
 	db, err := database.FromContext(r.Context())
 	if err != nil {
 		http.Error(w, "Internal Server Error: Database connection missing.", http.StatusInternalServerError)

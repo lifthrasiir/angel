@@ -23,9 +23,14 @@ func init() {
 	sqlite3.Binary = sqliteBinary
 }
 
+// Database is a wrapper around the main database connection.
+type Database struct {
+	*sql.DB
+}
+
 // InitDB initializes the SQLite database connection and creates tables if they don't exist.
 // This is the main database initialization function for production use.
-func InitDB(dataSourceName string) (*sql.DB, error) {
+func InitDB(dataSourceName string) (*Database, error) {
 	db, err := sql.Open("sqlite3", dataSourceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -80,12 +85,14 @@ func InitDB(dataSourceName string) (*sql.DB, error) {
 	}
 
 	log.Println("Database initialized and tables created.")
-	return db, nil
+	return &Database{
+		DB: db,
+	}, nil
 }
 
 // InitTestDB initializes an in-memory SQLite database for testing.
 // This function uses a unique database name to prevent conflicts between tests.
-func InitTestDB(testName string) (*sql.DB, error) {
+func InitTestDB(testName string) (*Database, error) {
 	// Initialize an in-memory database for testing with unique name
 	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL", testName)
 	return InitDB(dbName)
@@ -399,11 +406,11 @@ func syncFTSOnStartup(db *sql.DB) error {
 }
 
 type databaseJob struct {
-	db *sql.DB
+	db *Database
 }
 
 // Job returns a housekeeping job that performs periodic database maintenance tasks.
-func Job(db *sql.DB) HousekeepingJob {
+func Job(db *Database) HousekeepingJob {
 	return &databaseJob{db: db}
 }
 
@@ -437,7 +444,7 @@ func (job *databaseJob) Last() error {
 }
 
 // PerformWALCheckpoint triggers a WAL checkpoint.
-func PerformWALCheckpoint(db *sql.DB) error {
+func PerformWALCheckpoint(db *Database) error {
 	if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 		return fmt.Errorf("failed to perform WAL checkpoint: %w", err)
 	}
@@ -445,7 +452,7 @@ func PerformWALCheckpoint(db *sql.DB) error {
 }
 
 // PerformVacuum performs a full or incremental vacuum to reclaim space.
-func PerformVacuum(db *sql.DB, npages int) error {
+func PerformVacuum(db *Database, npages int) error {
 	if npages <= 0 {
 		if _, err := db.Exec("VACUUM"); err != nil {
 			return fmt.Errorf("failed to perform full vacuum: %w", err)

@@ -17,7 +17,7 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
-func ExtractSession(ctx context.Context, db *sql.DB, sessionId string, targetMessageID int) (newSessionId string, newSessionName string, err error) {
+func ExtractSession(ctx context.Context, db *database.Database, sessionId string, targetMessageID int) (newSessionId string, newSessionName string, err error) {
 	// Get the original session to validate existence
 	originalSession, err := database.GetSession(db, sessionId)
 	if err != nil {
@@ -179,7 +179,7 @@ func ExtractSession(ctx context.Context, db *sql.DB, sessionId string, targetMes
 }
 
 // processCompressionRemapping processes compression messages and remaps their content
-func processCompressionRemapping(db *sql.DB, messages []FrontendMessage) ([]FrontendMessage, error) {
+func processCompressionRemapping(db *database.Database, messages []FrontendMessage) ([]FrontendMessage, error) {
 	var processed []FrontendMessage
 
 	for _, msg := range messages {
@@ -220,7 +220,7 @@ func processCompressionRemapping(db *sql.DB, messages []FrontendMessage) ([]Fron
 }
 
 // remapCompressionContent remaps the content of a compression message based on the actual messages
-func remapCompressionContent(db *sql.DB, compressionData map[string]interface{}) (string, error) {
+func remapCompressionContent(db *database.Database, compressionData map[string]interface{}) (string, error) {
 	// Extract the original message IDs from compression data
 	messageIDs, ok := compressionData["messageIds"].([]interface{})
 	if !ok {
@@ -277,7 +277,7 @@ func collectSubsessionIDs(messages []FrontendMessage) []string {
 }
 
 // copySubsessionsToNewSession copies all subsessions to the new session
-func copySubsessionsToNewSession(db *sql.DB, sessionId string, newSessionID string, subsessionIDs []string) error {
+func copySubsessionsToNewSession(db *database.Database, sessionId string, newSessionID string, subsessionIDs []string) error {
 	for _, subsessionID := range subsessionIDs {
 		// Create full session IDs
 		// fullSessionId = sessionId "." subsessionId
@@ -311,7 +311,7 @@ func copySubsessionsToNewSession(db *sql.DB, sessionId string, newSessionID stri
 }
 
 // copyMessagesBetweenSessions copies all messages from one session to another
-func copyMessagesBetweenSessions(db *sql.DB, sourceSessionID, targetSessionID string) error {
+func copyMessagesBetweenSessions(db *database.Database, sourceSessionID, targetSessionID string) error {
 	// Get all messages from source session
 	sourceMessages, err := database.GetSessionHistory(db, sourceSessionID, "")
 	if err != nil {

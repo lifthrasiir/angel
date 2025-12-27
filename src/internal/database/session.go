@@ -21,7 +21,7 @@ type WorkspaceWithSessions struct {
 }
 
 // CreateWorkspace creates a new workspace in the database.
-func CreateWorkspace(db *sql.DB, workspaceID string, name string, defaultSystemPrompt string) error {
+func CreateWorkspace(db *Database, workspaceID string, name string, defaultSystemPrompt string) error {
 	_, err := db.Exec("INSERT INTO workspaces (id, name, default_system_prompt) VALUES (?, ?, ?)", workspaceID, name, defaultSystemPrompt)
 	if err != nil {
 		return fmt.Errorf("failed to create workspace: %w", err)
@@ -30,7 +30,7 @@ func CreateWorkspace(db *sql.DB, workspaceID string, name string, defaultSystemP
 }
 
 // GetWorkspace retrieves a single workspace by its ID.
-func GetWorkspace(db *sql.DB, workspaceID string) (Workspace, error) {
+func GetWorkspace(db *Database, workspaceID string) (Workspace, error) {
 	var w Workspace
 	err := db.QueryRow("SELECT id, name, default_system_prompt, created_at FROM workspaces WHERE id = ?", workspaceID).Scan(&w.ID, &w.Name, &w.DefaultSystemPrompt, &w.CreatedAt)
 	if err != nil {
@@ -40,7 +40,7 @@ func GetWorkspace(db *sql.DB, workspaceID string) (Workspace, error) {
 }
 
 // GetAllWorkspaces retrieves all workspaces from the database.
-func GetAllWorkspaces(db *sql.DB) ([]Workspace, error) {
+func GetAllWorkspaces(db *Database) ([]Workspace, error) {
 	rows, err := db.Query("SELECT id, name, default_system_prompt, created_at FROM workspaces ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query all workspaces: %w", err)
@@ -63,7 +63,7 @@ func GetAllWorkspaces(db *sql.DB) ([]Workspace, error) {
 }
 
 // DeleteWorkspace deletes a workspace and all its associated sessions and messages.
-func DeleteWorkspace(db *sql.DB, workspaceID string) error {
+func DeleteWorkspace(db *Database, workspaceID string) error {
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
 	if err != nil {
@@ -105,7 +105,7 @@ func DeleteWorkspace(db *sql.DB, workspaceID string) error {
 }
 
 // CreateSession creates a new session in the database.
-func CreateSession(db *sql.DB, sessionID string, systemPrompt string, workspaceID string) (string, error) {
+func CreateSession(db *Database, sessionID string, systemPrompt string, workspaceID string) (string, error) {
 	primaryBranchID := GenerateID() // Generate a new ID for the primary branch
 	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name, workspace_id, primary_branch_id) VALUES (?, ?, ?, ?, ?)", sessionID, systemPrompt, "", workspaceID, primaryBranchID)
 	if err != nil {
@@ -120,7 +120,7 @@ func CreateSession(db *sql.DB, sessionID string, systemPrompt string, workspaceI
 }
 
 // UpdateSessionLastUpdated updates the last_updated_at timestamp for a session.
-func UpdateSessionLastUpdated(db *sql.DB, sessionID string) error {
+func UpdateSessionLastUpdated(db *Database, sessionID string) error {
 	_, err := db.Exec("UPDATE sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session last_updated_at: %w", err)
@@ -129,7 +129,7 @@ func UpdateSessionLastUpdated(db *sql.DB, sessionID string) error {
 }
 
 // UpdateSessionName updates the name of a session.
-func UpdateSessionName(db *sql.DB, sessionID string, name string) error {
+func UpdateSessionName(db *Database, sessionID string, name string) error {
 	_, err := db.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session name: %w", err)
@@ -138,7 +138,7 @@ func UpdateSessionName(db *sql.DB, sessionID string, name string) error {
 }
 
 // UpdateSessionWorkspace updates the workspace ID of a session.
-func UpdateSessionWorkspace(db *sql.DB, sessionID string, workspaceID string) error {
+func UpdateSessionWorkspace(db *Database, sessionID string, workspaceID string) error {
 	_, err := db.Exec("UPDATE sessions SET workspace_id = ? WHERE id = ?", workspaceID, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to update session workspace: %w", err)
@@ -147,7 +147,7 @@ func UpdateSessionWorkspace(db *sql.DB, sessionID string, workspaceID string) er
 }
 
 // GetWorkspaceAndSessions retrieves a workspace and all its sessions.
-func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSessions, error) {
+func GetWorkspaceAndSessions(db *Database, workspaceID string) (*WorkspaceWithSessions, error) {
 	var wsWithSessions WorkspaceWithSessions
 
 	// Get workspace information
@@ -202,7 +202,7 @@ func GetWorkspaceAndSessions(db *sql.DB, workspaceID string) (*WorkspaceWithSess
 }
 
 // SessionExists checks if a session with the given ID exists.
-func SessionExists(db *sql.DB, sessionID string) (bool, error) {
+func SessionExists(db *Database, sessionID string) (bool, error) {
 	var exists bool
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)", sessionID).Scan(&exists)
 	if err != nil && err != sql.ErrNoRows {
@@ -212,7 +212,7 @@ func SessionExists(db *sql.DB, sessionID string) (bool, error) {
 }
 
 // GetSession retrieves a session by its ID.
-func GetSession(db *sql.DB, sessionID string) (Session, error) {
+func GetSession(db *Database, sessionID string) (Session, error) {
 	var s Session
 	row := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, '') FROM sessions WHERE id = ?", sessionID)
 	err := row.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID)
@@ -223,7 +223,7 @@ func GetSession(db *sql.DB, sessionID string) (Session, error) {
 }
 
 // DeleteSession deletes a session and all its associated messages, branches, shell commands, and session environments.
-func DeleteSession(db *sql.DB, sessionID string, sandboxBaseDir string) error {
+func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error {
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
 	if err != nil {
@@ -313,7 +313,7 @@ func GenerateID() string {
 }
 
 // CleanupOldTemporarySessions deletes temporary sessions older than the specified duration
-func CleanupOldTemporarySessions(db *sql.DB, olderThan time.Duration, sandboxBaseDir string) error {
+func CleanupOldTemporarySessions(db *Database, olderThan time.Duration, sandboxBaseDir string) error {
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
 	if err != nil {

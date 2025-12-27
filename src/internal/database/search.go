@@ -1,7 +1,6 @@
 package database
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 )
@@ -18,7 +17,7 @@ type SearchResult struct {
 }
 
 // SearchMessages searches for messages matching the query using FTS5 tables
-func SearchMessages(db *sql.DB, query string, maxID int, limit int, workspaceID string) ([]SearchResult, bool, error) {
+func SearchMessages(db *Database, query string, maxID int, limit int, workspaceID string) ([]SearchResult, bool, error) {
 	// Validate query
 	if strings.TrimSpace(query) == "" {
 		return nil, false, fmt.Errorf("search query cannot be empty")

@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"sync"
@@ -10,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonschema"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/database"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -83,7 +83,7 @@ func (t *Tools) BuiltinNames() map[string]bool {
 }
 
 // InitMCPManager initializes MCP connections from database
-func (t *Tools) InitMCPManager(db *sql.DB) {
+func (t *Tools) InitMCPManager(db *database.Database) {
 	t.mcpManager.init(t, db)
 }
 

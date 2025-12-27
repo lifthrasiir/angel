@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -803,7 +802,7 @@ func (c *OpenAIClient) MaxTokens(modelName string) int {
 }
 
 // ReloadOpenAIProviders reloads OpenAI providers from database configurations
-func ReloadOpenAIProviders(db *sql.DB, registry *Models) {
+func ReloadOpenAIProviders(db *database.Database, registry *Models) {
 	// Get current OpenAI configs to know which models to keep
 	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {

@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -288,7 +287,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 }
 
 // copyEnvironmentToSubagent copies the environment configuration from main session to subagent session
-func copyEnvironmentToSubagent(db *sql.DB, mainSessionId, subSessionId string) error {
+func copyEnvironmentToSubagent(db *database.Database, mainSessionId, subSessionId string) error {
 	// Get main session environment
 	mainRoots, _, err := database.GetLatestSessionEnv(db, mainSessionId)
 	if err != nil {

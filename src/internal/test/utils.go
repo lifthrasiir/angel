@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
 	"embed"
 	"fmt"
 	"io"
@@ -27,7 +26,7 @@ import (
 )
 
 // Helper function to set up the test environment
-func setupTest(t *testing.T) (*mux.Router, *sql.DB, *llm.Models) {
+func setupTest(t *testing.T) (*mux.Router, *database.Database, *llm.Models) {
 	// Initialize an in-memory database for testing with unique name
 	testDB, err := database.InitTestDB(t.Name())
 	if err != nil {
@@ -192,7 +191,7 @@ func testStreamingRequest(t *testing.T, router *mux.Router, method, url string, 
 }
 
 // querySingleRow executes a query that is expected to return a single row and handles errors.
-func querySingleRow(t *testing.T, db *sql.DB, query string, args []interface{}, dest ...interface{}) {
+func querySingleRow(t *testing.T, db *database.Database, query string, args []interface{}, dest ...interface{}) {
 	row := db.QueryRow(query, args...)
 	err := row.Scan(dest...)
 	if err != nil {

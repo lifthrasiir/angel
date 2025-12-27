@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -29,7 +28,7 @@ type MCPConnection struct {
 }
 
 // init initializes MCP connections from database
-func (m *MCPManager) init(tools *Tools, db *sql.DB) {
+func (m *MCPManager) init(tools *Tools, db *database.Database) {
 	m.connections = make(map[string]*MCPConnection)
 	m.tools = tools
 

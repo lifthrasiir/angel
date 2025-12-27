@@ -100,7 +100,7 @@ func nilIntStr(i *int) string {
 	return fmt.Sprintf("%d", *i)
 }
 
-func printMessages(t *testing.T, db *sql.DB, testName string) {
+func printMessages(t *testing.T, db *database.Database, testName string) {
 	t.Logf("--- Messages in DB after %s ---", testName)
 
 	rows, err := db.Query("SELECT id, type, parent_message_id, chosen_next_id, text FROM messages ORDER BY id ASC")

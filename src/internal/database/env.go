@@ -145,7 +145,7 @@ func GetShellCommandByID(db DbOrTx, id string) (*ShellCommand, error) {
 
 // CleanupStaleShellCommands marks any previously running commands as failed on startup.
 // This is used to clean up commands that were running when Angel restarted.
-func CleanupStaleShellCommands(db *sql.DB, now time.Time) error {
+func CleanupStaleShellCommands(db *Database, now time.Time) error {
 	result, err := db.Exec(`
 		UPDATE shell_commands
 		SET status = 'failed_on_startup',

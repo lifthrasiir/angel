@@ -36,7 +36,7 @@ const MaxPollDelayInSeconds = 60
 
 // StartShellCommandManager initializes and starts the background goroutine
 // that manages shell command lifecycles, including persistence and backoff.
-func StartShellCommandManager(db *sql.DB) {
+func StartShellCommandManager(db *database.Database) {
 	log.Println("Starting shell command manager...")
 
 	// Clean up any stale running commands from previous runs

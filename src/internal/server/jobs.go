@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"log"
 	"sync"
 	"time"
@@ -79,7 +78,7 @@ func StopHousekeepingJobs() {
 }
 
 type tempSessionCleanupJob struct {
-	db             *sql.DB
+	db             *database.Database
 	olderThan      time.Duration
 	sandboxBaseDir string
 }

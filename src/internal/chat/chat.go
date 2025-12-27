@@ -33,7 +33,7 @@ type InitialState struct {
 }
 
 func NewSessionAndMessage(
-	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, sessionId string, userMessage string, systemPrompt string, attachments []FileAttachment,
 	workspaceId string, modelToUse string, fetchLimit int, initialRoots []string,
 ) error {
@@ -157,7 +157,7 @@ func NewSessionAndMessage(
 }
 
 func NewChatMessage(
-	ctx context.Context, db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, sessionId string, userMessage string, attachments []FileAttachment, modelToUse string, fetchLimit int,
 ) error {
 	session, err := database.GetSession(db, sessionId)
@@ -307,7 +307,7 @@ func NewChatMessage(
 	return nil
 }
 
-func LoadChatSession(ctx context.Context, db *sql.DB, ew EventWriter, sessionId string, beforeMessageID int, fetchLimit int) (initialState InitialState, err error) {
+func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter, sessionId string, beforeMessageID int, fetchLimit int) (initialState InitialState, err error) {
 	// Check if session exists
 	exists, err := database.SessionExists(db, sessionId)
 	if err != nil {

@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -261,7 +260,7 @@ func parseRetryAfter(retryAfter string) time.Duration {
 
 func tryAllProviders[T any](
 	ctx context.Context,
-	db *sql.DB,
+	db *database.Database,
 	model *Model,
 	apiCallback func(*GeminiAPIClient, GeminiAPIConfig) (T, error),
 	codeAssistCallback func(*CodeAssistClient) (T, error),
@@ -475,7 +474,7 @@ func convertSessionParamsToGenerateRequest(toolRegistry *tool.Tools, model *Mode
 
 // databaseTokenSource wraps oauth2.TokenSource to save refreshed tokens to database
 type databaseTokenSource struct {
-	db          *sql.DB
+	db          *database.Database
 	tokenID     int
 	kind        string
 	userEmail   string

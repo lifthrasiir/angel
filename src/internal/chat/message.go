@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,7 +15,7 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
-func AppendAttachmentParts(db *sql.DB, toolResults tool.HandlerResults, partsForContent []Part) []Part {
+func AppendAttachmentParts(db *database.Database, toolResults tool.HandlerResults, partsForContent []Part) []Part {
 	for _, attachment := range toolResults.Attachments {
 		// Retrieve blob data from DB using hash
 		blobData, err := database.GetBlob(db, attachment.Hash)
@@ -37,7 +36,7 @@ func AppendAttachmentParts(db *sql.DB, toolResults tool.HandlerResults, partsFor
 }
 
 // Helper function to convert FrontendMessage to Content for LLM
-func ConvertFrontendMessagesToContent(db *sql.DB, frontendMessages []FrontendMessage) []Content {
+func ConvertFrontendMessagesToContent(db *database.Database, frontendMessages []FrontendMessage) []Content {
 	var contents []Content
 	// Apply curation rules before converting to Content
 	curatedMessages := applyCurationRules(frontendMessages)

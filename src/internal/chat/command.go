@@ -13,11 +13,11 @@ import (
 // ExecuteClearCommand executes clear or clearblobs command by creating a command message
 func ExecuteClearCommand(ctx context.Context, db database.DbOrTx, sessionID, command string) (int, error) {
 	// Get the primary branch for the session
-	sqlDB, ok := db.(*sql.DB)
+	databaseDB, ok := db.(*database.Database)
 	if !ok {
-		return 0, fmt.Errorf("expected *sql.DB, got %T", db)
+		return 0, fmt.Errorf("expected *database.Database, got %T", db)
 	}
-	session, err := database.GetSession(sqlDB, sessionID)
+	session, err := database.GetSession(databaseDB, sessionID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get session: %w", err)
 	}
@@ -55,7 +55,7 @@ func ExecuteClearCommand(ctx context.Context, db database.DbOrTx, sessionID, com
 		}
 	} else {
 		// This is the first message, update session's chosen_first_id
-		if err := database.UpdateSessionChosenFirstID(sqlDB, sessionID, &commandMessageID); err != nil {
+		if err := database.UpdateSessionChosenFirstID(databaseDB, sessionID, &commandMessageID); err != nil {
 			// Non-fatal error, log but continue
 			fmt.Printf("Warning: Failed to update chosen_first_id for session %s: %v\n", sessionID, err)
 		}

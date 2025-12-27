@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -25,7 +24,7 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 
 // Helper function to stream LLM response
 func streamLLMResponse(
-	db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
+	db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
 	ew EventWriter, mc *database.MessageChain, inferSessionName bool, callStartTime time.Time, fullHistoryForLLM []FrontendMessage,
 ) error {
 	var agentResponseText string
@@ -482,7 +481,7 @@ func streamLLMResponse(
 	return nil
 }
 
-func handlePendingConfirmation(db *sql.DB, ew EventWriter, initialState InitialState, pendingConfirmation *tool.PendingConfirmation) error {
+func handlePendingConfirmation(db *database.Database, ew EventWriter, initialState InitialState, pendingConfirmation *tool.PendingConfirmation) error {
 	confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
 	if marshalErr != nil {
 		ew.Broadcast(EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
@@ -504,7 +503,7 @@ func handlePendingConfirmation(db *sql.DB, ew EventWriter, initialState InitialS
 }
 
 func checkStreamCancellation(
-	ctx context.Context, initialState InitialState, db *sql.DB,
+	ctx context.Context, initialState InitialState, db *database.Database,
 	ew EventWriter, modelMessageID int, agentResponseText string, cancelCallback func(),
 ) error {
 	select {
@@ -532,7 +531,7 @@ func checkStreamCancellation(
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
 func inferAndSetSessionName(
-	db *sql.DB, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	sessionId string, userMessage string, ew EventWriter, modelToUse string,
 ) {
 	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)

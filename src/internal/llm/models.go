@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -625,7 +624,7 @@ func (r *Models) GetModel(name string) (*Model, bool) {
 }
 
 // InitializeOpenAIEndpoints sets up OpenAI providers from database configs
-func (r *Models) InitializeOpenAIEndpoints(db *sql.DB) error {
+func (r *Models) InitializeOpenAIEndpoints(db *database.Database) error {
 	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenAI configs: %w", err)
@@ -698,7 +697,7 @@ func (r *Models) createOpenAIEndpoint(config *OpenAIConfig) error {
 }
 
 // UpdateOpenAIEndpoints updates OpenAI providers when configs change
-func (r *Models) UpdateOpenAIEndpoints(db *sql.DB) error {
+func (r *Models) UpdateOpenAIEndpoints(db *database.Database) error {
 	configs, err := database.GetOpenAIConfigs(db)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenAI configs: %w", err)

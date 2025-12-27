@@ -2,7 +2,6 @@ package search_chat
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -81,7 +80,7 @@ func SearchChatTool(ctx context.Context, args map[string]interface{}, params too
 }
 
 // searchChatHistory searches through chat history using the common SearchMessages function
-func searchChatHistory(db *sql.DB, keywords, workspaceID, currentSessionID string) ([]ChatSearchResult, error) {
+func searchChatHistory(db *database.Database, keywords, workspaceID, currentSessionID string) ([]ChatSearchResult, error) {
 	// Use the common SearchMessages function
 	searchResults, _, err := database.SearchMessages(db, keywords, 0, 20, workspaceID)
 	if err != nil {
