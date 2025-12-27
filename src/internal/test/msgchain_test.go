@@ -315,8 +315,8 @@ func TestBranchingMessageChain(t *testing.T) {
 	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
-			responseFromPart(Part{Text: "B's thought", Thought: true}),
-			responseFromPart(Part{Text: "B's response"}),
+			responseFromPart(Part{Text: "A's thought", Thought: true}),
+			responseFromPart(Part{Text: "A's response"}),
 		},
 	})
 	msgA1Text := "Message A"
@@ -487,27 +487,15 @@ func TestBranchingMessageChain(t *testing.T) {
 		t.Errorf("Primary branch not updated to new branch. Got %s, want %s", currentPrimaryBranchID, newBranchCID)
 	}
 
-	// Simulate streaming response for Message C (thought and model)
-	models.SetGeminiProvider(&MockGeminiProvider{
-		Responses: []GenerateContentResponse{
-			// Responses for C (thought, model)
-			responseFromPart(Part{Text: "C's thought", Thought: true}),
-			responseFromPart(Part{Text: "C's response"}),
-		},
-	})
-
 	// Use the normal chat endpoint to complete C1-C3 chain (similar to B1-B3)
-	reqBodyC2 := map[string]interface{}{
-		"message": "Continue from Message C",
-	}
-	bodyC2, _ := json.Marshal(reqBodyC2)
-	respC2 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s", sessionId), bodyC2, http.StatusOK)
+	respC2 := testStreamingRequest(t, router, "GET", fmt.Sprintf("/api/chat/%s", sessionId), nil, http.StatusOK)
 	defer respC2.Body.Close()
 
 	// Wait for the response to complete
 	for event := range parseSseStream(t, respC2) {
-		if event.Type == EventInitialState || event.Type == EventInitialStateNoCall {
-			// Process events but don't need to store them
+		// Process events but don't need to store them
+		if event.Type == EventComplete {
+			break
 		}
 	}
 
