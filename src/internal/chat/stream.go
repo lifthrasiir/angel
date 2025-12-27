@@ -48,7 +48,14 @@ func streamLLMResponse(
 		ew.Broadcast(EventError, err.Error())
 		return err
 	}
-	defer removeCall(initialState.SessionId) // Ensure call is removed from manager when function exits
+
+	// Ensure call is removed when function exits, using flag to avoid duplicate cleanup
+	callCompleted := false
+	defer func() {
+		if !callCompleted {
+			completeCall(initialState.SessionId)
+		}
+	}()
 
 	// Calculate elapsed time since the call started
 	initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
@@ -73,7 +80,6 @@ func streamLLMResponse(
 			IncludeThoughts: true,
 		})
 		if err != nil {
-			failCall(initialState.SessionId, err) // Mark the call as failed
 			// Save a model_error message to the database
 			errorMessage := fmt.Sprintf("LLM call failed: %v", err)
 			if errors.Is(err, context.Canceled) {
@@ -476,7 +482,8 @@ func streamLLMResponse(
 		ew.Broadcast(EventCumulTokenCount, fmt.Sprintf("%d\n%d", modelMessageID, *finalTotalTokenCount))
 	}
 
-	completeCall(initialState.SessionId) // Mark the call as completed
+	completeCall(initialState.SessionId) // Mark the call as completed and remove from active calls
+	callCompleted = true                 // Prevent defer from calling completeCall again
 	inferWg.Wait()
 	return nil
 }
@@ -509,8 +516,6 @@ func checkStreamCancellation(
 	select {
 	case <-ctx.Done():
 		// API call was cancelled (either by client disconnect or explicit cancel)
-		// Mark the call as cancelled in the manager
-		failCall(initialState.SessionId, ctx.Err())
 		// Update the message in DB with current accumulated text as-is
 		if modelMessageID >= 0 && agentResponseText != "" { // Only update if a model message was created and has content
 			if err := database.UpdateMessageContent(db, modelMessageID, agentResponseText, true); err != nil {
