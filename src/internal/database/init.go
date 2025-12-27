@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ncruces/go-sqlite3"
@@ -22,6 +23,11 @@ var sqliteBinary []byte
 func init() {
 	sqlite3.Binary = sqliteBinary
 }
+
+var (
+	// testDBCounter is an atomic counter used to generate unique test database names
+	testDBCounter atomic.Int64
+)
 
 // Database is a wrapper around the main database connection.
 type Database struct {
@@ -94,7 +100,9 @@ func InitDB(dataSourceName string) (*Database, error) {
 // This function uses a unique database name to prevent conflicts between tests.
 func InitTestDB(testName string) (*Database, error) {
 	// Initialize an in-memory database for testing with unique name
-	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL", testName)
+	// Add an atomic counter suffix to prevent conflicts when tests run with -count=N
+	counter := testDBCounter.Add(1)
+	dbName := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL", testName, counter)
 	return InitDB(dbName)
 }
 
