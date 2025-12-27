@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { useLocation } from 'react-router-dom';
 import type { ChatMessage } from '../types/chat';
@@ -54,6 +54,9 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   const operationManager = sessionManager?.operationManager;
   const location = useLocation();
 
+  // Ref to track previous pathname to detect actual URL transitions
+  const prevPathnameRef = useRef<string | null>(null);
+
   // Jotai atoms
   const setMessages = useSetAtom(messagesAtom);
   const addMessage = useSetAtom(addMessageAtom);
@@ -81,8 +84,6 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   const eventHandlers: OperationEventHandlers = useMemo(
     () => ({
       onInitialState: (data: any) => {
-        console.log('Initial state received:', data);
-
         // Reset chat state for new session
         if (!data.isCallActive) {
           resetChatSessionState();
@@ -93,13 +94,10 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         setMessages((prevMessages) => {
           if (data.isCallActive && prevMessages.length > 0) {
             // Already streaming and have messages, don't overwrite
-            console.log('Skipping message update - streaming in progress with', prevMessages.length, 'messages');
             return prevMessages;
           } else if (data.messages && data.messages.length > 0) {
-            console.log('Setting messages:', data.messages.length, 'messages');
             return data.messages;
           } else {
-            console.log('No messages to set');
             return [];
           }
         });
@@ -129,7 +127,6 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         }
 
         // Note: Session load completion is now managed by SessionState
-        console.log('Session load handled by SessionState');
 
         // If this is a new session creation (URL is /new or /temp), navigate to the session URL
         const pathname = location.pathname;
@@ -137,7 +134,6 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           pathname === '/new' || pathname === '/temp' || pathname.match(/^\/w\/[^\/]+\/(new|temp)$/) !== null;
 
         if (isNewSessionURL && data.sessionId && data.sessionId !== sessionManager.sessionId) {
-          console.log('Navigating to new session:', data.sessionId);
           // Navigate will trigger the URL effect, but it's idempotent (won't reload if sessionId matches)
           sessionManager.navigateToSession(data.sessionId);
         }
@@ -312,8 +308,16 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
     const urlPath = parseURLPath(pathname);
 
     // For /new or /temp pages, clear chat state (like loading an empty session)
+    // But ONLY when actually transitioning from an existing session to /new
     if (urlPath.type === 'new_session') {
-      resetChatSessionState();
+      const prevPathname = prevPathnameRef.current;
+      const isTransitioningFromSession = prevPathname && parseURLPath(prevPathname).type === 'existing_session';
+
+      // Only reset if we're actually transitioning from a session to /new
+      if (isTransitioningFromSession) {
+        resetChatSessionState();
+      }
+      prevPathnameRef.current = pathname;
       return;
     }
 
@@ -321,6 +325,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
     if (urlPath.type === 'existing_session' && urlPath.sessionId && urlPath.sessionId !== sessionManager.sessionId) {
       loadSession(urlPath.sessionId);
     }
+
+    prevPathnameRef.current = pathname;
   }, [location.pathname, sessionManager.sessionId, loadSession, resetChatSessionState]);
 
   // Computed values (moved before useEffects that use them)
