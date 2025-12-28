@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/server"
 )
 
@@ -16,5 +17,6 @@ var loginUnavailableHTML []byte
 var modelsJSON []byte
 
 func main() {
-	server.Main("angel.db", embeddedFiles, loginUnavailableHTML, modelsJSON)
+	config := env.NewEnvConfig()
+	server.Main(config, embeddedFiles, loginUnavailableHTML, modelsJSON)
 }

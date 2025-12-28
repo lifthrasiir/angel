@@ -19,6 +19,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/server"
 	"github.com/lifthrasiir/angel/internal/tool"
@@ -79,9 +80,12 @@ func setupTest(t *testing.T) (*mux.Router, *database.Database, *llm.Models) {
 	// Initialize GeminiAuth
 	geminiAuth := llm.NewGeminiAuth("")
 
+	// Create test EnvConfig
+	config := env.NewTestEnvConfig()
+
 	// Create a new router for testing
 	router := mux.NewRouter()
-	router.Use(server.MakeContextMiddleware(testDB, models, geminiAuth, tools))
+	router.Use(server.MakeContextMiddleware(testDB, models, geminiAuth, tools, config))
 	server.InitRouter(router, embed.FS{})
 
 	// Ensure the database connection is closed after the test

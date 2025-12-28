@@ -32,18 +32,20 @@ func GetSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS,
 
 	entry, ok := sessionFSMap[sessionId]
 	if !ok {
-		// Determine the base directory for session sandboxes
-		baseDir := SandboxBaseDir()
-
-		sf, err := filesystem.NewSessionFS(sessionId, baseDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SessionFS for session %s: %w", sessionId, err)
-		}
-
-		// Get DB from context
+		// Get DB and EnvConfig from context
 		db, err := database.FromContext(ctx)
 		if err != nil {
 			return nil, err
+		}
+		config, err := EnvConfigFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		baseDir := config.SessionDir()
+		sf, err := filesystem.NewSessionFS(sessionId, baseDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SessionFS for session %s: %w", sessionId, err)
 		}
 
 		// Get the session environment to retrieve roots

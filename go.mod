@@ -8,7 +8,7 @@ require (
 	github.com/lifthrasiir/angel/gemini v0.0.0-00010101000000-000000000000 // indirect
 	github.com/lifthrasiir/angel/internal/chat v0.0.0-00010101000000-000000000000 // indirect
 	github.com/lifthrasiir/angel/internal/database v0.0.0-00010101000000-000000000000 // indirect
-	github.com/lifthrasiir/angel/internal/env v0.0.0-00010101000000-000000000000 // indirect
+	github.com/lifthrasiir/angel/internal/env v0.0.0-00010101000000-000000000000
 	github.com/lifthrasiir/angel/internal/llm v0.0.0-00010101000000-000000000000 // indirect
 	github.com/lifthrasiir/angel/internal/prompts v0.0.0-00010101000000-000000000000 // indirect
 	github.com/lifthrasiir/angel/internal/server v0.0.0-00010101000000-000000000000

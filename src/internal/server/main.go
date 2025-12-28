@@ -54,7 +54,7 @@ func getExecutableName() string {
 	return "./angel"
 }
 
-func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, modelsJSON []byte) {
+func Main(config *env.EnvConfig, embeddedFiles embed.FS, loginUnavailableHTML []byte, modelsJSON []byte) {
 	// Initialize tools registry
 	tools := tool.NewTools()
 	InitTools(tools)
@@ -74,9 +74,9 @@ func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, mo
 		}
 	}
 
-	checkNetworkFilesystem(dbPath)
+	checkNetworkFilesystem(config.DBPath())
 
-	db, err := database.InitDB(dbPath)
+	db, err := database.InitDB(config.DBPath())
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -90,7 +90,7 @@ func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, mo
 		&tempSessionCleanupJob{
 			db:             db,
 			olderThan:      48 * time.Hour,
-			sandboxBaseDir: env.SandboxBaseDir(),
+			sandboxBaseDir: config.SessionDir(),
 		},
 	}
 
@@ -126,7 +126,7 @@ func Main(dbPath string, embeddedFiles embed.FS, loginUnavailableHTML []byte, mo
 	models.SetAngelEvalProvider(&llm.AngelEvalProvider{})
 
 	router := mux.NewRouter()
-	router.Use(MakeContextMiddleware(db, models, geminiAuth, tools))
+	router.Use(MakeContextMiddleware(db, models, geminiAuth, tools, config))
 
 	// Apply CSRF middleware.
 	// For production, ensure csrf.Secure(true) is used with HTTPS.
@@ -453,18 +453,32 @@ func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func contextWithGlobals(ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) context.Context {
+func contextWithGlobals(
+	ctx context.Context,
+	db *database.Database,
+	models *llm.Models,
+	ga *llm.GeminiAuth,
+	tools *tool.Tools,
+	config *env.EnvConfig,
+) context.Context {
 	ctx = database.ContextWith(ctx, db)
 	ctx = llm.ContextWithModels(ctx, models)
 	ctx = llm.ContextWithGeminiAuth(ctx, ga)
 	ctx = tool.ContextWith(ctx, tools)
+	ctx = env.ContextWithEnvConfig(ctx, config)
 	return ctx
 }
 
-func MakeContextMiddleware(db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools) func(next http.Handler) http.Handler {
+func MakeContextMiddleware(
+	db *database.Database,
+	models *llm.Models,
+	ga *llm.GeminiAuth,
+	tools *tool.Tools,
+	config *env.EnvConfig,
+) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(contextWithGlobals(r.Context(), db, models, ga, tools))
+			r = r.WithContext(contextWithGlobals(r.Context(), db, models, ga, tools, config))
 			r = csrf.PlaintextHTTPRequest(r) // Required because we are typically working on localhost
 
 			next.ServeHTTP(w, r)
@@ -506,4 +520,13 @@ func getTools(w http.ResponseWriter, r *http.Request) *tool.Tools {
 		runtime.Goexit()
 	}
 	return tools
+}
+
+func getEnvConfig(w http.ResponseWriter, r *http.Request) *env.EnvConfig {
+	config, err := env.EnvConfigFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "Internal Server Error: EnvConfig missing.", http.StatusInternalServerError)
+		runtime.Goexit()
+	}
+	return config
 }

@@ -232,6 +232,7 @@ func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request
 // New endpoint to delete a chat session
 func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	config := getEnvConfig(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -240,7 +241,7 @@ func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sandboxBaseDir := env.SandboxBaseDir()
+	sandboxBaseDir := config.SessionDir()
 	if err := database.DeleteSession(db, sessionId, sandboxBaseDir); err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to delete session %s", sessionId))
 		return
