@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
@@ -247,8 +248,6 @@ func remapCompressionContent(db *database.Database, compressionData map[string]i
 	return strings.Join(remappedContent, "\n\n"), nil
 }
 
-var copiedSessionNamePattern = regexp.MustCompile(`^(.*?)(?:\s*\(Copy(?:\s+(\d+))?\))?$`)
-
 // collectSubsessionIDs collects all subsession IDs from subagent FunctionResponse messages
 func collectSubsessionIDs(messages []FrontendMessage) []string {
 	var subsessionIDs []string
@@ -437,6 +436,8 @@ func frontendMessageToText(msgType MessageType, parts []Part) (string, string, e
 	}
 }
 
+var copiedSessionNamePattern = regexp.MustCompile(`^(?i)(.*)\(Copy(?:[\s\pZ]+(\d+))?\)[\s\pZ]*$`)
+
 // generateCopySessionName generates a copy name for a session, incrementing the copy number if needed
 func generateCopySessionName(originalName string) string {
 	if originalName == "" {
@@ -450,15 +451,15 @@ func generateCopySessionName(originalName string) string {
 	// Use regex to extract copy number if it exists
 	matches := copiedSessionNamePattern.FindStringSubmatch(originalName)
 	if matches != nil && matches[1] != "" {
-		baseName = matches[1]
+		trimmed := strings.TrimRightFunc(matches[1], unicode.IsSpace)
 		if matches[2] != "" {
 			// Parse existing copy number
-			if num, err := strconv.Atoi(matches[2]); err == nil {
+			if num, err := strconv.Atoi(matches[2]); err == nil && num < math.MaxInt {
+				baseName = trimmed
 				copyNum = num + 1
-			} else {
-				copyNum = math.MaxInt
 			}
 		} else {
+			baseName = trimmed
 			copyNum = 2 // Original was just "(Copy)", so next is 2
 		}
 	}
