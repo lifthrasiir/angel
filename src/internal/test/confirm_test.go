@@ -27,7 +27,7 @@ func setupSessionWithPendingConfirmation(
 	models *llm.Models,
 	toolName string,
 	toolArgs map[string]interface{},
-) (sessionId string, branchId string, pendingConfirmationData string, resp *http.Response) {
+) (sdb *database.SessionDatabase, sessionId string, branchId string, pendingConfirmationData string, resp *http.Response) {
 	// Setup Mock Gemini Provider to return a function call for the specified tool
 	models.SetGeminiProvider(&MockGeminiProvider{
 		Responses: []GenerateContentResponse{
@@ -73,9 +73,15 @@ func setupSessionWithPendingConfirmation(
 		t.Fatalf("Failed to get all required data for confirmation test. SessionID: %s, BranchID: %s, PendingConfirmationData: %s", sessionId, branchId, pendingConfirmationData)
 	}
 
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		t.Fatalf("Failed to create session database: %v", err)
+	}
+	// Note: Don't defer Close here - caller is responsible for closing sdb
+
 	// Verify that the branch's pending_confirmation column is set
 	var branch Branch
-	querySingleRow(t, db, "SELECT pending_confirmation FROM branches WHERE id = ?", []interface{}{branchId}, &branch.PendingConfirmation)
+	querySingleRow(t, sdb, "SELECT pending_confirmation FROM S.branches WHERE id = ?", []interface{}{branchId}, &branch.PendingConfirmation)
 	if branch.PendingConfirmation == nil || *branch.PendingConfirmation == "" {
 		t.Fatalf("Expected pending_confirmation to be set in DB, got %v", branch.PendingConfirmation)
 	}
@@ -100,11 +106,14 @@ func TestConfirmationDenial(t *testing.T) {
 	defer os.RemoveAll(tempDir) // Clean up the temporary directory
 
 	// Setup session with pending confirmation
-	sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(t, router, db, models, "write_file", map[string]interface{}{"file_path": filepath.Join(tempDir, "denied.txt"), "content": "Denied Content"})
+	sdb, sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(
+		t, router, db, models, "write_file",
+		map[string]interface{}{"file_path": filepath.Join(tempDir, "denied.txt"), "content": "Denied Content"})
+	defer sdb.Close()
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
-	_, err = database.AddSessionEnv(db, sessionId, []string{tempDir})
+	_, err = database.AddSessionEnv(sdb, []string{tempDir})
 	if err != nil {
 		t.Fatalf("Failed to update session roots: %v", err)
 	}
@@ -141,14 +150,14 @@ func TestConfirmationDenial(t *testing.T) {
 
 	// Verify pending_confirmation is cleared in DB
 	var branch Branch
-	querySingleRow(t, db, "SELECT pending_confirmation FROM branches WHERE id = ?", []interface{}{branchId}, &branch.PendingConfirmation)
+	querySingleRow(t, sdb, "SELECT pending_confirmation FROM S.branches WHERE id = ?", []interface{}{branchId}, &branch.PendingConfirmation)
 	if branch.PendingConfirmation != nil && *branch.PendingConfirmation != "" {
 		t.Fatalf("Expected pending_confirmation to be cleared in DB after denial, got %v", branch.PendingConfirmation)
 	}
 
 	// Verify a new message (function response) was added after denial
 	var messageCount int
-	querySingleRow(t, db, "SELECT COUNT(*) FROM messages WHERE session_id = ?", []interface{}{sessionId}, &messageCount)
+	querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.messages WHERE session_id = ?", []interface{}{sdb.LocalSessionId()}, &messageCount)
 	// Initial user message + function call message + function response message
 	if messageCount != 3 {
 		t.Fatalf("Expected 3 messages after denial (user + function call + function response), got %d", messageCount)
@@ -172,11 +181,14 @@ func TestConfirmationApproval(t *testing.T) {
 	defer os.RemoveAll(tempDir) // Clean up the temporary directory
 
 	// Setup session with pending confirmation
-	sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(t, router, db, models, "write_file", map[string]interface{}{"file_path": filepath.Join(tempDir, "approved.txt"), "content": "Approved Content"})
+	sdb, sessionId, branchId, _, resp1 := setupSessionWithPendingConfirmation(
+		t, router, db, models, "write_file",
+		map[string]interface{}{"file_path": filepath.Join(tempDir, "approved.txt"), "content": "Approved Content"})
+	defer sdb.Close()
 	defer resp1.Body.Close()
 
 	// Update session roots to include the temporary directory
-	_, err = database.AddSessionEnv(db, sessionId, []string{tempDir})
+	_, err = database.AddSessionEnv(sdb, []string{tempDir})
 	if err != nil {
 		t.Fatalf("Failed to update session roots: %v", err)
 	}
@@ -250,14 +262,14 @@ func TestConfirmationApproval(t *testing.T) {
 
 	// Verify pending_confirmation is cleared in DB
 	var pendingConfirmationAfterApproval sql.NullString
-	querySingleRow(t, db, "SELECT pending_confirmation FROM branches WHERE id = ?", []interface{}{branchId}, &pendingConfirmationAfterApproval)
+	querySingleRow(t, sdb, "SELECT pending_confirmation FROM S.branches WHERE id = ?", []interface{}{branchId}, &pendingConfirmationAfterApproval)
 	if pendingConfirmationAfterApproval.Valid && pendingConfirmationAfterApproval.String != "" {
 		t.Fatalf("Expected pending_confirmation to be cleared in DB after approval, got %v", pendingConfirmationAfterApproval.String)
 	}
 
 	// Verify new messages were added after approval
 	var messageCount int
-	querySingleRow(t, db, "SELECT COUNT(*) FROM messages WHERE session_id = ?", []interface{}{sessionId}, &messageCount)
+	querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.messages WHERE session_id = ?", []interface{}{sdb.LocalSessionId()}, &messageCount)
 	// Initial user message + function call message + function response message + model message
 	if messageCount != 4 {
 		t.Fatalf("Expected 4 messages after approval (user + function call + function response + model), got %d", messageCount)

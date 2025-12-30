@@ -15,7 +15,7 @@ import (
 // Branch struct to hold branch data
 type Branch struct {
 	ID                  string  `json:"id"`
-	SessionID           string  `json:"session_id"`
+	LocalSessionID      string  `json:"session_id"`
 	ParentBranchID      *string `json:"parent_branch_id"`       // Pointer for nullable
 	BranchFromMessageID *int    `json:"branch_from_message_id"` // Pointer for nullable
 	CreatedAt           string  `json:"created_at"`
@@ -34,7 +34,7 @@ type FileAttachment struct {
 // Message struct to hold message data for database interaction
 type Message struct {
 	ID                      int              `json:"id"`
-	SessionID               string           `json:"session_id"`
+	LocalSessionID          string           `json:"session_id"`
 	BranchID                string           `json:"branch_id"`
 	ParentMessageID         *int             `json:"parent_message_id"`
 	ChosenNextID            *int             `json:"chosen_next_id"`
@@ -121,6 +121,8 @@ type Session struct {
 	PrimaryBranchID string `json:"primary_branch_id"`
 }
 
+// SplitSessionId splits a session ID into main session ID and suffix for subsessions
+// Return values satisfy `sessionId == mainSessionId + suffix`.
 func SplitSessionId(sessionId string) (mainSessionId, suffix string) {
 	if sessionId == "" {
 		return "", ""

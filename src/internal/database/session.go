@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -13,6 +14,121 @@ import (
 
 	. "github.com/lifthrasiir/angel/internal/types"
 )
+
+// sessionMeta implements common methods for SessionDatabase and SessionTx.
+type sessionMeta struct {
+	id string
+}
+
+// SessionId returns the full session ID associated with this SessionDatabase.
+func (meta sessionMeta) SessionId() string { return meta.id }
+
+// LocalSessionId returns the local session ID that should be stored in session-specific tables.
+func (meta sessionMeta) LocalSessionId() string { return meta.id }
+
+// rewriteQuery rewrites queries to replace a pseudo-schema `S.` (for the current session) with the correct SQL syntax.
+// Since this is a simple string replacement, any query should NOT use a bare string that may contain `S.`.
+func (meta sessionMeta) rewriteQuery(query string) string {
+	return strings.ReplaceAll(query, "S.", "") // TODO: Use "`sess:<quoted sessionId>`." instead
+}
+
+// SessionDatabase is a wrapper around the main database connection for session-specific operations.
+type SessionDatabase struct {
+	*Database
+	sessionMeta
+}
+
+// SessionTx is a wrapper around sql.Tx for session-specific operations within a transaction.
+type SessionTx struct {
+	*sql.Tx
+	sessionMeta
+}
+
+// WithSession returns a SessionDatabase for a specific session ID. It should be `Close`d after use.
+func (db *Database) WithSession(sessionId string) (*SessionDatabase, error) {
+	meta := sessionMeta{id: sessionId}
+	return &SessionDatabase{Database: db, sessionMeta: meta}, nil
+}
+
+// WithSuffix returns a SessionDatabase for a session ID with the given suffix appended.
+func (db *SessionDatabase) WithSuffix(suffix string) *SessionDatabase {
+	if !strings.HasPrefix(suffix, ".") {
+		panic("suffix must start with a dot")
+	}
+	meta := sessionMeta{id: db.sessionMeta.id + suffix}
+	return &SessionDatabase{Database: db.Database, sessionMeta: meta}
+}
+
+func (db *SessionDatabase) Begin() (*SessionTx, error) {
+	tx, err := db.Database.Begin()
+	if err != nil {
+		return nil, err
+	}
+	return &SessionTx{Tx: tx, sessionMeta: db.sessionMeta}, nil
+}
+
+func (db *SessionDatabase) BeginTx(ctx context.Context, opts *sql.TxOptions) (*SessionTx, error) {
+	tx, err := db.Database.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &SessionTx{Tx: tx, sessionMeta: db.sessionMeta}, nil
+}
+
+func (db *SessionDatabase) Exec(query string, args ...interface{}) (sql.Result, error) {
+	return db.Database.Exec(db.rewriteQuery(query), args...)
+}
+func (db *SessionDatabase) Prepare(query string) (*sql.Stmt, error) {
+	return db.Database.Prepare(db.rewriteQuery(query))
+}
+func (db *SessionDatabase) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return db.Database.Query(db.rewriteQuery(query), args...)
+}
+func (db *SessionDatabase) QueryRow(query string, args ...interface{}) *sql.Row {
+	return db.Database.QueryRow(db.rewriteQuery(query), args...)
+}
+func (db *SessionDatabase) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return db.Database.ExecContext(ctx, db.rewriteQuery(query), args...)
+}
+func (db *SessionDatabase) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+	return db.Database.PrepareContext(ctx, db.rewriteQuery(query))
+}
+func (db *SessionDatabase) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	return db.Database.QueryContext(ctx, db.rewriteQuery(query), args...)
+}
+func (db *SessionDatabase) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	return db.Database.QueryRowContext(ctx, db.rewriteQuery(query), args...)
+}
+
+func (tx *SessionTx) Exec(query string, args ...interface{}) (sql.Result, error) {
+	return tx.Tx.Exec(tx.rewriteQuery(query), args...)
+}
+func (tx *SessionTx) Prepare(query string) (*sql.Stmt, error) {
+	return tx.Tx.Prepare(tx.rewriteQuery(query))
+}
+func (tx *SessionTx) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return tx.Tx.Query(tx.rewriteQuery(query), args...)
+}
+func (tx *SessionTx) QueryRow(query string, args ...interface{}) *sql.Row {
+	return tx.Tx.QueryRow(tx.rewriteQuery(query), args...)
+}
+func (tx *SessionTx) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return tx.Tx.ExecContext(ctx, tx.rewriteQuery(query), args...)
+}
+func (tx *SessionTx) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+	return tx.Tx.PrepareContext(ctx, tx.rewriteQuery(query))
+}
+func (tx *SessionTx) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	return tx.Tx.QueryContext(ctx, tx.rewriteQuery(query), args...)
+}
+func (tx *SessionTx) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	return tx.Tx.QueryRowContext(ctx, tx.rewriteQuery(query), args...)
+}
+
+func (db *SessionDatabase) Close() error {
+	// For now does nothing, but will eventually do something after per-session DB connections are implemented
+	return nil
+}
 
 // WorkspaceWithSessions struct to hold workspace with its sessions
 type WorkspaceWithSessions struct {
@@ -104,24 +220,35 @@ func DeleteWorkspace(db *Database, workspaceID string) error {
 	return tx.Commit()
 }
 
-// CreateSession creates a new session in the database.
-func CreateSession(db *Database, sessionID string, systemPrompt string, workspaceID string) (string, error) {
+// CreateSession creates a new session in both the main database and the session database.
+// Returns the SessionDatabase (already attached) and the primary branch ID.
+func CreateSession(db *Database, sessionID string, systemPrompt string, workspaceID string) (*SessionDatabase, string, error) {
 	primaryBranchID := GenerateID() // Generate a new ID for the primary branch
-	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name, workspace_id, primary_branch_id) VALUES (?, ?, ?, ?, ?)", sessionID, systemPrompt, "", workspaceID, primaryBranchID)
+	_, err := db.Exec(
+		"INSERT INTO sessions (id, system_prompt, name, workspace_id, primary_branch_id) VALUES (?, ?, ?, ?, ?)",
+		sessionID, systemPrompt, "", workspaceID, primaryBranchID)
 	if err != nil {
-		return "", fmt.Errorf("failed to create session: %w", err)
+		return nil, "", fmt.Errorf("failed to create session: %w", err)
 	}
+
 	// Also create the initial branch entry in the branches table
-	_, err = db.Exec("INSERT INTO branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, NULL, NULL)", primaryBranchID, sessionID)
+	_, err = db.Exec(
+		"INSERT INTO branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, NULL, NULL)",
+		primaryBranchID, sessionID)
 	if err != nil {
-		return "", fmt.Errorf("failed to create initial branch for session: %w", err)
+		return nil, "", fmt.Errorf("failed to create initial branch for session: %w", err)
 	}
-	return primaryBranchID, nil
+
+	sdb, err := db.WithSession(sessionID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get session database: %w", err)
+	}
+	return sdb, primaryBranchID, nil
 }
 
 // UpdateSessionLastUpdated updates the last_updated_at timestamp for a session.
-func UpdateSessionLastUpdated(db *Database, sessionID string) error {
-	_, err := db.Exec("UPDATE sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", sessionID)
+func UpdateSessionLastUpdated(db *SessionDatabase) error {
+	_, err := db.Exec("UPDATE S.sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", db.LocalSessionId())
 	if err != nil {
 		return fmt.Errorf("failed to update session last_updated_at: %w", err)
 	}
@@ -129,8 +256,8 @@ func UpdateSessionLastUpdated(db *Database, sessionID string) error {
 }
 
 // UpdateSessionName updates the name of a session.
-func UpdateSessionName(db *Database, sessionID string, name string) error {
-	_, err := db.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, sessionID)
+func UpdateSessionName(db *SessionDatabase, name string) error {
+	_, err := db.Exec("UPDATE S.sessions SET name = ? WHERE id = ?", name, db.LocalSessionId())
 	if err != nil {
 		return fmt.Errorf("failed to update session name: %w", err)
 	}
@@ -138,8 +265,8 @@ func UpdateSessionName(db *Database, sessionID string, name string) error {
 }
 
 // UpdateSessionWorkspace updates the workspace ID of a session.
-func UpdateSessionWorkspace(db *Database, sessionID string, workspaceID string) error {
-	_, err := db.Exec("UPDATE sessions SET workspace_id = ? WHERE id = ?", workspaceID, sessionID)
+func UpdateSessionWorkspace(db *SessionDatabase, workspaceID string) error {
+	_, err := db.Exec("UPDATE S.sessions SET workspace_id = ? WHERE id = ?", workspaceID, db.LocalSessionId())
 	if err != nil {
 		return fmt.Errorf("failed to update session workspace: %w", err)
 	}
@@ -168,17 +295,19 @@ func GetWorkspaceAndSessions(db *Database, workspaceID string) (*WorkspaceWithSe
 	wsWithSessions.Workspace = workspace
 
 	// Get sessions for the workspace
-	var query string
+	var placeholder string
 	var args []interface{}
-
 	if workspaceID == "" {
-		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = '' AND id NOT LIKE '%.%' ORDER BY last_updated_at DESC"
+		placeholder = "''"
 	} else {
-		query = "SELECT id, last_updated_at, name, workspace_id FROM sessions WHERE workspace_id = ? AND id NOT LIKE '%.%' ORDER BY last_updated_at DESC"
+		placeholder = "?"
 		args = append(args, workspaceID)
 	}
-
-	rows, err := db.Query(query, args...)
+	rows, err := db.Query(
+		fmt.Sprintf(`
+			SELECT id, last_updated_at, name, workspace_id FROM sessions
+			WHERE workspace_id = %s AND id NOT LIKE '%%.%%' ORDER BY last_updated_at DESC`, placeholder),
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions: %w", err)
 	}
@@ -202,9 +331,11 @@ func GetWorkspaceAndSessions(db *Database, workspaceID string) (*WorkspaceWithSe
 }
 
 // SessionExists checks if a session with the given ID exists.
-func SessionExists(db *Database, sessionID string) (bool, error) {
+// In split-db architecture, this queries the main DB's sessions table (not the session DB).
+func SessionExists(db *SessionDatabase) (bool, error) {
 	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)", sessionID).Scan(&exists)
+	// Use db.Database directly to query main DB, bypassing S. prefix rewriting
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)", db.SessionId()).Scan(&exists)
 	if err != nil && err != sql.ErrNoRows {
 		return false, fmt.Errorf("failed to check session existence: %w", err)
 	}
@@ -212,9 +343,12 @@ func SessionExists(db *Database, sessionID string) (bool, error) {
 }
 
 // GetSession retrieves a session by its ID.
-func GetSession(db *Database, sessionID string) (Session, error) {
+// In split-db architecture, this queries the main DB's sessions table (not the session DB).
+func GetSession(db *SessionDatabase) (Session, error) {
 	var s Session
-	row := db.QueryRow("SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, '') FROM sessions WHERE id = ?", sessionID)
+	row := db.QueryRow(
+		"SELECT id, last_updated_at, system_prompt, name, workspace_id, COALESCE(primary_branch_id, '') FROM sessions WHERE id = ?",
+		db.SessionId())
 	err := row.Scan(&s.ID, &s.LastUpdated, &s.SystemPrompt, &s.Name, &s.WorkspaceID, &s.PrimaryBranchID)
 	if err != nil {
 		return s, err

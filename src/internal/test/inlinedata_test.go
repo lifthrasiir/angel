@@ -262,16 +262,28 @@ func TestInlineDataCounterReset(t *testing.T) {
 			t.Errorf("Expected different session IDs, got same: %s", firstSessionId)
 		}
 
+		sdb1, err := db.WithSession(firstSessionId)
+		if err != nil {
+			t.Fatalf("Failed to get first session DB: %v", err)
+		}
+		defer sdb1.Close()
+
+		sdb2, err := db.WithSession(secondSessionId)
+		if err != nil {
+			t.Fatalf("Failed to get second session DB: %v", err)
+		}
+		defer sdb2.Close()
+
 		// First, let's just check if any messages exist in the sessions
 		var firstMessageCount int
-		err1 := db.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ?", firstSessionId).Scan(&firstMessageCount)
+		err1 := sdb1.QueryRow("SELECT COUNT(*) FROM S.messages WHERE session_id = ?", sdb1.LocalSessionId()).Scan(&firstMessageCount)
 		if err1 != nil {
 			t.Fatalf("Failed to count messages in first session: %v", err1)
 		}
 		t.Logf("First session has %d messages", firstMessageCount)
 
 		var secondMessageCount int
-		err2 := db.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ?", secondSessionId).Scan(&secondMessageCount)
+		err2 := sdb2.QueryRow("SELECT COUNT(*) FROM S.messages WHERE session_id = ?", sdb2.LocalSessionId()).Scan(&secondMessageCount)
 		if err2 != nil {
 			t.Fatalf("Failed to count messages in second session: %v", err2)
 		}
@@ -279,14 +291,14 @@ func TestInlineDataCounterReset(t *testing.T) {
 
 		// Check for messages with attachments
 		var firstAttachmentCount int
-		err3 := db.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ? AND attachments IS NOT NULL AND attachments != '[]'", firstSessionId).Scan(&firstAttachmentCount)
+		err3 := sdb1.QueryRow("SELECT COUNT(*) FROM S.messages WHERE session_id = ? AND attachments IS NOT NULL AND attachments != '[]'", sdb1.LocalSessionId()).Scan(&firstAttachmentCount)
 		if err3 != nil {
 			t.Fatalf("Failed to count attachment messages in first session: %v", err3)
 		}
 		t.Logf("First session has %d messages with attachments", firstAttachmentCount)
 
 		var secondAttachmentCount int
-		err4 := db.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ? AND attachments IS NOT NULL AND attachments != '[]'", secondSessionId).Scan(&secondAttachmentCount)
+		err4 := sdb2.QueryRow("SELECT COUNT(*) FROM S.messages WHERE session_id = ? AND attachments IS NOT NULL AND attachments != '[]'", sdb2.LocalSessionId()).Scan(&secondAttachmentCount)
 		if err4 != nil {
 			t.Fatalf("Failed to count attachment messages in second session: %v", err4)
 		}
@@ -302,11 +314,11 @@ func TestInlineDataCounterReset(t *testing.T) {
 
 		// Now let's check the actual filenames to verify counter reset functionality
 		// Query the first session's attachment messages
-		rows, err := db.Query(`
-			SELECT id, attachments FROM messages
+		rows, err := sdb1.Query(`
+			SELECT id, attachments FROM S.messages
 			WHERE session_id = ? AND attachments IS NOT NULL AND attachments != '[]'
 			ORDER BY created_at ASC
-		`, firstSessionId)
+		`, sdb1.LocalSessionId())
 		if err != nil {
 			t.Fatalf("Failed to query messages with attachments: %v", err)
 		}
@@ -335,11 +347,11 @@ func TestInlineDataCounterReset(t *testing.T) {
 		}
 
 		// Query the second session's attachment messages
-		rows2, err := db.Query(`
-			SELECT id, attachments FROM messages
+		rows2, err := sdb2.Query(`
+			SELECT id, attachments FROM S.messages
 			WHERE session_id = ? AND attachments IS NOT NULL AND attachments != '[]'
 			ORDER BY created_at ASC
-		`, secondSessionId)
+		`, sdb2.LocalSessionId())
 		if err != nil {
 			t.Fatalf("Failed to query messages with attachments for second session: %v", err)
 		}

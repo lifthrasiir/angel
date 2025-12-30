@@ -42,19 +42,19 @@ func extractStateSnapshotContent(xmlContent string) string {
 	return xmlContent // Fallback to full XML if tags not found
 }
 
-func CompressSession(ctx context.Context, db *database.Database, models *llm.Models, sessionID string, modelName string) (result CompressResult, err error) {
+func CompressSession(ctx context.Context, db *database.SessionDatabase, models *llm.Models, modelName string) (result CompressResult, err error) {
 	// 1. Load session and all messages from the database for the given sessionID.
-	session, err := database.GetSession(db, sessionID)
+	session, err := database.GetSession(db)
 	if err != nil {
-		err = fmt.Errorf("failed to get session %s: %w", sessionID, err)
+		err = fmt.Errorf("failed to get session %s: %w", db.SessionId(), err)
 		return
 	}
 
 	// Get all messages for the session, including thoughts, to accurately represent history for compression.
 	// We'll filter thoughts later if needed for the context sent to the LLM for summarization.
-	allMessages, err := database.GetSessionHistory(db, sessionID, session.PrimaryBranchID)
+	allMessages, err := database.GetSessionHistory(db, session.PrimaryBranchID)
 	if err != nil {
-		err = fmt.Errorf("failed to get session history for %s: %w", sessionID, err)
+		err = fmt.Errorf("failed to get session history for %s: %w", db.SessionId(), err)
 		return
 	}
 
@@ -202,7 +202,7 @@ func CompressSession(ctx context.Context, db *database.Database, models *llm.Mod
 
 	// Create the new compression message
 	compressionMsg := Message{
-		SessionID:       sessionID,
+		LocalSessionID:  db.LocalSessionId(),
 		BranchID:        session.PrimaryBranchID,
 		Type:            TypeCompression,
 		Text:            fmt.Sprintf("%d\n%s", *compressedUpToMessageID, extractedSummary),

@@ -18,9 +18,9 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
-func ExtractSession(ctx context.Context, db *database.Database, sessionId string, targetMessageID int) (newSessionId string, newSessionName string, err error) {
+func ExtractSession(ctx context.Context, db *database.SessionDatabase, targetMessageID int) (newSessionId string, newSessionName string, err error) {
 	// Get the original session to validate existence
-	originalSession, err := database.GetSession(db, sessionId)
+	originalSession, err := database.GetSession(db)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			err = notFoundError("session not found")
@@ -42,14 +42,14 @@ func ExtractSession(ctx context.Context, db *database.Database, sessionId string
 	}
 
 	// Validate that the target message belongs to the session
-	if targetMessage.SessionID != sessionId {
+	if targetMessage.LocalSessionID != db.LocalSessionId() {
 		err = badRequestError("target message does not belong to the specified session")
 		return
 	}
 
 	// Get all messages from the session up to the target message, following branch history
 	// Use GetSessionHistory to get the complete message chain without alterations
-	completeMessages, err := database.GetSessionHistory(db, sessionId, targetMessage.BranchID)
+	completeMessages, err := database.GetSessionHistory(db, targetMessage.BranchID)
 	if err != nil {
 		err = fmt.Errorf("failed to get messages from branch: %w", err)
 		return
@@ -81,13 +81,19 @@ func ExtractSession(ctx context.Context, db *database.Database, sessionId string
 
 	// Create a new session
 	newSessionId = database.GenerateID()
+	newDb, err := db.WithSession(newSessionId)
+	if err != nil {
+		err = fmt.Errorf("failed to create session database for new session: %w", err)
+		return
+	}
+	defer newDb.Close()
 
 	// Collect subsession IDs from subagent FunctionResponse messages
 	subsessionIDs := collectSubsessionIDs(processedMessages)
 
 	// Copy subsessions if any exist
 	if len(subsessionIDs) > 0 {
-		err := copySubsessionsToNewSession(db, sessionId, newSessionId, subsessionIDs)
+		err := copySubsessionsToNewSession(db, newDb, subsessionIDs)
 		if err != nil {
 			log.Printf("extractSessionHandler: Failed to copy subsessions: %v", err)
 			// Non-fatal error, continue without subsessions
@@ -101,20 +107,21 @@ func ExtractSession(ctx context.Context, db *database.Database, sessionId string
 	// originalSession.SystemPrompt is already evaluated, so use it directly
 
 	// Create the new session
-	newPrimaryBranchID, err := database.CreateSession(db, newSessionId, originalSession.SystemPrompt, originalSession.WorkspaceID)
+	newDb, newPrimaryBranchID, err := database.CreateSession(newDb.Database, newSessionId, originalSession.SystemPrompt, originalSession.WorkspaceID)
 	if err != nil {
 		err = fmt.Errorf("failed to create new session: %w", err)
 		return
 	}
+	defer newDb.Close()
 
 	// Set the name for the new session
-	if err := database.UpdateSessionName(db, newSessionId, newSessionName); err != nil {
+	if err := database.UpdateSessionName(newDb, newSessionName); err != nil {
 		log.Printf("Failed to set name for new session %s: %v", newSessionId, err)
 		// Non-fatal error, continue
 	}
 
 	// Create a new message chain for the new session
-	mc, err := database.NewMessageChain(ctx, db, newSessionId, newPrimaryBranchID)
+	mc, err := database.NewMessageChain(ctx, newDb, newPrimaryBranchID)
 	if err != nil {
 		err = fmt.Errorf("failed to create new message chain: %w", err)
 		return
@@ -156,14 +163,14 @@ func ExtractSession(ctx context.Context, db *database.Database, sessionId string
 
 		// Reset IDs and session references for the new session
 		originalMsg.ID = 0 // Will be assigned by database
-		originalMsg.SessionID = newSessionId
+		originalMsg.LocalSessionID = newSessionId
 		originalMsg.BranchID = newPrimaryBranchID
 		originalMsg.ParentMessageID = nil // Will be set by MessageChain.Add()
 		originalMsg.ChosenNextID = nil    // Will be set by MessageChain.Add()
 		originalMsg.Indexed = 0           // Reset indexed to 0 to trigger reindex when needed
 
 		// Add the message to the new session with all original fields preserved
-		_, err2 = mc.Add(ctx, db, *originalMsg)
+		_, err2 = mc.Add(*originalMsg)
 		if err2 != nil {
 			err = fmt.Errorf("failed to add message %d to new session: %w", originalMsgID, err2)
 			return
@@ -171,7 +178,7 @@ func ExtractSession(ctx context.Context, db *database.Database, sessionId string
 	}
 
 	// Update last_updated_at for the new session
-	if err := database.UpdateSessionLastUpdated(db, newSessionId); err != nil {
+	if err := database.UpdateSessionLastUpdated(newDb); err != nil {
 		log.Printf("Failed to update last_updated_at for new session %s: %v", newSessionId, err)
 		// Non-fatal error, continue with response
 	}
@@ -180,7 +187,7 @@ func ExtractSession(ctx context.Context, db *database.Database, sessionId string
 }
 
 // processCompressionRemapping processes compression messages and remaps their content
-func processCompressionRemapping(db *database.Database, messages []FrontendMessage) ([]FrontendMessage, error) {
+func processCompressionRemapping(db *database.SessionDatabase, messages []FrontendMessage) ([]FrontendMessage, error) {
 	var processed []FrontendMessage
 
 	for _, msg := range messages {
@@ -221,7 +228,7 @@ func processCompressionRemapping(db *database.Database, messages []FrontendMessa
 }
 
 // remapCompressionContent remaps the content of a compression message based on the actual messages
-func remapCompressionContent(db *database.Database, compressionData map[string]interface{}) (string, error) {
+func remapCompressionContent(db *database.SessionDatabase, compressionData map[string]interface{}) (string, error) {
 	// Extract the original message IDs from compression data
 	messageIDs, ok := compressionData["messageIds"].([]interface{})
 	if !ok {
@@ -276,30 +283,34 @@ func collectSubsessionIDs(messages []FrontendMessage) []string {
 }
 
 // copySubsessionsToNewSession copies all subsessions to the new session
-func copySubsessionsToNewSession(db *database.Database, sessionId string, newSessionID string, subsessionIDs []string) error {
+func copySubsessionsToNewSession(db, newDb *database.SessionDatabase, subsessionIDs []string) error {
 	for _, subsessionID := range subsessionIDs {
 		// Create full session IDs
 		// fullSessionId = sessionId "." subsessionId
 		// newFullSessionId = newSessionId "." subsessionId
-		fullSessionID := fmt.Sprintf("%s.%s", sessionId, subsessionID)
-		newFullSessionID := fmt.Sprintf("%s.%s", newSessionID, subsessionID)
+		fullSessionID := fmt.Sprintf("%s.%s", db.SessionId(), subsessionID)
+		newFullSessionID := fmt.Sprintf("%s.%s", newDb.SessionId(), subsessionID)
+
+		sourceDb := db.WithSuffix("." + subsessionID)
+		defer sourceDb.Close()
 
 		// Get the original subsession
-		originalSubsession, err := database.GetSession(db, fullSessionID)
+		originalSubsession, err := database.GetSession(sourceDb)
 		if err != nil {
 			log.Printf("Failed to get subsession %s: %v", fullSessionID, err)
 			continue
 		}
 
 		// Create new subsession with new full session ID and new session ID as parent
-		_, err = database.CreateSession(db, newFullSessionID, originalSubsession.SystemPrompt, newSessionID)
+		targetDb, _, err := database.CreateSession(db.Database, newFullSessionID, originalSubsession.SystemPrompt, originalSubsession.WorkspaceID)
 		if err != nil {
 			log.Printf("Failed to create new subsession %s: %v", newFullSessionID, err)
 			continue
 		}
+		defer targetDb.Close()
 
 		// Copy all messages from original subsession to new subsession
-		err = copyMessagesBetweenSessions(db, fullSessionID, newFullSessionID)
+		err = copyMessagesBetweenSessions(sourceDb, targetDb)
 		if err != nil {
 			log.Printf("Failed to copy messages from subsession %s to %s: %v", fullSessionID, newFullSessionID, err)
 			continue
@@ -310,20 +321,20 @@ func copySubsessionsToNewSession(db *database.Database, sessionId string, newSes
 }
 
 // copyMessagesBetweenSessions copies all messages from one session to another
-func copyMessagesBetweenSessions(db *database.Database, sourceSessionID, targetSessionID string) error {
+func copyMessagesBetweenSessions(sourceDb, targetDb *database.SessionDatabase) error {
 	// Get all messages from source session
-	sourceMessages, err := database.GetSessionHistory(db, sourceSessionID, "")
+	sourceMessages, err := database.GetSessionHistory(sourceDb, "")
 	if err != nil {
 		return fmt.Errorf("failed to get messages from source session: %w", err)
 	}
 
 	// Create message chain for target session
-	targetBranchID, err := database.GetSessionPrimaryBranchID(db, targetSessionID)
+	targetBranchID, err := database.GetSessionPrimaryBranchID(targetDb)
 	if err != nil {
 		return fmt.Errorf("failed to get primary branch ID for target session: %w", err)
 	}
 
-	mc, err := database.NewMessageChain(context.Background(), db, targetSessionID, targetBranchID)
+	mc, err := database.NewMessageChain(context.Background(), targetDb, targetBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create message chain for target session: %w", err)
 	}
@@ -337,7 +348,7 @@ func copyMessagesBetweenSessions(db *database.Database, sourceSessionID, targetS
 			continue
 		}
 
-		originalMsg, err := database.GetMessageByID(db, originalMsgID)
+		originalMsg, err := database.GetMessageByID(sourceDb, originalMsgID)
 		if err != nil {
 			log.Printf("Failed to get original message %d: %v", originalMsgID, err)
 			continue
@@ -345,14 +356,14 @@ func copyMessagesBetweenSessions(db *database.Database, sourceSessionID, targetS
 
 		// Reset IDs and session references for the new session
 		originalMsg.ID = 0
-		originalMsg.SessionID = targetSessionID
+		originalMsg.LocalSessionID = targetDb.LocalSessionId()
 		originalMsg.BranchID = targetBranchID
 		originalMsg.ParentMessageID = nil // Will be set by MessageChain.Add()
 		originalMsg.ChosenNextID = nil
 		originalMsg.Indexed = 0 // Reset indexed to 0
 
 		// Add the message to the target session
-		_, err = mc.Add(context.Background(), db, *originalMsg)
+		_, err = mc.Add(*originalMsg)
 		if err != nil {
 			log.Printf("Failed to add message %d to target session: %v", originalMsgID, err)
 			continue

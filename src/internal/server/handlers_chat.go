@@ -45,8 +45,8 @@ func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := chat.NewSessionAndMessage(
 		r.Context(), db, models, ga, tools,
-		ew, sessionId, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
-		requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
+		ew, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
+		sessionId, requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
 	); err != nil {
 		sendInternalServerError(w, r, err, "Failed to create new session and message")
 	}
@@ -82,8 +82,8 @@ func newTempSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := chat.NewSessionAndMessage(
 		r.Context(), db, models, ga, tools,
-		ew, sessionId, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
-		requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
+		ew, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
+		sessionId, requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
 	); err != nil {
 		sendInternalServerError(w, r, err, "Failed to create new temporary session and message")
 	}
@@ -103,6 +103,13 @@ func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
 	var requestBody struct {
 		Message     string           `json:"message"`
 		Attachments []FileAttachment `json:"attachments"`
@@ -120,8 +127,8 @@ func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := chat.NewChatMessage(
-		r.Context(), db, models, ga, tools,
-		ew, sessionId, requestBody.Message, requestBody.Attachments, requestBody.Model, requestBody.FetchLimit,
+		r.Context(), sdb, models, ga, tools,
+		ew, requestBody.Message, requestBody.Attachments, requestBody.Model, requestBody.FetchLimit,
 	); err != nil {
 		sendInternalServerError(w, r, err, "Failed to process chat message")
 	}
@@ -172,7 +179,14 @@ func loadChatSessionHandler(w http.ResponseWriter, r *http.Request) {
 		ew = sseW // Avoid nil interface
 	}
 
-	initialState, err := chat.LoadChatSession(r.Context(), db, ew, sessionId, beforeMessageID, fetchLimit)
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
+	initialState, err := chat.LoadChatSession(r.Context(), sdb, ew, beforeMessageID, fetchLimit)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to load chat session")
 		return
@@ -281,11 +295,17 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var err error
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
 	if isRetry && requestBody.NewMessageText == "" {
-		err = chat.RetryBranch(r.Context(), db, models, ga, tools, ew, sessionId, requestBody.UpdatedMessageID)
+		err = chat.RetryBranch(r.Context(), sdb, models, ga, tools, ew, requestBody.UpdatedMessageID)
 	} else {
-		err = chat.CreateBranch(r.Context(), db, models, ga, tools, ew, sessionId, requestBody.UpdatedMessageID, requestBody.NewMessageText)
+		err = chat.CreateBranch(r.Context(), sdb, models, ga, tools, ew, requestBody.UpdatedMessageID, requestBody.NewMessageText)
 	}
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to create branch")
@@ -311,7 +331,14 @@ func switchBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := chat.SwitchBranch(db, sessionId, requestBody.NewPrimaryBranchID); err != nil {
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
+	if err := chat.SwitchBranch(sdb, requestBody.NewPrimaryBranchID); err != nil {
 		sendInternalServerError(w, r, err, "Failed to switch primary branch")
 		return
 	}
@@ -351,9 +378,16 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
 	if err := chat.ConfirmBranch(
-		r.Context(), db, models, ga, tools,
-		ew, sessionId, branchId, requestBody.Approved, requestBody.ModifiedData,
+		r.Context(), sdb, models, ga, tools,
+		ew, branchId, requestBody.Approved, requestBody.ModifiedData,
 	); err != nil {
 		sendInternalServerError(w, r, err, "Failed to confirm branch")
 		return
@@ -381,7 +415,14 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := chat.RetryErrorBranch(r.Context(), db, models, ga, tools, ew, sessionId, branchId); err != nil {
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
+	if err := chat.RetryErrorBranch(r.Context(), sdb, models, ga, tools, ew, branchId); err != nil {
 		sendInternalServerError(w, r, err, "Failed to retry error branch")
 		return
 	}
@@ -411,13 +452,18 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sdb, err := db.WithSession(sessionID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
 	// Execute the command
 	var commandMessageID int
-	var err error
-
 	switch requestBody.Command {
 	case "clear", "clearblobs":
-		commandMessageID, err = chat.ExecuteClearCommand(r.Context(), db, sessionID, requestBody.Command)
+		commandMessageID, err = chat.ExecuteClearCommand(r.Context(), sdb, requestBody.Command)
 	default:
 		sendBadRequestError(w, r, fmt.Sprintf("Unknown command: %s", requestBody.Command))
 		return
@@ -446,7 +492,14 @@ func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := chat.CompressSession(r.Context(), db, models, sessionID, DefaultGeminiModel)
+	sdb, err := db.WithSession(sessionID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
+	result, err := chat.CompressSession(r.Context(), sdb, models, DefaultGeminiModel)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to compress session")
 		return
@@ -494,7 +547,14 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newSessionId, newSessionName, err := chat.ExtractSession(r.Context(), db, sessionId, targetMessageID)
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
+	newSessionId, newSessionName, err := chat.ExtractSession(r.Context(), sdb, targetMessageID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to extract session")
 		return

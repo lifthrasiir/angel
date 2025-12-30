@@ -139,7 +139,14 @@ func handleSessionPage(embeddedFiles embed.FS, w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	exists, err := database.SessionExists(db, sessionId)
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendNotFoundError(w, r, "Session not found")
+		return
+	}
+	defer sdb.Close()
+
+	exists, err := database.SessionExists(sdb)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to check session existence")
 		return
@@ -342,7 +349,14 @@ func updateSessionNameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := database.UpdateSessionName(db, sessionId, requestBody.Name); err != nil {
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendNotFoundError(w, r, "Session not found")
+		return
+	}
+	defer sdb.Close()
+
+	if err := database.UpdateSessionName(sdb, requestBody.Name); err != nil {
 		sendInternalServerError(w, r, err, "Failed to update session name")
 		return
 	}
@@ -378,8 +392,15 @@ func updateSessionWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendNotFoundError(w, r, "Session not found")
+		return
+	}
+	defer sdb.Close()
+
 	// Verify that the session exists
-	exists, err := database.SessionExists(db, sessionId)
+	exists, err := database.SessionExists(sdb)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to check session existence")
 		return
@@ -389,7 +410,7 @@ func updateSessionWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := database.UpdateSessionWorkspace(db, sessionId, requestBody.WorkspaceID); err != nil {
+	if err := database.UpdateSessionWorkspace(sdb, requestBody.WorkspaceID); err != nil {
 		sendInternalServerError(w, r, err, "Failed to update session workspace")
 		return
 	}
@@ -729,13 +750,20 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendNotFoundError(w, r, "Session not found")
+		return
+	}
+	defer sdb.Close()
+
 	// Get the SessionFS instance for this session
-	sessionFS, err := env.GetSessionFS(r.Context(), sessionId)
+	sessionFS, err := database.GetSessionFS(r.Context(), sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to get SessionFS for session %s", sessionId))
 		return
 	}
-	defer env.ReleaseSessionFS(sessionId)
+	defer database.ReleaseSessionFS(sessionId)
 
 	// Get current roots before update for EnvChanged calculation
 	oldRoots := sessionFS.Roots()
@@ -747,7 +775,7 @@ func updateSessionRootsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update the database
-	_, err = database.AddSessionEnv(db, sessionId, requestBody.Roots)
+	_, err = database.AddSessionEnv(sdb, requestBody.Roots)
 	if err != nil {
 		sendInternalServerError(w, r, err, fmt.Sprintf("Failed to update session roots in DB for session %s", sessionId))
 		return
@@ -783,7 +811,15 @@ func handleDownloadBlobByHash(w http.ResponseWriter, r *http.Request) {
 		blobHash = blobHash[:dotIndex]
 	}
 
-	data, err := database.GetBlob(db, blobHash) // GetBlob works with hash
+	// XXX: Session ID would be eventually required in this endpoint to access the correct DB
+	sdb, err := db.WithSession("")
+	if err != nil {
+		sendNotFoundError(w, r, "Blob data not found")
+		return
+	}
+	defer sdb.Close()
+
+	data, err := database.GetBlob(sdb, blobHash)
 	if err != nil {
 		if strings.Contains(err.Error(), "blob not found") {
 			sendNotFoundError(w, r, "Blob data not found")

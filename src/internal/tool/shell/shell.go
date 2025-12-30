@@ -11,7 +11,6 @@ import (
 	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
-	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -47,7 +46,7 @@ func StartShellCommandManager(db *database.Database) {
 
 // updateCmdStateFromProcessState is called when a command has exited.
 // It retrieves final output and updates the DB.
-func updateCmdStateFromProcessState(db database.DbOrTx, cmdID string, rc *filesystem.RunningCommand) {
+func updateCmdStateFromProcessState(db database.SessionDbOrTx, cmdID string, rc *filesystem.RunningCommand) {
 	cmdDB, err := database.GetShellCommandByID(db, cmdID)
 	if err != nil {
 		log.Printf("Error getting command %s from DB for final update: %v", cmdID, err)
@@ -94,11 +93,11 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		return tool.HandlerResults{}, err
 	}
 
-	sfs, err := env.GetSessionFS(ctx, params.SessionId)
+	sfs, err := database.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS: %w", err)
 	}
-	defer env.ReleaseSessionFS(params.SessionId)
+	defer database.ReleaseSessionFS(params.SessionId)
 
 	if err := tool.EnsureKnownKeys("run_shell_command", args, "command", "directory"); err != nil {
 		return tool.HandlerResults{}, err
@@ -123,6 +122,12 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 			},
 		}
 	}
+
+	sdb, err := db.WithSession(params.SessionId)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	defer sdb.Close()
 
 	// Acquire branch lock
 	branchMu := getBranchShellLock(params.BranchId)
@@ -158,7 +163,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 	}
 
 	// Insert into DB immediately to ensure the record exists for updateCmdStateFromProcessState
-	if err := database.InsertShellCommand(db, cmdDB); err != nil {
+	if err := database.InsertShellCommand(sdb, cmdDB); err != nil {
 		rc.Close() // rc.Close() calls rc.Cancel(), which is redundant with deferred cancel() but safe
 		return tool.HandlerResults{}, fmt.Errorf("failed to insert shell command into DB: %w", err)
 	}
@@ -174,9 +179,9 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		log.Printf("RunShellCommandTool: Command '%s' (ID: %s) finished immediately. Updating DB.", commandStr, cmdID)
 		// Command finished within the initial delay
 		// Update DB with final status
-		updateCmdStateFromProcessState(db, cmdID, rc)
+		updateCmdStateFromProcessState(sdb, cmdID, rc)
 		// Return completed status and output
-		finalCmd, _ := database.GetShellCommandByID(db, cmdID) // Fetch updated status (guaranteed to exist now)
+		finalCmd, _ := database.GetShellCommandByID(sdb, cmdID) // Fetch updated status (guaranteed to exist now)
 		result := map[string]interface{}{
 			"command_id":      cmdID,
 			"status":          finalCmd.Status,
@@ -203,7 +208,7 @@ func RunShellCommandTool(ctx context.Context, args map[string]interface{}, param
 		cmdDB.Stderr = append(cmdDB.Stderr, initialStderr...)
 		cmdDB.StdoutOffset = int64(len(cmdDB.Stdout))
 		cmdDB.StderrOffset = int64(len(cmdDB.Stderr))
-		if err := database.UpdateShellCommand(db, cmdDB); err != nil {
+		if err := database.UpdateShellCommand(sdb, cmdDB); err != nil {
 			log.Printf("Warning: Failed to update initial stdout/stderr for command %s: %v", cmdID, err)
 		}
 
@@ -249,7 +254,13 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		return tool.HandlerResults{}, fmt.Errorf("invalid command_id argument for poll_shell_command")
 	}
 
-	cmdDB, err := database.GetShellCommandByID(db, cmdID)
+	sdb, err := db.WithSession(params.SessionId)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	defer sdb.Close()
+
+	cmdDB, err := database.GetShellCommandByID(sdb, cmdID)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
 	}
@@ -275,9 +286,9 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 
 				if foundInMap && currentInfo.RunningCommand.Cmd.ProcessState != nil && currentInfo.RunningCommand.Cmd.ProcessState.Exited() {
 					// Command has truly exited, update DB immediately
-					updateCmdStateFromProcessState(db, cmdID, currentInfo.RunningCommand)
+					updateCmdStateFromProcessState(sdb, cmdID, currentInfo.RunningCommand)
 					// After updating, re-fetch the command from DB to get its final status
-					updatedCmdDB, err := database.GetShellCommandByID(db, cmdID)
+					updatedCmdDB, err := database.GetShellCommandByID(sdb, cmdID)
 					if err == nil {
 						cmdDB = updatedCmdDB // Use the updated command DB object
 					} else {
@@ -286,7 +297,7 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 				} else {
 					// Command might not have fully exited yet, or was already cleaned up by manageRunningCommands
 					// Re-fetch from DB to get the latest status
-					updatedCmdDB, err := database.GetShellCommandByID(db, cmdID)
+					updatedCmdDB, err := database.GetShellCommandByID(sdb, cmdID)
 					if err == nil {
 						cmdDB = updatedCmdDB
 					} else {
@@ -312,7 +323,7 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	// Update last polled time in DB (agent just polled it)
 	cmdDB.LastPolledAt = time.Now().Unix()
 	// Do not update NextPollDelay here, it's managed by manageRunningCommands
-	if err := database.UpdateShellCommand(db, *cmdDB); err != nil {
+	if err := database.UpdateShellCommand(sdb, *cmdDB); err != nil {
 		log.Printf("Warning: Failed to update last_polled_at for command %s: %v", cmdID, err)
 	}
 
@@ -368,7 +379,7 @@ func PollShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	// Update offsets in DB for next poll
 	cmdDB.StdoutOffset = currentStdoutLen
 	cmdDB.StderrOffset = currentStderrLen
-	if err := database.UpdateShellCommand(db, *cmdDB); err != nil {
+	if err := database.UpdateShellCommand(sdb, *cmdDB); err != nil {
 		log.Printf("Warning: Failed to update stdout/stderr offsets for command %s: %v", cmdID, err)
 	}
 
@@ -401,7 +412,13 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		return tool.HandlerResults{}, fmt.Errorf("invalid command_id argument for kill_shell_command")
 	}
 
-	cmdDB, err := database.GetShellCommandByID(db, cmdID)
+	sdb, err := db.WithSession(params.SessionId)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	defer sdb.Close()
+
+	cmdDB, err := database.GetShellCommandByID(sdb, cmdID)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("command with ID %s not found in DB: %w", cmdID, err)
 	}
@@ -426,7 +443,7 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		cmdDB.Status = "failed"
 		cmdDB.EndTime = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
 		cmdDB.ErrorMessage = sql.NullString{String: "Command process not found in memory. It might have already terminated.", Valid: true}
-		if err := database.UpdateShellCommand(db, *cmdDB); err != nil {
+		if err := database.UpdateShellCommand(sdb, *cmdDB); err != nil {
 			log.Printf("Error updating DB for missing command on kill attempt %s: %v", cmdID, err)
 		}
 		return tool.HandlerResults{Value: map[string]interface{}{
@@ -442,7 +459,7 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 		cmdDB.Status = "failed_to_kill"
 		cmdDB.EndTime = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
 		cmdDB.ErrorMessage = sql.NullString{String: fmt.Sprintf("Failed to kill process: %v", err), Valid: true}
-		if err := database.UpdateShellCommand(db, *cmdDB); err != nil {
+		if err := database.UpdateShellCommand(sdb, *cmdDB); err != nil {
 			log.Printf("Error updating DB for kill failure %s: %v", cmdID, err)
 		}
 		return tool.HandlerResults{}, fmt.Errorf("failed to kill command %s: %w", cmdID, err)
@@ -452,7 +469,7 @@ func KillShellCommandTool(ctx context.Context, args map[string]interface{}, para
 	cmdDB.Status = "killed"
 	cmdDB.EndTime = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
 	cmdDB.ErrorMessage = sql.NullString{String: "Killed by agent.", Valid: true}
-	if err := database.UpdateShellCommand(db, *cmdDB); err != nil {
+	if err := database.UpdateShellCommand(sdb, *cmdDB); err != nil {
 		log.Printf("Error updating DB for killed command %s: %v", cmdID, err)
 	}
 

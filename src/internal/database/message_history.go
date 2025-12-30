@@ -15,8 +15,8 @@ import (
 )
 
 // GetMessagePossibleNextIDs retrieves all possible next message IDs and their branch IDs for a given message ID.
-func GetMessagePossibleNextIDs(db DbOrTx, messageID int) ([]PossibleNextMessage, error) {
-	rows, err := db.Query("SELECT id, branch_id FROM messages WHERE parent_message_id = ?", messageID)
+func GetMessagePossibleNextIDs(db SessionDbOrTx, messageID int) ([]PossibleNextMessage, error) {
+	rows, err := db.Query("SELECT id, branch_id FROM S.messages WHERE parent_message_id = ?", messageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query possible next message IDs: %w", err)
 	}
@@ -40,8 +40,7 @@ func GetMessagePossibleNextIDs(db DbOrTx, messageID int) ([]PossibleNextMessage,
 // If fetchLimit is > 0, cursor-based pagination using beforeMessageID and fetchLimit is done.
 // If beforeMessageID is 0, it fetches the latest messages.
 func getSessionHistoryInternal(
-	db DbOrTx,
-	sessionID string,
+	db SessionDbOrTx,
 	primaryBranchID string,
 	discardThoughts bool,
 	canAlterHistory bool,
@@ -67,7 +66,7 @@ func getSessionHistoryInternal(
 	// For first message editing support, find the starting point using chosen_first_id
 	var startingMessageID int
 	var chosenFirstID sql.NullInt64
-	err := db.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionID).Scan(&chosenFirstID)
+	err := db.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", db.SessionId()).Scan(&chosenFirstID)
 	if err != nil || !chosenFirstID.Valid {
 		// If no chosen_first_id is set, fall back to the original behavior
 		startingMessageID = 1
@@ -102,7 +101,7 @@ func getSessionHistoryInternal(
 						),
 						'[]'
 					)
-				FROM messages AS m LEFT OUTER JOIN messages AS mm ON m.id = mm.parent_message_id
+				FROM S.messages AS m LEFT OUTER JOIN S.messages AS mm ON m.id = mm.parent_message_id
 				GROUP BY m.id
 				HAVING m.branch_id = ? AND m.id >= ? AND m.id <= ?
 				ORDER BY m.id ASC
@@ -121,7 +120,7 @@ func getSessionHistoryInternal(
 				var attachmentsJSON sql.NullString
 				var possibleNextIDsAndBranchesStr string
 				if err := rows.Scan(
-					&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
+					&m.ID, &m.LocalSessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
 					&m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model,
 					&m.State, &possibleNextIDsAndBranchesStr,
 				); err != nil {
@@ -244,7 +243,7 @@ func getSessionHistoryInternal(
 				}
 			} else {
 				messageIdLimit = parentBranchMessageID
-				err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ?", parentBranchMessageID).Scan(&branchID)
+				err := db.QueryRow("SELECT branch_id FROM S.messages WHERE id = ?", parentBranchMessageID).Scan(&branchID)
 				if err != nil {
 					return fmt.Errorf("failed to query parent branch ID: %w", err)
 				}
@@ -300,9 +299,9 @@ func getSessionHistoryInternal(
 		combinedHistory = combinedHistory[1:]
 	} else if len(combinedHistory) > 0 && combinedHistory[0].ParentMessageID == nil {
 		// Full history fetch or we didn't exceed fetchLimit, handle first message case
-		firstMessages, err := GetSessionFirstMessages(db, sessionID)
+		firstMessages, err := GetSessionFirstMessages(db)
 		if err != nil {
-			log.Printf("getSessionHistoryInternal: Failed to get first messages for session %s: %v", sessionID, err)
+			log.Printf("getSessionHistoryInternal: Failed to get first messages for session %s: %v", db.SessionId(), err)
 			// Non-fatal, continue without possible first message IDs
 		} else if len(firstMessages) > 1 {
 			var possibleFirstIds []PossibleNextMessage
@@ -359,6 +358,17 @@ func getSessionHistoryInternal(
 	}
 
 	return combinedHistory, nil
+}
+
+func CreateFrontendMessage(
+	m Message,
+	attachmentsJSON sql.NullString,
+	possibleBranches []PossibleNextMessage,
+	ignoreBeforeLastCompression bool,
+	includeState bool,
+	clearblobsSeen bool,
+) (FrontendMessage, *int, error) {
+	return createFrontendMessage(m, attachmentsJSON, possibleBranches, ignoreBeforeLastCompression, includeState, clearblobsSeen)
 }
 
 // createFrontendMessage converts a Message DB struct into a FrontendMessage
@@ -429,7 +439,7 @@ func createFrontendMessage(
 		Type:             m.Type,
 		Attachments:      processedAttachments,
 		CumulTokenCount:  tokens,
-		SessionID:        m.SessionID,
+		SessionID:        m.LocalSessionID,
 		BranchID:         m.BranchID,
 		ParentMessageID:  fmParentMessageID,
 		ChosenNextID:     fmChosenNextID,

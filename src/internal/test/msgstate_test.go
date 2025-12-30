@@ -144,17 +144,23 @@ func TestThoughtSignatureHandling(t *testing.T) {
 		t.Fatal("Session ID not found in initial state")
 	}
 
+	sdb, err := db.WithSession(sessionID)
+	if err != nil {
+		t.Fatalf("Failed to create session database: %v", err)
+	}
+	defer sdb.Close()
+
 	testThoughtSignature := "test_thought_signature_123"
 
 	// Verification 1: Check if ThoughtSignature is stored in the database (using GetSessionHistoryContext for LLM context)
 	// This is what would be sent to the LLM, so it should include ThoughtSignature
-	messagesForLLM, err := database.GetSessionHistoryContext(db, sessionID, primaryBranchID)
+	messagesForLLM, err := database.GetSessionHistoryContext(sdb, primaryBranchID)
 	if err != nil {
 		t.Fatalf("Failed to get messages for LLM context: %v", err)
 	}
 
 	// Debug: check raw database state column to confirm it's stored
-	rows, err := db.Query("SELECT id, type, state FROM messages WHERE session_id = ? ORDER BY id", sessionID)
+	rows, err := sdb.Query("SELECT id, type, state FROM S.messages WHERE session_id = ? ORDER BY id", sdb.LocalSessionId())
 	if err != nil {
 		t.Fatalf("Failed to query raw database: %v", err)
 	}

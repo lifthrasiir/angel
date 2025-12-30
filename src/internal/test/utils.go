@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"embed"
 	"fmt"
 	"io"
@@ -195,7 +196,9 @@ func testStreamingRequest(t *testing.T, router *mux.Router, method, url string, 
 }
 
 // querySingleRow executes a query that is expected to return a single row and handles errors.
-func querySingleRow(t *testing.T, db *database.Database, query string, args []interface{}, dest ...interface{}) {
+func querySingleRow(t *testing.T, db interface {
+	QueryRow(query string, args ...interface{}) *sql.Row
+}, query string, args []interface{}, dest ...interface{}) {
 	row := db.QueryRow(query, args...)
 	err := row.Scan(dest...)
 	if err != nil {

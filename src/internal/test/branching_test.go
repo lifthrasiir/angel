@@ -20,32 +20,34 @@ func TestBranchingLogic(t *testing.T) {
 	// Scenario 1: Linear message flow - chosen_next_id updates correctly
 	t.Run("LinearMessageFlow", func(t *testing.T) {
 		sessionId := database.GenerateID()
-		primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt", "default")
+
+		sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt", "default")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
+		defer sdb.Close()
 
-		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), sdb, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
 
 		// Message 1
-		msg1, err := mc.Add(context.Background(), testDB, Message{Text: "Message 1", Type: "user"})
+		msg1, err := mc.Add(Message{Text: "Message 1", Type: "user"})
 		if err != nil {
 			t.Fatalf("Failed to add message 1: %v", err)
 		}
 		msg1ID := msg1.ID
 
 		// Message 2
-		msg2, err := mc.Add(context.Background(), testDB, Message{Text: "Message 2", Type: "model"})
+		msg2, err := mc.Add(Message{Text: "Message 2", Type: "model"})
 		if err != nil {
 			t.Fatalf("Failed to add message 2: %v", err)
 		}
 		msg2ID := msg2.ID
 
 		// Message 3
-		msg3, err := mc.Add(context.Background(), testDB, Message{Text: "Message 3", Type: "user"})
+		msg3, err := mc.Add(Message{Text: "Message 3", Type: "user"})
 		if err != nil {
 			t.Fatalf("Failed to add message 3: %v", err)
 		}
@@ -53,21 +55,21 @@ func TestBranchingLogic(t *testing.T) {
 
 		// Verify chosen_next_id for Message 1
 		var chosenNextID1 sql.NullInt64
-		querySingleRow(t, testDB, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msg1ID}, &chosenNextID1)
+		querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msg1ID}, &chosenNextID1)
 		if !chosenNextID1.Valid || chosenNextID1.Int64 != int64(msg2ID) {
 			t.Errorf("Expected chosen_next_id for message 1 to be %d, got %v", msg2ID, chosenNextID1)
 		}
 
 		// Verify chosen_next_id for Message 2
 		var chosenNextID2 sql.NullInt64
-		querySingleRow(t, testDB, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msg2ID}, &chosenNextID2)
+		querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msg2ID}, &chosenNextID2)
 		if !chosenNextID2.Valid || chosenNextID2.Int64 != int64(msg3ID) {
 			t.Errorf("Expected chosen_next_id for message 2 to be %d, got %v", msg3ID, chosenNextID2)
 		}
 
 		// Verify chosen_next_id for Message 3 (should be empty)
 		var chosenNextID3 sql.NullInt64
-		querySingleRow(t, testDB, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msg3ID}, &chosenNextID3)
+		querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msg3ID}, &chosenNextID3)
 		if chosenNextID3.Valid {
 			t.Errorf("Expected chosen_next_id for message 3 to be empty, got %v", chosenNextID3.Int64)
 		}
@@ -76,24 +78,26 @@ func TestBranchingLogic(t *testing.T) {
 	// Scenario 2: Branching - new session has correct parent_id and branch_id
 	t.Run("BranchingNewSession", func(t *testing.T) {
 		originalSessionId := database.GenerateID()
-		originalPrimaryBranchID, err := database.CreateSession(testDB, originalSessionId, "Original system prompt", "default")
+
+		sdb, originalPrimaryBranchID, err := database.CreateSession(testDB, originalSessionId, "Original system prompt", "default")
 		if err != nil {
 			t.Fatalf("Failed to create original session: %v", err)
 		}
+		defer sdb.Close()
 
-		mcOriginal, err := database.NewMessageChain(context.Background(), testDB, originalSessionId, originalPrimaryBranchID)
+		mcOriginal, err := database.NewMessageChain(context.Background(), sdb, originalPrimaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain for original session: %v", err)
 		}
 
 		// Add messages to the original session
-		firstMsg, err := mcOriginal.Add(context.Background(), testDB, Message{Text: "First message", Type: "user"})
+		firstMsg, err := mcOriginal.Add(Message{Text: "First message", Type: "user"})
 		if err != nil {
 			t.Fatalf("Failed to add first message: %v", err)
 		}
 		firstMsgID := firstMsg.ID
 
-		msgToBranchFrom, err := mcOriginal.Add(context.Background(), testDB, Message{Text: "Message to branch from", Type: "user"})
+		msgToBranchFrom, err := mcOriginal.Add(Message{Text: "Message to branch from", Type: "user"})
 		if err != nil {
 			t.Fatalf("Failed to add message to branch from: %v", err)
 		}
@@ -123,12 +127,12 @@ func TestBranchingLogic(t *testing.T) {
 
 		// Verify the new branch in the branches table
 		var b Branch
-		querySingleRow(t, testDB, "SELECT id, session_id, parent_branch_id, branch_from_message_id FROM branches WHERE id = ?", []interface{}{newBranchID}, &b.ID, &b.SessionID, &b.ParentBranchID, &b.BranchFromMessageID)
+		querySingleRow(t, sdb, "SELECT id, session_id, parent_branch_id, branch_from_message_id FROM S.branches WHERE id = ?", []interface{}{newBranchID}, &b.ID, &b.LocalSessionID, &b.ParentBranchID, &b.BranchFromMessageID)
 		if b.ID != newBranchID {
 			t.Errorf("Expected branch ID %s, got %s", newBranchID, b.ID)
 		}
-		if b.SessionID != originalSessionId {
-			t.Errorf("Expected session ID %s, got %s", originalSessionId, b.SessionID)
+		if b.LocalSessionID != sdb.LocalSessionId() {
+			t.Errorf("Expected local session ID to be %q for main session, got %q", sdb.LocalSessionId(), b.LocalSessionID)
 		}
 		if *b.ParentBranchID != originalPrimaryBranchID {
 			t.Errorf("Expected parent branch ID %s, got %s", originalPrimaryBranchID, *b.ParentBranchID)
@@ -140,7 +144,7 @@ func TestBranchingLogic(t *testing.T) {
 		// Verify the first message in the new branch
 		var firstMsgBranchID string
 		var firstMsgParentID sql.NullInt64
-		querySingleRow(t, testDB, "SELECT branch_id, parent_message_id FROM messages WHERE session_id = ? AND branch_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{originalSessionId, newBranchID}, &firstMsgBranchID, &firstMsgParentID)
+		querySingleRow(t, sdb, "SELECT branch_id, parent_message_id FROM S.messages WHERE session_id = ? AND branch_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{sdb.LocalSessionId(), newBranchID}, &firstMsgBranchID, &firstMsgParentID)
 		if firstMsgBranchID != newBranchID {
 			t.Errorf("Expected first message branch ID %s, got %s", newBranchID, firstMsgBranchID)
 		}
@@ -150,20 +154,20 @@ func TestBranchingLogic(t *testing.T) {
 
 		// Verify that the original session's primary branch is updated to the new branch
 		var updatedPrimaryBranchID string
-		querySingleRow(t, testDB, "SELECT primary_branch_id FROM sessions WHERE id = ?", []interface{}{originalSessionId}, &updatedPrimaryBranchID)
+		querySingleRow(t, sdb, "SELECT primary_branch_id FROM sessions WHERE id = ?", []interface{}{originalSessionId}, &updatedPrimaryBranchID)
 		if updatedPrimaryBranchID != newBranchID {
 			t.Errorf("Expected original session's primary branch ID to be %s, got %s", newBranchID, updatedPrimaryBranchID)
 		}
 
 		// Verify chosen_next_id for the message branched from
 		var chosenNextID sql.NullInt64
-		querySingleRow(t, testDB, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{firstMsgID}, &chosenNextID)
+		querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{firstMsgID}, &chosenNextID)
 		if !chosenNextID.Valid {
 			t.Errorf("Expected chosen_next_id for branched message to be valid, got NULL")
 		}
 		// Get the ID of the first message in the new branch to compare
 		var firstMessageInNewBranchID int
-		querySingleRow(t, testDB, "SELECT id FROM messages WHERE branch_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{newBranchID}, &firstMessageInNewBranchID)
+		querySingleRow(t, sdb, "SELECT id FROM S.messages WHERE branch_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{newBranchID}, &firstMessageInNewBranchID)
 		if chosenNextID.Int64 != int64(firstMessageInNewBranchID) {
 			t.Errorf("Expected chosen_next_id for branched message to be %d, got %d", firstMessageInNewBranchID, chosenNextID.Int64)
 		}
@@ -172,19 +176,21 @@ func TestBranchingLogic(t *testing.T) {
 	// Scenario 3: SetPrimaryBranchHandler
 	t.Run("SetPrimaryBranchHandler", func(t *testing.T) {
 		sessionId := database.GenerateID()
-		originalPrimaryBranchID, err := database.CreateSession(testDB, sessionId, "Session for primary branch test", "default")
+
+		sdb, originalPrimaryBranchID, err := database.CreateSession(testDB, sessionId, "Session for primary branch test", "default")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
+		defer sdb.Close()
 
 		// Create a new branch
-		msgToBranchFrom := Message{SessionID: sessionId, BranchID: originalPrimaryBranchID, Text: "Message to branch from for primary branch test", Type: "user"}
-		msgIDToBranchFrom, err := database.AddMessageToSession(context.Background(), testDB, msgToBranchFrom)
+		msgToBranchFrom := Message{LocalSessionID: sessionId, BranchID: originalPrimaryBranchID, Text: "Message to branch from for primary branch test", Type: "user"}
+		msgIDToBranchFrom, err := database.AddMessageToSession(context.Background(), sdb, msgToBranchFrom)
 		if err != nil {
 			t.Fatalf("Failed to add message to branch from for primary branch test: %v", err)
 		}
 		newBranchID := database.GenerateID()
-		_, err = database.CreateBranch(testDB, newBranchID, sessionId, &originalPrimaryBranchID, &msgIDToBranchFrom) // Pass generated ID
+		_, err = database.CreateBranch(sdb, newBranchID, &originalPrimaryBranchID, &msgIDToBranchFrom) // Pass generated ID
 		if err != nil {
 			t.Fatalf("Failed to create new branch for primary branch test: %v", err)
 		}
@@ -209,7 +215,7 @@ func TestBranchingLogic(t *testing.T) {
 
 		// Verify in DB that the primary branch ID is updated
 		var currentPrimaryBranchID string
-		querySingleRow(t, testDB, "SELECT primary_branch_id FROM sessions WHERE id = ?", []interface{}{sessionId}, &currentPrimaryBranchID)
+		querySingleRow(t, sdb, "SELECT primary_branch_id FROM S.sessions WHERE id = ?", []interface{}{sdb.LocalSessionId()}, &currentPrimaryBranchID)
 		if currentPrimaryBranchID != newBranchID {
 			t.Errorf("Expected primary branch ID %s, got %s", newBranchID, currentPrimaryBranchID)
 		}
@@ -217,35 +223,37 @@ func TestBranchingLogic(t *testing.T) {
 
 	t.Run("TestGetSessionHistory_And_Context_InBranching", func(t *testing.T) {
 		sessionId := database.GenerateID()
-		primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for history test", "default")
+
+		sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for history test", "default")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
+		defer sdb.Close()
 
-		mcHistory, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mcHistory, err := database.NewMessageChain(context.Background(), sdb, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain for history test: %v", err)
 		}
 
 		// 1. Create linear message flow
 		// Message 1 (user)
-		if _, err = mcHistory.Add(context.Background(), testDB, Message{Text: "User message 1", Type: "user"}); err != nil {
+		if _, err = mcHistory.Add(Message{Text: "User message 1", Type: "user"}); err != nil {
 			t.Fatalf("Failed to add msg1: %v", err)
 		}
 
 		// Message 2 (model)
-		msg2, err := mcHistory.Add(context.Background(), testDB, Message{Text: "Model message 2", Type: "model"})
+		msg2, err := mcHistory.Add(Message{Text: "Model message 2", Type: "model"})
 		if err != nil {
 			t.Fatalf("Failed to add msg2: %v", err)
 		}
 
 		// Message 3 (thought) - should be discarded by GetSessionHistoryContext
-		if _, err = mcHistory.Add(context.Background(), testDB, Message{Text: "Thought message 3", Type: "thought"}); err != nil {
+		if _, err = mcHistory.Add(Message{Text: "Thought message 3", Type: "thought"}); err != nil {
 			t.Fatalf("Failed to add msg3: %v", err)
 		}
 
 		// Message 4 (user)
-		msg4, err := mcHistory.Add(context.Background(), testDB, Message{Text: "User message 4", Type: "user"})
+		msg4, err := mcHistory.Add(Message{Text: "User message 4", Type: "user"})
 		if err != nil {
 			t.Fatalf("Failed to add msg4: %v", err)
 		}
@@ -253,55 +261,55 @@ func TestBranchingLogic(t *testing.T) {
 		// Message 5 (compression) - should affect GetSessionHistoryContext
 		// Compress up to msg2 (skip msg3 thought and msg4)
 		compressionText := fmt.Sprintf("%d\nSummary of messages up to msg2", msg2.ID)
-		if _, err = mcHistory.Add(context.Background(), testDB, Message{Text: compressionText, Type: "compression"}); err != nil {
+		if _, err = mcHistory.Add(Message{Text: compressionText, Type: "compression"}); err != nil {
 			t.Fatalf("Failed to add msg5: %v", err)
 		}
 
 		// Message 6 (model) - after compression
-		if _, err = mcHistory.Add(context.Background(), testDB, Message{Text: "Model message 6 (after compression)", Type: "model"}); err != nil {
+		if _, err = mcHistory.Add(Message{Text: "Model message 6 (after compression)", Type: "model"}); err != nil {
 			t.Fatalf("Failed to add msg6: %v", err)
 		}
 
 		// Message 7 (user)
-		if _, err = mcHistory.Add(context.Background(), testDB, Message{Text: "User message 7", Type: "user"}); err != nil {
+		if _, err = mcHistory.Add(Message{Text: "User message 7", Type: "user"}); err != nil {
 			t.Fatalf("Failed to add msg7: %v", err)
 		}
 
 		// 2. Create a branch (branch from msg4)
-		newBranchID, err := database.CreateBranch(testDB, database.GenerateID(), sessionId, &primaryBranchID, &msg4.ID)
+		newBranchID, err := database.CreateBranch(sdb, database.GenerateID(), &primaryBranchID, &msg4.ID)
 		if err != nil {
 			t.Fatalf("Failed to create new branch: %v", err)
 		}
 
-		mcNewBranch, err := database.NewMessageChain(context.Background(), testDB, sessionId, newBranchID)
+		mcNewBranch, err := database.NewMessageChain(context.Background(), sdb, newBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain for new branch: %v", err)
 		}
 		mcNewBranch.LastMessageID = msg4.ID // Set parent for the first message in new branch
 
 		// Message A (new branch, user) - parent is msg4
-		if _, err := mcNewBranch.Add(context.Background(), testDB, Message{Text: "User message A (new branch)", Type: "user"}); err != nil {
+		if _, err := mcNewBranch.Add(Message{Text: "User message A (new branch)", Type: "user"}); err != nil {
 			t.Fatalf("Failed to add msgA: %v", err)
 		}
 
 		// Message B (new branch, model)
-		if _, err := mcNewBranch.Add(context.Background(), testDB, Message{Text: "Model message B (new branch)", Type: "model"}); err != nil {
+		if _, err := mcNewBranch.Add(Message{Text: "Model message B (new branch)", Type: "model"}); err != nil {
 			t.Fatalf("Failed to add msgB: %v", err)
 		}
 
 		// Message C (new branch, thought) - should be discarded by GetSessionHistoryContext
-		if _, err := mcNewBranch.Add(context.Background(), testDB, Message{Text: "Thought message C (new branch)", Type: "thought"}); err != nil {
+		if _, err := mcNewBranch.Add(Message{Text: "Thought message C (new branch)", Type: "thought"}); err != nil {
 			t.Fatalf("Failed to add msgC: %v", err)
 		}
 
 		// Message D (new branch, user)
-		if _, err := mcNewBranch.Add(context.Background(), testDB, Message{Text: "User message D (new branch)", Type: "user"}); err != nil {
+		if _, err := mcNewBranch.Add(Message{Text: "User message D (new branch)", Type: "user"}); err != nil {
 			t.Fatalf("Failed to add msgD: %v", err)
 		}
 
 		// 3. GetSessionHistory test (primaryBranchID)
 		t.Run("GetSessionHistory_PrimaryBranch", func(t *testing.T) {
-			history, err := database.GetSessionHistory(testDB, sessionId, primaryBranchID)
+			history, err := database.GetSessionHistory(sdb, primaryBranchID)
 			if err != nil {
 				t.Fatalf("GetSessionHistory failed: %v", err)
 			}
@@ -332,7 +340,7 @@ func TestBranchingLogic(t *testing.T) {
 
 		// 4. GetSessionHistoryContext test (primaryBranchID)
 		t.Run("GetSessionHistoryContext_PrimaryBranch", func(t *testing.T) {
-			history, err := database.GetSessionHistoryContext(testDB, sessionId, primaryBranchID)
+			history, err := database.GetSessionHistoryContext(sdb, primaryBranchID)
 			if err != nil {
 				t.Fatalf("GetSessionHistoryContext failed: %v", err)
 			}
@@ -373,7 +381,7 @@ func TestBranchingLogic(t *testing.T) {
 
 		// 5. Test GetSessionHistoryContext (newBranchID)
 		t.Run("GetSessionHistoryContext_NewBranch", func(t *testing.T) {
-			history, err := database.GetSessionHistoryContext(testDB, sessionId, newBranchID)
+			history, err := database.GetSessionHistoryContext(sdb, newBranchID)
 			if err != nil {
 				t.Fatalf("GetSessionHistoryContext failed: %v", err)
 			}
@@ -418,24 +426,31 @@ func TestNewSessionAndMessage_BranchIDConsistency(t *testing.T) {
 		payload := []byte(`{"message": "Initial message for consistency test", "workspaceId": "testWsConsistency"}`)
 		_ = testRequest(t, router, "POST", "/api/chat", payload, http.StatusOK)
 
+		// Retrieve the session ID from the main DB, so that we can access the correct session DB file
 		var sessionID string
 		var primaryBranchIDFromSession string
 		querySingleRow(t, testDB, "SELECT id, primary_branch_id FROM sessions WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1", []interface{}{"testWsConsistency"}, &sessionID, &primaryBranchIDFromSession)
 
+		sdb, err := testDB.WithSession(sessionID)
+		if err != nil {
+			t.Fatalf("Failed to create session database: %v", err)
+		}
+		defer sdb.Close()
+
 		// Verify branch in branches table
 		var branchIDFromBranches string
 		var branchSessionIDFromBranches string
-		querySingleRow(t, testDB, "SELECT id, session_id FROM branches WHERE id = ?", []interface{}{primaryBranchIDFromSession}, &branchIDFromBranches, &branchSessionIDFromBranches)
+		querySingleRow(t, sdb, "SELECT id, session_id FROM S.branches WHERE id = ?", []interface{}{primaryBranchIDFromSession}, &branchIDFromBranches, &branchSessionIDFromBranches)
 		if branchIDFromBranches != primaryBranchIDFromSession {
 			t.Errorf("Expected branch ID from branches table %s, got %s", primaryBranchIDFromSession, branchIDFromBranches)
 		}
-		if branchSessionIDFromBranches != sessionID {
-			t.Errorf("Expected branch session ID from branches table %s, got %s", sessionID, branchSessionIDFromBranches)
+		if branchSessionIDFromBranches != sdb.LocalSessionId() {
+			t.Errorf("Expected local session ID to be %q for main session, got %q", sdb.LocalSessionId(), branchSessionIDFromBranches)
 		}
 
 		// Verify branch_id of the first message
 		var messageBranchID string
-		querySingleRow(t, testDB, "SELECT branch_id FROM messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{sessionID}, &messageBranchID)
+		querySingleRow(t, sdb, "SELECT branch_id FROM S.messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{sdb.LocalSessionId()}, &messageBranchID)
 		if messageBranchID != primaryBranchIDFromSession {
 			t.Errorf("Expected first message branch ID %s, got %s", primaryBranchIDFromSession, messageBranchID)
 		}
@@ -451,22 +466,25 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 	t.Run("BranchIDConsistency", func(t *testing.T) {
 		// 1. Create an initial session and messages to branch from
 		sessionId := database.GenerateID()
-		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Initial system prompt for branching test", "default")
+
+		sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "Initial system prompt for branching test", "default")
 		if err != nil {
 			t.Fatalf("Failed to create initial session: %v", err)
 		}
-		firstMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "First message for branching test", Type: "user"}
-		firstMessageID, err := database.AddMessageToSession(context.Background(), testDB, firstMessage)
+		defer sdb.Close()
+
+		firstMessage := Message{LocalSessionID: sessionId, BranchID: primaryBranchID, Text: "First message for branching test", Type: "user"}
+		firstMessageID, err := database.AddMessageToSession(context.Background(), sdb, firstMessage)
 		if err != nil {
 			t.Fatalf("Failed to add first message: %v", err)
 		}
-		parentMessage := Message{SessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &firstMessageID, Text: "Message to branch from", Type: "user"}
-		parentMessageID, err := database.AddMessageToSession(context.Background(), testDB, parentMessage)
+		parentMessage := Message{LocalSessionID: sessionId, BranchID: primaryBranchID, ParentMessageID: &firstMessageID, Text: "Message to branch from", Type: "user"}
+		parentMessageID, err := database.AddMessageToSession(context.Background(), sdb, parentMessage)
 		if err != nil {
 			t.Fatalf("Failed to add parent message: %v", err)
 		}
 		// Update chosen_next_id for the first message
-		if err = database.UpdateMessageChosenNextID(testDB, firstMessageID, &parentMessageID); err != nil {
+		if err = database.UpdateMessageChosenNextID(sdb, firstMessageID, &parentMessageID); err != nil {
 			t.Fatalf("Failed to update chosen_next_id for first message: %v", err)
 		}
 
@@ -495,12 +513,12 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 
 		// 3. Verify the new branch in the branches table
 		var branchFromBranches Branch
-		querySingleRow(t, testDB, "SELECT id, session_id, parent_branch_id, branch_from_message_id FROM branches WHERE id = ?", []interface{}{newBranchID}, &branchFromBranches.ID, &branchFromBranches.SessionID, &branchFromBranches.ParentBranchID, &branchFromBranches.BranchFromMessageID)
+		querySingleRow(t, sdb, "SELECT id, session_id, parent_branch_id, branch_from_message_id FROM S.branches WHERE id = ?", []interface{}{newBranchID}, &branchFromBranches.ID, &branchFromBranches.LocalSessionID, &branchFromBranches.ParentBranchID, &branchFromBranches.BranchFromMessageID)
 		if branchFromBranches.ID != newBranchID {
 			t.Errorf("Expected branch ID from branches table %s, got %s", newBranchID, branchFromBranches.ID)
 		}
-		if branchFromBranches.SessionID != sessionId {
-			t.Errorf("Expected branch session ID from branches table %s, got %s", sessionId, branchFromBranches.SessionID)
+		if branchFromBranches.LocalSessionID != sdb.LocalSessionId() {
+			t.Errorf("Expected local session ID to be %q for main session, got %q", sdb.LocalSessionId(), branchFromBranches.LocalSessionID)
 		}
 		if *branchFromBranches.ParentBranchID != primaryBranchID {
 			t.Errorf("Expected parent branch ID %s, got %s", primaryBranchID, *branchFromBranches.ParentBranchID)
@@ -513,7 +531,7 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 		var firstMessageInNewBranchID int
 		var firstMessageBranchID string
 		var firstMessageParentID sql.NullInt64
-		querySingleRow(t, testDB, "SELECT id, branch_id, parent_message_id FROM messages WHERE session_id = ? AND branch_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{sessionId, newBranchID}, &firstMessageInNewBranchID, &firstMessageBranchID, &firstMessageParentID)
+		querySingleRow(t, sdb, "SELECT id, branch_id, parent_message_id FROM S.messages WHERE session_id = ? AND branch_id = ? ORDER BY created_at ASC LIMIT 1", []interface{}{sdb.LocalSessionId(), newBranchID}, &firstMessageInNewBranchID, &firstMessageBranchID, &firstMessageParentID)
 		if firstMessageBranchID != newBranchID {
 			t.Errorf("Expected first message branch ID %s, got %s", newBranchID, firstMessageBranchID)
 		}
@@ -523,7 +541,7 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 
 		// 5. Verify chosen_next_id of the parent message
 		var chosenNextID sql.NullInt64
-		querySingleRow(t, testDB, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{firstMessageID}, &chosenNextID)
+		querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{firstMessageID}, &chosenNextID)
 		if !chosenNextID.Valid || chosenNextID.Int64 != int64(firstMessageInNewBranchID) {
 			t.Errorf("Expected chosen_next_id for parent message to be %d, got %d", firstMessageInNewBranchID, chosenNextID.Int64)
 		}
@@ -532,32 +550,32 @@ func TestCreateBranchHandler_BranchIDConsistency(t *testing.T) {
 
 // TestFirstMessageEditing tests the functionality of editing the first message in a session
 func TestFirstMessageEditing(t *testing.T) {
-
 	// Scenario 1: Edit first message when there's only one message
 	t.Run("Scenario1_SingleMessage", func(t *testing.T) {
 		router, testDB, _ := setupTest(t)
 
 		// Create a new session
 		sessionId := database.GenerateID()
-		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
+		sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
+		defer sdb.Close()
 
 		// Create a message chain and add the first message
-		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), sdb, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
 
-		firstMsg, err := mc.Add(context.Background(), testDB, Message{Text: "First message", Type: TypeUserText})
+		firstMsg, err := mc.Add(Message{Text: "First message", Type: TypeUserText})
 		if err != nil {
 			t.Fatalf("Failed to add first message: %v", err)
 		}
 
 		// Verify chosen_first_id is set to first message
 		var chosenFirstID *int
-		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&chosenFirstID)
+		err = sdb.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", sdb.LocalSessionId()).Scan(&chosenFirstID)
 		if err != nil {
 			t.Fatalf("Failed to get chosen_first_id: %v", err)
 		}
@@ -572,7 +590,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the session's chosen_first_id was updated to point to the new message
 		var newChosenFirstID *int
-		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&newChosenFirstID)
+		err = sdb.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", sdb.LocalSessionId()).Scan(&newChosenFirstID)
 		if err != nil {
 			t.Fatalf("Failed to get new chosen_first_id: %v", err)
 		}
@@ -582,7 +600,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the new message exists with the correct content
 		var messageText string
-		err = testDB.QueryRow("SELECT text FROM messages WHERE id = ?", *newChosenFirstID).Scan(&messageText)
+		err = sdb.QueryRow("SELECT text FROM S.messages WHERE id = ?", *newChosenFirstID).Scan(&messageText)
 		if err != nil {
 			t.Fatalf("Failed to get new message text: %v", err)
 		}
@@ -592,7 +610,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the new message has no parent (it's a first message)
 		var parentMessageID *int
-		err = testDB.QueryRow("SELECT parent_message_id FROM messages WHERE id = ?", *newChosenFirstID).Scan(&parentMessageID)
+		err = sdb.QueryRow("SELECT parent_message_id FROM S.messages WHERE id = ?", *newChosenFirstID).Scan(&parentMessageID)
 		if err != nil {
 			t.Fatalf("Failed to get parent_message_id: %v", err)
 		}
@@ -601,11 +619,11 @@ func TestFirstMessageEditing(t *testing.T) {
 		}
 
 		// Test GetSessionHistory returns only the edited first message chain
-		session, err := database.GetSession(testDB, sessionId)
+		session, err := database.GetSession(sdb)
 		if err != nil {
 			t.Fatalf("Failed to get session: %v", err)
 		}
-		history, err := database.GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
+		history, err := database.GetSessionHistory(sdb, session.PrimaryBranchID)
 		if err != nil {
 			t.Fatalf("GetSessionHistory failed: %v", err)
 		}
@@ -627,35 +645,36 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Create a new session
 		sessionId := database.GenerateID()
-		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
+		sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
+		defer sdb.Close()
 
 		// Create a message chain with multiple messages: A1 -> B1 -> C1
-		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), sdb, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
 
-		msgA1, err := mc.Add(context.Background(), testDB, Message{Text: "Message A1", Type: TypeUserText})
+		msgA1, err := mc.Add(Message{Text: "Message A1", Type: TypeUserText})
 		if err != nil {
 			t.Fatalf("Failed to add message A1: %v", err)
 		}
 
-		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message B1", Type: TypeModelText})
+		_, err = mc.Add(Message{Text: "Message B1", Type: TypeModelText})
 		if err != nil {
 			t.Fatalf("Failed to add message B1: %v", err)
 		}
 
-		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message C1", Type: TypeUserText})
+		_, err = mc.Add(Message{Text: "Message C1", Type: TypeUserText})
 		if err != nil {
 			t.Fatalf("Failed to add message C1: %v", err)
 		}
 
 		// Verify the current first message
 		var chosenFirstID *int
-		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&chosenFirstID)
+		err = sdb.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", sdb.LocalSessionId()).Scan(&chosenFirstID)
 		if err != nil {
 			t.Fatalf("Failed to get chosen_first_id: %v", err)
 		}
@@ -670,7 +689,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the session's chosen_first_id was updated
 		var newChosenFirstID *int
-		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&newChosenFirstID)
+		err = sdb.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", sdb.LocalSessionId()).Scan(&newChosenFirstID)
 		if err != nil {
 			t.Fatalf("Failed to get new chosen_first_id: %v", err)
 		}
@@ -680,7 +699,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the new message content
 		var messageText string
-		err = testDB.QueryRow("SELECT text FROM messages WHERE id = ?", *newChosenFirstID).Scan(&messageText)
+		err = sdb.QueryRow("SELECT text FROM S.messages WHERE id = ?", *newChosenFirstID).Scan(&messageText)
 		if err != nil {
 			t.Fatalf("Failed to get new message text: %v", err)
 		}
@@ -690,7 +709,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the new first message starts a new chain (doesn't point to existing messages)
 		var chosenNextID *int
-		err = testDB.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", *newChosenFirstID).Scan(&chosenNextID)
+		err = sdb.QueryRow("SELECT chosen_next_id FROM S.messages WHERE id = ?", *newChosenFirstID).Scan(&chosenNextID)
 		if err != nil {
 			t.Fatalf("Failed to get chosen_next_id: %v", err)
 		}
@@ -699,11 +718,11 @@ func TestFirstMessageEditing(t *testing.T) {
 		}
 
 		// Test GetSessionHistory returns the correct chain after first message edit
-		session, err := database.GetSession(testDB, sessionId)
+		session, err := database.GetSession(sdb)
 		if err != nil {
 			t.Fatalf("Failed to get session: %v", err)
 		}
-		history, err := database.GetSessionHistory(testDB, sessionId, session.PrimaryBranchID)
+		history, err := database.GetSessionHistory(sdb, session.PrimaryBranchID)
 		if err != nil {
 			t.Fatalf("GetSessionHistory failed: %v", err)
 		}
@@ -733,28 +752,29 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Create a new session
 		sessionId := database.GenerateID()
-		primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
+		sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "")
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
+		defer sdb.Close()
 
 		// Create initial chain: A1 -> B1 -> C1
-		mc, err := database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err := database.NewMessageChain(context.Background(), sdb, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create message chain: %v", err)
 		}
 
-		msgA1, err := mc.Add(context.Background(), testDB, Message{Text: "Message A1", Type: TypeUserText})
+		msgA1, err := mc.Add(Message{Text: "Message A1", Type: TypeUserText})
 		if err != nil {
 			t.Fatalf("Failed to add message A1: %v", err)
 		}
 
-		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message B1", Type: TypeModelText})
+		_, err = mc.Add(Message{Text: "Message B1", Type: TypeModelText})
 		if err != nil {
 			t.Fatalf("Failed to add message B1: %v", err)
 		}
 
-		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message C1", Type: TypeUserText})
+		_, err = mc.Add(Message{Text: "Message C1", Type: TypeUserText})
 		if err != nil {
 			t.Fatalf("Failed to add message C1: %v", err)
 		}
@@ -766,26 +786,26 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Get the new first message ID (A2)
 		var newChosenFirstID *int
-		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&newChosenFirstID)
+		err = sdb.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", sdb.LocalSessionId()).Scan(&newChosenFirstID)
 		if err != nil {
 			t.Fatalf("Failed to get new chosen_first_id: %v", err)
 		}
 
 		// Get the last message ID from the current chain
 		var lastMessageID int
-		err = testDB.QueryRow("SELECT id FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 1", sessionId).Scan(&lastMessageID)
+		err = sdb.QueryRow("SELECT id FROM S.messages WHERE session_id = ? ORDER BY id DESC LIMIT 1", sdb.LocalSessionId()).Scan(&lastMessageID)
 		if err != nil {
 			t.Fatalf("Failed to get last message ID: %v", err)
 		}
 
 		// Create new chain from the last message
-		mc, err = database.NewMessageChain(context.Background(), testDB, sessionId, primaryBranchID)
+		mc, err = database.NewMessageChain(context.Background(), sdb, primaryBranchID)
 		if err != nil {
 			t.Fatalf("Failed to create new message chain: %v", err)
 		}
 		mc.LastMessageID = lastMessageID // Set last message to the current last message
 
-		_, err = mc.Add(context.Background(), testDB, Message{Text: "Message B2", Type: TypeModelText})
+		_, err = mc.Add(Message{Text: "Message B2", Type: TypeModelText})
 		if err != nil {
 			t.Fatalf("Failed to add message B2: %v", err)
 		}
@@ -797,7 +817,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the final first message
 		var finalChosenFirstID *int
-		err = testDB.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionId).Scan(&finalChosenFirstID)
+		err = sdb.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", sdb.LocalSessionId()).Scan(&finalChosenFirstID)
 		if err != nil {
 			t.Fatalf("Failed to get final chosen_first_id: %v", err)
 		}
@@ -807,7 +827,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the final first message content
 		var finalMessageText string
-		err = testDB.QueryRow("SELECT text FROM messages WHERE id = ?", *finalChosenFirstID).Scan(&finalMessageText)
+		err = sdb.QueryRow("SELECT text FROM S.messages WHERE id = ?", *finalChosenFirstID).Scan(&finalMessageText)
 		if err != nil {
 			t.Fatalf("Failed to get final message text: %v", err)
 		}
@@ -817,7 +837,7 @@ func TestFirstMessageEditing(t *testing.T) {
 
 		// Verify the final first message starts a new chain (doesn't point to existing messages)
 		var chosenNextID *int
-		err = testDB.QueryRow("SELECT chosen_next_id FROM messages WHERE id = ?", *finalChosenFirstID).Scan(&chosenNextID)
+		err = sdb.QueryRow("SELECT chosen_next_id FROM S.messages WHERE id = ?", *finalChosenFirstID).Scan(&chosenNextID)
 		if err != nil {
 			t.Fatalf("Failed to get chosen_next_id: %v", err)
 		}

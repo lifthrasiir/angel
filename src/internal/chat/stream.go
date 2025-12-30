@@ -24,7 +24,7 @@ var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 
 // Helper function to stream LLM response
 func streamLLMResponse(
-	db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
+	db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
 	ew EventWriter, mc *database.MessageChain, inferSessionName bool, callStartTime time.Time, fullHistoryForLLM []FrontendMessage,
 ) error {
 	var agentResponseText string
@@ -37,7 +37,7 @@ func streamLLMResponse(
 	defer cancel()
 
 	// Set all required context values
-	ctx = database.ContextWith(ctx, db)
+	ctx = database.ContextWith(ctx, db.Database)
 	ctx = llm.ContextWithModels(ctx, models)
 	ctx = llm.ContextWithGeminiAuth(ctx, ga)
 	ctx = tool.ContextWith(ctx, tools)
@@ -91,7 +91,7 @@ func streamLLMResponse(
 					log.Printf("Failed to update initial model message with error: %v", err)
 				}
 			} else { // If no model message was created yet, add a new error message
-				if _, err := mc.Add(ctx, db, Message{Type: TypeModelError, Text: errorMessage}); err != nil {
+				if _, err := mc.Add(Message{Type: TypeModelError, Text: errorMessage}); err != nil {
 					log.Printf("Failed to add model error message to DB: %v", err)
 				}
 			}
@@ -151,7 +151,7 @@ func streamLLMResponse(
 					hasFunctionCall = true
 
 					fcJson, _ := json.Marshal(fc)
-					newMessage, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson), State: state})
+					newMessage, err := mc.Add(Message{Type: TypeFunctionCall, Text: string(fcJson), State: state})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save function call message")
 					}
@@ -184,7 +184,7 @@ func streamLLMResponse(
 						t := lastUsageMetadata.PromptTokenCount
 						promptTokens = &t
 					}
-					newMessage, err = mc.Add(ctx, db, Message{
+					newMessage, err = mc.Add(Message{
 						Type:            TypeFunctionResponse,
 						Text:            string(frJson),
 						Attachments:     toolResults.Attachments,
@@ -231,7 +231,7 @@ func streamLLMResponse(
 						Args: argsMap,
 					}
 					fcJson, _ := json.Marshal(fc)
-					newMessage, err := mc.Add(ctx, db, Message{Type: TypeFunctionCall, Text: string(fcJson), State: state})
+					newMessage, err := mc.Add(Message{Type: TypeFunctionCall, Text: string(fcJson), State: state})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save executable code message")
 					}
@@ -256,7 +256,7 @@ func streamLLMResponse(
 						t := lastUsageMetadata.PromptTokenCount
 						promptTokens = &t
 					}
-					newMessage, err := mc.Add(ctx, db, Message{Type: TypeFunctionResponse, Text: string(frJson), CumulTokenCount: promptTokens, State: state})
+					newMessage, err := mc.Add(Message{Type: TypeFunctionResponse, Text: string(frJson), CumulTokenCount: promptTokens, State: state})
 					if err != nil {
 						return logAndErrorf(err, "Failed to save code execution result message")
 					}
@@ -298,7 +298,7 @@ func streamLLMResponse(
 					}
 
 					// Create a message with empty text but with attachment
-					newMessage, err := mc.Add(ctx, db, Message{
+					newMessage, err := mc.Add(Message{
 						Type:        TypeModelText,
 						Text:        "", // Empty text for inlineData messages
 						State:       state,
@@ -355,7 +355,7 @@ func streamLLMResponse(
 						thoughtText = fmt.Sprintf("Thinking...\n%s", part.Text)
 					}
 
-					newMessage, err := mc.Add(ctx, db, Message{Type: TypeThought, Text: thoughtText, State: state})
+					newMessage, err := mc.Add(Message{Type: TypeThought, Text: thoughtText, State: state})
 					if err != nil {
 						log.Printf("Failed to save thought message: %v", err)
 					}
@@ -373,7 +373,7 @@ func streamLLMResponse(
 						// Initialize agentResponseText for the new model message
 						agentResponseText = ""
 						// Add the initial model message to DB with empty text
-						newMessage, err := mc.Add(ctx, db, Message{Type: TypeModelText, Text: "", State: state})
+						newMessage, err := mc.Add(Message{Type: TypeModelText, Text: "", State: state})
 						if err != nil {
 							return logAndErrorf(err, "Failed to add new model message to DB")
 						}
@@ -395,7 +395,7 @@ func streamLLMResponse(
 
 		addCancelErrorMessage := func() {
 			// Add a separate error message to the database
-			if _, err := mc.Add(ctx, db, Message{Type: TypeModelError, Text: "user canceled request"}); err != nil {
+			if _, err := mc.Add(Message{Type: TypeModelError, Text: "user canceled request"}); err != nil {
 				log.Printf("Failed to add error message to DB: %v", err)
 			}
 		}
@@ -417,7 +417,7 @@ func streamLLMResponse(
 		errorMessage := FinishReasonMessage(firstFinishReason)
 
 		// Add error message to database
-		if _, err := mc.Add(ctx, db, Message{Type: TypeModelError, Text: errorMessage}); err != nil {
+		if _, err := mc.Add(Message{Type: TypeModelError, Text: errorMessage}); err != nil {
 			log.Printf("Failed to add error message to DB: %v", err)
 		}
 
@@ -442,9 +442,9 @@ func streamLLMResponse(
 
 	// Only infer session name if inferSessionName is true and the name is still empty
 	if inferSessionName {
-		currentSession, err := database.GetSession(db, initialState.SessionId)
+		currentSession, err := database.GetSession(db)
 		if err != nil {
-			log.Printf("streamLLMResponse: Failed to get session %s for initial name check: %v", initialState.SessionId, err)
+			log.Printf("streamLLMResponse: Failed to get session %s for initial name check: %v", db.SessionId(), err)
 			// If GetSession fails, assume name might be missing and attempt inference.
 		}
 
@@ -462,7 +462,7 @@ func streamLLMResponse(
 				if len(initialState.History) > 0 && len(initialState.History[0].Parts) > 0 && initialState.History[0].Parts[0].Text != "" {
 					userMsg = initialState.History[0].Parts[0].Text
 				}
-				inferAndSetSessionName(db, models, ga, tools, initialState.SessionId, userMsg, ew, mc.LastMessageModel)
+				inferAndSetSessionName(db, models, ga, tools, userMsg, ew, mc.LastMessageModel)
 			}()
 		}
 	}
@@ -488,7 +488,9 @@ func streamLLMResponse(
 	return nil
 }
 
-func handlePendingConfirmation(db *database.Database, ew EventWriter, initialState InitialState, pendingConfirmation *tool.PendingConfirmation) error {
+func handlePendingConfirmation(
+	db *database.SessionDatabase, ew EventWriter, initialState InitialState, pendingConfirmation *tool.PendingConfirmation,
+) error {
 	confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
 	if marshalErr != nil {
 		ew.Broadcast(EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
@@ -510,7 +512,7 @@ func handlePendingConfirmation(db *database.Database, ew EventWriter, initialSta
 }
 
 func checkStreamCancellation(
-	ctx context.Context, initialState InitialState, db *database.Database,
+	ctx context.Context, initialState InitialState, db *database.SessionDatabase,
 	ew EventWriter, modelMessageID int, agentResponseText string, cancelCallback func(),
 ) error {
 	select {
@@ -536,27 +538,27 @@ func checkStreamCancellation(
 
 // inferAndSetSessionName infers the session name using LLM and updates it in the DB.
 func inferAndSetSessionName(
-	db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
-	sessionId string, userMessage string, ew EventWriter, modelToUse string,
+	db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	userMessage string, ew EventWriter, modelToUse string,
 ) {
-	log.Printf("inferAndSetSessionName: Starting for session %s", sessionId)
+	log.Printf("inferAndSetSessionName: Starting for session %s", db.SessionId())
 
 	var inferredName string // Initialize to empty string
 
 	defer func() {
 		// This defer will execute at the end of the function, ensuring 'N' is sent.
 		// If inferredName is still empty, it means inference failed or was skipped.
-		ew.Send(EventSessionName, fmt.Sprintf("%s\n%s", sessionId, inferredName))
+		ew.Send(EventSessionName, fmt.Sprintf("%s\n%s", db.SessionId(), inferredName))
 	}()
 
 	if db == nil {
-		log.Printf("inferAndSetSessionName: Database connection is nil for session %s", sessionId)
+		log.Printf("inferAndSetSessionName: Database connection is nil for session %s", db.SessionId())
 		return
 	}
 
-	session, err := database.GetSession(db, sessionId)
+	session, err := database.GetSession(db)
 	if err != nil {
-		log.Printf("Failed to get session %s for name inference: %v", sessionId, err)
+		log.Printf("Failed to get session %s for name inference: %v", db.SessionId(), err)
 		return // inferredName remains empty
 	}
 	if session.Name != "" { // If name is not empty, user has set it, do not infer
@@ -572,10 +574,10 @@ func inferAndSetSessionName(
 			extractedName := strings.TrimSpace(matches[1])
 			if extractedName != "" {
 				inferredName = extractedName
-				if err := database.UpdateSessionName(db, sessionId, inferredName); err != nil {
-					log.Printf("Failed to update session name from comment for %s: %v", sessionId, err)
+				if err := database.UpdateSessionName(db, inferredName); err != nil {
+					log.Printf("Failed to update session name from comment for %s: %v", db.SessionId(), err)
 				}
-				log.Printf("inferAndSetSessionName: Inferred name from comment for session %s: %s", sessionId, inferredName)
+				log.Printf("inferAndSetSessionName: Inferred name from comment for session %s: %s", db.SessionId(), inferredName)
 				return // Name inferred from comment, no need for LLM
 			}
 		}
@@ -593,7 +595,7 @@ func inferAndSetSessionName(
 
 	// Create new context with database connection for subagent
 	subagentCtx := context.Background()
-	subagentCtx = database.ContextWith(subagentCtx, db)
+	subagentCtx = database.ContextWith(subagentCtx, db.Database)
 	subagentCtx = llm.ContextWithModels(subagentCtx, models)
 	subagentCtx = llm.ContextWithGeminiAuth(subagentCtx, ga)
 	subagentCtx = tool.ContextWith(subagentCtx, tools)
@@ -618,25 +620,25 @@ func inferAndSetSessionName(
 		IncludeThoughts: false,
 	})
 	if err != nil {
-		log.Printf("Failed to infer session name for %s: %v", sessionId, err)
+		log.Printf("Failed to infer session name for %s: %v", db.SessionId(), err)
 		return // inferredName remains empty
 	}
 
 	llmInferredNameText := strings.TrimSpace(oneShotResult.Text)
 	if len(llmInferredNameText) > 100 || strings.Contains(llmInferredNameText, "\n") {
-		log.Printf("Inferred name for session %s is invalid (too long or multi-line): %s", sessionId, llmInferredNameText)
+		log.Printf("Inferred name for session %s is invalid (too long or multi-line): %s", db.SessionId(), llmInferredNameText)
 		return // inferredName remains empty
 	}
 
 	inferredName = llmInferredNameText // Set inferredName only if successful
 
-	if err := database.UpdateSessionName(db, sessionId, inferredName); err != nil {
-		log.Printf("Failed to update session name for %s: %v", sessionId, err)
+	if err := database.UpdateSessionName(db, inferredName); err != nil {
+		log.Printf("Failed to update session name for %s: %v", db.SessionId(), err)
 		// If DB update fails, inferredName is still the valid one, but DB might not reflect it.
 		// We still send the inferredName to frontend, as it's the best we have.
 		return
 	}
-	log.Printf("inferAndSetSessionName: Finished for session %s. Inferred name: %s", sessionId, inferredName)
+	log.Printf("inferAndSetSessionName: Finished for session %s. Inferred name: %s", db.SessionId(), inferredName)
 }
 
 // logAndErrorf logs an error and returns a new error that wraps the original.

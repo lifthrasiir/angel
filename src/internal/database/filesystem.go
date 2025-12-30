@@ -1,4 +1,4 @@
-package env
+package database
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/lifthrasiir/angel/filesystem"
-	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -33,14 +33,20 @@ func GetSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS,
 	entry, ok := sessionFSMap[sessionId]
 	if !ok {
 		// Get DB and EnvConfig from context
-		db, err := database.FromContext(ctx)
+		db, err := FromContext(ctx)
 		if err != nil {
 			return nil, err
 		}
-		config, err := EnvConfigFromContext(ctx)
+		config, err := env.EnvConfigFromContext(ctx)
 		if err != nil {
 			return nil, err
 		}
+
+		sdb, err := db.WithSession(sessionId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get session database for session %s: %w", sessionId, err)
+		}
+		defer sdb.Close()
 
 		baseDir := config.SessionDir()
 		sf, err := filesystem.NewSessionFS(sessionId, baseDir)
@@ -49,7 +55,7 @@ func GetSessionFS(ctx context.Context, sessionId string) (*filesystem.SessionFS,
 		}
 
 		// Get the session environment to retrieve roots
-		roots, _, err := database.GetLatestSessionEnv(db, sessionId)
+		roots, _, err := GetLatestSessionEnv(sdb)
 		if err != nil {
 			log.Printf("getSessionFS: Failed to get session %s to retrieve roots: %v", sessionId, err)
 			return nil, fmt.Errorf("failed to get session roots for session %s: %w", sessionId, err)

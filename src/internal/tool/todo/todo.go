@@ -9,7 +9,7 @@ import (
 
 	"github.com/lifthrasiir/angel/filesystem"
 	. "github.com/lifthrasiir/angel/gemini"
-	"github.com/lifthrasiir/angel/internal/env"
+	"github.com/lifthrasiir/angel/internal/database"
 	"github.com/lifthrasiir/angel/internal/tool"
 )
 
@@ -85,11 +85,11 @@ var validPriorities = map[string]bool{
 
 // WriteTodoTool handles the write_todo tool call.
 func WriteTodoTool(ctx context.Context, args map[string]interface{}, params tool.HandlerParams) (tool.HandlerResults, error) {
-	sf, err := env.GetSessionFS(ctx, params.SessionId)
+	sf, err := database.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for write_todo: %w", err)
 	}
-	defer env.ReleaseSessionFS(params.SessionId)
+	defer database.ReleaseSessionFS(params.SessionId)
 
 	action, ok := args["action"].(string)
 	if !ok || action == "" {

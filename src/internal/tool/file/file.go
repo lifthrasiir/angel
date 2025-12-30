@@ -11,7 +11,6 @@ import (
 	"github.com/lifthrasiir/angel/editor"
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
-	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -26,11 +25,11 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params tool.
 		return tool.HandlerResults{}, fmt.Errorf("invalid file_path argument for read_file")
 	}
 
-	sf, err := env.GetSessionFS(ctx, params.SessionId)
+	sf, err := database.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for read_file: %w", err)
 	}
-	defer env.ReleaseSessionFS(params.SessionId)
+	defer database.ReleaseSessionFS(params.SessionId)
 
 	content, err := sf.ReadFile(absolutePath)
 	if err != nil {
@@ -48,8 +47,13 @@ func ReadFileTool(ctx context.Context, args map[string]interface{}, params tool.
 		if err != nil {
 			return tool.HandlerResults{}, err
 		}
+		sdb, err := db.WithSession(params.SessionId)
+		if err != nil {
+			return tool.HandlerResults{}, err
+		}
+		defer sdb.Close()
 
-		hash, err := database.SaveBlob(ctx, db, content)
+		hash, err := database.SaveBlob(ctx, sdb, content)
 		if err != nil {
 			return tool.HandlerResults{}, fmt.Errorf("failed to save blob for %s: %w", absolutePath, err)
 		}
@@ -116,11 +120,11 @@ func WriteFileTool(ctx context.Context, args map[string]interface{}, params tool
 		}
 	}
 
-	sf, err := env.GetSessionFS(ctx, params.SessionId)
+	sf, err := database.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for write_file: %w", err)
 	}
-	defer env.ReleaseSessionFS(params.SessionId)
+	defer database.ReleaseSessionFS(params.SessionId)
 
 	// 1. Read old content
 	oldContentStr := ""
@@ -156,11 +160,11 @@ func ListDirectoryTool(ctx context.Context, args map[string]interface{}, params 
 		return tool.HandlerResults{}, fmt.Errorf("invalid path argument for list_directory")
 	}
 
-	sf, err := env.GetSessionFS(ctx, params.SessionId)
+	sf, err := database.GetSessionFS(ctx, params.SessionId)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to get SessionFS for list_directory: %w", err)
 	}
-	defer env.ReleaseSessionFS(params.SessionId)
+	defer database.ReleaseSessionFS(params.SessionId)
 
 	entries, err := sf.ReadDir(path)
 	if err != nil {

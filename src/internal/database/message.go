@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 
@@ -12,8 +11,10 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
-// DbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
-type DbOrTx interface {
+// SessionDbOrTx interface defines the common methods used from *sql.DB and *sql.Tx.
+type SessionDbOrTx interface {
+	SessionId() string
+	LocalSessionId() string
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
@@ -23,8 +24,10 @@ type DbOrTx interface {
 }
 
 // CreateBranch creates a new branch in the
-func CreateBranch(db *Database, branchID string, sessionID string, parentBranchID *string, branchFromMessageID *int) (string, error) {
-	_, err := db.Exec("INSERT INTO branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, ?, ?)", branchID, sessionID, parentBranchID, branchFromMessageID)
+func CreateBranch(db *SessionDatabase, branchID string, parentBranchID *string, branchFromMessageID *int) (string, error) {
+	_, err := db.Exec(
+		"INSERT INTO S.branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, ?, ?)",
+		branchID, db.LocalSessionId(), parentBranchID, branchFromMessageID)
 	if err != nil {
 		return "", fmt.Errorf("failed to create branch: %w", err)
 	}
@@ -32,7 +35,7 @@ func CreateBranch(db *Database, branchID string, sessionID string, parentBranchI
 }
 
 // AddMessageToSession adds a message to a session in the
-func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, error) {
+func AddMessageToSession(ctx context.Context, db SessionDbOrTx, msg Message) (int, error) {
 	// Process attachments: save blob data and store only hashes
 	for i := range msg.Attachments {
 		if msg.Attachments[i].Data != nil {
@@ -51,11 +54,11 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 	}
 
 	result, err := db.Exec(`
-		INSERT INTO messages (
+		INSERT INTO S.messages (
 			session_id, branch_id, parent_message_id, chosen_next_id, text,
 			type, attachments, cumul_token_count, model, generation, state, aux)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.SessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Text,
+		msg.LocalSessionID, msg.BranchID, msg.ParentMessageID, msg.ChosenNextID, msg.Text,
 		msg.Type, string(attachmentsJSON), msg.CumulTokenCount, msg.Model, msg.Generation, msg.State, msg.Aux)
 	if err != nil {
 		log.Printf("AddMessageToSession: Failed to add message to session: %v", err)
@@ -80,7 +83,7 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 			// Don't fail the operation, but log the error
 		}
 
-		_, err = db.Exec("INSERT INTO message_trigrams(rowid) VALUES (?)", messageID)
+		_, err = db.Exec("INSERT INTO S.message_trigrams(rowid) VALUES (?)", messageID)
 		if err != nil {
 			log.Printf("AddMessageToSession: Failed to insert into message_trigrams: %v", err)
 			// Don't fail the operation, but log the error
@@ -91,8 +94,8 @@ func AddMessageToSession(ctx context.Context, db DbOrTx, msg Message) (int, erro
 }
 
 // UpdateMessageChosenNextID updates the chosen_next_id for a specific message.
-func UpdateMessageChosenNextID(db DbOrTx, messageID int, chosenNextID *int) error {
-	_, err := db.Exec("UPDATE messages SET chosen_next_id = ? WHERE id = ?", chosenNextID, messageID)
+func UpdateMessageChosenNextID(db SessionDbOrTx, messageID int, chosenNextID *int) error {
+	_, err := db.Exec("UPDATE S.messages SET chosen_next_id = ? WHERE id = ?", chosenNextID, messageID)
 	if err != nil {
 		return fmt.Errorf("failed to update message chosen_next_id: %w", err)
 	}
@@ -100,8 +103,8 @@ func UpdateMessageChosenNextID(db DbOrTx, messageID int, chosenNextID *int) erro
 }
 
 // UpdateSessionPrimaryBranchID updates the primary_branch_id for a session.
-func UpdateSessionPrimaryBranchID(db *Database, sessionID string, branchID string) error {
-	_, err := db.Exec("UPDATE sessions SET primary_branch_id = ? WHERE id = ?", branchID, sessionID)
+func UpdateSessionPrimaryBranchID(db *SessionDatabase, branchID string) error {
+	_, err := db.Exec("UPDATE S.sessions SET primary_branch_id = ? WHERE id = ?", branchID, db.LocalSessionId())
 	if err != nil {
 		log.Printf("UpdateSessionPrimaryBranchID: Failed to update session primary_branch_id: %v", err)
 		return fmt.Errorf("failed to update session primary_branch_id: %w", err)
@@ -110,10 +113,10 @@ func UpdateSessionPrimaryBranchID(db *Database, sessionID string, branchID strin
 }
 
 // GetBranch retrieves a branch by its ID.
-func GetBranch(db *Database, branchID string) (Branch, error) {
+func GetBranch(db *SessionDatabase, branchID string) (Branch, error) {
 	var b Branch
-	row := db.QueryRow("SELECT id, session_id, parent_branch_id, branch_from_message_id, created_at, pending_confirmation FROM branches WHERE id = ?", branchID)
-	err := row.Scan(&b.ID, &b.SessionID, &b.ParentBranchID, &b.BranchFromMessageID, &b.CreatedAt, &b.PendingConfirmation)
+	row := db.QueryRow("SELECT id, session_id, parent_branch_id, branch_from_message_id, created_at, pending_confirmation FROM S.branches WHERE id = ?", branchID)
+	err := row.Scan(&b.ID, &b.LocalSessionID, &b.ParentBranchID, &b.BranchFromMessageID, &b.CreatedAt, &b.PendingConfirmation)
 	if err != nil {
 		return b, fmt.Errorf("failed to get branch: %w", err)
 	}
@@ -121,8 +124,8 @@ func GetBranch(db *Database, branchID string) (Branch, error) {
 }
 
 // UpdateBranchPendingConfirmation updates the pending_confirmation for a branch.
-func UpdateBranchPendingConfirmation(db *Database, branchID string, confirmationData string) error {
-	_, err := db.Exec("UPDATE branches SET pending_confirmation = ? WHERE id = ?", confirmationData, branchID)
+func UpdateBranchPendingConfirmation(db *SessionDatabase, branchID string, confirmationData string) error {
+	_, err := db.Exec("UPDATE S.branches SET pending_confirmation = ? WHERE id = ?", confirmationData, branchID)
 	if err != nil {
 		return fmt.Errorf("failed to update branch pending_confirmation: %w", err)
 	}
@@ -131,43 +134,46 @@ func UpdateBranchPendingConfirmation(db *Database, branchID string, confirmation
 
 // GetSessionHistory retrieves the chat history for a given session and its primary branch.
 // It includes all messages, including thoughts.
-func GetSessionHistory(db DbOrTx, sessionID string, primaryBranchID string) ([]FrontendMessage, error) {
-	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, 0, 0)
+func GetSessionHistory(db SessionDbOrTx, primaryBranchID string) ([]FrontendMessage, error) {
+	return getSessionHistoryInternal(db, primaryBranchID, false, false, 0, 0)
 }
 
 // GetSessionHistoryContext retrieves the chat history for a given session and its primary branch,
 // discarding thoughts and ignoring messages before the last compression or clear command.
-func GetSessionHistoryContext(db DbOrTx, sessionID string, primaryBranchID string) ([]FrontendMessage, error) {
-	return getSessionHistoryInternal(db, sessionID, primaryBranchID, true, true, 0, 0)
+func GetSessionHistoryContext(db SessionDbOrTx, primaryBranchID string) ([]FrontendMessage, error) {
+	return getSessionHistoryInternal(db, primaryBranchID, true, true, 0, 0)
 }
 
 // GetSessionHistoryPaginated retrieves a paginated chat history for a given session and branch.
 // It fetches messages with IDs less than beforeMessageID, up to fetchLimit.
-func GetSessionHistoryPaginated(db DbOrTx, sessionID string, primaryBranchID string, beforeMessageID int, fetchLimit int) ([]FrontendMessage, error) {
+func GetSessionHistoryPaginated(db SessionDbOrTx, primaryBranchID string, beforeMessageID int, fetchLimit int) ([]FrontendMessage, error) {
 	// For paginated calls, we need to fetch one more message to get proper possibleBranches for the first message
 	if fetchLimit > 0 {
-		return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, beforeMessageID, fetchLimit+1)
+		return getSessionHistoryInternal(db, primaryBranchID, false, false, beforeMessageID, fetchLimit+1)
 	}
-	return getSessionHistoryInternal(db, sessionID, primaryBranchID, false, false, beforeMessageID, fetchLimit)
+	return getSessionHistoryInternal(db, primaryBranchID, false, false, beforeMessageID, fetchLimit)
 }
 
 // GetSessionHistoryPaginatedWithAutoBranch retrieves paginated chat history with automatic branch detection.
 // If beforeMessageID is specified, it automatically uses the branch containing that message.
 // Otherwise, it falls back to the session's primary branch.
-func GetSessionHistoryPaginatedWithAutoBranch(db *Database, sessionID string, beforeMessageID int, fetchLimit int) ([]FrontendMessage, string, error) {
+func GetSessionHistoryPaginatedWithAutoBranch(db *SessionDatabase, beforeMessageID int, fetchLimit int) ([]FrontendMessage, string, error) {
 	var targetBranchID string
 
 	// Get the session's primary branch ID as default
-	err := db.QueryRow("SELECT primary_branch_id FROM sessions WHERE id = ?", sessionID).Scan(&targetBranchID)
+	err := db.QueryRow("SELECT primary_branch_id FROM S.sessions WHERE id = ?", db.LocalSessionId()).Scan(&targetBranchID)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get primary branch ID for session %s: %w", sessionID, err)
+		return nil, "", fmt.Errorf("failed to get primary branch ID for session %s: %w", db.SessionId(), err)
 	}
 
 	// If beforeMessageID is specified, find which branch contains this message
 	if beforeMessageID > 0 {
 		var messageBranchID string
 		var parentMessageID sql.NullInt64
-		err := db.QueryRow("SELECT branch_id, parent_message_id FROM messages WHERE id = ? AND session_id = ?", beforeMessageID, sessionID).Scan(&messageBranchID, &parentMessageID)
+		err := db.QueryRow(
+			"SELECT branch_id, parent_message_id FROM S.messages WHERE id = ? AND session_id = ?",
+			beforeMessageID, db.LocalSessionId(),
+		).Scan(&messageBranchID, &parentMessageID)
 		if err == nil && messageBranchID != "" {
 			// Default to the message's branch
 			targetBranchID = messageBranchID
@@ -175,7 +181,7 @@ func GetSessionHistoryPaginatedWithAutoBranch(db *Database, sessionID string, be
 			// If the message has a parent in a different branch, use the parent's branch instead
 			if parentMessageID.Valid {
 				var parentBranchID string
-				err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ?", parentMessageID.Int64).Scan(&parentBranchID)
+				err := db.QueryRow("SELECT branch_id FROM S.messages WHERE id = ?", parentMessageID.Int64).Scan(&parentBranchID)
 				if err == nil && parentBranchID != messageBranchID {
 					targetBranchID = parentBranchID
 				}
@@ -187,7 +193,7 @@ func GetSessionHistoryPaginatedWithAutoBranch(db *Database, sessionID string, be
 	}
 
 	// Get the paginated history using the determined branch
-	history, err := GetSessionHistoryPaginated(db, sessionID, targetBranchID, beforeMessageID, fetchLimit)
+	history, err := GetSessionHistoryPaginated(db, targetBranchID, beforeMessageID, fetchLimit)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get session history: %w", err)
 	}
@@ -196,8 +202,8 @@ func GetSessionHistoryPaginatedWithAutoBranch(db *Database, sessionID string, be
 }
 
 // UpdateMessageTokens updates the cumul_token_count for a specific message.
-func UpdateMessageTokens(db DbOrTx, messageID int, cumulTokenCount int) error {
-	_, err := db.Exec("UPDATE messages SET cumul_token_count = ? WHERE id = ?", cumulTokenCount, messageID)
+func UpdateMessageTokens(db SessionDbOrTx, messageID int, cumulTokenCount int) error {
+	_, err := db.Exec("UPDATE S.messages SET cumul_token_count = ? WHERE id = ?", cumulTokenCount, messageID)
 	if err != nil {
 		return fmt.Errorf("failed to update message tokens: %w", err)
 	}
@@ -205,7 +211,7 @@ func UpdateMessageTokens(db DbOrTx, messageID int, cumulTokenCount int) error {
 }
 
 // UpdateMessageContent updates the content of a message in the
-func UpdateMessageContent(db *Database, messageID int, content string, syncFTS bool) error {
+func UpdateMessageContent(db *SessionDatabase, messageID int, content string, syncFTS bool) error {
 	// Start transaction for atomic update
 	tx, err := db.Begin()
 	if err != nil {
@@ -214,7 +220,7 @@ func UpdateMessageContent(db *Database, messageID int, content string, syncFTS b
 	defer tx.Rollback()
 
 	// Update message content
-	stmt, err := tx.Prepare("UPDATE messages SET text = ? WHERE id = ?")
+	stmt, err := tx.Prepare("UPDATE S.messages SET text = ? WHERE id = ?")
 	if err != nil {
 		return fmt.Errorf("failed to prepare update message content statement: %w", err)
 	}
@@ -244,9 +250,9 @@ func UpdateMessageContent(db *Database, messageID int, content string, syncFTS b
 }
 
 // GetMessageBranchID retrieves the branch_id for a given message ID.
-func GetMessageBranchID(db *Database, messageID int) (string, error) {
+func GetMessageBranchID(db *SessionDatabase, messageID int) (string, error) {
 	var branchID string
-	err := db.QueryRow("SELECT branch_id FROM messages WHERE id = ?", messageID).Scan(&branchID)
+	err := db.QueryRow("SELECT branch_id FROM S.messages WHERE id = ?", messageID).Scan(&branchID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get branch_id for message %d: %w", messageID, err)
 	}
@@ -254,21 +260,26 @@ func GetMessageBranchID(db *Database, messageID int) (string, error) {
 }
 
 // GetLastMessageInBranch retrieves the ID and model of the last message in a given session and branch.
-func GetLastMessageInBranch(db DbOrTx, sessionID string, branchID string) (lastMessageID int, lastMessageModel string, lastMessageGeneration int, err error) {
-	row := db.QueryRow("SELECT id, model, generation FROM messages WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1", sessionID, branchID)
+func GetLastMessageInBranch(db SessionDbOrTx, branchID string) (lastMessageID int, lastMessageModel string, lastMessageGeneration int, err error) {
+	row := db.QueryRow(`
+		SELECT id, model, generation FROM S.messages
+		WHERE session_id = ? AND branch_id = ? AND chosen_next_id IS NULL ORDER BY created_at DESC LIMIT 1
+	`, db.LocalSessionId(), branchID)
 	err = row.Scan(&lastMessageID, &lastMessageModel, &lastMessageGeneration)
 	if err != nil {
-		err = fmt.Errorf("failed to get last message in branch: %w", err)
+		if err != sql.ErrNoRows {
+			err = fmt.Errorf("failed to get last message in branch: %w", err)
+		}
 		return
 	}
 	return
 }
 
 // GetMessageDetails retrieves the type, parent_message_id, and branch_id for a given message ID.
-func GetMessageDetails(db *Database, messageID int) (MessageType, sql.NullInt64, string, error) {
+func GetMessageDetails(db *SessionDatabase, messageID int) (MessageType, sql.NullInt64, string, error) {
 	var msgType, branchID string
 	var parentMessageID sql.NullInt64
-	row := db.QueryRow("SELECT type, parent_message_id, branch_id FROM messages WHERE id = ?", messageID)
+	row := db.QueryRow("SELECT type, parent_message_id, branch_id FROM S.messages WHERE id = ?", messageID)
 	err := row.Scan(&msgType, &parentMessageID, &branchID)
 	if err != nil {
 		return MessageType(""), sql.NullInt64{}, "", fmt.Errorf("failed to get message details: %w", err)
@@ -277,10 +288,10 @@ func GetMessageDetails(db *Database, messageID int) (MessageType, sql.NullInt64,
 }
 
 // GetOriginalNextMessageID retrieves the ID of the message that originally followed a given message in its branch.
-func GetOriginalNextMessageID(db *Database, parentMessageID int, branchID string) (sql.NullInt64, error) {
+func GetOriginalNextMessageID(db *SessionDatabase, parentMessageID int, branchID string) (sql.NullInt64, error) {
 	var originalNextMessageID sql.NullInt64
 	err := db.QueryRow(`
-		SELECT id FROM messages
+		SELECT id FROM S.messages
 		WHERE parent_message_id = ? AND branch_id = ?
 		ORDER BY created_at ASC LIMIT 1
 	`, parentMessageID, branchID).Scan(&originalNextMessageID)
@@ -291,10 +302,10 @@ func GetOriginalNextMessageID(db *Database, parentMessageID int, branchID string
 }
 
 // GetFirstMessageOfBranch retrieves the ID of the first message in a given branch that has a specific parent message.
-func GetFirstMessageOfBranch(db *Database, parentMessageID int, branchID string) (int, error) {
+func GetFirstMessageOfBranch(db *SessionDatabase, parentMessageID int, branchID string) (int, error) {
 	var firstMessageID int
 	err := db.QueryRow(`
-		SELECT id FROM messages
+		SELECT id FROM S.messages
 		WHERE parent_message_id = ? AND branch_id = ?
 		ORDER BY created_at ASC LIMIT 1
 	`, parentMessageID, branchID).Scan(&firstMessageID)
@@ -305,7 +316,7 @@ func GetFirstMessageOfBranch(db *Database, parentMessageID int, branchID string)
 }
 
 // GetMessageByID retrieves a single message by its ID.
-func GetMessageByID(db *Database, messageID int) (*Message, error) {
+func GetMessageByID(db *SessionDatabase, messageID int) (*Message, error) {
 	var m Message
 	var attachmentsJSON sql.NullString // Use sql.NullString to handle NULL attachments
 
@@ -313,10 +324,10 @@ func GetMessageByID(db *Database, messageID int) (*Message, error) {
 		SELECT
 			id, session_id, branch_id, parent_message_id, chosen_next_id,
 			text, type, attachments, cumul_token_count, created_at, model, generation, state, aux, indexed
-		FROM messages
+		FROM S.messages
 		WHERE id = ?
 	`, messageID).Scan(
-		&m.ID, &m.SessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
+		&m.ID, &m.LocalSessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
 		&m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model, &m.Generation,
 		&m.State, &m.Aux, &m.Indexed,
 	)
@@ -340,8 +351,8 @@ func GetMessageByID(db *Database, messageID int) (*Message, error) {
 }
 
 // UpdateSessionChosenFirstID updates the chosen_first_id for a specific session.
-func UpdateSessionChosenFirstID(db DbOrTx, sessionID string, chosenFirstID *int) error {
-	_, err := db.Exec("UPDATE sessions SET chosen_first_id = ? WHERE id = ?", chosenFirstID, sessionID)
+func UpdateSessionChosenFirstID(db SessionDbOrTx, chosenFirstID *int) error {
+	_, err := db.Exec("UPDATE S.sessions SET chosen_first_id = ? WHERE id = ?", chosenFirstID, db.LocalSessionId())
 	if err != nil {
 		return fmt.Errorf("failed to update session chosen_first_id: %w", err)
 	}
@@ -349,41 +360,41 @@ func UpdateSessionChosenFirstID(db DbOrTx, sessionID string, chosenFirstID *int)
 }
 
 // GetSessionChosenFirstID retrieves the chosen_first_id for a specific session.
-func GetSessionChosenFirstID(db *Database, sessionID string) (*int, error) {
+func GetSessionChosenFirstID(db *SessionDatabase) (*int, error) {
 	var chosenFirstID *int
-	err := db.QueryRow("SELECT chosen_first_id FROM sessions WHERE id = ?", sessionID).Scan(&chosenFirstID)
+	err := db.QueryRow("SELECT chosen_first_id FROM S.sessions WHERE id = ?", db.LocalSessionId()).Scan(&chosenFirstID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get chosen_first_id for session %s: %w", sessionID, err)
+		return nil, fmt.Errorf("failed to get chosen_first_id for session %s: %w", db.SessionId(), err)
 	}
 	return chosenFirstID, nil
 }
 
 // GetSessionFirstMessage retrieves the first message for a session using chosen_first_id.
-func GetSessionFirstMessage(db *Database, sessionID string) (*Message, error) {
-	chosenFirstID, err := GetSessionChosenFirstID(db, sessionID)
+func GetSessionFirstMessage(db *SessionDatabase) (*Message, error) {
+	chosenFirstID, err := GetSessionChosenFirstID(db)
 	if err != nil {
 		return nil, err
 	}
 	if chosenFirstID == nil {
-		return nil, fmt.Errorf("no first message set for session %s", sessionID)
+		return nil, fmt.Errorf("no first message set for session %s", db.SessionId())
 	}
 	return GetMessageByID(db, *chosenFirstID)
 }
 
 // GetSessionFirstMessages retrieves all first messages (parent_message_id IS NULL) for a session.
-func GetSessionFirstMessages(db DbOrTx, sessionID string) ([]Message, error) {
+func GetSessionFirstMessages(db SessionDbOrTx) ([]Message, error) {
 	query := `
 		SELECT id, session_id, branch_id, parent_message_id, chosen_next_id,
 		       text, type, attachments, cumul_token_count, created_at,
 		       model, generation, state, aux
-		FROM messages
+		FROM S.messages
 		WHERE session_id = ? AND parent_message_id IS NULL
 		ORDER BY created_at ASC
 	`
 
-	rows, err := db.Query(query, sessionID)
+	rows, err := db.Query(query, db.LocalSessionId())
 	if err != nil {
-		return nil, fmt.Errorf("failed to query first messages for session %s: %w", sessionID, err)
+		return nil, fmt.Errorf("failed to query first messages for session %s: %w", db.SessionId(), err)
 	}
 	defer rows.Close()
 
@@ -392,7 +403,7 @@ func GetSessionFirstMessages(db DbOrTx, sessionID string) ([]Message, error) {
 		var msg Message
 		var attachments sql.NullString
 		err := rows.Scan(
-			&msg.ID, &msg.SessionID, &msg.BranchID, &msg.ParentMessageID, &msg.ChosenNextID,
+			&msg.ID, &msg.LocalSessionID, &msg.BranchID, &msg.ParentMessageID, &msg.ChosenNextID,
 			&msg.Text, &msg.Type, &attachments, &msg.CumulTokenCount, &msg.CreatedAt,
 			&msg.Model, &msg.Generation, &msg.State, &msg.Aux,
 		)
@@ -418,7 +429,7 @@ func GetSessionFirstMessages(db DbOrTx, sessionID string) ([]Message, error) {
 
 // DeleteMessage deletes a message from the database and updates the parent's chosen_next_id.
 // Simplified version to avoid deadlocks in tests.
-func DeleteMessage(db *Database, messageID int) error {
+func DeleteMessage(db *SessionDatabase, messageID int) error {
 	// Get the message details first
 	var msg Message
 	var attachments sql.NullString
@@ -426,10 +437,10 @@ func DeleteMessage(db *Database, messageID int) error {
 		SELECT id, session_id, branch_id, parent_message_id, chosen_next_id,
 		       text, type, attachments, cumul_token_count, created_at,
 		       model, generation, state, aux
-		FROM messages
+		FROM S.messages
 		WHERE id = ?
 	`, messageID).Scan(
-		&msg.ID, &msg.SessionID, &msg.BranchID, &msg.ParentMessageID, &msg.ChosenNextID,
+		&msg.ID, &msg.LocalSessionID, &msg.BranchID, &msg.ParentMessageID, &msg.ChosenNextID,
 		&msg.Text, &msg.Type, &attachments, &msg.CumulTokenCount, &msg.CreatedAt,
 		&msg.Model, &msg.Generation, &msg.State, &msg.Aux,
 	)
@@ -457,14 +468,14 @@ func DeleteMessage(db *Database, messageID int) error {
 	// Update parent's chosen_next_id if parent exists
 	if msg.ParentMessageID != nil {
 		var nextID *int = msg.ChosenNextID
-		_, err = tx.Exec("UPDATE messages SET chosen_next_id = ? WHERE id = ?", nextID, *msg.ParentMessageID)
+		_, err = tx.Exec("UPDATE S.messages SET chosen_next_id = ? WHERE id = ?", nextID, *msg.ParentMessageID)
 		if err != nil {
 			return fmt.Errorf("failed to update parent message: %w", err)
 		}
 	}
 
 	// Delete the message
-	_, err = tx.Exec("DELETE FROM messages WHERE id = ?", messageID)
+	_, err = tx.Exec("DELETE FROM S.messages WHERE id = ?", messageID)
 	if err != nil {
 		return fmt.Errorf("failed to delete message: %w", err)
 	}
@@ -474,34 +485,24 @@ func DeleteMessage(db *Database, messageID int) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("Successfully deleted message %d from session %s, branch %s", messageID, msg.SessionID, msg.BranchID)
+	log.Printf("Successfully deleted message %d from session %s, branch %s", messageID, msg.LocalSessionID, msg.BranchID)
 	return nil
 }
 
 // GetSessionPrimaryBranchID retrieves the primary branch ID for a given session.
-func GetSessionPrimaryBranchID(db *Database, sessionID string) (string, error) {
+func GetSessionPrimaryBranchID(db *SessionDatabase) (string, error) {
 	var primaryBranchID string
-	err := db.QueryRow("SELECT primary_branch_id FROM sessions WHERE id = ?", sessionID).Scan(&primaryBranchID)
+	err := db.QueryRow("SELECT primary_branch_id FROM S.sessions WHERE id = ?", db.LocalSessionId()).Scan(&primaryBranchID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get primary branch ID for session %s: %w", sessionID, err)
+		return "", fmt.Errorf("failed to get primary branch ID for session %s: %w", db.SessionId(), err)
 	}
 	return primaryBranchID, nil
 }
 
-func CreateFrontendMessage(
-	m Message,
-	attachmentsJSON sql.NullString,
-	possibleBranches []PossibleNextMessage,
-	ignoreBeforeLastCompression bool,
-	includeState bool,
-	clearblobsSeen bool,
-) (FrontendMessage, *int, error) {
-	return createFrontendMessage(m, attachmentsJSON, possibleBranches, ignoreBeforeLastCompression, includeState, clearblobsSeen)
-}
-
 // MessageChain represents a sequence of messages in a conversation branch.
 type MessageChain struct {
-	SessionID             string
+	ctx                   context.Context
+	db                    SessionDbOrTx
 	BranchID              string
 	Messages              []Message
 	LastMessageID         int
@@ -511,17 +512,18 @@ type MessageChain struct {
 
 // NewMessageChain creates a new MessageChain with the given session and branch IDs.
 // It also initializes LastMessage by fetching the last message from the
-func NewMessageChain(ctx context.Context, db DbOrTx, sessionID, branchID string) (mc *MessageChain, err error) {
+func NewMessageChain(ctx context.Context, db SessionDbOrTx, branchID string) (mc *MessageChain, err error) {
 	mc = &MessageChain{
-		SessionID: sessionID,
-		BranchID:  branchID,
-		Messages:  []Message{},
+		ctx:      ctx,
+		db:       db,
+		BranchID: branchID,
+		Messages: []Message{},
 	}
 
 	// Get the last message ID for the current branch from the database
-	mc.LastMessageID, mc.LastMessageModel, mc.LastMessageGeneration, err = GetLastMessageInBranch(db, mc.SessionID, mc.BranchID)
+	mc.LastMessageID, mc.LastMessageModel, mc.LastMessageGeneration, err = GetLastMessageInBranch(db, mc.BranchID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if err == sql.ErrNoRows {
 			// No messages in this branch yet, LastMessage remains nil
 			mc.LastMessageID = 0
 			mc.LastMessageGeneration = 0
@@ -540,8 +542,8 @@ func NewMessageChain(ctx context.Context, db DbOrTx, sessionID, branchID string)
 
 // Add adds a message to the chain, updating parent_message_id and chosen_next_id.
 // It returns the offset to mc.Messages.
-func (mc *MessageChain) Add(ctx context.Context, db DbOrTx, msg Message) (Message, error) {
-	msg.SessionID = mc.SessionID
+func (mc *MessageChain) Add(msg Message) (Message, error) {
+	msg.LocalSessionID = mc.db.LocalSessionId()
 	msg.BranchID = mc.BranchID
 
 	var parentMessageID *int
@@ -558,7 +560,7 @@ func (mc *MessageChain) Add(ctx context.Context, db DbOrTx, msg Message) (Messag
 	}
 
 	// Add the message to the database
-	messageID, err := AddMessageToSession(ctx, db, msg)
+	messageID, err := AddMessageToSession(mc.ctx, mc.db, msg)
 	if err != nil {
 		return Message{}, fmt.Errorf("failed to add message to session: %w", err)
 	}
@@ -566,20 +568,20 @@ func (mc *MessageChain) Add(ctx context.Context, db DbOrTx, msg Message) (Messag
 
 	// If there was a previous message, update its chosen_next_id
 	if mc.LastMessageID != 0 {
-		if err := UpdateMessageChosenNextID(db, mc.LastMessageID, &messageID); err != nil {
+		if err := UpdateMessageChosenNextID(mc.db, mc.LastMessageID, &messageID); err != nil {
 			return Message{}, fmt.Errorf("failed to update chosen_next_id for previous message: %w", err)
 		}
 	} else {
 		// This is the first message in the chain, update session's chosen_first_id
-		databaseDB, ok := db.(*Database)
+		databaseDB, ok := mc.db.(*SessionDatabase)
 		if !ok {
 			// Can't cast to *Database, skip session update
 			log.Printf("MessageChain.Add: db is not *Database, skipping session chosen_first_id update")
 			return msg, nil
 		}
-		if err := UpdateSessionChosenFirstID(databaseDB, mc.SessionID, &messageID); err != nil {
+		if err := UpdateSessionChosenFirstID(databaseDB, &messageID); err != nil {
 			// Non-fatal error, log but continue
-			log.Printf("Failed to update chosen_first_id for session %s: %v", mc.SessionID, err)
+			log.Printf("Failed to update chosen_first_id for session %s: %v", mc.db.SessionId(), err)
 		}
 	}
 
@@ -590,10 +592,10 @@ func (mc *MessageChain) Add(ctx context.Context, db DbOrTx, msg Message) (Messag
 }
 
 // GetOriginalNextMessageInBranch finds the message that originally follows a given message in its own branch.
-func GetOriginalNextMessageInBranch(db *Database, parentMessageID int, branchID string) (*int, error) {
+func GetOriginalNextMessageInBranch(db *SessionDatabase, parentMessageID int, branchID string) (*int, error) {
 	var originalNextMessageID sql.NullInt64
 	err := db.QueryRow(`
-		SELECT id FROM messages
+		SELECT id FROM S.messages
 		WHERE parent_message_id = ? AND branch_id = ?
 		ORDER BY created_at ASC LIMIT 1
 	`, parentMessageID, branchID).Scan(&originalNextMessageID)
@@ -612,24 +614,14 @@ func GetOriginalNextMessageInBranch(db *Database, parentMessageID int, branchID 
 	return nil, nil
 }
 
-// GetBranchSessionID retrieves the session ID for a given branch ID.
-func GetBranchSessionID(db *Database, branchID string) (string, error) {
-	var sessionID string
-	err := db.QueryRow("SELECT session_id FROM branches WHERE id = ?", branchID).Scan(&sessionID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get session ID for branch %s: %w", branchID, err)
-	}
-	return sessionID, nil
-}
-
 // GetFirstMessageInBranch finds the first message of a branch (parent_message_id IS NULL).
-func GetFirstMessageInBranch(db *Database, sessionID string, branchID string) (*int, error) {
+func GetFirstMessageInBranch(db *SessionDatabase, branchID string) (*int, error) {
 	var firstMessageID *int
 	err := db.QueryRow(`
-		SELECT id FROM messages
+		SELECT id FROM S.messages
 		WHERE session_id = ? AND branch_id = ? AND parent_message_id IS NULL
 		ORDER BY created_at DESC LIMIT 1
-	`, sessionID, branchID).Scan(&firstMessageID)
+	`, db.LocalSessionId(), branchID).Scan(&firstMessageID)
 
 	if err != nil {
 		if err == sql.ErrNoRows {

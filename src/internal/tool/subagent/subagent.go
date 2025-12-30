@@ -210,32 +210,41 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 		return tool.HandlerResults{}, errors.New("subagent tool cannot be called from a subagent session")
 	}
 
+	mainDb, err := db.WithSession(params.SessionId)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	defer mainDb.Close()
+
 	var subsessionID string
 	var newAgentID string
+	var subDb *database.SessionDatabase
 
 	if hasSystemPrompt {
 		// Spawn a new subagent
 		newAgentID = database.GenerateID()
 		subsessionID = fmt.Sprintf("%s.%s", params.SessionId, newAgentID)
+		subDb = mainDb.WithSuffix("." + newAgentID)
 
 		// Create new subagent session with the provided system prompt
-		_, err = database.CreateSession(db, subsessionID, systemPrompt, "")
+		subDb, _, err = database.CreateSession(subDb.Database, subsessionID, systemPrompt, "")
 		if err != nil {
 			return tool.HandlerResults{}, fmt.Errorf("failed to create new subagent session with ID %s: %w", subsessionID, err)
 		}
 	} else {
 		// Interact with an existing subagent
 		subsessionID = fmt.Sprintf("%s.%s", params.SessionId, subagentID)
+		subDb = mainDb.WithSuffix("." + subagentID)
 
 		// Verify the subagent session exists
-		_, err = database.GetSession(db, subsessionID)
+		_, err = database.GetSession(subDb)
 		if err != nil {
 			return tool.HandlerResults{}, fmt.Errorf("subagent session with ID %s not found: %w", subsessionID, err)
 		}
 	}
 
 	// Copy environment from main session to subagent session
-	err = copyEnvironmentToSubagent(db, params.SessionId, subsessionID)
+	err = copyEnvironmentToSubagent(mainDb, subDb)
 	if err != nil {
 		log.Printf("Failed to copy environment to subagent: %v", err)
 		// Non-fatal, continue with subagent execution
@@ -254,12 +263,11 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 	// with the resolved subagent model name
 	err = chat.NewChatMessage(
 		ctx,
-		db,
+		subDb,
 		models,
 		ga,
 		tools,
 		resultCollector, // Custom EventWriter that captures events
-		subsessionID,
 		text,
 		nil,                        // No attachments for regular subagent
 		subagentModelProvider.Name, // Use the resolved subagent model
@@ -287,15 +295,15 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 }
 
 // copyEnvironmentToSubagent copies the environment configuration from main session to subagent session
-func copyEnvironmentToSubagent(db *database.Database, mainSessionId, subSessionId string) error {
+func copyEnvironmentToSubagent(mainDb, subDb *database.SessionDatabase) error {
 	// Get main session environment
-	mainRoots, _, err := database.GetLatestSessionEnv(db, mainSessionId)
+	mainRoots, _, err := database.GetLatestSessionEnv(mainDb)
 	if err != nil {
 		return fmt.Errorf("failed to get main session environment: %w", err)
 	}
 
 	// Get subagent session environment
-	subRoots, _, err := database.GetLatestSessionEnv(db, subSessionId)
+	subRoots, _, err := database.GetLatestSessionEnv(subDb)
 	if err != nil {
 		return fmt.Errorf("failed to get subagent session environment: %w", err)
 	}
@@ -309,7 +317,7 @@ func copyEnvironmentToSubagent(db *database.Database, mainSessionId, subSessionI
 	// Only update if roots have actually changed
 	if rootsChanged.HasChanges() {
 		// Add new subagent session environment in DB
-		_, err = database.AddSessionEnv(db, subSessionId, mainRoots)
+		_, err = database.AddSessionEnv(subDb, mainRoots)
 		if err != nil {
 			return fmt.Errorf("failed to add new subagent session environment: %w", err)
 		}
@@ -366,9 +374,16 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	agentID := database.GenerateID()
 	subsessionID := fmt.Sprintf("%s.%s", params.SessionId, agentID)
 
+	mainDb, err := db.WithSession(params.SessionId)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	defer mainDb.Close()
+	subDb := mainDb.WithSuffix("." + agentID)
+
 	// Create subsession with system prompt for image generation
 	systemPrompt := "Generate images based on the user's request. The output should contain the generated images."
-	_, err = database.CreateSession(db, subsessionID, systemPrompt, "")
+	subDb, _, err = database.CreateSession(subDb.Database, subsessionID, systemPrompt, "")
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to create image generation subsession with ID %s: %w", subsessionID, err)
 	}
@@ -377,7 +392,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	var inputAttachments []FileAttachment
 	for _, hash := range inputHashes {
 		if hash != "" {
-			attachment, err := database.GetBlobAsFileAttachment(db, hash)
+			attachment, err := database.GetBlobAsFileAttachment(mainDb, hash)
 			if err != nil {
 				return tool.HandlerResults{}, fmt.Errorf("failed to create file attachment for hash %s: %w", hash, err)
 			}
@@ -386,7 +401,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	}
 
 	// Copy environment from main session to image generation subagent
-	err = copyEnvironmentToSubagent(db, params.SessionId, subsessionID)
+	err = copyEnvironmentToSubagent(mainDb, subDb)
 	if err != nil {
 		log.Printf("Failed to copy environment to image generation subagent: %v", err)
 		// Non-fatal, continue with image generation
@@ -405,12 +420,11 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	// with the resolved image generation model name
 	err = chat.NewChatMessage(
 		ctx,
-		db,
+		subDb,
 		models,
 		ga,
 		tools,
 		resultCollector, // Custom EventWriter that captures events
-		subsessionID,
 		text,
 		inputAttachments,        // Input images as attachments
 		imageModelProvider.Name, // Use the resolved image generation model

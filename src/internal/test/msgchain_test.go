@@ -100,10 +100,12 @@ func nilIntStr(i *int) string {
 	return fmt.Sprintf("%d", *i)
 }
 
-func printMessages(t *testing.T, db *database.Database, testName string) {
+func printMessages(t *testing.T, db *database.SessionDatabase, testName string) {
+	t.Helper()
+
 	t.Logf("--- Messages in DB after %s ---", testName)
 
-	rows, err := db.Query("SELECT id, type, parent_message_id, chosen_next_id, text FROM messages ORDER BY id ASC")
+	rows, err := db.Query("SELECT id, type, parent_message_id, chosen_next_id, text FROM S.messages ORDER BY id ASC")
 	if err != nil {
 		t.Fatalf("Failed to query messages: %v", err)
 	}
@@ -173,8 +175,6 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	rr := testStreamingRequest(t, router, "POST", "/api/chat", body, http.StatusOK)
 	defer rr.Body.Close()
 
-	printMessages(t, db, "After first message chain") // ADDED
-
 	// Parse SSE events to get session ID and message IDs
 	var sessionId string
 	var firstUserMessageID int
@@ -214,10 +214,18 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		t.Fatal("Model message ID not found in SSE events")
 	}
 
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		t.Fatalf("Failed to get session DB: %v", err)
+	}
+	defer sdb.Close()
+
+	printMessages(t, sdb, "After first message chain")
+
 	// Verify initial message chain
 	// User (firstUserMessageID) -> Thought (thoughtMessageID) -> Model (modelMessageID)
 	var msg Message
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{firstUserMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{firstUserMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID != nil {
 		t.Errorf("Expected first user message parent_message_id to be nil, got %d", *msg.ParentMessageID)
 	}
@@ -225,7 +233,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		t.Errorf("Expected first user message chosen_next_id to be %d, got %v", thoughtMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{thoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{thoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != firstUserMessageID {
 		t.Errorf("Expected thought message parent_message_id to be %d, got %v", firstUserMessageID, nilIntStr(msg.ParentMessageID))
 	}
@@ -233,7 +241,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 		t.Errorf("Expected thought message chosen_next_id to be %d, got %v", modelMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != thoughtMessageID {
 		t.Errorf("Expected model message parent_message_id to be %d, got %v", thoughtMessageID, nilIntStr(msg.ParentMessageID))
 	}
@@ -242,7 +250,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	}
 
 	// 2. Send another user message
-	printMessages(t, db, "Before second user message") // ADDED
+	printMessages(t, sdb, "Before second user message")
 	secondUserMessage := "How are you?"
 	reqBody = map[string]interface{}{
 		"message": secondUserMessage,
@@ -277,12 +285,12 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 
 	// Verify chain after second user message
 	// Model (modelMessageID) -> User (secondUserMessageID) -> Thought (secondThoughtMessageID)
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{modelMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != secondUserMessageID {
 		t.Errorf("Expected model message chosen_next_id to be %d, got %v", secondUserMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{secondUserMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{secondUserMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != modelMessageID {
 		t.Errorf("Expected second user message parent_message_id to be %d, got %v", modelMessageID, nilIntStr(msg.ParentMessageID))
 	}
@@ -291,7 +299,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	}
 
 	// Verify the second thought message
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{secondThoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{secondThoughtMessageID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != secondUserMessageID {
 		t.Errorf("Expected second thought message parent_message_id to be %d, got %v", secondUserMessageID, nilIntStr(msg.ParentMessageID))
 	}
@@ -359,7 +367,14 @@ func TestBranchingMessageChain(t *testing.T) {
 	if sessionId == "" || msgA1ID == 0 || msgA2ID == 0 || msgA3ID == 0 || originalPrimaryBranchID == "" {
 		t.Fatalf("Failed to get all IDs for A1-A3 chain. SessionID: %s, MsgA1ID: %d, MsgA2ID: %d, MsgA3ID: %d, OriginalPrimaryBranchID: %s", sessionId, msgA1ID, msgA2ID, msgA3ID, originalPrimaryBranchID)
 	}
-	printMessages(t, db, "After A1-A3 chain")
+
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		t.Fatalf("Failed to get session DB: %v", err)
+	}
+	defer sdb.Close()
+
+	printMessages(t, sdb, "After A1-A3 chain")
 
 	// 2. Send second user message (C)
 	models.SetGeminiProvider(&MockGeminiProvider{
@@ -396,34 +411,34 @@ func TestBranchingMessageChain(t *testing.T) {
 	if msgB1ID == 0 || msgB2ID == 0 || msgB3ID == 0 {
 		t.Fatalf("Failed to get all IDs for B chain. MsgB1ID: %d, MsgB2ID: %d, MsgB3ID: %d", msgB1ID, msgB2ID, msgB3ID)
 	}
-	printMessages(t, db, "After A1-A3-B1-B3 chain")
+	printMessages(t, sdb, "After A1-A3-B1-B3 chain")
 
 	// Verify A1-A3-B1-B3 chain in DB
 	var msg Message
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA1ID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgA1ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ParentMessageID != nil {
 		t.Errorf("Expected first user message parent_message_id to be nil, got %d", *msg.ParentMessageID)
 	}
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA2ID {
 		t.Errorf("Expected first user message chosen_next_id to be %v, got %d", nilIntStr(msg.ChosenNextID), msgA2ID)
 	}
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgA2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgA3ID {
 		t.Errorf("Expected A2's chosen_next_id to be A3 (model). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgA3ID)
 	}
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB1ID {
 		t.Errorf("Expected A3's chosen_next_id to be B1 (user). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgB1ID)
 	}
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB1ID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgB1ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB2ID {
 		t.Errorf("Expected B1's chosen_next_id to be B2 (thought). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgB2ID)
 	}
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgB2ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgB3ID {
 		t.Errorf("Expected B2's chosen_next_id to be B3 (model). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgB3ID)
 	}
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id FROM messages WHERE id = ?", []interface{}{msgB3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgB3ID}, &msg.ParentMessageID, &msg.ChosenNextID)
 	if msg.ChosenNextID != nil {
 		t.Errorf("Expected B3's chosen_next_id to be nil. Got %v", nilIntStr(msg.ChosenNextID))
 	}
@@ -478,11 +493,11 @@ func TestBranchingMessageChain(t *testing.T) {
 	if newBranchCID == "" || msgC1ID == 0 {
 		t.Fatalf("Failed to get newBranchCID or msgC1ID. NewBranchCID: %s, MsgC1ID: %d", newBranchCID, msgC1ID)
 	}
-	printMessages(t, db, "After A1-A3-C1 branch creation")
+	printMessages(t, sdb, "After A1-A3-C1 branch creation")
 
 	// Verify that the new branch is now the primary branch
 	var currentPrimaryBranchID string
-	querySingleRow(t, db, "SELECT primary_branch_id FROM sessions WHERE id = ?", []interface{}{sessionId}, &currentPrimaryBranchID)
+	querySingleRow(t, sdb, "SELECT primary_branch_id FROM S.sessions WHERE id = ?", []interface{}{sdb.LocalSessionId()}, &currentPrimaryBranchID)
 	if currentPrimaryBranchID != newBranchCID {
 		t.Errorf("Primary branch not updated to new branch. Got %s, want %s", currentPrimaryBranchID, newBranchCID)
 	}
@@ -499,7 +514,7 @@ func TestBranchingMessageChain(t *testing.T) {
 		}
 	}
 
-	printMessages(t, db, "After A1-A3-C1-C3 branch creation")
+	printMessages(t, sdb, "After A1-A3-C1-C3 branch creation")
 
 	// iii) Verify that the history correctly includes C1-C2-C3 and that A3 has both B1 and C1 as next messages.
 	// Load history for C1-C2-C3 branch
@@ -518,13 +533,13 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 
 	// Get msgC2ID and msgC3ID from DB after streaming
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgC1ID}, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgC1ID}, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil {
 		t.Fatalf("Failed to get chosen_next_id for msgC1ID %d: %v", msgC1ID, err)
 	}
 	msgC2ID := int(*msg.ChosenNextID)
 
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgC2ID}, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgC2ID}, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil {
 		t.Fatalf("Failed to get chosen_next_id for msgC2ID %d: %v", msgC2ID, err)
 	}
@@ -544,14 +559,14 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 
 	// Verify A3's chosen_next_id is C1 (user C)
-	querySingleRow(t, db, "SELECT chosen_next_id FROM messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ChosenNextID)
+	querySingleRow(t, sdb, "SELECT chosen_next_id FROM S.messages WHERE id = ?", []interface{}{msgA3ID}, &msg.ChosenNextID)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != msgC1ID {
 		t.Errorf("A3's chosen_next_id is not C1 (user C). Got %v, want %d", nilIntStr(msg.ChosenNextID), msgC1ID)
 	}
 
 	// Verify A3's parent (A3) has both B1 and C1 as possible next messages (by checking branches table)
 	var count int
-	querySingleRow(t, db, "SELECT COUNT(*) FROM branches WHERE session_id = ? AND branch_from_message_id = ?", []interface{}{sessionId, msgA3ID}, &count)
+	querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.branches WHERE session_id = ? AND branch_from_message_id = ?", []interface{}{sdb.LocalSessionId(), msgA3ID}, &count)
 	if count != 1 { // Only the new C branch should have A3 as parent
 		t.Errorf("Expected 1 branch from A3, got %d", count)
 	}
@@ -563,7 +578,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	}
 	bodySwitch, _ := json.Marshal(reqBodySwitch)
 	testRequest(t, router, "PUT", fmt.Sprintf("/api/chat/%s/branch", sessionId), bodySwitch, http.StatusOK)
-	printMessages(t, db, "After switching back to A1-A3-B1-B3 branch")
+	printMessages(t, sdb, "After switching back to A1-A3-B1-B3 branch")
 
 	// v) Verify that the history has changed to A1-A3-B1-B3
 	// Load history for A1-A3-B1-B3 branch
@@ -656,13 +671,6 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 			if receivedModelMessage != "ABC" {
 				t.Errorf("Expected consolidated message 'ABC', got '%s'", receivedModelMessage)
 			}
-
-			// Verify the message in the database
-			var msg Message
-			querySingleRow(t, db, "SELECT text FROM messages WHERE id = ?", []interface{}{modelMessageID}, &msg.Text)
-			if msg.Text != "ABC" {
-				t.Errorf("Expected message in DB to be 'ABC', got '%s'", msg.Text)
-			}
 		}
 	}
 
@@ -674,6 +682,19 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 	}
 	if modelMessageID == 0 {
 		t.Fatal("Model message ID not found in SSE events")
+	}
+
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		t.Fatalf("Failed to get session DB: %v", err)
+	}
+	defer sdb.Close()
+
+	// Verify the message in the database
+	var msg Message
+	querySingleRow(t, sdb, "SELECT text FROM S.messages WHERE id = ?", []interface{}{modelMessageID}, &msg.Text)
+	if msg.Text != "ABC" {
+		t.Errorf("Expected message in DB to be 'ABC', got '%s'", msg.Text)
 	}
 }
 
@@ -1325,15 +1346,21 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 		t.Fatal("Code response message ID not found in SSE events")
 	}
 
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		t.Fatalf("Failed to get session DB: %v", err)
+	}
+	defer sdb.Close()
+
 	// Verify message chain in DB
 	// User -> CodeCall -> CodeResponse
 	var msg Message
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id, type, text FROM messages WHERE id = ?", []interface{}{userMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id, type, text FROM S.messages WHERE id = ?", []interface{}{userMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
 	if msg.ChosenNextID == nil || *msg.ChosenNextID != codeCallMessageID {
 		t.Errorf("Expected user message chosen_next_id to be %d, got %v", codeCallMessageID, nilIntStr(msg.ChosenNextID))
 	}
 
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id, type, text FROM messages WHERE id = ?", []interface{}{codeCallMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id, type, text FROM S.messages WHERE id = ?", []interface{}{codeCallMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != userMessageID {
 		t.Errorf("Expected code call parent_message_id to be %d, got %v", userMessageID, nilIntStr(msg.ParentMessageID))
 	}
@@ -1362,7 +1389,7 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 		t.Errorf("ExecutableCode in DB mismatch. Expected {python, print('hello')}, got {%s, %s}", ec.Language, ec.Code)
 	}
 
-	querySingleRow(t, db, "SELECT parent_message_id, chosen_next_id, type, text FROM messages WHERE id = ?", []interface{}{codeResponseMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
+	querySingleRow(t, sdb, "SELECT parent_message_id, chosen_next_id, type, text FROM S.messages WHERE id = ?", []interface{}{codeResponseMessageID}, &msg.ParentMessageID, &msg.ChosenNextID, &msg.Type, &msg.Text)
 	if msg.ParentMessageID == nil || *msg.ParentMessageID != codeCallMessageID {
 		t.Errorf("Expected code response parent_message_id to be %d, got %v", codeCallMessageID, nilIntStr(msg.ParentMessageID))
 	}
@@ -1398,24 +1425,25 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	sessionId := database.GenerateID()
 	primaryBranchId := database.GenerateID()
 
-	_, err := database.CreateSession(db, sessionId, "You are a helpful assistant", "")
+	sdb, _, err := database.CreateSession(db, sessionId, "You are a helpful assistant", "")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
+	defer sdb.Close()
 
-	_, err = database.CreateBranch(db, primaryBranchId, sessionId, nil, nil)
+	_, err = database.CreateBranch(sdb, primaryBranchId, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create branch: %v", err)
 	}
 
 	// Step 2: Add messages using MessageChain for proper relationships
-	mc, err := database.NewMessageChain(context.Background(), db, sessionId, primaryBranchId)
+	mc, err := database.NewMessageChain(context.Background(), sdb, primaryBranchId)
 	if err != nil {
 		t.Fatalf("Failed to create message chain: %v", err)
 	}
 
 	// Add user message
-	_, err = mc.Add(context.Background(), db, Message{
+	_, err = mc.Add(Message{
 		Text:  "Hello",
 		Type:  TypeUserText,
 		Model: "gemini-2.5-flash",
@@ -1425,7 +1453,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	}
 
 	// Add error message
-	errorMsg, err := mc.Add(context.Background(), db, Message{
+	errorMsg, err := mc.Add(Message{
 		Text: "Error occurred",
 		Type: TypeError,
 	})
@@ -1436,7 +1464,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	errorMsgID := errorMsg.ID
 
 	// Verify error message is the last one
-	lastID, _, _, err := database.GetLastMessageInBranch(db, sessionId, primaryBranchId)
+	lastID, _, _, err := database.GetLastMessageInBranch(sdb, primaryBranchId)
 	if err != nil {
 		t.Fatalf("Failed to get last message: %v", err)
 	}
@@ -1492,7 +1520,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	}
 
 	// Step 4: Verify error message was deleted
-	_, err = database.GetMessageByID(db, errorMsgID)
+	_, err = database.GetMessageByID(sdb, errorMsgID)
 	if err == nil {
 		t.Error("Error message still exists in database")
 	} else if err != sql.ErrNoRows {

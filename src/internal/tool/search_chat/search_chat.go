@@ -46,8 +46,14 @@ func SearchChatTool(ctx context.Context, args map[string]interface{}, params too
 	currentSessionID := params.SessionId
 	currentWorkspaceID := ""
 	if currentSessionID != "" {
+		sdb, err := db.WithSession(currentSessionID)
+		if err != nil {
+			return tool.HandlerResults{}, fmt.Errorf("failed to get session DB: %w", err)
+		}
+		defer sdb.Close()
+
 		var session Session
-		session, err = database.GetSession(db, currentSessionID)
+		session, err = database.GetSession(sdb)
 		if err != nil {
 			return tool.HandlerResults{}, fmt.Errorf("failed to get current session: %w", err)
 		}
@@ -178,13 +184,18 @@ func RecallTool(ctx context.Context, args map[string]interface{}, params tool.Ha
 	if err != nil {
 		return tool.HandlerResults{}, err
 	}
+	sdb, err := db.WithSession(params.SessionId)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
+	defer sdb.Close()
 
 	// For now, treat query as a single hash
 	// In the future, this could be expanded to handle multiple hashes or search functionality
 	hash := strings.TrimSpace(query)
 
 	// Try to retrieve the blob as a file attachment
-	attachment, err := database.GetBlobAsFileAttachment(db, hash)
+	attachment, err := database.GetBlobAsFileAttachment(sdb, hash)
 	if err != nil {
 		return tool.HandlerResults{}, fmt.Errorf("failed to retrieve content for hash %s: %w", hash, err)
 	}

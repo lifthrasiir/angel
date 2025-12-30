@@ -97,14 +97,16 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 	// Create a workspace and a session/message within it
 	workspaceID := "testWsDelete"
 	database.CreateWorkspace(testDB, workspaceID, "Workspace to Delete", "")
-	var err error // Declare err here
+
 	sessionID := database.GenerateID()
-	primaryBranchID, err := database.CreateSession(testDB, sessionID, "System prompt", workspaceID)
+	sdb, primaryBranchID, err := database.CreateSession(testDB, sessionID, "System prompt", workspaceID)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	msg := Message{SessionID: sessionID, BranchID: primaryBranchID, Text: "Hello", Type: "user"}
-	_, err = database.AddMessageToSession(context.Background(), testDB, msg)
+	defer sdb.Close()
+
+	msg := Message{LocalSessionID: sessionID, BranchID: primaryBranchID, Text: "Hello", Type: "user"}
+	_, err = database.AddMessageToSession(context.Background(), sdb, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}
@@ -191,8 +193,14 @@ func TestNewSessionAndMessage(t *testing.T) {
 		var actualSessionID string
 		querySingleRow(t, testDB, "SELECT id FROM sessions WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1", []interface{}{"testWsNewSession"}, &actualSessionID)
 
-		querySingleRow(t, testDB, "SELECT id FROM sessions WHERE id = ?", []interface{}{actualSessionID}, &sessionIDFromDB)
-		querySingleRow(t, testDB, "SELECT text FROM messages WHERE session_id = ? AND type = 'user' ORDER BY id ASC LIMIT 1", []interface{}{actualSessionID}, &text)
+		sdb, err := testDB.WithSession(actualSessionID)
+		if err != nil {
+			t.Fatalf("Failed to create session database: %v", err)
+		}
+		defer sdb.Close()
+
+		querySingleRow(t, sdb, "SELECT id FROM S.sessions WHERE id = ?", []interface{}{sdb.LocalSessionId()}, &sessionIDFromDB)
+		querySingleRow(t, sdb, "SELECT text FROM S.messages WHERE session_id = ? AND type = 'user' ORDER BY id ASC LIMIT 1", []interface{}{sdb.LocalSessionId()}, &text)
 		if text != "Hello, world!" {
 			t.Errorf("message text in DB mismatch: got %v want %v", text, "Hello, world!")
 		}
@@ -210,22 +218,22 @@ func TestChatMessage(t *testing.T) {
 	router, testDB, _ := setupTest(t)
 
 	// Prepare a session
-	var err error // Declare err here
 	sessionId := "testChatSession"
-	_, err = database.CreateSession(testDB, sessionId, "Initial system prompt", "default")
+	sdb, _, err := database.CreateSession(testDB, sessionId, "Initial system prompt", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
+	defer sdb.Close()
 
 	// Test case 1: Successful addition of a new message
 	t.Run("Success", func(t *testing.T) {
-		sessionData, err := database.GetSession(testDB, sessionId)
+		sessionData, err := database.GetSession(sdb)
 		if err != nil {
 			t.Fatalf("Failed to get session: %v", err)
 		}
 		// Add an initial message to the session
-		msg := Message{SessionID: sessionId, BranchID: sessionData.PrimaryBranchID, Text: "Initial message", Type: "user", Model: DefaultGeminiModel}
-		_, err = database.AddMessageToSession(context.Background(), testDB, msg)
+		msg := Message{LocalSessionID: sdb.LocalSessionId(), BranchID: sessionData.PrimaryBranchID, Text: "Initial message", Type: "user", Model: DefaultGeminiModel}
+		_, err = database.AddMessageToSession(context.Background(), sdb, msg)
 		if err != nil {
 			t.Fatalf("Failed to add initial message: %v", err)
 		}
@@ -235,7 +243,7 @@ func TestChatMessage(t *testing.T) {
 
 		// Verify in DB
 		var text string
-		querySingleRow(t, testDB, "SELECT text FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 1", []interface{}{sessionId}, &text)
+		querySingleRow(t, sdb, "SELECT text FROM S.messages WHERE session_id = ? ORDER BY id DESC LIMIT 1", []interface{}{sdb.LocalSessionId()}, &text)
 		if text != "Another message" {
 			t.Errorf("message text in DB mismatch: got %v want %v", text, "Another message")
 		}
@@ -260,20 +268,21 @@ func TestLoadChatSession(t *testing.T) {
 
 	// Prepare a session and some messages
 	sessionId := "testLoadSession"
-	primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for loading", "default")
+	sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for loading", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
+	defer sdb.Close()
 
 	ctx := context.Background()
-	mc, err := database.NewMessageChain(ctx, testDB, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(ctx, sdb, primaryBranchID)
 	if err != nil {
 		t.Fatalf("Failed to create message chain: %v", err)
 	}
-	if _, err := mc.Add(ctx, testDB, Message{Text: "User message 1", Type: "user"}); err != nil {
+	if _, err := mc.Add(Message{Text: "User message 1", Type: "user"}); err != nil {
 		t.Fatalf("Failed to add message 1: %v", err)
 	}
-	if _, err := mc.Add(ctx, testDB, Message{Text: "Model response 1", Type: "model"}); err != nil {
+	if _, err := mc.Add(Message{Text: "Model response 1", Type: "model"}); err != nil {
 		t.Fatalf("Failed to add message 2: %v", err)
 	}
 
@@ -337,10 +346,11 @@ func TestUpdateSessionNameHandler(t *testing.T) {
 
 	// Prepare a session
 	sessionId := "testUpdateNameSession"
-	_, err := database.CreateSession(testDB, sessionId, "System prompt", "default")
+	sdb, _, err := database.CreateSession(testDB, sessionId, "System prompt", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
+	defer sdb.Close()
 
 	// Test case 1: Successful name update
 	t.Run("Success", func(t *testing.T) {
@@ -349,7 +359,7 @@ func TestUpdateSessionNameHandler(t *testing.T) {
 
 		// Verify in DB
 		var name string
-		querySingleRow(t, testDB, "SELECT name FROM sessions WHERE id = ?", []interface{}{sessionId}, &name)
+		querySingleRow(t, sdb, "SELECT name FROM S.sessions WHERE id = ?", []interface{}{sdb.LocalSessionId()}, &name)
 		if name != "Updated Session Name" {
 			t.Errorf("session name in DB mismatch: got %v want %v", name, "Updated Session Name")
 		}
@@ -374,12 +384,14 @@ func TestDeleteSession(t *testing.T) {
 
 	// Prepare a session and some messages
 	sessionId := "TestDeleteSession"
-	primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for deletion", "default")
+	sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt for deletion", "default")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
-	msg := Message{SessionID: sessionId, BranchID: primaryBranchID, Text: "Message to be deleted", Type: "user"}
-	_, err = database.AddMessageToSession(context.Background(), testDB, msg)
+	defer sdb.Close()
+
+	msg := Message{BranchID: primaryBranchID, Text: "Message to be deleted", Type: "user"}
+	_, err = database.AddMessageToSession(context.Background(), sdb, msg)
 	if err != nil {
 		t.Fatalf("Failed to add message to session: %v", err)
 	}
@@ -399,15 +411,15 @@ func TestDeleteSession(t *testing.T) {
 
 		// Verify deletion in DB
 		var count int
-		querySingleRow(t, testDB, "SELECT COUNT(*) FROM sessions WHERE id = ?", []interface{}{sessionId}, &count)
+		querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.sessions WHERE id = ?", []interface{}{sessionId}, &count)
 		if count != 0 {
 			t.Errorf("session not deleted from DB")
 		}
-		querySingleRow(t, testDB, "SELECT COUNT(*) FROM messages WHERE session_id = ?", []interface{}{sessionId}, &count)
+		querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.messages WHERE session_id = ?", []interface{}{sessionId}, &count)
 		if count != 0 {
 			t.Errorf("messages not deleted from DB")
 		}
-		querySingleRow(t, testDB, "SELECT COUNT(*) FROM branches WHERE session_id = ?", []interface{}{sessionId}, &count)
+		querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.branches WHERE session_id = ?", []interface{}{sessionId}, &count)
 		if count != 0 {
 			t.Errorf("branches not deleted from DB")
 		}

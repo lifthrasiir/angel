@@ -34,8 +34,8 @@ type InitialState struct {
 
 func NewSessionAndMessage(
 	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
-	ew EventWriter, sessionId string, userMessage string, systemPrompt string, attachments []FileAttachment,
-	workspaceId string, modelToUse string, fetchLimit int, initialRoots []string,
+	ew EventWriter, userMessage string, systemPrompt string, attachments []FileAttachment,
+	sessionID string, workspaceId string, modelToUse string, fetchLimit int, initialRoots []string,
 ) error {
 	var workspaceName string
 	if workspaceId != "" {
@@ -59,15 +59,16 @@ func NewSessionAndMessage(
 	}
 
 	// Create session with primary_branch_id (must be before SetInitialSessionEnv for FK constraint)
-	primaryBranchID, err := database.CreateSession(db, sessionId, systemPrompt, workspaceId)
+	sdb, primaryBranchID, err := database.CreateSession(db, sessionID, systemPrompt, workspaceId)
 	if err != nil {
 		return fmt.Errorf("failed to create new session: %w", err)
 	}
+	defer sdb.Close()
 
 	// Handle InitialRoots if provided (after session is created)
 	if len(initialRoots) > 0 {
 		// Set initial roots as generation 0 environment
-		err := database.SetInitialSessionEnv(db, sessionId, initialRoots)
+		err := database.SetInitialSessionEnv(sdb, initialRoots)
 		if err != nil {
 			return fmt.Errorf("failed to set initial session environment: %w", err)
 		}
@@ -85,7 +86,7 @@ func NewSessionAndMessage(
 	}
 
 	// Create a new message chain
-	mc, err := database.NewMessageChain(ctx, db, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(ctx, sdb, primaryBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create new message chain: %w", err)
 	}
@@ -93,14 +94,14 @@ func NewSessionAndMessage(
 	// Add user message to the chain
 	mc.LastMessageModel = modelToUse
 	mc.LastMessageGeneration = 0 // New session starts with generation 0
-	userMsg, err := mc.Add(ctx, db, Message{Text: userMessage, Type: TypeUserText, Attachments: attachments})
+	userMsg, err := mc.Add(Message{Text: userMessage, Type: TypeUserText, Attachments: attachments})
 	if err != nil {
 		return fmt.Errorf("failed to save user message: %w", err)
 	}
 
 	// Update last_updated_at for the new session
-	if err := database.UpdateSessionLastUpdated(db, sessionId); err != nil {
-		log.Printf("Failed to update last_updated_at for new session %s: %v", sessionId, err)
+	if err := database.UpdateSessionLastUpdated(sdb); err != nil {
+		log.Printf("Failed to update last_updated_at for new session %s: %v", sdb.SessionId(), err)
 		// Non-fatal error, continue with response
 	}
 
@@ -112,25 +113,25 @@ func NewSessionAndMessage(
 	defer ew.Release()
 
 	// Retrieve session history from DB for LLM (full context)
-	historyContext, err := database.GetSessionHistoryContext(db, sessionId, primaryBranchID)
+	historyContext, err := database.GetSessionHistoryContext(sdb, primaryBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve full session history for LLM: %w", err)
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
-	frontendHistory, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, fetchLimit)
+	frontendHistory, err := database.GetSessionHistoryPaginated(sdb, primaryBranchID, 0, fetchLimit)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve paginated session history for frontend: %w", err)
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
-	currentRoots, _, err := database.GetLatestSessionEnv(db, sessionId) // Generation is guaranteed to be 0
+	currentRoots, _, err := database.GetLatestSessionEnv(sdb) // Generation is guaranteed to be 0
 	if err != nil {
 		return fmt.Errorf("failed to get latest session environment: %w", err)
 	}
 
 	initialState := InitialState{
-		SessionId:       sessionId,
+		SessionId:       sessionID,
 		History:         frontendHistory,
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     workspaceId,
@@ -146,23 +147,23 @@ func NewSessionAndMessage(
 	ew.Send(EventInitialState, string(initialStateJSON))
 
 	// New session gets its name inferred unless it's a subsession
-	inferSessionName := !IsSubsessionId(sessionId)
+	inferSessionName := !IsSubsessionId(sessionID)
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, inferSessionName, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(sdb, models, ga, tools, initialState, ew, mc, inferSessionName, time.Now(), historyContext); err != nil {
 		return fmt.Errorf("error streaming LLM response: %w", err)
 	}
 	return nil
 }
 
 func NewChatMessage(
-	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
-	ew EventWriter, sessionId string, userMessage string, attachments []FileAttachment, modelToUse string, fetchLimit int,
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ew EventWriter, userMessage string, attachments []FileAttachment, modelToUse string, fetchLimit int,
 ) error {
-	session, err := database.GetSession(db, sessionId)
+	session, err := database.GetSession(db)
 	if err != nil {
-		log.Printf("chatMessage: Failed to load session %s: %v", sessionId, err)
+		log.Printf("chatMessage: Failed to load session %s: %v", db.SessionId(), err)
 		if errors.Is(err, sql.ErrNoRows) ||
 			err.Error() == "sql: no rows in result set" ||
 			strings.Contains(err.Error(), "no such table") {
@@ -177,7 +178,7 @@ func NewChatMessage(
 	var envChangedEventPayload string
 
 	// Create a new message chain
-	mc, err := database.NewMessageChain(ctx, db, sessionId, primaryBranchID)
+	mc, err := database.NewMessageChain(ctx, db, primaryBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create message chain: %w", err)
 	}
@@ -189,24 +190,24 @@ func NewChatMessage(
 		mc.LastMessageModel = DefaultGeminiModel
 	}
 
-	_, currentGeneration, err := database.GetLatestSessionEnv(db, sessionId)
+	_, currentGeneration, err := database.GetLatestSessionEnv(db)
 	if err != nil {
-		return fmt.Errorf("failed to get latest session environment for session %s: %w", sessionId, err)
+		return fmt.Errorf("failed to get latest session environment for session %s: %w", db.SessionId(), err)
 	}
 
 	// Check for environment changes and add system message to chain if needed
 	if currentGeneration > mc.LastMessageGeneration {
 		// Get old roots from the previous generation
-		oldRoots, err := database.GetSessionEnv(db, sessionId, mc.LastMessageGeneration)
+		oldRoots, err := database.GetSessionEnv(db, mc.LastMessageGeneration)
 		if err != nil {
-			log.Printf("chatMessage: Failed to get old session environment for session %s, generation %d: %v", sessionId, mc.LastMessageGeneration, err)
+			log.Printf("chatMessage: Failed to get old session environment for session %s, generation %d: %v", db.SessionId(), mc.LastMessageGeneration, err)
 			// Non-fatal, continue with user message
 		}
 
 		// Get new roots from the current generation
-		newRoots, err := database.GetSessionEnv(db, sessionId, currentGeneration)
+		newRoots, err := database.GetSessionEnv(db, currentGeneration)
 		if err != nil {
-			log.Printf("chatMessage: Failed to get new session environment for session %s, generation %d: %v", sessionId, currentGeneration, err)
+			log.Printf("chatMessage: Failed to get new session environment for session %s, generation %d: %v", db.SessionId(), currentGeneration, err)
 			// Non-fatal, continue with user message
 		}
 
@@ -225,7 +226,7 @@ func NewChatMessage(
 			// Non-fatal, continue with user message
 		}
 
-		systemMsg, err := mc.Add(ctx, db, Message{
+		systemMsg, err := mc.Add(Message{
 			Text:            string(envChangedJSON),
 			Type:            TypeEnvChanged,
 			Attachments:     nil,
@@ -240,7 +241,7 @@ func NewChatMessage(
 	}
 
 	// Add user message to the chain
-	userMsg, err := mc.Add(ctx, db, Message{
+	userMsg, err := mc.Add(Message{
 		Text:            userMessage,
 		Type:            TypeUserText,
 		Attachments:     attachments,
@@ -251,8 +252,8 @@ func NewChatMessage(
 	}
 
 	// Update last_updated_at for the session
-	if err := database.UpdateSessionLastUpdated(db, sessionId); err != nil {
-		log.Printf("Failed to update last_updated_at for session %s: %v", sessionId, err)
+	if err := database.UpdateSessionLastUpdated(db); err != nil {
+		log.Printf("Failed to update last_updated_at for session %s: %v", db.SessionId(), err)
 		// Non-fatal error, continue with response
 	}
 
@@ -268,25 +269,25 @@ func NewChatMessage(
 	ew.Send(EventAcknowledge, fmt.Sprintf("%d", userMsg.ID))
 
 	// Retrieve session history from DB for LLM (full context)
-	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, sessionId, primaryBranchID)
+	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, primaryBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve full session history for LLM: %w", err)
 	}
 
 	// Retrieve session history for frontend InitialState (paginated)
-	frontendHistoryForInitialState, err := database.GetSessionHistoryPaginated(db, sessionId, primaryBranchID, 0, fetchLimit)
+	frontendHistoryForInitialState, err := database.GetSessionHistoryPaginated(db, primaryBranchID, 0, fetchLimit)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve paginated session history for frontend: %w", err)
 	}
 
-	roots, _, err := database.GetLatestSessionEnv(db, sessionId)
+	roots, _, err := database.GetLatestSessionEnv(db)
 	if err != nil {
-		return fmt.Errorf("failed to get latest session environment for session %s: %w", sessionId, err)
+		return fmt.Errorf("failed to get latest session environment for session %s: %w", db.SessionId(), err)
 	}
 
 	// Prepare initial state for streaming (similar to loadChatSession)
 	initialState := InitialState{
-		SessionId:       sessionId,
+		SessionId:       db.SessionId(),
 		History:         frontendHistoryForInitialState, // Use paginated history for frontend
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     session.WorkspaceID,
@@ -307,9 +308,9 @@ func NewChatMessage(
 	return nil
 }
 
-func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter, sessionId string, beforeMessageID int, fetchLimit int) (initialState InitialState, err error) {
+func LoadChatSession(ctx context.Context, db *database.SessionDatabase, ew EventWriter, beforeMessageID int, fetchLimit int) (initialState InitialState, err error) {
 	// Check if session exists
-	exists, err := database.SessionExists(db, sessionId)
+	exists, err := database.SessionExists(db)
 	if err != nil {
 		err = fmt.Errorf("failed to check session existence: %w", err)
 		return
@@ -319,7 +320,7 @@ func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter,
 		return
 	}
 
-	session, err := database.GetSession(db, sessionId)
+	session, err := database.GetSession(db)
 	if err != nil {
 		err = fmt.Errorf("failed to load session: %w", err)
 		return
@@ -335,7 +336,7 @@ func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter,
 	}
 
 	// Use automatic branch detection to load history with pagination
-	history, actualBranchID, err := database.GetSessionHistoryPaginatedWithAutoBranch(db, sessionId, beforeMessageID, fetchLimit)
+	history, actualBranchID, err := database.GetSessionHistoryPaginatedWithAutoBranch(db, beforeMessageID, fetchLimit)
 	if err != nil {
 		err = fmt.Errorf("failed to load session history: %w", err)
 		return
@@ -346,9 +347,9 @@ func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter,
 		history = []FrontendMessage{}
 	}
 
-	currentRoots, currentGeneration, err := database.GetLatestSessionEnv(db, sessionId)
+	currentRoots, currentGeneration, err := database.GetLatestSessionEnv(db)
 	if err != nil {
-		err = fmt.Errorf("failed to get latest session environment for session %s: %w", sessionId, err)
+		err = fmt.Errorf("failed to get latest session environment for session %s: %w", db.SessionId(), err)
 		return
 	}
 
@@ -374,7 +375,7 @@ func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter,
 
 	var initialStateEnvChanged *env.EnvChanged
 	if currentGeneration > lastMessageGenerationInHistory {
-		oldRoots, err := database.GetSessionEnv(db, sessionId, lastMessageGenerationInHistory)
+		oldRoots, err := database.GetSessionEnv(db, lastMessageGenerationInHistory)
 		if err != nil {
 			log.Printf("loadChatSession: Failed to get old session environment for generation %d: %v", lastMessageGenerationInHistory, err)
 			// Non-fatal, continue
@@ -389,7 +390,7 @@ func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter,
 
 	// Prepare initial state as a single JSON object
 	initialState = InitialState{
-		SessionId:       sessionId,
+		SessionId:       db.SessionId(),
 		History:         history,
 		SystemPrompt:    session.SystemPrompt,
 		WorkspaceID:     session.WorkspaceID,
@@ -410,7 +411,7 @@ func LoadChatSession(ctx context.Context, db *database.Database, ew EventWriter,
 
 	// If it's an SSE request, handle streaming. Otherwise, send regular JSON response.
 	if ew != nil {
-		if callStartTime, ok := GetCallStartTime(sessionId); ok {
+		if callStartTime, ok := GetCallStartTime(db.SessionId()); ok {
 			initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
 
 			initialStateJSON, err2 := json.Marshal(initialState)
