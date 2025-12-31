@@ -1,14 +1,13 @@
 package chat
 
-import "fmt"
-
-type BadRequestError struct{ error }
-type NotFoundError struct{ error }
+import (
+	. "github.com/lifthrasiir/angel/internal/types"
+)
 
 func badRequestError(format string, args ...interface{}) error {
-	return BadRequestError{fmt.Errorf(format, args...)}
+	return MakeBadRequestError(format, args...)
 }
 
 func notFoundError(format string, args ...interface{}) error {
-	return NotFoundError{fmt.Errorf(format, args...)}
+	return MakeNotFoundError(format, args...)
 }

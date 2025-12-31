@@ -76,7 +76,8 @@ func Main(config *env.EnvConfig, embeddedFiles embed.FS, loginUnavailableHTML []
 
 	checkNetworkFilesystem(config.DBPath())
 
-	db, err := database.InitDB(config.DBPath())
+	ctx := env.ContextWithEnvConfig(context.Background(), config)
+	db, err := database.InitDB(ctx, config.DBPath())
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}

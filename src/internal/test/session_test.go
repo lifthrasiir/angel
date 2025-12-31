@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -113,10 +114,19 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 
 	// Test case 1: Successful deletion
 	t.Run("Success", func(t *testing.T) {
+		// Get session DB path before deletion
+		sessionDBPath, err := database.GetSessionDBPathFromDB(testDB, sessionID)
+		if err != nil {
+			t.Fatalf("Failed to get session DB path: %v", err)
+		}
+
+		// Close sdb before deletion to release the file handle
+		sdb.Close()
+
 		rr := testRequest(t, router, "DELETE", "/api/workspaces/"+workspaceID, nil, http.StatusOK)
 
 		var response map[string]string
-		err := json.Unmarshal(rr.Body.Bytes(), &response)
+		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		if err != nil {
 			t.Fatalf("could not unmarshal response: %v", err)
 		}
@@ -124,7 +134,7 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 			t.Errorf("expected status 'success', got %v", response["status"])
 		}
 
-		// Verify deletion in DB
+		// Verify deletion in main DB
 		var count int
 		querySingleRow(t, testDB, "SELECT COUNT(*) FROM workspaces WHERE id = ?", []interface{}{workspaceID}, &count)
 		if count != 0 {
@@ -134,13 +144,10 @@ func TestDeleteWorkspaceHandler(t *testing.T) {
 		if count != 0 {
 			t.Errorf("sessions not deleted from DB")
 		}
-		querySingleRow(t, testDB, "SELECT COUNT(*) FROM messages WHERE session_id = ?", []interface{}{sessionID}, &count)
-		if count != 0 {
-			t.Errorf("messages not deleted from DB")
-		}
-		querySingleRow(t, testDB, "SELECT COUNT(*) FROM branches WHERE session_id = ?", []interface{}{sessionID}, &count)
-		if count != 0 {
-			t.Errorf("branches not deleted from DB")
+
+		// Verify session DB file was deleted
+		if _, err := os.Stat(sessionDBPath); !os.IsNotExist(err) {
+			t.Errorf("session DB file not deleted: %s", sessionDBPath)
 		}
 	})
 
@@ -368,7 +375,7 @@ func TestUpdateSessionNameHandler(t *testing.T) {
 	// Test case 2: Session not found
 	t.Run("Session Not Found", func(t *testing.T) {
 		payload := []byte(`{"name": "Non-existent Session Name"}`)
-		testRequest(t, router, "POST", "/api/chat/NonExistentSession/name", payload, http.StatusOK)
+		testRequest(t, router, "POST", "/api/chat/NonExistentSession/name", payload, http.StatusNotFound)
 	})
 
 	// Test case 3: Invalid JSON payload

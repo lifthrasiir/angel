@@ -73,22 +73,8 @@ func AddMessageToSession(ctx context.Context, db SessionDbOrTx, msg Message) (in
 
 	messageID := int(lastInsertID)
 
-	// Add message to FTS tables only for user and model messages
-	// FTS tables are contentless and will automatically read from messages_searchable view
-	// which only includes messages with type IN ('user', 'model')
-	if msg.Type == TypeUserText || msg.Type == TypeModelText {
-		_, err = db.Exec("INSERT INTO message_stems(rowid) VALUES (?)", messageID)
-		if err != nil {
-			log.Printf("AddMessageToSession: Failed to insert into message_stems: %v", err)
-			// Don't fail the operation, but log the error
-		}
-
-		_, err = db.Exec("INSERT INTO S.message_trigrams(rowid) VALUES (?)", messageID)
-		if err != nil {
-			log.Printf("AddMessageToSession: Failed to insert into message_trigrams: %v", err)
-			// Don't fail the operation, but log the error
-		}
-	}
+	// FTS indexing is handled by SessionWatcher - no need to insert here
+	// SessionWatcher will detect the change and update the main DB's FTS tables
 
 	return messageID, nil
 }
@@ -104,11 +90,31 @@ func UpdateMessageChosenNextID(db SessionDbOrTx, messageID int, chosenNextID *in
 
 // UpdateSessionPrimaryBranchID updates the primary_branch_id for a session.
 func UpdateSessionPrimaryBranchID(db *SessionDatabase, branchID string) error {
-	_, err := db.Exec("UPDATE S.sessions SET primary_branch_id = ? WHERE id = ?", branchID, db.LocalSessionId())
+	// Update both main DB sessions table and session DB sessions table for consistency
+	tx, err := db.Begin()
 	if err != nil {
-		log.Printf("UpdateSessionPrimaryBranchID: Failed to update session primary_branch_id: %v", err)
-		return fmt.Errorf("failed to update session primary_branch_id: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
+
+	// Update main DB sessions table
+	_, err = tx.Exec("UPDATE sessions SET primary_branch_id = ? WHERE id = ?", branchID, db.SessionId())
+	if err != nil {
+		log.Printf("UpdateSessionPrimaryBranchID: Failed to update main DB session primary_branch_id: %v", err)
+		return fmt.Errorf("failed to update main DB session primary_branch_id: %w", err)
+	}
+
+	// Update session DB sessions table
+	_, err = tx.Exec("UPDATE S.sessions SET primary_branch_id = ? WHERE id = ?", branchID, db.LocalSessionId())
+	if err != nil {
+		log.Printf("UpdateSessionPrimaryBranchID: Failed to update session DB session primary_branch_id: %v", err)
+		return fmt.Errorf("failed to update session DB session primary_branch_id: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return nil
 }
 
@@ -232,19 +238,9 @@ func UpdateMessageContent(db *SessionDatabase, messageID int, content string, sy
 	}
 
 	// Sync FTS if requested (for final message updates)
-	if syncFTS {
-		// FTS tables are contentless and will automatically read from messages_searchable view
-		// Use INSERT OR REPLACE to force re-indexing with new content
-		_, err = tx.Exec("INSERT OR REPLACE INTO message_stems(rowid) VALUES (?)", messageID)
-		if err != nil {
-			return fmt.Errorf("failed to update message_stems: %w", err)
-		}
-
-		_, err = tx.Exec("INSERT OR REPLACE INTO message_trigrams(rowid) VALUES (?)", messageID)
-		if err != nil {
-			return fmt.Errorf("failed to update message_trigrams: %w", err)
-		}
-	}
+	// Note: FTS indexing is handled by SessionWatcher - syncFTS parameter is kept for API compatibility
+	// but the actual FTS update happens when SessionWatcher detects the DB change
+	_ = syncFTS
 
 	return tx.Commit()
 }
@@ -351,11 +347,29 @@ func GetMessageByID(db *SessionDatabase, messageID int) (*Message, error) {
 }
 
 // UpdateSessionChosenFirstID updates the chosen_first_id for a specific session.
-func UpdateSessionChosenFirstID(db SessionDbOrTx, chosenFirstID *int) error {
-	_, err := db.Exec("UPDATE S.sessions SET chosen_first_id = ? WHERE id = ?", chosenFirstID, db.LocalSessionId())
+func UpdateSessionChosenFirstID(db *SessionDatabase, chosenFirstID *int) error {
+	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to update session chosen_first_id: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
+
+	// Update main DB sessions table
+	_, err = tx.Exec("UPDATE sessions SET chosen_first_id = ? WHERE id = ?", chosenFirstID, db.SessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update main DB session chosen_first_id: %w", err)
+	}
+
+	// Update session DB sessions table
+	_, err = tx.Exec("UPDATE S.sessions SET chosen_first_id = ? WHERE id = ?", chosenFirstID, db.LocalSessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update session DB session chosen_first_id: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return nil
 }
 

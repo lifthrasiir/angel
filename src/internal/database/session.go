@@ -17,25 +17,33 @@ import (
 
 // sessionMeta implements common methods for SessionDatabase and SessionTx.
 type sessionMeta struct {
-	id string
+	id          string
+	attachAlias string // Alias for the attached session DB (e.g., "session_db_1234567890")
 }
 
 // SessionId returns the full session ID associated with this SessionDatabase.
 func (meta sessionMeta) SessionId() string { return meta.id }
 
 // LocalSessionId returns the local session ID that should be stored in session-specific tables.
-func (meta sessionMeta) LocalSessionId() string { return meta.id }
+func (meta sessionMeta) LocalSessionId() string { return ToLocalSessionID(meta.id) }
 
-// rewriteQuery rewrites queries to replace a pseudo-schema `S.` (for the current session) with the correct SQL syntax.
+// rewriteQuery rewrites queries to replace a pseudo-schema `S.` (for the current session) with the attached database alias.
+// For example, "SELECT * FROM S.sessions" becomes "SELECT * FROM session_db_1234567890.sessions".
+// If no attach alias is set (main DB queries), it removes the `S.` prefix.
 // Since this is a simple string replacement, any query should NOT use a bare string that may contain `S.`.
 func (meta sessionMeta) rewriteQuery(query string) string {
-	return strings.ReplaceAll(query, "S.", "") // TODO: Use "`sess:<quoted sessionId>`." instead
+	if meta.attachAlias != "" {
+		return strings.ReplaceAll(query, "S.", meta.attachAlias+".")
+	}
+	return strings.ReplaceAll(query, "S.", "")
 }
 
 // SessionDatabase is a wrapper around the main database connection for session-specific operations.
+// It holds a reference to an attached session database via the AttachPool.
 type SessionDatabase struct {
 	*Database
 	sessionMeta
+	cleanup func() // Cleanup function to release the attach when done
 }
 
 // SessionTx is a wrapper around sql.Tx for session-specific operations within a transaction.
@@ -45,18 +53,102 @@ type SessionTx struct {
 }
 
 // WithSession returns a SessionDatabase for a specific session ID. It should be `Close`d after use.
+// This attaches the session database to the main connection and returns a SessionDatabase that
+// queries the attached session DB when using the `S.` prefix.
 func (db *Database) WithSession(sessionId string) (*SessionDatabase, error) {
-	meta := sessionMeta{id: sessionId}
-	return &SessionDatabase{Database: db, sessionMeta: meta}, nil
+	// Extract main session ID to determine which session DB file to use
+	mainSessionID, _ := SplitSessionId(sessionId)
+
+	// Get the session DB path
+	sessionDBPath, err := GetSessionDBPath(db.ctx, mainSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session DB path: %w", err)
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(sessionDBPath); os.IsNotExist(err) {
+		return nil, MakeNotFoundError("session DB does not exist: %s", sessionDBPath)
+	}
+
+	// Attach the session database to the main connection
+	alias, cleanup, err := db.attachPool.Acquire(sessionDBPath, mainSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach session DB: %w", err)
+	}
+
+	meta := sessionMeta{id: sessionId, attachAlias: alias}
+	return &SessionDatabase{Database: db, sessionMeta: meta, cleanup: cleanup}, nil
+}
+
+// CreateSessionDB creates a new session database file for the given main session ID.
+// If the database file already exists, this is a no-op.
+func (db *Database) CreateSessionDB(mainSessionID string) error {
+	// Get session DB path
+	sessionDBPath, err := GetSessionDBPath(db.ctx, mainSessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session DB path: %w", err)
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(sessionDBPath); err == nil {
+		// File already exists, nothing to do
+		return nil
+	}
+
+	// Ensure directory exists
+	dbDir := filepath.Dir(sessionDBPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		return fmt.Errorf("failed to create session DB directory %s: %w", dbDir, err)
+	}
+
+	// Attach the session database (SQLite will create the file if it doesn't exist)
+	alias, cleanup, err := db.attachPool.Acquire(sessionDBPath, mainSessionID)
+	if err != nil {
+		return fmt.Errorf("failed to attach session DB for schema creation: %w", err)
+	}
+	defer cleanup()
+
+	// Create SessionDatabase to use rewriteQuery
+	meta := sessionMeta{id: mainSessionID, attachAlias: alias}
+	sdb := &SessionDatabase{Database: db, sessionMeta: meta}
+
+	// Create schema using S. prefix (rewriteQuery will convert it to the actual alias)
+	_, err = sdb.Exec(createSessionSchemaSQL)
+	if err != nil {
+		return fmt.Errorf("failed to create session schema: %w", err)
+	}
+
+	log.Printf("Database: Created new session DB: %s", sessionDBPath)
+	return nil
+}
+
+// WithSessionDB attaches an existing session database and returns a SessionDatabase.
+// This is a lower-level alternative to WithSession that skips the file existence check.
+func (db *Database) WithSessionDB(mainSessionID string) (*SessionDatabase, error) {
+	// Get the session DB path
+	sessionDBPath, err := GetSessionDBPath(db.ctx, mainSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session DB path: %w", err)
+	}
+
+	// Attach the session database to the main connection
+	alias, cleanup, err := db.attachPool.Acquire(sessionDBPath, mainSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach session DB: %w", err)
+	}
+
+	meta := sessionMeta{id: mainSessionID, attachAlias: alias}
+	return &SessionDatabase{Database: db, sessionMeta: meta, cleanup: cleanup}, nil
 }
 
 // WithSuffix returns a SessionDatabase for a session ID with the given suffix appended.
+// It shares the same attach alias and cleanup with the parent (only the parent should call Close).
 func (db *SessionDatabase) WithSuffix(suffix string) *SessionDatabase {
 	if !strings.HasPrefix(suffix, ".") {
 		panic("suffix must start with a dot")
 	}
-	meta := sessionMeta{id: db.sessionMeta.id + suffix}
-	return &SessionDatabase{Database: db.Database, sessionMeta: meta}
+	meta := sessionMeta{id: db.sessionMeta.id + suffix, attachAlias: db.sessionMeta.attachAlias}
+	return &SessionDatabase{Database: db.Database, sessionMeta: meta, cleanup: nil} // No cleanup for suffix
 }
 
 func (db *SessionDatabase) Begin() (*SessionTx, error) {
@@ -126,7 +218,11 @@ func (tx *SessionTx) QueryRowContext(ctx context.Context, query string, args ...
 }
 
 func (db *SessionDatabase) Close() error {
-	// For now does nothing, but will eventually do something after per-session DB connections are implemented
+	// Call the cleanup function to release the attach
+	if db.cleanup != nil {
+		db.cleanup()
+		db.cleanup = nil
+	}
 	return nil
 }
 
@@ -180,24 +276,46 @@ func GetAllWorkspaces(db *Database) ([]Workspace, error) {
 
 // DeleteWorkspace deletes a workspace and all its associated sessions and messages.
 func DeleteWorkspace(db *Database, workspaceID string) error {
-	// Start a transaction to ensure atomicity
+	// Get all session IDs in the workspace first (before transaction)
+	rows, err := db.Query("SELECT id FROM sessions WHERE workspace_id = ?", workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to query sessions for workspace %s: %w", workspaceID, err)
+	}
+	defer rows.Close()
+
+	var sessionIDs []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			return fmt.Errorf("failed to scan session ID: %w", err)
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+
+	// Delete session DB files for each session
+	for _, sessionID := range sessionIDs {
+		mainSessionID, _ := SplitSessionId(sessionID)
+		sessionDBPath, err := GetSessionDBPathFromDB(db, mainSessionID)
+		if err != nil {
+			// Session DB path not found, skip
+			continue
+		}
+
+		// Force detach from AttachPool before deleting the file
+		if err := db.attachPool.ForceDetachByMainSessionID(mainSessionID); err != nil {
+			log.Printf("Warning: Failed to detach session %s before deletion: %v", mainSessionID, err)
+		}
+
+		// Delete the session DB file
+		os.Remove(sessionDBPath)
+	}
+
+	// Start a transaction to ensure atomicity for main DB operations
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback() // Rollback on error
-
-	// Delete messages associated with the sessions in the workspace
-	_, err = tx.Exec("DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
-	if err != nil {
-		return fmt.Errorf("failed to delete messages for workspace %s: %w", workspaceID, err)
-	}
-
-	// Delete shell commands associated with the sessions in the workspace
-	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?))", workspaceID)
-	if err != nil {
-		return fmt.Errorf("failed to delete shell commands for workspace %s: %w", workspaceID, err)
-	}
 
 	// Delete session environments associated with the sessions in the workspace
 	_, err = tx.Exec("DELETE FROM session_envs WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
@@ -205,7 +323,7 @@ func DeleteWorkspace(db *Database, workspaceID string) error {
 		return fmt.Errorf("failed to delete session environments for workspace %s: %w", workspaceID, err)
 	}
 
-	// Delete sessions associated with the workspace
+	// Delete sessions associated with the workspace from main DB
 	_, err = tx.Exec("DELETE FROM sessions WHERE workspace_id = ?", workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to delete sessions for workspace %s: %w", workspaceID, err)
@@ -224,52 +342,126 @@ func DeleteWorkspace(db *Database, workspaceID string) error {
 // Returns the SessionDatabase (already attached) and the primary branch ID.
 func CreateSession(db *Database, sessionID string, systemPrompt string, workspaceID string) (*SessionDatabase, string, error) {
 	primaryBranchID := GenerateID() // Generate a new ID for the primary branch
-	_, err := db.Exec(
-		"INSERT INTO sessions (id, system_prompt, name, workspace_id, primary_branch_id) VALUES (?, ?, ?, ?, ?)",
+
+	// Insert into main DB's sessions table
+	_, err := db.Exec("INSERT INTO sessions (id, system_prompt, name, workspace_id, primary_branch_id) VALUES (?, ?, ?, ?, ?)",
 		sessionID, systemPrompt, "", workspaceID, primaryBranchID)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create session: %w", err)
+		return nil, "", fmt.Errorf("failed to create session in main DB: %w", err)
 	}
 
-	// Also create the initial branch entry in the branches table
-	_, err = db.Exec(
-		"INSERT INTO branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, NULL, NULL)",
-		primaryBranchID, sessionID)
+	// Create the session database file explicitly
+	mainSessionID, _ := SplitSessionId(sessionID)
+	if err := db.CreateSessionDB(mainSessionID); err != nil {
+		return nil, "", fmt.Errorf("failed to create session DB: %w", err)
+	}
+
+	// Attach the session database to perform initial setup
+	sdb, err := db.WithSession(sessionID)
 	if err != nil {
+		return nil, "", fmt.Errorf("failed to attach session DB: %w", err)
+	}
+
+	// Use LOCAL session ID for session DB storage
+	localSessionID := ToLocalSessionID(sessionID)
+
+	// Insert into session DB's sessions table for consistency
+	_, err = sdb.Exec("INSERT OR REPLACE INTO S.sessions (id, system_prompt, name, workspace_id, primary_branch_id) VALUES (?, ?, ?, ?, ?)",
+		localSessionID, systemPrompt, "", workspaceID, primaryBranchID)
+	if err != nil {
+		sdb.Close()
+		return nil, "", fmt.Errorf("failed to create session in session DB: %w", err)
+	}
+
+	// Create the initial branch entry in the session DB's branches table
+	_, err = sdb.Exec("INSERT INTO S.branches (id, session_id, parent_branch_id, branch_from_message_id) VALUES (?, ?, NULL, NULL)", primaryBranchID, localSessionID)
+	if err != nil {
+		sdb.Close()
 		return nil, "", fmt.Errorf("failed to create initial branch for session: %w", err)
 	}
 
-	sdb, err := db.WithSession(sessionID)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get session database: %w", err)
-	}
+	// Return the already-attached SessionDatabase
 	return sdb, primaryBranchID, nil
 }
 
 // UpdateSessionLastUpdated updates the last_updated_at timestamp for a session.
 func UpdateSessionLastUpdated(db *SessionDatabase) error {
-	_, err := db.Exec("UPDATE S.sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", db.LocalSessionId())
+	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to update session last_updated_at: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
+
+	// Update main DB sessions table
+	_, err = tx.Exec("UPDATE sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", db.SessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update main DB session last_updated_at: %w", err)
+	}
+
+	// Update session DB sessions table
+	_, err = tx.Exec("UPDATE S.sessions SET last_updated_at = CURRENT_TIMESTAMP WHERE id = ?", db.LocalSessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update session DB session last_updated_at: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return nil
 }
 
 // UpdateSessionName updates the name of a session.
 func UpdateSessionName(db *SessionDatabase, name string) error {
-	_, err := db.Exec("UPDATE S.sessions SET name = ? WHERE id = ?", name, db.LocalSessionId())
+	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to update session name: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
+
+	// Update main DB sessions table
+	_, err = tx.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, db.SessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update main DB session name: %w", err)
+	}
+
+	// Update session DB sessions table
+	_, err = tx.Exec("UPDATE S.sessions SET name = ? WHERE id = ?", name, db.LocalSessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update session DB session name: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return nil
 }
 
 // UpdateSessionWorkspace updates the workspace ID of a session.
 func UpdateSessionWorkspace(db *SessionDatabase, workspaceID string) error {
-	_, err := db.Exec("UPDATE S.sessions SET workspace_id = ? WHERE id = ?", workspaceID, db.LocalSessionId())
+	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to update session workspace: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
+
+	// Update main DB sessions table
+	_, err = tx.Exec("UPDATE sessions SET workspace_id = ? WHERE id = ?", workspaceID, db.SessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update main DB session workspace: %w", err)
+	}
+
+	// Update session DB sessions table
+	_, err = tx.Exec("UPDATE S.sessions SET workspace_id = ? WHERE id = ?", workspaceID, db.LocalSessionId())
+	if err != nil {
+		return fmt.Errorf("failed to update session DB session workspace: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return nil
 }
 
@@ -358,6 +550,14 @@ func GetSession(db *SessionDatabase) (Session, error) {
 
 // DeleteSession deletes a session and all its associated messages, branches, shell commands, and session environments.
 func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error {
+	// Get the main session ID to detach from AttachPool
+	mainSessionID, _ := SplitSessionId(sessionID)
+
+	// Force detach from AttachPool before deleting
+	if err := db.attachPool.ForceDetachByMainSessionID(mainSessionID); err != nil {
+		log.Printf("Warning: Failed to detach session %s before deletion: %v", mainSessionID, err)
+	}
+
 	// Start a transaction to ensure atomicity
 	tx, err := db.Begin()
 	if err != nil {
@@ -419,7 +619,22 @@ func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error 
 		}
 	}
 
-	return tx.Commit()
+	// Commit the transaction first
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Delete the session DB file after successful commit
+	sessionDBPath, err := GetSessionDBPathFromDB(db, mainSessionID)
+	if err != nil {
+		log.Printf("Warning: Failed to get session DB path for deletion: %v", err)
+		return nil
+	}
+	if err := os.Remove(sessionDBPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Warning: Failed to delete session DB file %s: %v", sessionDBPath, err)
+	}
+
+	return nil
 }
 
 // GenerateID generates a random ID for sessions and branches

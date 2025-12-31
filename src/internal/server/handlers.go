@@ -687,9 +687,9 @@ func deleteMCPConfigHandler(w http.ResponseWriter, r *http.Request) {
 // As special cases, BadRequestError and NotFoundError types are handled to send 400 and 404 responses respectively.
 func sendInternalServerError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	switch err.(type) {
-	case chat.BadRequestError:
+	case BadRequestError:
 		sendBadRequestError(w, r, err.Error())
-	case chat.NotFoundError:
+	case NotFoundError:
 		sendNotFoundError(w, r, err.Error())
 	default:
 		log.Printf("%s: %v", msg, err)

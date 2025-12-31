@@ -45,6 +45,7 @@ replace (
 require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fvbommel/sortorder v1.1.0 // indirect
 	github.com/gorilla/csrf v1.7.3 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect

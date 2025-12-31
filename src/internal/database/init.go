@@ -1,17 +1,19 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"fmt"
 	"log"
-	"strings"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"github.com/ncruces/go-sqlite3"
 	_ "github.com/ncruces/go-sqlite3/driver"
 
+	"github.com/lifthrasiir/angel/internal/env"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -29,14 +31,46 @@ var (
 	testDBCounter atomic.Int64
 )
 
-// Database is a wrapper around the main database connection.
+// Database is a wrapper around the main database connection with additional split-DB infrastructure.
 type Database struct {
 	*sql.DB
+	ctx        context.Context // Context containing EnvConfig
+	attachPool *AttachPool     // Pool for attaching session databases
+	watcher    *SessionWatcher // Watcher for session database changes
+	sessionDir string
+}
+
+// GetAttachPool returns the AttachPool for attaching session databases.
+func (db *Database) GetAttachPool() *AttachPool {
+	return db.attachPool
+}
+
+// Watcher returns the SessionWatcher for watching session database changes.
+func (db *Database) Watcher() *SessionWatcher {
+	return db.watcher
+}
+
+// Ctx returns the context containing EnvConfig for this database.
+func (db *Database) Ctx() context.Context {
+	return db.ctx
+}
+
+// Close closes the main database connection and stops the session watcher.
+func (db *Database) Close() error {
+	// Stop watcher first
+	if db.watcher != nil {
+		if err := db.watcher.Stop(); err != nil {
+			log.Printf("Warning: Failed to stop session watcher: %v", err)
+		}
+	}
+
+	// Close main DB
+	return db.DB.Close()
 }
 
 // InitDB initializes the SQLite database connection and creates tables if they don't exist.
 // This is the main database initialization function for production use.
-func InitDB(dataSourceName string) (*Database, error) {
+func InitDB(ctx context.Context, dataSourceName string) (*Database, error) {
 	db, err := sql.Open("sqlite3", dataSourceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -79,7 +113,7 @@ func InitDB(dataSourceName string) (*Database, error) {
 	}
 
 	// Run migrations
-	if err = migrateDB(db); err != nil {
+	if err = migrateDB(ctx, db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run database migrations: %w", err)
 	}
@@ -90,10 +124,42 @@ func InitDB(dataSourceName string) (*Database, error) {
 		// Continue even if sync fails, FTS will be updated on next message completion
 	}
 
+	// Get session directory from EnvConfig
+	envConfig, err := env.EnvConfigFromContext(ctx)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to get env config: %w", err)
+	}
+	sessionDir := envConfig.SessionDir()
+
+	// Create Database object (without watcher yet)
+	database := &Database{
+		DB:         db,
+		ctx:        ctx,
+		attachPool: nil, // Will be set below
+		watcher:    nil, // Will be set below
+		sessionDir: sessionDir,
+	}
+
+	// Initialize AttachPool for split-DB architecture
+	database.attachPool = NewAttachPool(db)
+
+	// Initialize SessionWatcher
+	watcher, err := NewSessionWatcher(database, sessionDir)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create session watcher: %w", err)
+	}
+	database.watcher = watcher
+
+	// Start the watcher
+	if err := watcher.Start(); err != nil {
+		log.Printf("Warning: Failed to start session watcher: %v", err)
+		// Continue even if watcher fails, sessions can still be managed manually
+	}
+
 	log.Println("Database initialized and tables created.")
-	return &Database{
-		DB: db,
-	}, nil
+	return database, nil
 }
 
 // InitTestDB initializes an in-memory SQLite database for testing.
@@ -103,11 +169,20 @@ func InitTestDB(testName string) (*Database, error) {
 	// Add an atomic counter suffix to prevent conflicts when tests run with -count=N
 	counter := testDBCounter.Add(1)
 	dbName := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL", testName, counter)
-	return InitDB(dbName)
+
+	// Create test EnvConfig with custom session dir for testing
+	testEnvConfig := env.NewTestEnvConfig()
+	ctx := env.ContextWithEnvConfig(context.Background(), testEnvConfig)
+
+	return InitDB(ctx, dbName)
 }
 
 // createTables creates the necessary tables in the database.
 func createTables(db *sql.DB) error {
+	// Drop legacy VIEW if it exists (for split-db migration)
+	// This must happen before creating indexes on messages_searchable
+	_, _ = db.Exec("DROP VIEW IF EXISTS messages_searchable")
+
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS sessions (
 		id TEXT PRIMARY KEY,
@@ -293,26 +368,26 @@ func createTables(db *sql.DB) error {
 		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 	);
 
-	CREATE VIEW IF NOT EXISTS messages_searchable AS
-		SELECT id, replace(replace(text, '<', '\x0e'), '>', '\x0f') as text, session_id,
-			(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
-		FROM messages WHERE type IN ('user', 'model');
+	CREATE TABLE IF NOT EXISTS messages_searchable (
+		id INTEGER PRIMARY KEY,
+		text TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_messages_searchable_session_id ON messages_searchable(session_id);
+	CREATE INDEX IF NOT EXISTS idx_messages_searchable_workspace_id ON messages_searchable(workspace_id);
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS message_stems USING fts5(
 		text,
 		session_id UNINDEXED,
-		workspace_id UNINDEXED,
-		content='messages_searchable',
-		content_rowid='id',
-		tokenize='porter unicode61 remove_diacritics 1'
+		workspace_id UNINDEXED
 	);
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS message_trigrams USING fts5(
 		text,
 		session_id UNINDEXED,
 		workspace_id UNINDEXED,
-		content='messages_searchable',
-		content_rowid='id',
 		tokenize='trigram remove_diacritics 1'
 	);
 	`
@@ -324,20 +399,117 @@ func createTables(db *sql.DB) error {
 }
 
 // migrateDB handles database schema migrations.
-func migrateDB(db *sql.DB) error {
-	// Keep empty for now, add migration statements as needed
-	migrationStmts := []string{}
+func migrateDB(ctx context.Context, db *sql.DB) error {
+	// Migration 1: Convert messages_searchable from VIEW to table for split-db architecture
+	// Note: For new databases, createTables already creates messages_searchable as a table
+	// For existing databases, we need to drop the old VIEW and recreate as TABLE
 
-	for _, stmt := range migrationStmts {
-		_, err := db.Exec(stmt)
+	// First, check if messages_searchable is a VIEW (legacy database)
+	var viewType string
+	err := db.QueryRow("SELECT type FROM sqlite_master WHERE name='messages_searchable'").Scan(&viewType)
+	if err == nil && viewType == "view" {
+		// Legacy database with VIEW, need to migrate
+		log.Println("Migrating messages_searchable from VIEW to TABLE...")
+
+		// Drop the VIEW
+		_, err = db.Exec("DROP VIEW IF EXISTS messages_searchable")
 		if err != nil {
-			// Ignore "duplicate column name" errors for ALTER TABLE statements
-			if strings.Contains(err.Error(), "duplicate column name") ||
-				strings.Contains(err.Error(), "no such table") {
-				log.Printf("Migration step ignored (expected error): %s", err.Error())
-				continue
+			return fmt.Errorf("failed to drop messages_searchable view: %w", err)
+		}
+
+		// Create TABLE (same structure as in createTables)
+		_, err = db.Exec(`CREATE TABLE messages_searchable (
+			id INTEGER PRIMARY KEY,
+			text TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace_id TEXT
+		)`)
+		if err != nil {
+			return fmt.Errorf("failed to create messages_searchable table: %w", err)
+		}
+
+		// Create indexes
+		_, err = db.Exec("CREATE INDEX IF NOT EXISTS idx_messages_searchable_session_id ON messages_searchable(session_id)")
+		if err != nil {
+			log.Printf("Warning: Failed to create index: %v", err)
+		}
+		_, err = db.Exec("CREATE INDEX IF NOT EXISTS idx_messages_searchable_workspace_id ON messages_searchable(workspace_id)")
+		if err != nil {
+			log.Printf("Warning: Failed to create index: %v", err)
+		}
+
+		// Migrate data from messages table
+		_, err = db.Exec(`
+			INSERT INTO messages_searchable (id, text, session_id, workspace_id)
+			SELECT id, replace(replace(text, '<', '\x0e'), '>', '\x0f') as text, session_id,
+				(SELECT workspace_id FROM sessions WHERE sessions.id = messages.session_id) as workspace_id
+			FROM messages WHERE type IN ('user', 'model')
+		`)
+		if err != nil {
+			log.Printf("Warning: Failed to migrate messages to messages_searchable: %v", err)
+		} else {
+			log.Println("Migration to messages_searchable completed")
+		}
+
+		// Drop and recreate FTS tables (they used external content)
+		_, err = db.Exec("DROP TABLE IF EXISTS message_stems")
+		if err != nil {
+			log.Printf("Warning: Failed to drop message_stems: %v", err)
+		}
+		_, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS message_stems USING fts5(
+			text,
+			session_id UNINDEXED,
+			workspace_id UNINDEXED
+		)`)
+		if err != nil {
+			log.Printf("Warning: Failed to create message_stems: %v", err)
+		}
+
+		_, err = db.Exec("DROP TABLE IF EXISTS message_trigrams")
+		if err != nil {
+			log.Printf("Warning: Failed to drop message_trigrams: %v", err)
+		}
+		_, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS message_trigrams USING fts5(
+			text,
+			session_id UNINDEXED,
+			workspace_id UNINDEXED,
+			tokenize='trigram remove_diacritics 1'
+		)`)
+		if err != nil {
+			log.Printf("Warning: Failed to create message_trigrams: %v", err)
+		}
+
+		log.Println("FTS tables recreated (population deferred)")
+	}
+
+	// Migration 2: Split-DB architecture migration
+	// Check if migration is needed (main DB has messages but no session DBs)
+	var messageCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&messageCount)
+	if err != nil {
+		log.Printf("Warning: Failed to count messages: %v", err)
+		return nil
+	}
+
+	if messageCount > 0 {
+		// Check if session DBs exist
+		envConfig, err := env.EnvConfigFromContext(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get env config for migration: %w", err)
+		}
+		sessionDir := envConfig.SessionDir()
+
+		// Check if any .db files exist in session directory
+		files, err := filepath.Glob(filepath.Join(sessionDir, "*.db"))
+		if err != nil {
+			log.Printf("Warning: Failed to check session DB files: %v", err)
+		} else if len(files) == 0 {
+			// No session DB files exist, but we have messages - need migration
+			log.Printf("Found %d messages in main DB but no session DBs, running split-DB migration...", messageCount)
+			if err := MigrateToSplitDB(ctx, db, sessionDir); err != nil {
+				return fmt.Errorf("split-DB migration failed: %w", err)
 			}
-			return fmt.Errorf("failed to execute migration statement '%s': %w", stmt, err)
+			log.Println("Split-DB migration completed successfully")
 		}
 	}
 
@@ -346,70 +518,8 @@ func migrateDB(db *sql.DB) error {
 
 // syncFTSOnStartup syncs FTS tables with messages that might be missing due to crashes during streaming
 func syncFTSOnStartup(db *sql.DB) error {
-	log.Println("Checking for FTS desync on startup...")
-
-	// Count missing entries in message_stems
-	var missingStems int
-	err := db.QueryRow(`
-		SELECT COUNT(*) FROM messages_searchable
-		WHERE id NOT IN (SELECT rowid FROM message_stems)
-	`).Scan(&missingStems)
-	if err != nil {
-		return fmt.Errorf("failed to count missing FTS stems entries: %w", err)
-	}
-
-	// Count missing entries in message_trigrams
-	var missingTrigrams int
-	err = db.QueryRow(`
-		SELECT COUNT(*) FROM messages_searchable
-		WHERE id NOT IN (SELECT rowid FROM message_trigrams)
-	`).Scan(&missingTrigrams)
-	if err != nil {
-		return fmt.Errorf("failed to count missing FTS trigrams entries: %w", err)
-	}
-
-	if missingStems > 0 || missingTrigrams > 0 {
-		log.Printf("Found %d missing stems and %d missing trigrams, syncing...", missingStems, missingTrigrams)
-
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("failed to begin FTS sync transaction: %w", err)
-		}
-		defer tx.Rollback()
-
-		// Sync missing stems entries
-		if missingStems > 0 {
-			_, err = tx.Exec(`
-				INSERT INTO message_stems(rowid)
-				SELECT id FROM messages_searchable
-				WHERE id NOT IN (SELECT rowid FROM message_stems)
-			`)
-			if err != nil {
-				return fmt.Errorf("failed to sync missing stems entries: %w", err)
-			}
-		}
-
-		// Sync missing trigrams entries
-		if missingTrigrams > 0 {
-			_, err = tx.Exec(`
-				INSERT INTO message_trigrams(rowid)
-				SELECT id FROM messages_searchable
-				WHERE id NOT IN (SELECT rowid FROM message_trigrams)
-			`)
-			if err != nil {
-				return fmt.Errorf("failed to sync missing trigrams entries: %w", err)
-			}
-		}
-
-		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit FTS sync: %w", err)
-		}
-
-		log.Printf("FTS sync completed successfully")
-	} else {
-		log.Println("FTS is already in sync")
-	}
-
+	log.Println("FTS sync temporarily disabled for split-db migration")
+	// TODO: Re-implement FTS sync for the new messages_searchable table structure
 	return nil
 }
 
