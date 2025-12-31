@@ -15,6 +15,7 @@ import './FileAttachmentPreview.css';
 
 interface FileAttachmentPreviewProps {
   file: File | FileAttachment;
+  sessionId?: string;
   onRemove?: (file: File) => void;
   onResize?: (originalFile: File, resizedFile: File) => void;
   onResizeStateChange?: (file: File, shouldResize: boolean) => void;
@@ -25,6 +26,7 @@ interface FileAttachmentPreviewProps {
 
 const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
   file,
+  sessionId,
   onRemove,
   onResize,
   onResizeStateChange,
@@ -51,8 +53,8 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
 
     if (fileAttachment.data) {
       return `data:${fileAttachment.mimeType};base64,${fileAttachment.data}`;
-    } else if (fileAttachment.hash) {
-      return `/api/blob/${fileAttachment.hash}`;
+    } else if (fileAttachment.hash && sessionId) {
+      return `/${sessionId}/@${fileAttachment.hash}`;
     }
     return null;
   };
@@ -190,6 +192,7 @@ const FileAttachmentPreview: React.FC<FileAttachmentPreviewProps> = ({
         'application/json',
         JSON.stringify({
           isMessageAttachment: true,
+          sessionId: sessionId,
           fileName: file.fileName,
           fileType: file.mimeType,
           blobHash: file.hash,

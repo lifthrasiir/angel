@@ -40,6 +40,7 @@ const responseKeys = { content: 'string', note: 'string?' } as const;
 const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
   functionResponse,
   messageId,
+  sessionId,
   attachments,
   messageInfo,
   children,
@@ -62,7 +63,7 @@ const ReadFileResponse: React.FC<FunctionResponseMessageProps> = ({
         <code dangerouslySetInnerHTML={{ __html: highlightedContent }} />
       </pre>
       {response.note && <p>{response.note}</p>}
-      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} />}
+      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} sessionId={sessionId} />}
     </ChatBubble>
   );
 };
@@ -73,6 +74,7 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
   onToggleView,
   attachments,
   responseMessageInfo,
+  sessionId,
   children,
 }) => {
   const args = functionCall.args;
@@ -106,7 +108,7 @@ const ReadFilePair: React.FC<FunctionPairComponentProps> = ({
         <code dangerouslySetInnerHTML={{ __html: highlightedContent }} />
       </pre>
       {response.note && <p>{response.note}</p>}
-      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} />}
+      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} sessionId={sessionId} />}
     </ChatBubble>
   );
 };

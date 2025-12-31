@@ -68,6 +68,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
             messageInfo={messageInfoComponent}
             messageId={message.id}
             attachments={attachments}
+            sessionId={message.sessionId}
           />
         );
     } else if (type === 'user') {
@@ -94,6 +95,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           className="agent-thought"
           messageInfo={messageInfoComponent}
           messageId={message.id}
+          sessionId={message.sessionId}
           message={message}
           isMobile={isMobile}
         />
@@ -101,7 +103,12 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
     } else if (type === 'function_call') {
       if (functionCall)
         return (
-          <FunctionCallMessage functionCall={functionCall} messageInfo={messageInfoComponent} messageId={message.id} />
+          <FunctionCallMessage
+            functionCall={functionCall}
+            messageInfo={messageInfoComponent}
+            messageId={message.id}
+            sessionId={message.sessionId}
+          />
         );
     } else if (type === 'system') {
       return <SystemMessage text={text} messageInfo={messageInfoComponent} messageId={message.id} />;

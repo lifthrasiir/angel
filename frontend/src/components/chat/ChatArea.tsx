@@ -319,6 +319,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           possibleBranches={currentMessage.possibleBranches}
           model={currentMessage.model}
           maxTokens={availableModels.get(currentMessage.model || '')?.maxTokens}
+          sessionId={currentMessage.sessionId}
         />
       );
 
@@ -330,6 +331,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           possibleBranches={responseMessage.possibleBranches}
           model={responseMessage.model}
           maxTokens={availableModels.get(responseMessage.model || '')?.maxTokens}
+          sessionId={responseMessage.sessionId}
         />
       );
 

@@ -7,8 +7,8 @@ import { getFunctionPairComponent } from '../../utils/functionMessageRegistry';
 interface FunctionPairMessageProps {
   functionCall: FunctionCall;
   functionResponse: FunctionResponse;
-  callMessageId?: string;
-  responseMessageId?: string;
+  callMessageId: string;
+  responseMessageId: string;
   callMessageInfo?: React.ReactNode;
   responseMessageInfo?: React.ReactNode;
   responseAttachments?: FileAttachment[];
@@ -34,7 +34,12 @@ const FunctionPairMessage: React.FC<FunctionPairMessageProps> = ({
 
   const content = (
     <div className="function-pair-container">
-      <FunctionCallMessage functionCall={functionCall} messageId={callMessageId} messageInfo={callMessageInfo} />
+      <FunctionCallMessage
+        functionCall={functionCall}
+        messageId={callMessageId}
+        sessionId={sessionId}
+        messageInfo={callMessageInfo}
+      />
       <div
         className="function-pair-bar"
         onClick={handleToggleView}

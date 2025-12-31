@@ -797,7 +797,13 @@ func handleDownloadBlobByHash(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
 
 	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
 	blobHash := vars["blobHash"]
+
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
 
 	if blobHash == "" {
 		sendBadRequestError(w, r, "Blob hash is required")
@@ -811,8 +817,8 @@ func handleDownloadBlobByHash(w http.ResponseWriter, r *http.Request) {
 		blobHash = blobHash[:dotIndex]
 	}
 
-	// XXX: Session ID would be eventually required in this endpoint to access the correct DB
-	sdb, err := db.WithSession("")
+	// Get session DB to access the blob
+	sdb, err := db.WithSession(sessionId)
 	if err != nil {
 		sendNotFoundError(w, r, "Blob data not found")
 		return

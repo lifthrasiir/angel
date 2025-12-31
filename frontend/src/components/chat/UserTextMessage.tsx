@@ -15,7 +15,7 @@ interface UserTextMessageProps {
   text?: string;
   attachments?: FileAttachment[];
   messageInfo?: React.ReactElement<MessageInfoProps>; // Change type here
-  messageId?: string;
+  messageId: string;
   sessionId?: string;
   message?: ChatMessage;
   onSaveEdit: (messageId: string, editedText: string) => void;
@@ -29,6 +29,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   attachments,
   messageInfo,
   messageId,
+  sessionId,
   message,
   onSaveEdit,
   onRetryClick,
@@ -99,7 +100,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
     >
       <>
         {!imageOnly && text}
-        <FileAttachmentList attachments={attachments} isImageOnlyMessage={imageOnly} />
+        <FileAttachmentList attachments={attachments} sessionId={sessionId} isImageOnlyMessage={imageOnly} />
       </>
     </ChatBubble>
   );

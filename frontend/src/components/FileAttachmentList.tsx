@@ -4,12 +4,14 @@ import FileAttachmentPreview from './FileAttachmentPreview';
 
 interface FileAttachmentListProps {
   attachments?: FileAttachment[];
+  sessionId?: string;
   onRemove?: (file: File) => void;
   isImageOnlyMessage?: boolean;
 }
 
 const FileAttachmentList: React.FC<FileAttachmentListProps> = ({
   attachments,
+  sessionId,
   onRemove,
   isImageOnlyMessage = false,
 }) => {
@@ -27,7 +29,13 @@ const FileAttachmentList: React.FC<FileAttachmentListProps> = ({
     <div className={containerClassName}>
       <div className={listClassName}>
         {attachments.map((file, index) => (
-          <FileAttachmentPreview key={index} file={file} onRemove={onRemove} isImageOnlyMessage={isImageOnlyMessage} />
+          <FileAttachmentPreview
+            key={index}
+            file={file}
+            sessionId={sessionId}
+            onRemove={onRemove}
+            isImageOnlyMessage={isImageOnlyMessage}
+          />
         ))}
       </div>
     </div>

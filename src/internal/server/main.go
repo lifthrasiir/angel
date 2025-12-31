@@ -277,7 +277,6 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 	router.HandleFunc("/api/chat/{sessionId}/extract", extractSessionHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/command", commandHandler).Methods("POST")
 
-	router.HandleFunc("/api/blob/{blobHash}", handleDownloadBlobByHash).Methods("GET")
 	router.HandleFunc("/api/accounts", listAccountsHandler).Methods("GET")
 	router.HandleFunc("/api/accounts/{id}/details", getAccountDetailsHandler).Methods("GET")
 	router.HandleFunc("/api/countTokens", countTokensHandler).Methods("POST")
@@ -309,6 +308,7 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 	router.PathPrefix("/assets/").HandlerFunc(serveStaticFiles)
 	router.PathPrefix("/sourcemaps/").HandlerFunc(serveSourcemapFiles)
 
+	router.HandleFunc("/{sessionId}/@{blobHash}", handleDownloadBlobByHash).Methods("GET")
 	router.HandleFunc("/{sessionId}", handleSessionPage).Methods("GET")
 }
 

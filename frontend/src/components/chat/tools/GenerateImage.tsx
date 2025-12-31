@@ -19,7 +19,13 @@ const argsKeys = {
   want_image: 'boolean?',
 } as const;
 
-const GenerateImageCall: React.FC<FunctionCallMessageProps> = ({ functionCall, messageId, messageInfo, children }) => {
+const GenerateImageCall: React.FC<FunctionCallMessageProps> = ({
+  functionCall,
+  messageId,
+  messageInfo,
+  sessionId,
+  children,
+}) => {
   const args = functionCall.args;
   if (!validateExactKeys(args, argsKeys)) {
     return children;
@@ -38,10 +44,10 @@ const GenerateImageCall: React.FC<FunctionCallMessageProps> = ({ functionCall, m
       heighten={false}
     >
       <p>{args.text}</p>
-      {inputHashes.length > 0 && (
+      {inputHashes.length > 0 && sessionId && (
         <div className="input-images-container" style={{ marginTop: '10px' }}>
           {inputHashes.map((hash, index) => (
-            <BlobImage key={index} hash={hash} alt={`Input image ${hash.substring(0, 8)}`} />
+            <BlobImage key={index} sessionId={sessionId} hash={hash} alt={`Input image ${hash.substring(0, 8)}`} />
           ))}
         </div>
       )}
@@ -59,6 +65,7 @@ const GenerateImageResponse: React.FC<FunctionResponseMessageProps> = ({
   functionResponse,
   messageId,
   messageInfo,
+  sessionId,
   children,
 }) => {
   const response = functionResponse.response;
@@ -74,7 +81,9 @@ const GenerateImageResponse: React.FC<FunctionResponseMessageProps> = ({
     return parts.map((part, index) => {
       // Check if this part looks like a hash (64 character hex string for SHA-512/256)
       if (part.match(/^[a-f0-9]{64}$/i)) {
-        return <BlobImage key={index} hash={part} alt={`Generated image ${part}`} />;
+        return sessionId ? (
+          <BlobImage key={index} sessionId={sessionId} hash={part} alt={`Generated image ${part}`} />
+        ) : null;
       }
       // Return whitespace or other text as-is
       return part === ' ' ? ' ' : part;
@@ -101,6 +110,7 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
   functionResponse,
   onToggleView,
   responseMessageInfo,
+  sessionId,
   children,
   responseMessageId,
 }) => {
@@ -120,7 +130,9 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
 
     return parts.map((part, index) => {
       if (part.match(/^[a-f0-9]{64}$/i)) {
-        return <BlobImage key={index} hash={part} alt={`Generated image ${part}`} />;
+        return sessionId ? (
+          <BlobImage key={index} sessionId={sessionId} hash={part} alt={`Generated image ${part}`} />
+        ) : null;
       }
       return part;
     });
@@ -141,10 +153,10 @@ const GenerateImagePair: React.FC<FunctionPairComponentProps> = ({
         heighten={false}
       >
         {args.text}
-        {inputHashes.length > 0 && (
+        {inputHashes.length > 0 && sessionId && (
           <div className="input-images-container" style={{ marginTop: '10px' }}>
             {inputHashes.map((hash, index) => (
-              <BlobImage key={index} hash={hash} alt={`Input image ${hash.substring(0, 8)}`} />
+              <BlobImage key={index} sessionId={sessionId} hash={hash} alt={`Input image ${hash.substring(0, 8)}`} />
             ))}
           </div>
         )}

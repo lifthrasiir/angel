@@ -74,8 +74,9 @@ func GetBlobAsFileAttachment(db *SessionDatabase, hash string) (FileAttachment, 
 	}
 
 	return FileAttachment{
-		Hash:     hash,
-		MimeType: mimeType,
-		FileName: filename,
+		Hash:      hash,
+		MimeType:  mimeType,
+		FileName:  filename,
+		SessionId: db.SessionId(),
 	}, nil
 }

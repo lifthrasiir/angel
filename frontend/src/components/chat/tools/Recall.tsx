@@ -46,6 +46,7 @@ const RecallResponse: React.FC<FunctionResponseMessageProps> = ({
   functionResponse,
   messageId,
   attachments,
+  sessionId,
   messageInfo,
   children,
 }) => {
@@ -65,7 +66,7 @@ const RecallResponse: React.FC<FunctionResponseMessageProps> = ({
       collapsed={true}
     >
       <p>{response.response}</p>
-      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} />}
+      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} sessionId={sessionId} />}
     </ChatBubble>
   );
 };
@@ -76,6 +77,7 @@ const RecallPair: React.FC<FunctionPairComponentProps> = ({
   onToggleView,
   attachments,
   responseMessageInfo,
+  sessionId,
   children,
 }) => {
   const args = functionCall.args;
@@ -101,7 +103,7 @@ const RecallPair: React.FC<FunctionPairComponentProps> = ({
       showHeaderToggle={true}
     >
       <p>{hasResponse ? response.response : args.query}</p>
-      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} />}
+      {attachments && attachments.length > 0 && <FileAttachmentList attachments={attachments} sessionId={sessionId} />}
     </ChatBubble>
   );
 };

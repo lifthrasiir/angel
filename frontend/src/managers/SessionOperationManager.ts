@@ -1,4 +1,4 @@
-import type { FileAttachment } from '../types/chat';
+import type { FileAttachment, InitialState } from '../types/chat';
 import type { ModelInfo } from '../api/models';
 import { apiFetch, fetchSessionHistory } from '../api/apiClient';
 import { sendMessage, processStreamResponse, type SseEventHandler } from '../utils/messageHandler';
@@ -165,24 +165,24 @@ export class SessionOperationManager {
    */
   private handleStreamingEvent(
     event: SseEvent,
-    sessionId: string | null,
+    _sessionId: string | null,
     hasMoreMessages: boolean = false,
     handlers?: OperationEventHandlers,
   ): void {
     switch (event.type) {
       case EventInitialState:
       case EventInitialStateNoCall: {
-        const initialState = (event as any).initialState;
+        const initialState = event.initialState;
 
         // Dispatch SESSION_CREATED to update sessionManager.sessionId
         // This prevents duplicate session loads when URL is updated
         this._dispatch({
           type: 'SESSION_CREATED',
-          sessionId: initialState.sessionId || sessionId,
+          sessionId: initialState.sessionId,
           workspaceId: initialState.workspaceId,
         });
 
-        const mappedData = this.mapInitialData(initialState, sessionId, {
+        const mappedData = this.mapInitialData(initialState, {
           isCallActive: event.type === EventInitialState,
           hasMore: hasMoreMessages,
         });
@@ -208,8 +208,7 @@ export class SessionOperationManager {
    * Map initial state data to unified format
    */
   private mapInitialData(
-    initialState: any,
-    sessionId: string | null,
+    initialState: InitialState,
     options: {
       isCallActive: boolean;
       hasMore?: boolean;
@@ -220,12 +219,12 @@ export class SessionOperationManager {
     const hasMore =
       options.hasMore !== undefined
         ? options.hasMore
-        : options.fetchLimit !== undefined && (initialState.history || []).length > options.fetchLimit;
+        : options.fetchLimit !== undefined && initialState.history.length > options.fetchLimit;
 
     return {
       isCallActive: options.isCallActive,
-      sessionId: initialState.sessionId || sessionId,
-      messages: initialState.history || [],
+      sessionId: initialState.sessionId,
+      messages: initialState.history.map((message) => ({ sessionId: initialState.sessionId, ...message })),
       systemPrompt: initialState.systemPrompt,
       primaryBranchId: initialState.primaryBranchId,
       hasMore,
@@ -267,10 +266,10 @@ export class SessionOperationManager {
             switch (parsedEvent.type) {
               case EventInitialState:
               case EventInitialStateNoCall: {
-                const initialState = (parsedEvent as any).initialState;
+                const initialState = parsedEvent.initialState;
                 console.log('EventInitialState data:', initialState);
 
-                const mappedData = this.mapInitialData(initialState, sessionId, {
+                const mappedData = this.mapInitialData(initialState, {
                   isCallActive: event.type === EventInitialState,
                   fetchLimit,
                 });

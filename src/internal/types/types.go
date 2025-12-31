@@ -24,11 +24,12 @@ type Branch struct {
 
 // FileAttachment struct to hold file attachment data
 type FileAttachment struct {
-	FileName string `json:"fileName"`
-	MimeType string `json:"mimeType"`
-	Hash     string `json:"hash"`              // SHA-512/256 hash of the data
-	Data     []byte `json:"data,omitempty"`    // Raw binary data, used temporarily for upload/download
-	Omitted  bool   `json:"omitted,omitempty"` // Whether attachment was omitted due to clearblobs
+	FileName  string `json:"fileName"`
+	MimeType  string `json:"mimeType"`
+	Hash      string `json:"hash"`                // SHA-512/256 hash of the data
+	Data      []byte `json:"data,omitempty"`      // Raw binary data, used temporarily for upload/download
+	Omitted   bool   `json:"omitted,omitempty"`   // Whether attachment was omitted due to clearblobs
+	SessionId string `json:"sessionId,omitempty"` // Session ID for blob URL (required for fetching from backend)
 }
 
 // Message struct to hold message data for database interaction

@@ -109,6 +109,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             <FileAttachmentPreview
               key={index}
               file={file}
+              sessionId={sessionId || undefined}
               onRemove={() => handleRemoveFile(index)}
               onResize={handleFileResized}
               onResizeStateChange={handleFileResizeStateChange}

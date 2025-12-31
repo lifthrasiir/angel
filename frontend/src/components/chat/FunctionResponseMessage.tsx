@@ -9,7 +9,7 @@ import ChatBubble from './ChatBubble';
 interface FunctionResponseMessageProps {
   functionResponse: FunctionResponse;
   messageInfo?: React.ReactNode;
-  messageId?: string;
+  messageId: string;
   attachments?: FileAttachment[];
   sessionId?: string;
 }
@@ -68,7 +68,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
           title={codeContent}
           onHeaderClick={handleHeaderClick}
         >
-          <FileAttachmentList attachments={attachments} />
+          <FileAttachmentList attachments={attachments} sessionId={sessionId} />
         </ChatBubble>
       );
     } else {
@@ -88,7 +88,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
           ) : (
             <pre className="function-code-block">{codeContent}</pre>
           )}
-          <FileAttachmentList attachments={attachments} />
+          <FileAttachmentList attachments={attachments} sessionId={sessionId} />
         </ChatBubble>
       );
     }
@@ -100,6 +100,7 @@ const FunctionResponseMessage: React.FC<FunctionResponseMessageProps> = ({
       <CustomComponent
         functionResponse={functionResponse}
         messageId={messageId}
+        messageInfo={messageInfo}
         attachments={attachments}
         sessionId={sessionId}
       >
