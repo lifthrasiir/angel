@@ -3,7 +3,6 @@ package env
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 )
@@ -12,8 +11,9 @@ type envConfigKey struct{}
 
 // EnvConfig holds environment-specific application configuration.
 type EnvConfig struct {
-	dataDir    string
-	sessionDir string
+	dataDir     string
+	sessionDir  string
+	useMemoryDB bool // If true, use in-memory databases for testing
 }
 
 // DBPath returns the database file path.
@@ -24,6 +24,9 @@ func (c *EnvConfig) DataDir() string { return c.dataDir }
 
 // SessionDir returns the session directory path.
 func (c *EnvConfig) SessionDir() string { return c.sessionDir }
+
+// UseMemoryDB returns true if in-memory databases should be used (for testing).
+func (c *EnvConfig) UseMemoryDB() bool { return c.useMemoryDB }
 
 // NewEnvConfig creates a new EnvConfig with default values.
 func NewEnvConfig() *EnvConfig {
@@ -41,13 +44,11 @@ func NewEnvConfig() *EnvConfig {
 }
 
 // NewTestEnvConfig creates a new fresh EnvConfig for testing purposes.
-func NewTestEnvConfig() *EnvConfig {
-	// Use an independent nested directory within the base environment
+// If useMemoryDB is true, uses in-memory databases for better performance.
+// If false, uses real files for testing file system operations.
+func NewTestEnvConfig(useMemoryDB bool) *EnvConfig {
 	config := NewEnvConfig()
-	baseDir := config.dataDir
-	nonce := rand.Uint32()
-	config.dataDir = filepath.Join(baseDir, fmt.Sprintf("test%08X", nonce))
-	config.sessionDir = filepath.Join(baseDir, fmt.Sprintf("test%08X-sessions", nonce))
+	config.useMemoryDB = useMemoryDB
 	return config
 }
 

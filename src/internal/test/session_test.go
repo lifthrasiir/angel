@@ -93,13 +93,13 @@ func TestListWorkspacesHandler(t *testing.T) {
 
 // TestDeleteWorkspaceHandler tests the deleteWorkspaceHandler function
 func TestDeleteWorkspaceHandler(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB, _ := setupTestWithFilesystem(t)
 
 	// Create a workspace and a session/message within it
 	workspaceID := "testWsDelete"
 	database.CreateWorkspace(testDB, workspaceID, "Workspace to Delete", "")
 
-	sessionID := database.GenerateID()
+	sessionID := "testWsDeleteSession"
 	sdb, primaryBranchID, err := database.CreateSession(testDB, sessionID, "System prompt", workspaceID)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -387,7 +387,7 @@ func TestUpdateSessionNameHandler(t *testing.T) {
 
 // TestDeleteSession tests the deleteSession function
 func TestDeleteSession(t *testing.T) {
-	router, testDB, _ := setupTest(t)
+	router, testDB, _ := setupTestWithFilesystem(t)
 
 	// Prepare a session and some messages
 	sessionId := "TestDeleteSession"

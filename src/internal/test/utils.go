@@ -29,8 +29,19 @@ import (
 
 // Helper function to set up the test environment
 func setupTest(t *testing.T) (*mux.Router, *database.Database, *llm.Models) {
+	return setupTestWithSessionDB(t, true)
+}
+
+// Helper function to set up the test environment with real file system for session DBs.
+// Use this for testing file deletion, cleanup, etc.
+func setupTestWithFilesystem(t *testing.T) (*mux.Router, *database.Database, *llm.Models) {
+	return setupTestWithSessionDB(t, false)
+}
+
+// Internal helper that accepts useMemorySessionDB parameter
+func setupTestWithSessionDB(t *testing.T, useMemorySessionDB bool) (*mux.Router, *database.Database, *llm.Models) {
 	// Initialize an in-memory database for testing with unique name
-	testDB, err := database.InitTestDB(t.Name())
+	testDB, err := database.InitTestDB(t.Name(), useMemorySessionDB)
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -82,7 +93,7 @@ func setupTest(t *testing.T) (*mux.Router, *database.Database, *llm.Models) {
 	geminiAuth := llm.NewGeminiAuth("")
 
 	// Create test EnvConfig
-	config := env.NewTestEnvConfig()
+	config := env.NewTestEnvConfig(useMemorySessionDB)
 
 	// Create a new router for testing
 	router := mux.NewRouter()

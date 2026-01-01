@@ -193,6 +193,7 @@ func InitSessionDBForMigration(path string) (*sql.DB, error) {
 
 // GetSessionDBPath returns the file path for a session DB.
 // e.g., "foo" -> "angel-data/sessions/foo.db"
+// For testing with UseMemoryDB(), returns ":memory:".
 // Uses EnvConfig from context to determine the session directory.
 // If context doesn't have EnvConfig, tries to get it from database in context.
 func GetSessionDBPath(ctx context.Context, mainSessionID string) (string, error) {
@@ -209,6 +210,12 @@ func GetSessionDBPath(ctx context.Context, mainSessionID string) (string, error)
 			return "", fmt.Errorf("failed to get env config: %w", err)
 		}
 	}
+
+	// For testing, use in-memory databases
+	if envConfig.UseMemoryDB() {
+		return ":memory:", nil
+	}
+
 	sessionDir := envConfig.SessionDir()
 	return fmt.Sprintf("%s/%s.db", sessionDir, mainSessionID), nil
 }

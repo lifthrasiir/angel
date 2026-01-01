@@ -57,7 +57,7 @@ func (db *Database) Ctx() context.Context {
 
 // Close closes the main database connection and stops the session watcher.
 func (db *Database) Close() error {
-	// Stop watcher first
+	// Stop watcher first (if exists, may be nil in test mode)
 	if db.watcher != nil {
 		if err := db.watcher.Stop(); err != nil {
 			log.Printf("Warning: Failed to stop session watcher: %v", err)
@@ -144,18 +144,24 @@ func InitDB(ctx context.Context, dataSourceName string) (*Database, error) {
 	// Initialize AttachPool for split-DB architecture
 	database.attachPool = NewAttachPool(db)
 
-	// Initialize SessionWatcher
-	watcher, err := NewSessionWatcher(database, sessionDir)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create session watcher: %w", err)
-	}
-	database.watcher = watcher
+	// Initialize SessionWatcher (skip for in-memory DB testing)
+	var watcher *SessionWatcher
+	if !envConfig.UseMemoryDB() {
+		watcher, err = NewSessionWatcher(database, sessionDir)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to create session watcher: %w", err)
+		}
+		database.watcher = watcher
 
-	// Start the watcher
-	if err := watcher.Start(); err != nil {
-		log.Printf("Warning: Failed to start session watcher: %v", err)
-		// Continue even if watcher fails, sessions can still be managed manually
+		// Start the watcher
+		if err := watcher.Start(); err != nil {
+			log.Printf("Warning: Failed to start session watcher: %v", err)
+			// Continue even if watcher fails, sessions can still be managed manually
+		}
+	} else {
+		log.Printf("SessionWatcher disabled (in-memory DB mode)")
+		database.watcher = nil
 	}
 
 	log.Println("Database initialized and tables created.")
@@ -164,14 +170,15 @@ func InitDB(ctx context.Context, dataSourceName string) (*Database, error) {
 
 // InitTestDB initializes an in-memory SQLite database for testing.
 // This function uses a unique database name to prevent conflicts between tests.
-func InitTestDB(testName string) (*Database, error) {
+// useMemorySessionDB controls whether session DBs use in-memory (true) or real files (false).
+func InitTestDB(testName string, useMemorySessionDB bool) (*Database, error) {
 	// Initialize an in-memory database for testing with unique name
 	// Add an atomic counter suffix to prevent conflicts when tests run with -count=N
 	counter := testDBCounter.Add(1)
 	dbName := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared&_txlock=immediate&_foreign_keys=1&_journal_mode=WAL", testName, counter)
 
 	// Create test EnvConfig with custom session dir for testing
-	testEnvConfig := env.NewTestEnvConfig()
+	testEnvConfig := env.NewTestEnvConfig(useMemorySessionDB)
 	ctx := env.ContextWithEnvConfig(context.Background(), testEnvConfig)
 
 	db, err := InitDB(ctx, dbName)

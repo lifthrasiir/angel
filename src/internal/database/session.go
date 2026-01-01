@@ -59,15 +59,27 @@ func (db *Database) WithSession(sessionId string) (*SessionDatabase, error) {
 	// Extract main session ID to determine which session DB file to use
 	mainSessionID, _ := SplitSessionId(sessionId)
 
+	// Check if session exists in main DB first
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)", sessionId).Scan(&exists)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check session existence: %w", err)
+	}
+	if !exists {
+		return nil, MakeNotFoundError("session not found: %s", sessionId)
+	}
+
 	// Get the session DB path
 	sessionDBPath, err := GetSessionDBPath(db.ctx, mainSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session DB path: %w", err)
 	}
 
-	// Check if file exists
-	if _, err := os.Stat(sessionDBPath); os.IsNotExist(err) {
-		return nil, MakeNotFoundError("session DB does not exist: %s", sessionDBPath)
+	// Check if file exists (skip for in-memory databases)
+	if sessionDBPath != ":memory:" {
+		if _, err := os.Stat(sessionDBPath); os.IsNotExist(err) {
+			return nil, MakeNotFoundError("session DB does not exist: %s", sessionDBPath)
+		}
 	}
 
 	// Attach the session database to the main connection
@@ -306,8 +318,10 @@ func DeleteWorkspace(db *Database, workspaceID string) error {
 			log.Printf("Warning: Failed to detach session %s before deletion: %v", mainSessionID, err)
 		}
 
-		// Delete the session DB file
-		os.Remove(sessionDBPath)
+		// Delete the session DB file (skip for in-memory databases)
+		if sessionDBPath != ":memory:" {
+			os.Remove(sessionDBPath)
+		}
 	}
 
 	// Start a transaction to ensure atomicity for main DB operations
@@ -639,8 +653,11 @@ func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error 
 	sessionDBPath, err := GetSessionDBPathFromDB(db, mainSessionID)
 	if err != nil {
 		log.Printf("Warning: Failed to get session DB path for deletion: %v", err)
-	} else if err := os.Remove(sessionDBPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("Warning: Failed to delete session DB file %s: %v", sessionDBPath, err)
+	} else if sessionDBPath != ":memory:" {
+		// Only delete if it's a real file (not :memory:)
+		if err := os.Remove(sessionDBPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: Failed to delete session DB file %s: %v", sessionDBPath, err)
+		}
 	}
 
 	// Destroy the session's file system sandbox directories for all identified sessions
