@@ -317,10 +317,35 @@ func DeleteWorkspace(db *Database, workspaceID string) error {
 	}
 	defer tx.Rollback() // Rollback on error
 
-	// Delete session environments associated with the sessions in the workspace
-	_, err = tx.Exec("DELETE FROM session_envs WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
+	// Delete search index entries for these sessions
+	placeholders := make([]string, len(sessionIDs))
+	args := make([]interface{}, len(sessionIDs))
+	for i, id := range sessionIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	// Delete FTS index entries first (before deleting from messages_searchable)
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM message_stems WHERE rowid IN (SELECT id FROM messages_searchable WHERE session_id IN (%s))
+	`, strings.Join(placeholders, ",")), args...)
 	if err != nil {
-		return fmt.Errorf("failed to delete session environments for workspace %s: %w", workspaceID, err)
+		log.Printf("Warning: Failed to delete message_stems for workspace %s: %v", workspaceID, err)
+	}
+
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM message_trigrams WHERE rowid IN (SELECT id FROM messages_searchable WHERE session_id IN (%s))
+	`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		log.Printf("Warning: Failed to delete message_trigrams for workspace %s: %v", workspaceID, err)
+	}
+
+	// Delete from messages_searchable last
+	_, err = tx.Exec(fmt.Sprintf(`
+		DELETE FROM messages_searchable WHERE session_id IN (%s)
+	`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete search index for workspace %s: %w", workspaceID, err)
 	}
 
 	// Delete sessions associated with the workspace from main DB
@@ -548,7 +573,8 @@ func GetSession(db *SessionDatabase) (Session, error) {
 	return s, nil
 }
 
-// DeleteSession deletes a session and all its associated messages, branches, shell commands, and session environments.
+// DeleteSession deletes a session and all its associated data.
+// In split-db architecture, this deletes the session DB file and main DB entries.
 func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error {
 	// Get the main session ID to detach from AttachPool
 	mainSessionID, _ := SplitSessionId(sessionID)
@@ -565,37 +591,30 @@ func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error 
 	}
 	defer tx.Rollback() // Rollback on error
 
-	// Delete messages associated with the session
-	_, err = tx.Exec("DELETE FROM messages WHERE session_id = ? OR session_id LIKE ? || '.%'", sessionID, sessionID)
+	// Delete FTS index entries first
+	_, err = tx.Exec("DELETE FROM message_stems WHERE rowid IN (SELECT id FROM messages_searchable WHERE session_id = ? OR session_id LIKE ? || '.%')", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete messages for session %s and its sub-sessions: %w", sessionID, err)
+		log.Printf("Warning: Failed to delete message_stems for session %s: %v", sessionID, err)
 	}
 
-	// Delete shell commands associated with the session
-	_, err = tx.Exec("DELETE FROM shell_commands WHERE branch_id IN (SELECT id FROM branches WHERE session_id = ? OR session_id LIKE ? || '.%')", sessionID, sessionID)
+	_, err = tx.Exec("DELETE FROM message_trigrams WHERE rowid IN (SELECT id FROM messages_searchable WHERE session_id = ? OR session_id LIKE ? || '.%')", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete shell commands for session %s and its sub-sessions: %w", sessionID, err)
+		log.Printf("Warning: Failed to delete message_trigrams for session %s: %v", sessionID, err)
 	}
 
-	// Delete session environments associated with the session
-	_, err = tx.Exec("DELETE FROM session_envs WHERE session_id = ? OR session_id LIKE ? || '.%'", sessionID, sessionID)
+	// Delete from messages_searchable
+	_, err = tx.Exec("DELETE FROM messages_searchable WHERE session_id = ? OR session_id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to delete session environments for session %s and its sub-sessions: %w", sessionID, err)
+		return fmt.Errorf("failed to delete search index for session %s: %w", sessionID, err)
 	}
 
-	// Delete branches associated with the session
-	_, err = tx.Exec("DELETE FROM branches WHERE session_id = ? OR session_id LIKE ? || '.%'", sessionID, sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to delete branches for session %s and its sub-sessions: %w", sessionID, err)
-	}
-
-	// Delete the session itself and all its sub-sessions
+	// Delete the session entry and all its sub-sessions from main DB
 	_, err = tx.Exec("DELETE FROM sessions WHERE id = ? OR id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to delete session %s and its sub-sessions: %w", sessionID, err)
 	}
 
-	// Get all session IDs (main and sub-sessions) that will be deleted
+	// Get all session IDs (main and sub-sessions) for cleanup
 	var sessionIDsToDelete []string
 	rows, err := tx.Query("SELECT id FROM sessions WHERE id = ? OR id LIKE ? || '.%'", sessionID, sessionID)
 	if err != nil {
@@ -611,14 +630,6 @@ func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error 
 		sessionIDsToDelete = append(sessionIDsToDelete, id)
 	}
 
-	// Destroy the session's file system sandbox directories for all identified sessions
-	for _, id := range sessionIDsToDelete {
-		sessionDir := filepath.Join(sandboxBaseDir, id)
-		if err := os.RemoveAll(sessionDir); err != nil {
-			log.Printf("Warning: Failed to destroy session FS for %s: %v", id, err)
-		}
-	}
-
 	// Commit the transaction first
 	if err := tx.Commit(); err != nil {
 		return err
@@ -628,10 +639,16 @@ func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error 
 	sessionDBPath, err := GetSessionDBPathFromDB(db, mainSessionID)
 	if err != nil {
 		log.Printf("Warning: Failed to get session DB path for deletion: %v", err)
-		return nil
-	}
-	if err := os.Remove(sessionDBPath); err != nil && !os.IsNotExist(err) {
+	} else if err := os.Remove(sessionDBPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("Warning: Failed to delete session DB file %s: %v", sessionDBPath, err)
+	}
+
+	// Destroy the session's file system sandbox directories for all identified sessions
+	for _, id := range sessionIDsToDelete {
+		sessionDir := filepath.Join(sandboxBaseDir, id)
+		if err := os.RemoveAll(sessionDir); err != nil {
+			log.Printf("Warning: Failed to destroy session FS for %s: %v", id, err)
+		}
 	}
 
 	return nil
@@ -662,17 +679,11 @@ func GenerateID() string {
 }
 
 // CleanupOldTemporarySessions deletes temporary sessions older than the specified duration
+// In split-db architecture, this uses DeleteSession to handle each session's cleanup.
 func CleanupOldTemporarySessions(db *Database, olderThan time.Duration, sandboxBaseDir string) error {
-	// Start a transaction to ensure atomicity
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
 	// Find old temporary sessions
 	cutoffTime := time.Now().Add(-olderThan)
-	rows, err := tx.Query(`
+	rows, err := db.Query(`
 		SELECT id FROM sessions
 		WHERE id LIKE '.%' AND last_updated_at < ?
 		ORDER BY last_updated_at ASC
@@ -697,68 +708,16 @@ func CleanupOldTemporarySessions(db *Database, olderThan time.Duration, sandboxB
 
 	log.Printf("Cleaning up %d old temporary sessions", len(sessionIDsToDelete))
 
-	// Delete messages associated with the sessions
-	placeholders := make([]string, len(sessionIDsToDelete))
-	args := make([]interface{}, len(sessionIDsToDelete))
-	for i, id := range sessionIDsToDelete {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	_, err = tx.Exec(fmt.Sprintf(`
-		DELETE FROM messages WHERE session_id IN (%s)
-	`, strings.Join(placeholders, ",")), args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete messages for temporary sessions: %w", err)
-	}
-
-	// Delete shell commands associated with the sessions
-	_, err = tx.Exec(fmt.Sprintf(`
-		DELETE FROM shell_commands WHERE branch_id IN (
-			SELECT id FROM branches WHERE session_id IN (%s)
-		)
-	`, strings.Join(placeholders, ",")), args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete shell commands for temporary sessions: %w", err)
-	}
-
-	// Delete session environments associated with the sessions
-	_, err = tx.Exec(fmt.Sprintf(`
-		DELETE FROM session_envs WHERE session_id IN (%s)
-	`, strings.Join(placeholders, ",")), args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete session environments for temporary sessions: %w", err)
-	}
-
-	// Delete branches associated with the sessions
-	_, err = tx.Exec(fmt.Sprintf(`
-		DELETE FROM branches WHERE session_id IN (%s)
-	`, strings.Join(placeholders, ",")), args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete branches for temporary sessions: %w", err)
-	}
-
-	// Delete the sessions themselves
-	_, err = tx.Exec(fmt.Sprintf(`
-		DELETE FROM sessions WHERE id IN (%s)
-	`, strings.Join(placeholders, ",")), args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete temporary sessions: %w", err)
-	}
-
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit cleanup transaction: %w", err)
-	}
-
-	// Destroy the session's file system sandbox directories
-	for _, id := range sessionIDsToDelete {
-		sessionDir := filepath.Join(sandboxBaseDir, id)
-		if err := os.RemoveAll(sessionDir); err != nil {
-			log.Printf("Warning: Failed to destroy session FS for %s: %v", id, err)
+	// Delete each session using DeleteSession
+	successCount := 0
+	for _, sessionID := range sessionIDsToDelete {
+		if err := DeleteSession(db, sessionID, sandboxBaseDir); err != nil {
+			log.Printf("Warning: Failed to delete temporary session %s: %v", sessionID, err)
+		} else {
+			successCount++
 		}
 	}
 
-	log.Printf("Successfully cleaned up %d old temporary sessions", len(sessionIDsToDelete))
+	log.Printf("Successfully cleaned up %d/%d old temporary sessions", successCount, len(sessionIDsToDelete))
 	return nil
 }

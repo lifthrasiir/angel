@@ -80,6 +80,24 @@ func MigrateToSplitDB(ctx context.Context, mainDB *sql.DB, sessionDir string) er
 	}
 	log.Println("Migration validation passed")
 
+	// Step 6: Delete migrated data from main DB
+	if err := DeleteMigratedData(mainDB); err != nil {
+		return fmt.Errorf("failed to delete migrated data: %w", err)
+	}
+	log.Println("Deleted migrated data from main DB")
+
+	// Step 7: Drop triggers that are no longer needed
+	if err := DropMigratedTriggers(mainDB); err != nil {
+		return fmt.Errorf("failed to drop triggers: %w", err)
+	}
+	log.Println("Dropped triggers from main DB")
+
+	// Step 8: Vacuum to reclaim space
+	if _, err := mainDB.Exec("VACUUM"); err != nil {
+		return fmt.Errorf("failed to vacuum main DB: %w", err)
+	}
+	log.Println("Vacuumed main DB to reclaim space")
+
 	log.Println("Migration to split-DB architecture completed successfully!")
 	return nil
 }
@@ -890,6 +908,54 @@ func backupMainDB(mainDB *sql.DB) error {
 	_, err = mainDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", backupPath))
 	if err != nil {
 		return fmt.Errorf("failed to create backup: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteMigratedData drops tables that have been migrated to session DBs.
+// This includes messages, branches, session_envs, shell_commands, and blobs.
+func DeleteMigratedData(mainDB *sql.DB) error {
+	log.Println("Dropping migrated tables from main DB...")
+
+	// Drop in order of dependencies (respect foreign keys)
+	// When foreign_keys=ON, we must drop tables that reference others first
+	tables := []string{
+		"shell_commands", // References branches
+		"messages",       // No foreign key dependencies
+		"session_envs",   // References sessions
+		"branches",       // References sessions
+		"blobs",          // No foreign key dependencies
+	}
+
+	for _, table := range tables {
+		_, err := mainDB.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", table))
+		if err != nil {
+			return fmt.Errorf("failed to drop table %s: %w", table, err)
+		}
+		log.Printf("Dropped table: %s", table)
+	}
+
+	return nil
+}
+
+// DropMigratedTriggers drops triggers that are no longer needed in main DB.
+// This includes blob reference counting triggers that now live in session DBs.
+func DropMigratedTriggers(mainDB *sql.DB) error {
+	log.Println("Dropping migrated triggers from main DB...")
+
+	triggers := []string{
+		"increment_blob_refs",
+		"decrement_blob_refs",
+		"update_blob_refs",
+	}
+
+	for _, trigger := range triggers {
+		_, err := mainDB.Exec(fmt.Sprintf("DROP TRIGGER IF EXISTS %s", trigger))
+		if err != nil {
+			return fmt.Errorf("failed to drop trigger %s: %w", trigger, err)
+		}
+		log.Printf("Dropped trigger: %s", trigger)
 	}
 
 	return nil
