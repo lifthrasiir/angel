@@ -82,6 +82,22 @@ func (p *AttachPool) Acquire(sessionDBPath, mainSessionID string) (string, func(
 		return "", nil, fmt.Errorf("failed to attach database %s as %s: %w", sessionDBPath, alias, err)
 	}
 
+	// Configure pragmas for the attached database
+	// Note: journal_mode and synchronous are database-specific settings
+	pragmas := []string{
+		fmt.Sprintf("PRAGMA %s.journal_mode=DELETE", alias),
+		fmt.Sprintf("PRAGMA %s.synchronous=FULL", alias),
+	}
+
+	for _, pragma := range pragmas {
+		if _, err := p.mainDB.Exec(pragma); err != nil {
+			// Rollback: detach on pragma error
+			p.mainDB.Exec(fmt.Sprintf("DETACH DATABASE %s", alias))
+			p.mu.Unlock()
+			return "", nil, fmt.Errorf("failed to set pragma '%s': %w", pragma, err)
+		}
+	}
+
 	// Create AttachedDB entry
 	attached := &AttachedDB{
 		Alias:         alias,

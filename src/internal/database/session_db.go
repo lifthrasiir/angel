@@ -155,8 +155,8 @@ func InitSessionDBForMigration(path string) (*sql.DB, error) {
 
 	// SQLite performance and concurrency optimizations
 	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
+		"PRAGMA journal_mode=DELETE",
+		"PRAGMA synchronous=FULL",
 		"PRAGMA busy_timeout=30000",
 		"PRAGMA cache_size=-65536",
 		"PRAGMA mmap_size=268435456",

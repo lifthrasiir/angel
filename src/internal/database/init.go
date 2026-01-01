@@ -76,15 +76,15 @@ func InitDB(ctx context.Context, dataSourceName string) (*Database, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool for SQLite (especially important for :memory: databases)
+	// Configure connection pool for SQLite
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(30 * time.Minute) // Should be far longer than typical test runs
+	db.SetConnMaxLifetime(30 * time.Minute)
 
 	// SQLite performance and concurrency optimizations
 	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
+		"PRAGMA journal_mode=DELETE",
+		"PRAGMA synchronous=FULL",
 		"PRAGMA busy_timeout=30000",
 		"PRAGMA cache_size=-65536",
 		"PRAGMA mmap_size=268435456",
@@ -174,7 +174,19 @@ func InitTestDB(testName string) (*Database, error) {
 	testEnvConfig := env.NewTestEnvConfig()
 	ctx := env.ContextWithEnvConfig(context.Background(), testEnvConfig)
 
-	return InitDB(ctx, dbName)
+	db, err := InitDB(ctx, dbName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Pooling should be disabled for :memory: databases
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	// Should be far longer than typical test runs
+	db.SetConnMaxLifetime(30 * time.Minute)
+
+	return db, nil
 }
 
 // createTables creates the necessary tables in the database.
@@ -536,38 +548,10 @@ func (job *databaseJob) Name() string {
 	return "Periodic database maintenance"
 }
 
-func (job *databaseJob) First() error {
-	// XXX: Full vacuum can panic due to the OOM
-	if err := PerformVacuum(job.db, 1000); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (job *databaseJob) Sometimes() error {
-	if err := PerformWALCheckpoint(job.db); err != nil {
-		return err
-	}
-	if err := PerformVacuum(job.db, 100); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (job *databaseJob) Last() error {
-	if err := PerformWALCheckpoint(job.db); err != nil {
-		return err
-	}
-	return nil
-}
-
-// PerformWALCheckpoint triggers a WAL checkpoint.
-func PerformWALCheckpoint(db *Database) error {
-	if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		return fmt.Errorf("failed to perform WAL checkpoint: %w", err)
-	}
-	return nil
-}
+// XXX: Full vacuum can panic due to the OOM
+func (job *databaseJob) First() error     { return PerformVacuum(job.db, 1000) }
+func (job *databaseJob) Sometimes() error { return PerformVacuum(job.db, 100) }
+func (job *databaseJob) Last() error      { return nil }
 
 // PerformVacuum performs a full or incremental vacuum to reclaim space.
 func PerformVacuum(db *Database, npages int) error {
