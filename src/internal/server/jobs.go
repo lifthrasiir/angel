@@ -89,3 +89,21 @@ func (job *tempSessionCleanupJob) Sometimes() error {
 	return database.CleanupOldTemporarySessions(job.db, job.olderThan, job.sandboxBaseDir)
 }
 func (job *tempSessionCleanupJob) Last() error { return nil }
+
+// attachPoolCleanupJob is a housekeeping job that detaches unused session databases.
+type attachPoolCleanupJob struct {
+	db        *database.Database
+	olderThan time.Duration
+}
+
+func (job *attachPoolCleanupJob) Name() string { return "Attach pool cleanup" }
+func (job *attachPoolCleanupJob) First() error { return job.Sometimes() }
+func (job *attachPoolCleanupJob) Sometimes() error {
+	attachPool := job.db.GetAttachPool()
+	detached := attachPool.Housekeeping(job.olderThan)
+	if detached > 0 {
+		log.Printf("Attach pool cleanup: detached %d database(s)", detached)
+	}
+	return nil
+}
+func (job *attachPoolCleanupJob) Last() error { return job.Sometimes() }

@@ -416,19 +416,20 @@ func TestDeleteSession(t *testing.T) {
 			t.Errorf("expected status 'success', got %v", response["status"])
 		}
 
-		// Verify deletion in DB
+		// Verify deletion in main DB
 		var count int
-		querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.sessions WHERE id = ?", []interface{}{sessionId}, &count)
+		querySingleRow(t, testDB, "SELECT COUNT(*) FROM sessions WHERE id = ?", []interface{}{sessionId}, &count)
 		if count != 0 {
-			t.Errorf("session not deleted from DB")
+			t.Errorf("session not deleted from main DB")
 		}
-		querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.messages WHERE session_id = ?", []interface{}{sessionId}, &count)
-		if count != 0 {
-			t.Errorf("messages not deleted from DB")
+
+		// Verify session DB file was deleted
+		sessionDBPath, err := database.GetSessionDBPathFromDB(testDB, sessionId)
+		if err != nil {
+			t.Fatalf("failed to get session DB path: %v", err)
 		}
-		querySingleRow(t, sdb, "SELECT COUNT(*) FROM S.branches WHERE session_id = ?", []interface{}{sessionId}, &count)
-		if count != 0 {
-			t.Errorf("branches not deleted from DB")
+		if _, err := os.Stat(sessionDBPath); !os.IsNotExist(err) {
+			t.Errorf("session DB file still exists: %s", sessionDBPath)
 		}
 	})
 

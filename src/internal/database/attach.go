@@ -55,8 +55,6 @@ func (p *AttachPool) Acquire(sessionDBPath, mainSessionID string) (string, func(
 			attached.LastUsed = time.Now()
 			p.updateLRU(attached.Alias)
 			p.mu.Unlock()
-			log.Printf("AttachPool: Reusing existing attachment %s for %s (refcount now %d)",
-				attached.Alias, sessionDBPath, attached.RefCount)
 			cleanup := func() {
 				p.Release(attached.Alias)
 			}
@@ -108,6 +106,9 @@ func (p *AttachPool) Acquire(sessionDBPath, mainSessionID string) (string, func(
 
 // Release decrements the refcount for an attached database.
 // If refcount reaches zero, it marks the database for potential eviction and wakes up waiters.
+// The database will be detached either when:
+// 1. A housekeeping job determines it's old enough (10 minutes by default)
+// 2. All slots are full and a new attachment is needed (LRU eviction)
 func (p *AttachPool) Release(alias string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -122,15 +123,8 @@ func (p *AttachPool) Release(alias string) {
 	attached.LastUsed = time.Now()
 
 	if attached.RefCount <= 0 {
-		// Detach immediately when refcount reaches zero
-		log.Printf("AttachPool: Refcount reached zero for %s, detaching", alias)
-		if err := p.detachInternal(alias); err != nil {
-			log.Printf("AttachPool: Error detaching %s: %v", alias, err)
-		}
-		// Wake up any waiters
+		// Mark as unused, but don't detach immediately; wake up any waiters
 		p.cond.Broadcast()
-	} else {
-		log.Printf("AttachPool: Released %s (refcount now %d)", alias, attached.RefCount)
 	}
 }
 
@@ -153,8 +147,7 @@ func (p *AttachPool) evictLRUInternal() error {
 // Also removes it from the LRU list.
 // Caller must hold p.mu lock.
 func (p *AttachPool) detachInternal(alias string) error {
-	attached, exists := p.attached[alias]
-	if !exists {
+	if _, exists := p.attached[alias]; !exists {
 		return fmt.Errorf("alias %s not found in attached map", alias)
 	}
 
@@ -173,7 +166,6 @@ func (p *AttachPool) detachInternal(alias string) error {
 		}
 	}
 
-	log.Printf("AttachPool: Detached %s (%s)", alias, attached.Path)
 	return nil
 }
 
@@ -251,4 +243,30 @@ func (p *AttachPool) Stats() map[string]interface{} {
 		"max_attached":   p.maxAttached,
 		"lru_list":       p.lruList,
 	}
+}
+
+// Housekeeping detaches databases that have been unused (refcount == 0) for longer than the specified duration.
+// This should be called periodically by a housekeeping job.
+// Returns the number of databases detached.
+func (p *AttachPool) Housekeeping(olderThan time.Duration) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	detached := 0
+	cutoff := time.Now().Add(-olderThan)
+
+	// Find all databases with refcount == 0 that are older than the cutoff
+	for alias, attached := range p.attached {
+		if attached.RefCount == 0 && attached.LastUsed.Before(cutoff) {
+			log.Printf("AttachPool: Housekeeping detaching %s (unused since %v)",
+				alias, attached.LastUsed.Format(time.RFC3339))
+			if err := p.detachInternal(alias); err != nil {
+				log.Printf("AttachPool: Error detaching %s during housekeeping: %v", alias, err)
+			} else {
+				detached++
+			}
+		}
+	}
+
+	return detached
 }

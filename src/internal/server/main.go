@@ -84,7 +84,7 @@ func Main(config *env.EnvConfig, embeddedFiles embed.FS, loginUnavailableHTML []
 	defer db.Close()
 
 	// Start the shell command manager
-	shell.StartShellCommandManager(db) // Pass the database connection
+	shell.StartShellCommandManager(db)
 
 	jobs := []HousekeepingJob{
 		database.Job(db),
@@ -92,6 +92,10 @@ func Main(config *env.EnvConfig, embeddedFiles embed.FS, loginUnavailableHTML []
 			db:             db,
 			olderThan:      48 * time.Hour,
 			sandboxBaseDir: config.SessionDir(),
+		},
+		&attachPoolCleanupJob{
+			db:        db,
+			olderThan: 10 * time.Minute,
 		},
 	}
 
