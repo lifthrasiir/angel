@@ -8,7 +8,6 @@ import (
 	"log"
 	"path/filepath"
 	"sync/atomic"
-	"time"
 
 	"github.com/ncruces/go-sqlite3"
 	_ "github.com/ncruces/go-sqlite3/driver"
@@ -76,10 +75,10 @@ func InitDB(ctx context.Context, dataSourceName string) (*Database, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool for SQLite
+	// Configure connection pool for SQLite.
+	// Avoid using SetConnMaxLifetime as it can interfere with AttachPool connections.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(30 * time.Minute)
 
 	// SQLite performance and concurrency optimizations
 	pragmas := []string{
@@ -189,9 +188,6 @@ func InitTestDB(testName string, useMemorySessionDB bool) (*Database, error) {
 	// Pooling should be disabled for :memory: databases
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-
-	// Should be far longer than typical test runs
-	db.SetConnMaxLifetime(30 * time.Minute)
 
 	return db, nil
 }
