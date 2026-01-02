@@ -6,6 +6,7 @@ import { ModelInfo } from '../api/models';
 import { convertFilesToAttachments } from '../utils/fileHandler';
 import { useSessionManagerContext } from './SessionManagerContext';
 import { parseURLPath } from '../utils/urlSessionMapping';
+import { getWorkspaceId } from '../utils/sessionStateHelpers';
 import {
   addErrorMessageAtom,
   addMessageAtom,
@@ -15,7 +16,9 @@ import {
   primaryBranchIdAtom,
   selectedFilesAtom,
   selectedModelAtom,
+  sessionsAtom,
   systemPromptAtom,
+  sessionWorkspaceIdAtom,
   updateAgentMessageAtom,
   pendingConfirmationAtom,
   temporaryEnvChangeMessageAtom,
@@ -74,9 +77,12 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   const setInputMessage = useSetAtom(inputMessageAtom);
   const setEditingMessageId = useSetAtom(editingMessageIdAtom);
   const updateUserMessageId = useSetAtom(updateUserMessageIdAtom);
+  const setSessions = useSetAtom(sessionsAtom);
 
   const messages = useAtomValue(messagesAtom);
   const selectedModel = useAtomValue(selectedModelAtom);
+  const sidebarWorkspaceId = useAtomValue(sessionWorkspaceIdAtom);
+  const sessions = useAtomValue(sessionsAtom);
   const systemPrompt = useAtomValue(systemPromptAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
 
@@ -263,8 +269,27 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
           case EventSessionName:
             // Handle session name update
-            if (event.newName) {
-              setSessionName({ sessionId: event.sessionId, name: event.newName });
+            setSessionName({ sessionId: event.sessionId, name: event.newName });
+
+            // If the session is new (not in the sidebar list), add it locally
+            // Conditions:
+            // i) sidebar's workspace matches current session's workspace
+            // ii) session ID doesn't contain '.' (not a temporary session)
+            // iii) session is not already in the list
+            const currentWorkspaceId = getWorkspaceId(sessionManager.sessionState);
+            if (
+              sidebarWorkspaceId === currentWorkspaceId &&
+              !event.sessionId.includes('.') &&
+              !sessions.some((s) => s.id === event.sessionId)
+            ) {
+              setSessions([
+                {
+                  id: event.sessionId,
+                  name: event.newName,
+                  last_updated_at: new Date().toISOString(),
+                },
+                ...sessions,
+              ]);
             }
             break;
 
@@ -288,7 +313,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         addErrorMessage(`Stream error: ${error?.message || error?.toString() || 'Unknown error'}`);
       },
     }),
-    [location, sessionManager, onSessionSwitch],
+    [location, sessionManager, onSessionSwitch, sessions, sidebarWorkspaceId],
   );
 
   // Action handlers

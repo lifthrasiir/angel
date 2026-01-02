@@ -12,6 +12,8 @@ import {
   parseSseEvent,
   EventInitialState,
   EventInitialStateNoCall,
+  EventWorkspaceHint,
+  EventSessionName,
   EARLIER_MESSAGES_LOADED,
 } from '../types/events';
 
@@ -39,6 +41,7 @@ export class SessionOperationManager {
   private currentAbortController: AbortController | null = null;
   private currentSessionId: string | null = null;
   private currentHandlers?: OperationEventHandlers;
+  private expectSessionName: boolean | null = null; // null = undetermined, true = new session, false = not new session
 
   constructor(params: { dispatch: (action: SessionAction) => void; sessionState?: any }) {
     this._dispatch = params.dispatch;
@@ -68,6 +71,7 @@ export class SessionOperationManager {
     this.activeOperation = 'none';
     this.currentSessionId = null;
     this.currentHandlers = undefined;
+    this.expectSessionName = null;
   }
 
   /**
@@ -87,6 +91,7 @@ export class SessionOperationManager {
     this.currentSessionId = null;
     this.currentAbortController = null;
     this.currentHandlers = undefined;
+    this.expectSessionName = null;
   }
 
   /**
@@ -170,9 +175,23 @@ export class SessionOperationManager {
     handlers?: OperationEventHandlers,
   ): void {
     switch (event.type) {
+      case EventWorkspaceHint:
+        // EventWorkspaceHint indicates session loading or subsequent message
+        // In both cases, EventSessionName is not expected
+        this.expectSessionName = false;
+        handlers?.onEvent?.(event);
+        break;
+
       case EventInitialState:
       case EventInitialStateNoCall: {
         const initialState = event.initialState;
+
+        // If we haven't determined whether to expect session name yet,
+        // and we receive EventInitialState without EventWorkspaceHint first,
+        // this is a new session creation
+        if (this.expectSessionName === null) {
+          this.expectSessionName = true;
+        }
 
         // Dispatch SESSION_CREATED to update sessionManager.sessionId
         // This prevents duplicate session loads when URL is updated
@@ -190,9 +209,23 @@ export class SessionOperationManager {
         break;
       }
       case EventComplete:
+        // Only set activeOperation to 'none' if we're not waiting for EventSessionName
+        if (this.expectSessionName !== true) {
+          this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
+          handlers?.onComplete?.();
+          this.activeOperation = 'none';
+        } else {
+          // Waiting for EventSessionName, don't complete yet
+          this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'streaming' });
+          handlers?.onComplete?.();
+        }
+        break;
+      case EventSessionName:
+        // EventSessionName received, now we can complete
+        this.expectSessionName = false;
         this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
-        handlers?.onComplete?.();
         this.activeOperation = 'none';
+        handlers?.onEvent?.(event);
         break;
       case EventError:
         this._dispatch({ type: 'ERROR_OCCURRED', error: (event as any).error || 'Unknown error' });
