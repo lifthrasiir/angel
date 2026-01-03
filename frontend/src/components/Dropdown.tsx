@@ -240,21 +240,9 @@ const Dropdown: React.FC<DropdownProps> = ({
   };
 
   return (
-    <div
-      ref={menuRef}
-      className={`dropdown ${className}`}
-      style={{
-        position: 'relative',
-        display: 'inline-block',
-      }}
-    >
+    <div ref={menuRef} className={`dropdown ${className}`}>
       {/* Trigger */}
-      <div
-        ref={triggerRef}
-        onClick={handleToggleMenu}
-        className={`dropdown-trigger ${disabled ? 'dropdown-trigger-disabled' : ''}`}
-        style={{ cursor: disabled ? 'not-allowed' : 'pointer' }}
-      >
+      <div ref={triggerRef} onClick={handleToggleMenu} className={`dropdown-trigger ${disabled ? 'disabled' : ''}`}>
         {trigger}
       </div>
 

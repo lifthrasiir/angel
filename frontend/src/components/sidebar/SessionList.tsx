@@ -145,16 +145,7 @@ const SessionList: React.FC<SessionListProps> = ({
       }}
     >
       {sessions.map((session) => (
-        <li
-          key={session.id}
-          className="sidebar-session-item"
-          style={{
-            backgroundColor: openMenuSessionId === session.id ? '#f0f8ff' : 'transparent',
-            border: openMenuSessionId === session.id ? '1px solid #007bff' : '1px solid transparent',
-            borderRadius: '4px',
-            transition: 'all 0.2s ease',
-          }}
-        >
+        <li key={session.id} className={`sidebar-session-item ${session.id === openMenuSessionId ? 'active' : ''}`}>
           {editingSessionId === session.id ? (
             <div className="sidebar-session-edit-container">
               <input
@@ -215,10 +206,6 @@ const SessionList: React.FC<SessionListProps> = ({
               onDragEnter={(e) => handleDragEnter(e, session.id)}
               onDragLeave={handleDragLeave}
               className={`sidebar-session-button ${session.id === chatSessionId ? 'active' : ''} ${draggedSessionId === session.id ? 'drag-over' : ''}`}
-              style={{
-                position: 'relative',
-                transition: 'all 0.2s ease-in-out',
-              }}
               title={session.name || 'New Chat'}
               aria-label={`Go to ${session.name || 'New Chat'} session`}
             >

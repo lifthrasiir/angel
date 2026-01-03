@@ -213,7 +213,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       style={{
         width: 'var(--sidebar-width)',
         background: '#f0f0f0',
-        padding: '10px',
+        padding: '10px 5px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -257,7 +257,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             refreshWorkspaces={refreshWorkspaces}
           />
         ) : sessions && sessions.length === 0 ? (
-          <p>No sessions yet.</p>
+          <p style={{ padding: '0 5px' }}>No sessions yet.</p>
         ) : (
           <SessionList
             handleDeleteSession={handleDeleteSession}

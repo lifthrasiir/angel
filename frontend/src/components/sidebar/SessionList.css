@@ -3,6 +3,23 @@
     margin-bottom: 2px;
     display: flex;
     align-items: center;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+  }
+
+  .sidebar-session-item.active {
+    background-color: #f0f8ff;
+    border: 1px solid #007bff;
+  }
+
+  .sidebar-session-item > .dropdown {
+    display: none;
+  }
+  .sidebar-session-item:hover > .dropdown,
+  .sidebar-session-item.active > .dropdown {
+    display: block;
   }
 
   .sidebar-session-edit-container {
@@ -39,7 +56,7 @@
 
   .sidebar-session-button {
     flex-grow: 1;
-    padding: 6px 0 6px 8px;
+    padding: 6px 0 6px 3px;
     text-align: left;
     border: none;
     border-radius: 4px;
@@ -48,7 +65,8 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: all 0.2s ease;
+    position: relative;
+    transition: all 0.2s ease-in-out;
   }
 
   .sidebar-session-button.active {
@@ -105,19 +123,6 @@
     .sidebar-session-name-input {
       min-height: var(--touch-target-size);
       padding: calc(var(--spacing-unit) * 0.5);
-    }
-  }
-
-  @media (min-width: 769px) and (max-width: 1024px) {
-    .sidebar-session-button {
-      padding: calc(var(--spacing-unit) * 0.3) calc(var(--spacing-unit) * 0.5);
-      padding-right: 0;
-      min-height: var(--touch-target-size);
-    }
-
-    .sidebar-session-item .session-menu-trigger {
-      min-height: var(--touch-target-size);
-      min-width: var(--touch-target-size);
     }
   }
 }
