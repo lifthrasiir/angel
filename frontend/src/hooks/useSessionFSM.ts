@@ -18,6 +18,7 @@ import {
   updateUserMessageIdAtom,
   setSessionNameAtom,
   inputMessageAtom,
+  currentSessionNameAtom,
 } from '../atoms/chatAtoms';
 import { pendingConfirmationAtom, temporaryEnvChangeMessageAtom } from '../atoms/confirmationAtoms';
 import { isSystemPromptEditingAtom, editingMessageIdAtom } from '../atoms/uiAtoms';
@@ -68,7 +69,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   const setPendingConfirmation = useSetAtom(pendingConfirmationAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
-  const setSessionName = useSetAtom(setSessionNameAtom);
+  const setSessionNameInList = useSetAtom(setSessionNameAtom);
+  const setCurrentSessionName = useSetAtom(currentSessionNameAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
   const setEditingMessageId = useSetAtom(editingMessageIdAtom);
   const updateUserMessageId = useSetAtom(updateUserMessageIdAtom);
@@ -115,6 +117,9 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
         // Set workspace ID, just in case (should have been already set by EventWorkspaceHint)
         sessionManager.setSessionWorkspaceId(data.workspaceId);
+
+        // Set current session name (for both temporary and regular sessions)
+        setCurrentSessionName(data.name);
 
         // Handle pending confirmation
         if (data.pendingConfirmation) {
@@ -262,24 +267,29 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
             break;
 
           case EventSessionName:
-            // Handle session name update
-            setSessionName({ sessionId: event.sessionId, name: event.newName });
+            // Update current session name (for both temporary and regular sessions)
+            setCurrentSessionName(event.newName);
 
-            // If the session is new (not in the sidebar list), add it locally
-            // Conditions:
-            // i) sidebar's workspace matches current session's workspace
-            //    (implicitly true because they are strictly synchronized for now)
-            // ii) session ID doesn't contain '.' (not a temporary session)
-            // iii) session is not already in the list
-            if (!event.sessionId.includes('.') && !sessions.some((s) => s.id === event.sessionId)) {
-              setSessions([
-                {
-                  id: event.sessionId,
-                  name: event.newName,
-                  last_updated_at: new Date().toISOString(),
-                },
-                ...sessions,
-              ]);
+            // Update session name in the sidebar list (only for non-temporary sessions)
+            if (!event.sessionId.includes('.')) {
+              setSessionNameInList({ sessionId: event.sessionId, name: event.newName });
+
+              // If the session is new (not in the sidebar list), add it locally
+              // Conditions:
+              // i) sidebar's workspace matches current session's workspace
+              //    (implicitly true because they are strictly synchronized for now)
+              // ii) session ID doesn't contain '.' (not a temporary session)
+              // iii) session is not already in the list
+              if (!sessions.some((s) => s.id === event.sessionId)) {
+                setSessions([
+                  {
+                    id: event.sessionId,
+                    name: event.newName,
+                    last_updated_at: new Date().toISOString(),
+                  },
+                  ...sessions,
+                ]);
+              }
             }
             break;
 

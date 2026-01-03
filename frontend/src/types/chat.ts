@@ -52,6 +52,7 @@ export interface ChatMessage {
 
 export interface InitialState {
   sessionId: string;
+  name: string;
   history: ChatMessage[];
   systemPrompt: string;
   workspaceId: string;

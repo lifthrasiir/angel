@@ -5,7 +5,7 @@ import { useLocation } from 'react-router-dom';
 import { useSessionManagerContext } from '../../hooks/SessionManagerContext';
 import { classifySessionId, getSessionId } from '../../utils/sessionStateHelpers';
 import { isNewTemporarySessionURL } from '../../utils/urlSessionMapping';
-import { sessionsAtom } from '../../atoms/chatAtoms';
+import { sessionsAtom, currentSessionNameAtom } from '../../atoms/chatAtoms';
 import type { Workspace } from '../../types/chat';
 import SessionMenu from '../sidebar/SessionMenu';
 import './ChatHeader.css';
@@ -19,6 +19,7 @@ interface ChatHeaderProps {
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({ workspaces, onSessionRename, onSessionDelete, onToggleSidebar }) => {
   const sessions = useAtomValue(sessionsAtom);
+  const currentSessionName = useAtomValue(currentSessionNameAtom);
   const setSessions = useSetAtom(sessionsAtom);
   const sessionManager = useSessionManagerContext();
   const sessionId = getSessionId(sessionManager.sessionState);
@@ -38,7 +39,8 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ workspaces, onSessionRename, on
 
   // Find current session
   const currentSession = sessionId ? sessions.find((s) => s.id === sessionId) : undefined;
-  const sessionName = currentSession?.name || 'New Chat';
+  // Use currentSessionName if available (from InitialState or EventSessionName), otherwise fall back to session list or "New Chat"
+  const sessionName = currentSessionName || currentSession?.name || 'New Chat';
   const currentWorkspaceId = currentSession?.workspace_id || '';
 
   // Determine session type

@@ -22,6 +22,7 @@ import (
 
 type InitialState struct {
 	SessionId              string            `json:"sessionId"`
+	Name                   string            `json:"name"`
 	History                []FrontendMessage `json:"history"` // May or may not include thoughts
 	SystemPrompt           string            `json:"systemPrompt"`
 	WorkspaceID            string            `json:"workspaceId"`
@@ -132,6 +133,7 @@ func NewSessionAndMessage(
 
 	initialState := InitialState{
 		SessionId:       sessionID,
+		Name:            "", // New session has no name yet
 		History:         frontendHistory,
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     workspaceId,
@@ -288,6 +290,7 @@ func NewChatMessage(
 	// Prepare initial state for streaming (similar to loadChatSession)
 	initialState := InitialState{
 		SessionId:       db.SessionId(),
+		Name:            session.Name,
 		History:         frontendHistoryForInitialState, // Use paginated history for frontend
 		SystemPrompt:    systemPrompt,
 		WorkspaceID:     session.WorkspaceID,
@@ -391,6 +394,7 @@ func LoadChatSession(ctx context.Context, db *database.SessionDatabase, ew Event
 	// Prepare initial state as a single JSON object
 	initialState = InitialState{
 		SessionId:       db.SessionId(),
+		Name:            session.Name,
 		History:         history,
 		SystemPrompt:    session.SystemPrompt,
 		WorkspaceID:     session.WorkspaceID,

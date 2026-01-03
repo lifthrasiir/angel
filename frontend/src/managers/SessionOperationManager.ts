@@ -257,6 +257,7 @@ export class SessionOperationManager {
     return {
       isCallActive: options.isCallActive,
       sessionId: initialState.sessionId,
+      name: initialState.name,
       messages: initialState.history.map((message) => ({ sessionId: initialState.sessionId, ...message })),
       systemPrompt: initialState.systemPrompt,
       primaryBranchId: initialState.primaryBranchId,

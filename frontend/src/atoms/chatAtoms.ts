@@ -7,6 +7,7 @@ export const inputMessageAtom = atom<string>('');
 export const sessionsAtom = atom<Session[]>([]);
 export const systemPromptAtom = atom<string>('{{.Builtin.SystemPrompt}}');
 export const primaryBranchIdAtom = atom<string>('');
+export const currentSessionNameAtom = atom<string>(''); // Track current session name (including temporary sessions)
 
 // Derived atoms
 export const addMessageAtom = atom(null, (_get, set, newMessage: ChatMessage) => {
@@ -63,6 +64,7 @@ export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(messagesAtom, []);
   set(systemPromptAtom, '');
   set(primaryBranchIdAtom, '');
+  set(currentSessionNameAtom, '');
   // Note: selectedFilesAtom is NOT reset - attachments are preserved across sessions
   // Note: isSystemPromptEditingAtom is NOT reset here - handled separately
 });
