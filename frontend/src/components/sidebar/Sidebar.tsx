@@ -20,9 +20,16 @@ import { extractFilesFromDrop } from '../../utils/dragDropUtils';
 interface SidebarProps {
   workspaces: Workspace[];
   refreshWorkspaces: () => Promise<void>;
+  isMobileSidebarOpen?: boolean;
+  onSetMobileSidebarOpen?: (open: boolean) => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
+const Sidebar: React.FC<SidebarProps> = ({
+  workspaces,
+  refreshWorkspaces,
+  isMobileSidebarOpen,
+  onSetMobileSidebarOpen,
+}) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [sessions, setSessions] = useAtom(sessionsAtom);
@@ -36,7 +43,14 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
 
   const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(isMobileSidebarOpen !== undefined ? isMobileSidebarOpen : false);
+
+  // Sync with external state
+  useEffect(() => {
+    if (isMobileSidebarOpen !== undefined) {
+      setIsSidebarOpen(isMobileSidebarOpen);
+    }
+  }, [isMobileSidebarOpen]);
 
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | undefined>(undefined);
   const isInitializedRef = useRef(false);
@@ -121,6 +135,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
     navigate(path);
     if (isMobile) {
       setIsSidebarOpen(false);
+      onSetMobileSidebarOpen?.(false);
     }
   };
 
@@ -135,6 +150,7 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
     setShowWorkspaces(false);
     if (isMobile) {
       setIsSidebarOpen(false);
+      onSetMobileSidebarOpen?.(false);
     }
   };
 
@@ -264,8 +280,10 @@ const Sidebar: React.FC<SidebarProps> = ({ workspaces, refreshWorkspaces }) => {
     return (
       <SidebarMobile
         isOpen={isSidebarOpen}
-        onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-        onOverlayClick={() => setIsSidebarOpen(false)}
+        onOverlayClick={() => {
+          setIsSidebarOpen(false);
+          onSetMobileSidebarOpen?.(false);
+        }}
       >
         {sidebarContent}
       </SidebarMobile>

@@ -41,6 +41,7 @@ interface ChatAreaProps {
   handleRetryError?: (errorMessageId: string) => Promise<void>;
   handleBranchSwitch: (newBranchId: string) => Promise<void>;
   isSendDisabledByResizing?: () => boolean;
+  chatHeader?: React.ReactNode;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -60,6 +61,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleRetryError,
   handleBranchSwitch,
   isSendDisabledByResizing,
+  chatHeader,
 }) => {
   const [messages] = useAtom(messagesAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
@@ -113,57 +115,67 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [systemPrompt, globalPrompts]);
 
   return (
-    <ChatAreaDragDropOverlay onFilesSelected={onFilesSelected}>
-      <MessageListContainer
-        chatAreaRef={chatAreaRef}
-        sessionId={sessionId ?? undefined}
-        messages={messages}
-        hasMoreMessages={hasMoreMessagesState}
-        isLoading={isPriorSessionLoading}
-        loadEarlierMessages={loadEarlierMessages}
-      >
-        {!hasMoreMessagesState && (
-          <>
-            <TemporarySessionNotice show={showTempSessionNotice} />
-            <SystemPromptEditor
-              key={sessionId || 'new'}
-              initialPrompt={systemPrompt}
-              currentLabel={currentSystemPromptLabel}
-              onPromptUpdate={(updatedPrompt) => {
-                setSystemPrompt(updatedPrompt.value);
-              }}
-              isEditing={isSystemPromptEditing}
-              predefinedPrompts={globalPrompts}
-              workspaceId={workspaceId ?? undefined}
-            />
-          </>
-        )}
-        {renderedMessages}
-      </MessageListContainer>
-      {pendingConfirmation ? (
-        <ConfirmationDialog
-          onConfirm={(modifiedData) => sendConfirmation(true, sessionId!, primaryBranchId!, modifiedData)}
-          onDeny={() => sendConfirmation(false, sessionId!, primaryBranchId!)}
-          confirmationData={JSON.parse(pendingConfirmation)}
-        />
-      ) : (
-        <InputArea
-          handleSendMessage={handleSendMessage}
-          onFilesSelected={onFilesSelected}
-          handleRemoveFile={handleRemoveFile}
-          handleFileResizeStateChange={handleFileResizeStateChange}
-          handleFileProcessingStateChange={handleFileProcessingStateChange}
-          handleFileResized={handleFileResized}
-          handleCancelStreaming={handleCancelStreaming}
-          chatInputRef={chatInputRef}
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        overflow: 'hidden',
+      }}
+    >
+      {chatHeader}
+      <ChatAreaDragDropOverlay onFilesSelected={onFilesSelected}>
+        <MessageListContainer
           chatAreaRef={chatAreaRef}
-          sessionId={sessionId}
-          selectedFiles={selectedFiles}
-          isSendDisabledByResizing={isSendDisabledByResizing}
-          isDisabled={!isAuthenticated}
-        />
-      )}
-    </ChatAreaDragDropOverlay>
+          sessionId={sessionId ?? undefined}
+          messages={messages}
+          hasMoreMessages={hasMoreMessagesState}
+          isLoading={isPriorSessionLoading}
+          loadEarlierMessages={loadEarlierMessages}
+        >
+          {!hasMoreMessagesState && (
+            <>
+              <TemporarySessionNotice show={showTempSessionNotice} />
+              <SystemPromptEditor
+                key={sessionId || 'new'}
+                initialPrompt={systemPrompt}
+                currentLabel={currentSystemPromptLabel}
+                onPromptUpdate={(updatedPrompt) => {
+                  setSystemPrompt(updatedPrompt.value);
+                }}
+                isEditing={isSystemPromptEditing}
+                predefinedPrompts={globalPrompts}
+                workspaceId={workspaceId ?? undefined}
+              />
+            </>
+          )}
+          {renderedMessages}
+        </MessageListContainer>
+        {pendingConfirmation ? (
+          <ConfirmationDialog
+            onConfirm={(modifiedData) => sendConfirmation(true, sessionId!, primaryBranchId!, modifiedData)}
+            onDeny={() => sendConfirmation(false, sessionId!, primaryBranchId!)}
+            confirmationData={JSON.parse(pendingConfirmation)}
+          />
+        ) : (
+          <InputArea
+            handleSendMessage={handleSendMessage}
+            onFilesSelected={onFilesSelected}
+            handleRemoveFile={handleRemoveFile}
+            handleFileResizeStateChange={handleFileResizeStateChange}
+            handleFileProcessingStateChange={handleFileProcessingStateChange}
+            handleFileResized={handleFileResized}
+            handleCancelStreaming={handleCancelStreaming}
+            chatInputRef={chatInputRef}
+            chatAreaRef={chatAreaRef}
+            sessionId={sessionId}
+            selectedFiles={selectedFiles}
+            isSendDisabledByResizing={isSendDisabledByResizing}
+            isDisabled={!isAuthenticated}
+          />
+        )}
+      </ChatAreaDragDropOverlay>
+    </div>
   );
 };
 

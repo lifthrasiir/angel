@@ -1,16 +1,20 @@
 import type React from 'react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
 import { globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/modelAtoms';
 import { toastMessageAtom } from '../atoms/uiAtoms';
+import { sessionsAtom } from '../atoms/chatAtoms';
 import { PredefinedPrompt } from './chat/SystemPromptEditor';
 import { useChatSession } from '../hooks/useChatSession';
+import { useSessionFSM } from '../hooks/useSessionFSM';
 import { useSessionManagerContext } from '../hooks/SessionManagerContext';
 import { getSessionId } from '../utils/sessionStateHelpers';
 import useEscToCancel from '../hooks/useEscToCancel';
 import { useWorkspaces } from '../hooks/WorkspaceContext';
 import ChatArea from './chat/ChatArea';
+import ChatHeader from './chat/ChatHeader';
 import Sidebar from './sidebar/Sidebar';
 import ToastMessage from './ToastMessage';
 import { isTextInputKey } from '../utils/navigationKeys';
@@ -20,16 +24,25 @@ interface ChatLayoutProps {
 }
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }) => {
+  const navigate = useNavigate();
   // Use shared sessionManager from context
   const sessionManager = useSessionManagerContext();
   const chatSessionId = getSessionId(sessionManager.sessionState);
 
   const setGlobalPrompts = useSetAtom(globalPromptsAtom);
   const setSelectedGlobalPrompt = useSetAtom(selectedGlobalPromptAtom);
+  const [sessions, setSessions] = useAtom(sessionsAtom);
 
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
+
+  // Mobile sidebar state
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Get workspace info from sessionFSM
+  const sessionFSM = useSessionFSM();
+  const { workspaceId: sessionWorkspaceId } = sessionFSM;
   const {
     handleFilesSelected,
     handleRemoveFile,
@@ -49,6 +62,41 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
   } = useChatSession(isTemporary);
 
   const [toastMessage, setToastMessage] = useAtom(toastMessageAtom);
+
+  // Session menu handlers
+  const handleSessionRename = (sessionId: string) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (session) {
+      const newName = window.prompt('Enter new session name:', session.name || '');
+      if (newName !== null) {
+        apiFetch(`/api/chat/${sessionId}/name`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName }),
+        })
+          .then(() => {
+            setSessions(sessions.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
+          })
+          .catch((error) => {
+            console.error('Error updating session name:', error);
+          });
+      }
+    }
+  };
+
+  const handleSessionDelete = async (sessionId: string) => {
+    if (window.confirm('Are you sure you want to delete this session?')) {
+      try {
+        await apiFetch(`/api/chat/${sessionId}`, { method: 'DELETE' });
+        setSessions(sessions.filter((s) => s.id !== sessionId));
+        if (chatSessionId === sessionId) {
+          navigate(sessionWorkspaceId ? `/w/${sessionWorkspaceId}/new` : '/new');
+        }
+      } catch (error) {
+        console.error('Error deleting session:', error);
+      }
+    }
+  };
 
   useEscToCancel({
     isProcessing,
@@ -118,7 +166,12 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar workspaces={workspaces} refreshWorkspaces={refreshWorkspaces} />
+      <Sidebar
+        workspaces={workspaces}
+        refreshWorkspaces={refreshWorkspaces}
+        isMobileSidebarOpen={isMobileSidebarOpen}
+        onSetMobileSidebarOpen={setIsMobileSidebarOpen}
+      />
 
       {children ? (
         <div
@@ -150,6 +203,14 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
           handleRetryError={handleRetryError}
           handleBranchSwitch={handleBranchSwitch}
           isSendDisabledByResizing={isSendDisabledByResizing}
+          chatHeader={
+            <ChatHeader
+              workspaces={workspaces}
+              onSessionRename={handleSessionRename}
+              onSessionDelete={handleSessionDelete}
+              onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+            />
+          }
         />
       )}
       <ToastMessage message={toastMessage} onClose={() => setToastMessage(null)} />

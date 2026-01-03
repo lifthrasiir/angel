@@ -50,9 +50,11 @@ export const ChatAreaDragDropOverlay: React.FC<ChatAreaDragDropOverlayProps> = (
     <div
       style={{
         flexGrow: 1,
-        width: '0',
+        flexShrink: 1,
+        flexBasis: 'auto',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
         position: 'relative',
       }}
       onDragOver={handleDragOver}

@@ -1,40 +1,14 @@
 import React from 'react';
-import { FaBars, FaTimes } from 'react-icons/fa';
 
 interface SidebarMobileProps {
   isOpen: boolean;
-  onToggle: () => void;
   onOverlayClick: () => void;
   children: React.ReactNode;
 }
 
-export const SidebarMobile: React.FC<SidebarMobileProps> = ({ isOpen, onToggle, onOverlayClick, children }) => {
+export const SidebarMobile: React.FC<SidebarMobileProps> = ({ isOpen, onOverlayClick, children }) => {
   return (
     <>
-      {/* Mobile hamburger button */}
-      <button
-        onClick={onToggle}
-        style={{
-          position: 'fixed',
-          top: '10px',
-          left: '10px',
-          zIndex: 1001,
-          background: '#f0f0f0',
-          border: '1px solid #ccc',
-          borderRadius: '8px',
-          padding: '10px',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minWidth: '44px',
-          minHeight: '44px',
-        }}
-        aria-label="Toggle menu"
-      >
-        {isOpen ? <FaTimes /> : <FaBars />}
-      </button>
-
       {/* Mobile overlay */}
       {isOpen && (
         <div
