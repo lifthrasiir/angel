@@ -1,8 +1,8 @@
 import React from 'react';
 import { FaEllipsisV, FaEdit, FaTrash, FaChevronRight } from 'react-icons/fa';
-import { apiFetch } from '../api/apiClient';
-import type { Workspace } from '../types/chat';
-import Dropdown, { DropdownItem } from './Dropdown';
+import { apiFetch } from '../../api/apiClient';
+import type { Workspace } from '../../types/chat';
+import Dropdown, { DropdownItem } from '../Dropdown';
 
 interface SessionMenuProps {
   sessionId: string;

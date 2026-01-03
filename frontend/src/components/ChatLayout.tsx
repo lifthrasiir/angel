@@ -10,7 +10,7 @@ import { getSessionId } from '../utils/sessionStateHelpers';
 import useEscToCancel from '../hooks/useEscToCancel';
 import { useWorkspaces } from '../hooks/WorkspaceContext';
 import ChatArea from './chat/ChatArea';
-import Sidebar from './Sidebar';
+import Sidebar from './sidebar/Sidebar';
 import ToastMessage from './ToastMessage';
 import { isTextInputKey } from '../utils/navigationKeys';
 interface ChatLayoutProps {

@@ -1,5 +1,5 @@
 import type React from 'react';
-import { apiFetch } from '../api/apiClient';
+import { apiFetch } from '../../api/apiClient';
 import { FaTrash } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 

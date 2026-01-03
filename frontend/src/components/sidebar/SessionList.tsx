@@ -1,12 +1,12 @@
 import type React from 'react';
 import { useEffect, useState, useRef } from 'react';
-import { apiFetch } from '../api/apiClient';
+import { apiFetch } from '../../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
-import type { Session, Workspace } from '../types/chat';
-import { sessionsAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/chatAtoms';
-import { useSessionManagerContext } from '../hooks/SessionManagerContext';
-import { getSessionId } from '../utils/sessionStateHelpers';
-import { extractFilesFromDrop } from '../utils/dragDropUtils';
+import type { Session, Workspace } from '../../types/chat';
+import { sessionsAtom, selectedFilesAtom, preserveSelectedFilesAtom } from '../../atoms/chatAtoms';
+import { useSessionManagerContext } from '../../hooks/SessionManagerContext';
+import { getSessionId } from '../../utils/sessionStateHelpers';
+import { extractFilesFromDrop } from '../../utils/dragDropUtils';
 import SessionMenu from './SessionMenu';
 import './SessionList.css';
 
