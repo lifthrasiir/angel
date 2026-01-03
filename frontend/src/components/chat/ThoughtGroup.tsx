@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useAtom } from 'jotai';
 
 import { lastAutoDisplayedThoughtIdAtom } from '../../atoms/uiAtoms';
@@ -19,19 +19,41 @@ export const ThoughtGroup: React.FC<ThoughtGroupProps> = React.memo(
     const [lastAutoDisplayedThoughtId] = useAtom(lastAutoDisplayedThoughtIdAtom);
 
     const [activeThoughtId, setActiveThoughtId] = useState<string | null>(null);
-    const [hasBeenManuallySelected, setHasBeenManuallySelected] = useState(false);
+    // Track the previous latest thought ID to distinguish between auto-assigned and manual selection
+    const previousLatestIdRef = useRef<string | null>(null);
 
     useEffect(() => {
-      if (isAutoDisplayMode && !hasBeenManuallySelected) {
-        const autoDisplayThought = thoughts.find((thought) => thought.id === lastAutoDisplayedThoughtId);
-        setActiveThoughtId(autoDisplayThought ? autoDisplayThought.id : null);
-      } else if (!isAutoDisplayMode && !hasBeenManuallySelected) {
+      if (isAutoDisplayMode) {
+        const latestThought = thoughts.find((thought) => thought.id === lastAutoDisplayedThoughtId);
+
+        if (latestThought) {
+          // This group does contain the thought to be automatically displayed.
+          // There are three possible cases, assuming that lastAutoDisplayedThoughtId changed from A to B:
+          // 1. activeThoughtId = null: User had nothing selected, so we auto-assign B
+          // 2. activeThoughtId = A: User was viewing the previous latest thought, so we auto-switch to B
+          // 3. activeThoughtId = C (C != A and C != B): User manually selected an older thought, so we keep C
+          // 4. activeThoughtId = B is impossible because B has just arrived.
+          if (activeThoughtId === previousLatestIdRef.current) {
+            setActiveThoughtId(latestThought.id);
+            previousLatestIdRef.current = latestThought.id;
+          } else {
+            // If user manually selected an older thought, keep their selection
+          }
+        } else if (lastAutoDisplayedThoughtId === null) {
+          // Latest message is not a thought (e.g., model message), auto-close
+          // Only close if user was viewing the latest thought (auto mode)
+          if (activeThoughtId === previousLatestIdRef.current) {
+            setActiveThoughtId(null);
+            previousLatestIdRef.current = null;
+          }
+        }
+      } else {
         setActiveThoughtId(null);
+        previousLatestIdRef.current = null;
       }
-    }, [isAutoDisplayMode, lastAutoDisplayedThoughtId, thoughts, groupId, hasBeenManuallySelected]);
+    }, [isAutoDisplayMode, lastAutoDisplayedThoughtId, thoughts, groupId, activeThoughtId]);
 
     const handleCircleClick = (thought: ChatMessage) => {
-      setHasBeenManuallySelected(true);
       if (activeThoughtId === thought.id) {
         setActiveThoughtId(null);
       } else {

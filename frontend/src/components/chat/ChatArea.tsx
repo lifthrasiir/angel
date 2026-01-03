@@ -1,6 +1,6 @@
 import type React from 'react';
-import { useMemo } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import { useEffect, useMemo } from 'react';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import SystemPromptEditor from './SystemPromptEditor';
 import InputArea from './InputArea';
 import ConfirmationDialog from '../ConfirmationDialog';
@@ -11,7 +11,7 @@ import { pendingConfirmationAtom } from '../../atoms/confirmationAtoms';
 import { selectedFilesAtom } from '../../atoms/fileAtoms';
 import { availableModelsAtom, globalPromptsAtom } from '../../atoms/modelAtoms';
 import { isAuthenticatedAtom } from '../../atoms/systemAtoms';
-import { isSystemPromptEditingAtom } from '../../atoms/uiAtoms';
+import { isSystemPromptEditingAtom, lastAutoDisplayedThoughtIdAtom } from '../../atoms/uiAtoms';
 import { useSessionFSM } from '../../hooks/useSessionFSM';
 import { useProcessingState } from '../../hooks/useProcessingState';
 import { useMessageGrouping } from '../../hooks/useMessageGrouping';
@@ -68,6 +68,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
+  const setLastAutoDisplayedThoughtId = useSetAtom(lastAutoDisplayedThoughtIdAtom);
+
+  // Auto-expand the latest thought bubble during streaming
+  useEffect(() => {
+    if (messages.length === 0) {
+      setLastAutoDisplayedThoughtId(null);
+      return;
+    }
+
+    const lastMessage = messages[messages.length - 1];
+
+    if (lastMessage.type === 'thought') {
+      // Latest message is a thought, auto-expand it
+      setLastAutoDisplayedThoughtId(lastMessage.id);
+    } else {
+      // Latest message is not a thought, clear auto-display
+      setLastAutoDisplayedThoughtId(null);
+    }
+  }, [messages, setLastAutoDisplayedThoughtId]);
 
   // Get processing state from custom hook
   const { startTime } = useProcessingState();
