@@ -1,29 +1,32 @@
 import { useAtomValue, useSetAtom } from 'jotai';
+import { useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { sessionsAtom, primaryBranchIdAtom, addMessageAtom } from '../atoms/chatAtoms';
-import { statusMessageAtom, isPickingDirectoryAtom, compressAbortControllerAtom } from '../atoms/uiAtoms';
+import { statusMessageAtom } from '../atoms/uiAtoms';
 import { temporaryEnvChangeMessageAtom } from '../atoms/confirmationAtoms';
 import { pendingRootsAtom } from '../atoms/fileAtoms';
 import type { ChatMessage, RootsChanged, EnvChanged } from '../types/chat';
 import { fetchSessions } from '../utils/sessionManager';
 import { callDirectoryPicker } from '../utils/dialogHelpers';
+import { setIsPickingDirectory } from '../components/DirectoryPickerManager';
 import { useSessionManagerContext } from './SessionManagerContext';
 import { getWorkspaceId } from '../utils/sessionStateHelpers';
 
 export const useCommandProcessor = (sessionId: string | null) => {
   const setStatusMessage = useSetAtom(statusMessageAtom);
 
+  // Local ref for compress abort controller (was global atom)
+  const compressAbortControllerRef = useRef<AbortController | null>(null);
+
   // Use sessionManager for workspaceId
   const sessionManager = useSessionManagerContext();
   const workspaceId = getWorkspaceId(sessionManager.sessionState);
   const setSessions = useSetAtom(sessionsAtom);
-  const setIsPickingDirectory = useSetAtom(isPickingDirectoryAtom);
   const setTemporaryEnvChangeMessage = useSetAtom(temporaryEnvChangeMessageAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
   const setPendingRoots = useSetAtom(pendingRootsAtom);
   const currentPendingRoots = useAtomValue(pendingRootsAtom);
   const addMessage = useSetAtom(addMessageAtom);
-  const setCompressAbortController = useSetAtom(compressAbortControllerAtom);
 
   // Generic helper to refresh sessions
   const refreshSessions = async () => {
@@ -60,7 +63,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
     setStatusMessage('Compressing chat history...');
     // Note: Processing state is now managed by SessionState
     const abortController = new AbortController();
-    setCompressAbortController(abortController);
+    compressAbortControllerRef.current = abortController;
 
     try {
       const response = await apiFetch(`/api/chat/${sessionId}/compress`, {
@@ -96,7 +99,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
       }
     } finally {
       // Note: Processing state is now managed by SessionState
-      setCompressAbortController(null);
+      compressAbortControllerRef.current = null;
     }
   };
 
