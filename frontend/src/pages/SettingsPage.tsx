@@ -9,7 +9,8 @@ import GeminiAPISettings from '../components/settings/GeminiAPISettings'; // Imp
 import SystemPromptEditor, { PredefinedPrompt } from '../components/chat/SystemPromptEditor'; // Import SystemPromptEditor and PredefinedPrompt type
 import { AccountDetailsModal } from '../components/settings/AccountDetailsModal'; // Import AccountDetailsModal
 
-import { globalPromptsAtom, hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/chatAtoms';
+import { globalPromptsAtom } from '../atoms/modelAtoms';
+import { hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/systemAtoms';
 
 interface Account {
   id: number;

@@ -1,15 +1,9 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { apiFetch } from '../api/apiClient';
-import {
-  statusMessageAtom,
-  sessionsAtom,
-  isPickingDirectoryAtom,
-  temporaryEnvChangeMessageAtom,
-  primaryBranchIdAtom,
-  pendingRootsAtom,
-  addMessageAtom,
-  compressAbortControllerAtom,
-} from '../atoms/chatAtoms';
+import { sessionsAtom, primaryBranchIdAtom, addMessageAtom } from '../atoms/chatAtoms';
+import { statusMessageAtom, isPickingDirectoryAtom, compressAbortControllerAtom } from '../atoms/uiAtoms';
+import { temporaryEnvChangeMessageAtom } from '../atoms/confirmationAtoms';
+import { pendingRootsAtom } from '../atoms/fileAtoms';
 import type { ChatMessage, RootsChanged, EnvChanged } from '../types/chat';
 import { fetchSessions } from '../utils/sessionManager';
 import { callDirectoryPicker } from '../utils/dialogHelpers';

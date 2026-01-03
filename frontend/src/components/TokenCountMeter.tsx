@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAtom } from 'jotai';
-import { messagesAtom, selectedModelAtom } from '../atoms/chatAtoms';
+import { messagesAtom } from '../atoms/chatAtoms';
+import { selectedModelAtom } from '../atoms/modelAtoms';
 
 const TokenCountMeter: React.FC = () => {
   const [messages] = useAtom(messagesAtom);

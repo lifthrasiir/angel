@@ -1,5 +1,5 @@
 import { useSetAtom } from 'jotai';
-import { toastMessageAtom } from '../atoms/chatAtoms';
+import { toastMessageAtom } from '../atoms/uiAtoms';
 
 export const useCopyToClipboard = () => {
   const setToastMessage = useSetAtom(toastMessageAtom);

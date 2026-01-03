@@ -9,18 +9,19 @@ import {
   messagesAtom,
   inputMessageAtom,
   sessionsAtom,
-  lastAutoDisplayedThoughtIdAtom,
   systemPromptAtom,
-  isSystemPromptEditingAtom,
-  selectedFilesAtom,
-  workspaceNameAtom,
   primaryBranchIdAtom,
-  availableModelsAtom,
-  selectedModelAtom,
-  pendingConfirmationAtom,
-  pendingRootsAtom,
-  isModelManuallySelectedAtom,
 } from '../atoms/chatAtoms';
+import { pendingConfirmationAtom } from '../atoms/confirmationAtoms';
+import {
+  lastAutoDisplayedThoughtIdAtom,
+  isSystemPromptEditingAtom,
+  isModelManuallySelectedAtom,
+} from '../atoms/uiAtoms';
+import { selectedFilesAtom } from '../atoms/fileAtoms';
+import { pendingRootsAtom } from '../atoms/fileAtoms';
+import { workspaceNameAtom } from '../atoms/workspaceAtoms';
+import { availableModelsAtom, selectedModelAtom } from '../atoms/modelAtoms';
 import { useDocumentTitle } from './useDocumentTitle';
 import { useSessionFSM } from './useSessionFSM';
 import { getAvailableModels, ModelInfo } from '../api/models';

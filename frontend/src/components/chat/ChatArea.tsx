@@ -8,17 +8,12 @@ import ConfirmationDialog from '../ConfirmationDialog';
 import MessageListContainer from './MessageListContainer';
 import ChatAreaDragDropOverlay from './ChatAreaDragDropOverlay';
 import TemporarySessionNotice from './TemporarySessionNotice';
-import {
-  messagesAtom,
-  selectedFilesAtom,
-  availableModelsAtom,
-  isAuthenticatedAtom,
-  systemPromptAtom,
-  isSystemPromptEditingAtom,
-  globalPromptsAtom,
-  primaryBranchIdAtom,
-  pendingConfirmationAtom,
-} from '../../atoms/chatAtoms';
+import { messagesAtom, systemPromptAtom, primaryBranchIdAtom } from '../../atoms/chatAtoms';
+import { pendingConfirmationAtom } from '../../atoms/confirmationAtoms';
+import { selectedFilesAtom } from '../../atoms/fileAtoms';
+import { availableModelsAtom, globalPromptsAtom } from '../../atoms/modelAtoms';
+import { isAuthenticatedAtom } from '../../atoms/systemAtoms';
+import { isSystemPromptEditingAtom } from '../../atoms/uiAtoms';
 import { useSessionFSM } from '../../hooks/useSessionFSM';
 import { useProcessingState } from '../../hooks/useProcessingState';
 import { useMessageGrouping } from '../../hooks/useMessageGrouping';

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { toastMessageAtom } from '../atoms/chatAtoms';
+import { toastMessageAtom } from '../atoms/uiAtoms';
 
 interface UseEscToCancelProps {
   isProcessing: boolean;

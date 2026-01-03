@@ -3,7 +3,7 @@ import { useAtom } from 'jotai';
 import type { FileAttachment, ChatMessage } from '../../types/chat';
 import FileAttachmentList from '../FileAttachmentList';
 import ChatBubble, { type ChatBubbleRef } from './ChatBubble';
-import { editingMessageIdAtom } from '../../atoms/chatAtoms';
+import { editingMessageIdAtom } from '../../atoms/uiAtoms';
 import { useProcessingState } from '../../hooks/useProcessingState';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';

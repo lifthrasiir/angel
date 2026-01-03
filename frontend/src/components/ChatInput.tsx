@@ -2,14 +2,10 @@ import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { FaPaperclip, FaPaperPlane, FaTimes } from 'react-icons/fa';
 import { useAtom, useSetAtom } from 'jotai';
-import {
-  inputMessageAtom,
-  availableModelsAtom,
-  selectedModelAtom,
-  selectedFilesAtom,
-  statusMessageAtom,
-  isModelManuallySelectedAtom,
-} from '../atoms/chatAtoms';
+import { inputMessageAtom } from '../atoms/chatAtoms';
+import { availableModelsAtom, selectedModelAtom } from '../atoms/modelAtoms';
+import { selectedFilesAtom } from '../atoms/fileAtoms';
+import { statusMessageAtom, isModelManuallySelectedAtom } from '../atoms/uiAtoms';
 import { useCommandProcessor } from '../hooks/useCommandProcessor';
 import { useProcessingState } from '../hooks/useProcessingState';
 import { handleEnterKey } from '../utils/enterKeyHandler';

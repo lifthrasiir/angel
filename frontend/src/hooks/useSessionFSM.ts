@@ -11,23 +11,20 @@ import {
   addErrorMessageAtom,
   addMessageAtom,
   resetChatSessionStateAtom,
-  isSystemPromptEditingAtom,
   messagesAtom,
   primaryBranchIdAtom,
-  selectedFilesAtom,
-  selectedModelAtom,
   sessionsAtom,
   systemPromptAtom,
-  sessionWorkspaceIdAtom,
   updateAgentMessageAtom,
-  pendingConfirmationAtom,
-  temporaryEnvChangeMessageAtom,
-  preserveSelectedFilesAtom,
+  updateUserMessageIdAtom,
   setSessionNameAtom,
   inputMessageAtom,
-  editingMessageIdAtom,
-  updateUserMessageIdAtom,
 } from '../atoms/chatAtoms';
+import { pendingConfirmationAtom, temporaryEnvChangeMessageAtom } from '../atoms/confirmationAtoms';
+import { isSystemPromptEditingAtom, editingMessageIdAtom } from '../atoms/uiAtoms';
+import { selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/fileAtoms';
+import { selectedModelAtom } from '../atoms/modelAtoms';
+import { sessionWorkspaceIdAtom } from '../atoms/workspaceAtoms';
 import type { MessageSendParams, OperationEventHandlers } from '../managers/SessionOperationManager';
 import {
   EventThought,

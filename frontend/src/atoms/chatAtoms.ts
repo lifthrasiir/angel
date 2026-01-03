@@ -1,46 +1,19 @@
 import { atom } from 'jotai';
 import type { ChatMessage, Session } from '../types/chat';
-import { ModelInfo } from '../api/models';
-import { PredefinedPrompt } from '../components/chat/SystemPromptEditor';
 
-export const hasConnectedAccountsAtom = atom<boolean>(false);
-export const hasApiKeysAtom = atom<boolean>(false);
-export const isAuthenticatedAtom = atom<boolean>(false);
+// Core chat state
 export const messagesAtom = atom<ChatMessage[]>([]);
 export const inputMessageAtom = atom<string>('');
 export const sessionsAtom = atom<Session[]>([]);
-export const lastAutoDisplayedThoughtIdAtom = atom<string | null>(null);
-export const statusMessageAtom = atom<string | null>(null);
-export const toastMessageAtom = atom<string | null>(null);
 export const systemPromptAtom = atom<string>('{{.Builtin.SystemPrompt}}');
-export const isSystemPromptEditingAtom = atom<boolean>(false);
-export const selectedFilesAtom = atom<File[]>([]);
-export const workspaceNameAtom = atom<string | undefined>(undefined);
-export const sessionWorkspaceIdAtom = atom<string | undefined>(undefined);
 export const primaryBranchIdAtom = atom<string>('');
-export const availableModelsAtom = atom<Map<string, ModelInfo>>(new Map());
-export const selectedModelAtom = atom<ModelInfo | null>(null);
-export const globalPromptsAtom = atom<PredefinedPrompt[]>([]);
-export const selectedGlobalPromptAtom = atom<string>('');
-export const isPickingDirectoryAtom = atom<boolean>(false);
-export const pendingConfirmationAtom = atom<string | null>(null);
-export const temporaryEnvChangeMessageAtom = atom<ChatMessage | null>(null);
-export const pendingRootsAtom = atom<string[]>([]);
-export const compressAbortControllerAtom = atom<AbortController | null>(null);
-export const editingMessageIdAtom = atom<string | null>(null);
-export const preserveSelectedFilesAtom = atom<File[]>([]); // Files to preserve during session navigation
-export const isModelManuallySelectedAtom = atom<boolean>(false); // Track if user manually selected a model
 
-// Derived atom for adding messages
-export const addMessageAtom = atom(
-  null, // This is a write-only atom, so the first argument is null
-  (_get, set, newMessage: ChatMessage) => {
-    const currentMessages = _get(messagesAtom);
-    set(messagesAtom, [...currentMessages, newMessage]);
-  },
-);
+// Derived atoms
+export const addMessageAtom = atom(null, (_get, set, newMessage: ChatMessage) => {
+  const currentMessages = _get(messagesAtom);
+  set(messagesAtom, [...currentMessages, newMessage]);
+});
 
-// Derived atom for updating agent messages
 export const updateAgentMessageAtom = atom(
   null,
   (_get, set, payload: { messageId: string; text: string; modelName?: string }) => {
@@ -68,7 +41,6 @@ export const updateAgentMessageAtom = atom(
   },
 );
 
-// Derived atom for adding error messages
 export const addErrorMessageAtom = atom(null, (_get, set, errorMessageText: string) => {
   const currentMessages = _get(messagesAtom);
   const newMessages = [...currentMessages];
@@ -87,28 +59,20 @@ export const addErrorMessageAtom = atom(null, (_get, set, errorMessageText: stri
   set(messagesAtom, newMessages);
 });
 
-// Derived atom for resetting chat session state
 export const resetChatSessionStateAtom = atom(null, (_get, set) => {
   set(messagesAtom, []);
   set(systemPromptAtom, '');
-  set(isSystemPromptEditingAtom, true);
-  // Don't reset selectedFilesAtom - keep attachments across session changes
   set(primaryBranchIdAtom, '');
-  set(selectedModelAtom, null);
-  set(pendingConfirmationAtom, null);
-  set(temporaryEnvChangeMessageAtom, null);
-  set(pendingRootsAtom, []);
+  // Note: selectedFilesAtom is NOT reset - attachments are preserved across sessions
+  // Note: isSystemPromptEditingAtom is NOT reset here - handled separately
 });
 
-// Derived atom for adding a new session
 export const addSessionAtom = atom(null, (_get, set, newSession: Session) => {
   const currentSessions = _get(sessionsAtom);
   set(sessionsAtom, [newSession, ...currentSessions]);
 });
 
-// Derived atom for setting session name
 export const setSessionNameAtom = atom(null, (_get, set, payload: { sessionId: string; name: string }) => {
-  // Ignore session name updates for temporary sessions (sessions starting with '.')
   if (payload.sessionId.startsWith('.')) {
     return;
   }
@@ -120,7 +84,6 @@ export const setSessionNameAtom = atom(null, (_get, set, payload: { sessionId: s
   );
 });
 
-// Derived atom for updating user message ID
 export const updateUserMessageIdAtom = atom(null, (_get, set, payload: { temporaryId: string; newId: string }) => {
   const { temporaryId, newId } = payload;
   const currentMessages = _get(messagesAtom);
@@ -130,7 +93,6 @@ export const updateUserMessageIdAtom = atom(null, (_get, set, payload: { tempora
   );
 });
 
-// Derived atom for updating message token count
 export const updateMessageTokenCountAtom = atom(
   null,
   (_get, set, payload: { messageId: string; cumulTokenCount: number }) => {

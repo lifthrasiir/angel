@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { apiFetch } from '../api/apiClient';
-import { hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/chatAtoms';
+import { hasConnectedAccountsAtom, hasApiKeysAtom, isAuthenticatedAtom } from '../atoms/systemAtoms';
 import ChatLayout from '../components/ChatLayout';
 
 interface SessionPageProps {

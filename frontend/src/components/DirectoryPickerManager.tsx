@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { isPickingDirectoryAtom } from '../atoms/chatAtoms';
+import { isPickingDirectoryAtom } from '../atoms/uiAtoms';
 import { DirectoryPicker } from './DirectoryPicker';
 
 // Global state to track initial path for directory picker
