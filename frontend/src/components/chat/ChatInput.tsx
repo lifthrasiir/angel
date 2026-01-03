@@ -2,14 +2,14 @@ import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { FaPaperclip, FaPaperPlane, FaTimes } from 'react-icons/fa';
 import { useAtom, useSetAtom } from 'jotai';
-import { inputMessageAtom } from '../atoms/chatAtoms';
-import { availableModelsAtom, selectedModelAtom } from '../atoms/modelAtoms';
-import { selectedFilesAtom } from '../atoms/fileAtoms';
-import { statusMessageAtom, isModelManuallySelectedAtom } from '../atoms/uiAtoms';
-import { useCommandProcessor } from '../hooks/useCommandProcessor';
-import { useProcessingState } from '../hooks/useProcessingState';
-import { handleEnterKey } from '../utils/enterKeyHandler';
-import { handleNavigationKeys } from '../utils/navigationKeys';
+import { inputMessageAtom } from '../../atoms/chatAtoms';
+import { availableModelsAtom, selectedModelAtom } from '../../atoms/modelAtoms';
+import { selectedFilesAtom } from '../../atoms/fileAtoms';
+import { statusMessageAtom, isModelManuallySelectedAtom } from '../../atoms/uiAtoms';
+import { useCommandProcessor } from '../../hooks/useCommandProcessor';
+import { useProcessingState } from '../../hooks/useProcessingState';
+import { handleEnterKey } from '../../utils/enterKeyHandler';
+import { handleNavigationKeys } from '../../utils/navigationKeys';
 
 interface ChatInputProps {
   handleSendMessage: (message?: string) => void;

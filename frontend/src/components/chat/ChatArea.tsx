@@ -1,13 +1,11 @@
 import type React from 'react';
 import { useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { useLocation } from 'react-router-dom';
 import SystemPromptEditor from './SystemPromptEditor';
-import InputArea from '../InputArea';
+import InputArea from './InputArea';
 import ConfirmationDialog from '../ConfirmationDialog';
 import MessageListContainer from './MessageListContainer';
 import ChatAreaDragDropOverlay from './ChatAreaDragDropOverlay';
-import TemporarySessionNotice from './TemporarySessionNotice';
 import { messagesAtom, systemPromptAtom, primaryBranchIdAtom } from '../../atoms/chatAtoms';
 import { pendingConfirmationAtom } from '../../atoms/confirmationAtoms';
 import { selectedFilesAtom } from '../../atoms/fileAtoms';
@@ -17,7 +15,6 @@ import { isSystemPromptEditingAtom } from '../../atoms/uiAtoms';
 import { useSessionFSM } from '../../hooks/useSessionFSM';
 import { useProcessingState } from '../../hooks/useProcessingState';
 import { useMessageGrouping } from '../../hooks/useMessageGrouping';
-import { isNewTemporarySessionURL } from '../../utils/urlSessionMapping';
 
 interface ChatAreaProps {
   handleSendMessage: () => void;
@@ -71,7 +68,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
-  const location = useLocation();
 
   // Get processing state from custom hook
   const { startTime } = useProcessingState();
@@ -102,13 +98,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     handleRetryError,
   });
 
-  // Check if this is a temporary session and show notice if needed
-  const showTempSessionNotice = useMemo(() => {
-    const isTempURL = isNewTemporarySessionURL(location.pathname);
-    const isTempID = sessionId && sessionId.startsWith('.');
-    return isTempURL || !!isTempID;
-  }, [sessionId, location.pathname]);
-
   const currentSystemPromptLabel = useMemo(() => {
     const found = globalPrompts.find((p) => p.value === systemPrompt);
     return found ? found.label : ''; // Return label if found, else empty string for custom
@@ -135,7 +124,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         >
           {!hasMoreMessagesState && (
             <>
-              <TemporarySessionNotice show={showTempSessionNotice} />
               <SystemPromptEditor
                 key={sessionId || 'new'}
                 initialPrompt={systemPrompt}

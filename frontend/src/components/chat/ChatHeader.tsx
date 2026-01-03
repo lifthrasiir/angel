@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { FaBars } from 'react-icons/fa';
+import { FaBars, FaLock, FaPuzzlePiece } from 'react-icons/fa';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { useLocation } from 'react-router-dom';
 import { useSessionManagerContext } from '../../hooks/SessionManagerContext';
-import { getSessionId } from '../../utils/sessionStateHelpers';
+import { classifySessionId, getSessionId } from '../../utils/sessionStateHelpers';
+import { isNewTemporarySessionURL } from '../../utils/urlSessionMapping';
 import { sessionsAtom } from '../../atoms/chatAtoms';
 import type { Workspace } from '../../types/chat';
 import SessionMenu from '../sidebar/SessionMenu';
@@ -20,6 +22,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ workspaces, onSessionRename, on
   const setSessions = useSetAtom(sessionsAtom);
   const sessionManager = useSessionManagerContext();
   const sessionId = getSessionId(sessionManager.sessionState);
+  const location = useLocation();
   const [isMobile, setIsMobile] = useState(false);
 
   // Detect mobile viewport
@@ -37,6 +40,11 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ workspaces, onSessionRename, on
   const currentSession = sessionId ? sessions.find((s) => s.id === sessionId) : undefined;
   const sessionName = currentSession?.name || 'New Chat';
   const currentWorkspaceId = currentSession?.workspace_id || '';
+
+  // Determine session type
+  const sessionType = classifySessionId(sessionId);
+  // Also check if current URL is a temporary session URL (for sessions not yet created)
+  const isTempURL = isNewTemporarySessionURL(location.pathname);
 
   const handleRename = () => {
     if (onSessionRename && sessionId) {
@@ -75,7 +83,15 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ workspaces, onSessionRename, on
       )}
 
       {/* Center: Session name */}
-      <div className="chat-header-title">{sessionName}</div>
+      <div className="chat-header-title">
+        <span>{sessionName}</span>
+        {(sessionType === 'temp' || isTempURL) && (
+          <FaLock className="chat-header-icon" title="Temporary session, deleted after 48 hours of inactivity" />
+        )}
+        {sessionType === 'internal' && (
+          <FaPuzzlePiece className="chat-header-icon" title="Internal session created by system/subagent" />
+        )}
+      </div>
 
       {/* Right: Session menu */}
       {sessionId && !sessionId.startsWith('.') && (

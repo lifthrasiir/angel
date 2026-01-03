@@ -6,6 +6,7 @@
   background-color: #ffffff;
   border-bottom: 1px solid #e0e0e0;
   flex-shrink: 0;
+  min-height: 28px;
 }
 
 .chat-header-hamburger {
@@ -30,14 +31,27 @@
 
 .chat-header-title {
   flex: 1;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font-size: 16px;
   font-weight: 600;
   color: #333;
   overflow: hidden;
+}
+
+.chat-header-title span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin: 0 8px;
+}
+
+.chat-header-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: #666;
+  cursor: help;
 }
 
 .chat-header .session-menu-trigger {

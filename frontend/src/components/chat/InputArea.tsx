@@ -1,8 +1,8 @@
 import type React from 'react';
 import ChatInput from './ChatInput';
-import FileAttachmentPreview from './FileAttachmentPreview';
-import TokenCountMeter from './TokenCountMeter';
-import { extractFilesFromDrop } from '../utils/dragDropUtils';
+import FileAttachmentPreview from '../FileAttachmentPreview';
+import TokenCountMeter from '../TokenCountMeter';
+import { extractFilesFromDrop } from '../../utils/dragDropUtils';
 
 interface InputAreaProps {
   handleSendMessage: () => void;
