@@ -38,6 +38,9 @@ const SessionList: React.FC<SessionListProps> = ({
   const [isMobile, setIsMobile] = useState(false);
   const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
   const inputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
+  // Temporary state for edit input - only applied on Enter
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [tempEditValue, setTempEditValue] = useState<string>('');
 
   // Detect mobile viewport
   useEffect(() => {
@@ -56,10 +59,11 @@ const SessionList: React.FC<SessionListProps> = ({
 
   // Handle rename action from menu
   const handleRenameSession = (sessionId: string) => {
-    updateSessionState(sessionId, (s) => ({
-      ...s,
-      isEditing: true,
-    }));
+    const session = sessions.find((s) => s.id === sessionId);
+    if (session) {
+      setEditingSessionId(sessionId);
+      setTempEditValue(session.name || '');
+    }
 
     // Focus the input after the component re-renders
     queueMicrotask(() => {
@@ -150,7 +154,7 @@ const SessionList: React.FC<SessionListProps> = ({
             transition: 'all 0.2s ease',
           }}
         >
-          {session.isEditing ? (
+          {editingSessionId === session.id ? (
             <div className="sidebar-session-edit-container">
               <input
                 ref={(el) => {
@@ -159,41 +163,42 @@ const SessionList: React.FC<SessionListProps> = ({
                   }
                 }}
                 type="text"
-                value={session.name || ''}
+                value={tempEditValue}
                 onChange={(e) => {
-                  updateSessionState(session.id, (s) => ({
-                    ...s,
-                    name: e.target.value,
-                  }));
+                  setTempEditValue(e.target.value);
                 }}
-                onBlur={async () => {
-                  if (session.id) {
-                    try {
-                      await apiFetch(`/api/chat/${session.id}/name`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: session.name || '' }),
-                      });
-                    } catch (error) {
-                      console.error('Error updating session name:', error);
-                    }
-                  }
-                  updateSessionState(session.id, (s) => ({
-                    ...s,
-                    isEditing: false,
-                  }));
-                  // Clean up the ref
+                onBlur={() => {
+                  // On blur, just cancel editing (don't apply changes)
+                  setEditingSessionId(null);
+                  setTempEditValue('');
                   delete inputRefs.current[session.id];
                 }}
-                onKeyDown={(e) => {
+                onKeyDown={async (e) => {
                   if (e.key === 'Enter') {
-                    e.currentTarget.blur();
+                    // Apply changes on Enter
+                    if (session.id) {
+                      try {
+                        await apiFetch(`/api/chat/${session.id}/name`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ name: tempEditValue || '' }),
+                        });
+                        // Update local state only after successful API call
+                        updateSessionState(session.id, (s) => ({
+                          ...s,
+                          name: tempEditValue,
+                        }));
+                      } catch (error) {
+                        console.error('Error updating session name:', error);
+                      }
+                    }
+                    setEditingSessionId(null);
+                    setTempEditValue('');
+                    delete inputRefs.current[session.id];
                   } else if (e.key === 'Escape') {
-                    updateSessionState(session.id, (s) => ({
-                      ...s,
-                      isEditing: false,
-                    }));
-                    // Clean up the ref
+                    // Cancel on Escape
+                    setEditingSessionId(null);
+                    setTempEditValue('');
                     delete inputRefs.current[session.id];
                   }
                 }}
