@@ -60,14 +60,10 @@ func CreateBranch(
 		return fmt.Errorf("failed to get session %s: %w", db.SessionId(), err)
 	}
 
-	// Check if this is an attempt to edit the first message
-	currentChosenFirstID, err := database.GetSessionChosenFirstID(db)
-	if err != nil {
-		return fmt.Errorf("failed to get session chosen_first_id for session %s: %w", db.SessionId(), err)
-	}
-
 	// Handle first message editing if the message being updated is the current first message
-	isFirstMessageEdit := currentChosenFirstID != nil && *currentChosenFirstID == updatedMessageID
+	// A message is considered the first message if it has no parent, regardless of whether it's the current chosen first
+	// This is especially important for retry scenarios where the original first message may no longer be the chosen first
+	isFirstMessageEdit := !updatedParentMessageID.Valid
 
 	// Common variables that will be used by both paths
 	var newBranchID string
@@ -86,11 +82,6 @@ func CreateBranch(
 		// Set the new branch as the primary branch for the session
 		if err := database.UpdateSessionPrimaryBranchID(db, newBranchID); err != nil {
 			return fmt.Errorf("failed to set new branch as primary for session %s: %w", db.SessionId(), err)
-		}
-
-		// Validate that we're editing the current first message
-		if currentChosenFirstID == nil || *currentChosenFirstID != updatedMessageID {
-			return fmt.Errorf("can only edit the current first message of the session")
 		}
 
 		// Get the original message to preserve its properties

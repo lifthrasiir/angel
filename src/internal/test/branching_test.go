@@ -849,3 +849,44 @@ func TestFirstMessageEditing(t *testing.T) {
 		// are no longer relevant since the edited first message starts a new independent chain
 	})
 }
+
+// TestRetryFirstMessageTwice tests that retrying the first message twice should succeed both times.
+// This is a regression test for the bug where the second retry fails with 400:
+// "cannot branch from a message that has no parent message"
+func TestRetryFirstMessageTwice(t *testing.T) {
+	router, testDB, _ := setupTest(t)
+	sessionId := database.GenerateID()
+
+	sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "System prompt", "default")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	defer sdb.Close()
+
+	// Add a first message
+	mc, err := database.NewMessageChain(context.Background(), sdb, primaryBranchID)
+	if err != nil {
+		t.Fatalf("Failed to create message chain: %v", err)
+	}
+
+	firstMsg, err := mc.Add(Message{Text: "First message", Type: TypeUserText})
+	if err != nil {
+		t.Fatalf("Failed to add first message: %v", err)
+	}
+	firstMsgID := firstMsg.ID
+
+	// Update the session's chosen_first_id to point to this message
+	if err := database.UpdateSessionChosenFirstID(sdb, &firstMsgID); err != nil {
+		t.Fatalf("Failed to update chosen_first_id: %v", err)
+	}
+
+	// First retry request - should succeed
+	retryBody1 := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": ""}`, firstMsgID))
+	resp1 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch?retry=1", sessionId), retryBody1, http.StatusOK)
+	resp1.Body.Close()
+
+	// Second retry request - should also succeed (currently fails with 400)
+	retryBody2 := []byte(fmt.Sprintf(`{"updatedMessageId": %d, "newMessageText": ""}`, firstMsgID))
+	resp2 := testStreamingRequest(t, router, "POST", fmt.Sprintf("/api/chat/%s/branch?retry=1", sessionId), retryBody2, http.StatusOK)
+	resp2.Body.Close()
+}
