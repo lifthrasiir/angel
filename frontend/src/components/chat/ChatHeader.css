@@ -1,59 +1,76 @@
-.chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  background-color: #ffffff;
-  border-bottom: 1px solid #e0e0e0;
-  flex-shrink: 0;
-  min-height: 28px;
-}
+@layer components.ChatHeader {
+  .chat-header {
+    display: block;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 101;
+    overflow: visible;
+  }
 
-.chat-header-hamburger {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background-color 0.2s ease;
-  color: #666;
-  padding: 0;
-}
+  .chat-header-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background-color: #ffffff;
+    border-bottom: 1px solid #e0e0e0;
+    min-height: 28px;
+    position: relative;
+    z-index: 102;
+  }
 
-.chat-header-hamburger:hover {
-  background-color: #f0f0f0;
-  color: #333;
-}
+  .chat-header-hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+    color: #666;
+    padding: 0;
+  }
 
-.chat-header-title {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #333;
-  overflow: hidden;
-}
+  .chat-header-hamburger:hover {
+    background-color: #f0f0f0;
+    color: #333;
+  }
 
-.chat-header-title span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+  .chat-header-title {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    overflow: hidden;
+  }
 
-.chat-header-icon {
-  flex-shrink: 0;
-  font-size: 14px;
-  color: #666;
-  cursor: help;
-}
+  .chat-header-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-.chat-header .session-menu-trigger {
-  flex-shrink: 0;
+  .chat-header-icon {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: #666;
+    cursor: help;
+  }
+
+  .chat-header .session-menu-trigger {
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 768px) {
+    .chat-header-content {
+      padding: 10px 0;
+    }
+  }
 }

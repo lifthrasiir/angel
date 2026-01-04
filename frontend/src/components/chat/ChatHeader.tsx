@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { FaBars, FaLock, FaPuzzlePiece } from 'react-icons/fa';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { FaBars, FaChevronDown, FaChevronUp, FaLock, FaPuzzlePiece } from 'react-icons/fa';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useLocation } from 'react-router-dom';
 import { useSessionManagerContext } from '../../hooks/SessionManagerContext';
 import { classifySessionId, getSessionId } from '../../utils/sessionStateHelpers';
 import { isNewTemporarySessionURL } from '../../utils/urlSessionMapping';
 import { sessionsAtom, currentSessionNameAtom } from '../../atoms/chatAtoms';
+import { isSessionConfigOpenAtom } from '../../atoms/uiAtoms';
 import type { Workspace } from '../../types/chat';
 import SessionMenu from '../sidebar/SessionMenu';
 import './ChatHeader.css';
@@ -15,12 +16,20 @@ interface ChatHeaderProps {
   onSessionRename?: (sessionId: string) => void;
   onSessionDelete?: (sessionId: string) => void;
   onToggleSidebar?: () => void;
+  children?: React.ReactNode;
 }
 
-const ChatHeader: React.FC<ChatHeaderProps> = ({ workspaces, onSessionRename, onSessionDelete, onToggleSidebar }) => {
+const ChatHeader: React.FC<ChatHeaderProps> = ({
+  workspaces,
+  onSessionRename,
+  onSessionDelete,
+  onToggleSidebar,
+  children,
+}) => {
   const sessions = useAtomValue(sessionsAtom);
   const currentSessionName = useAtomValue(currentSessionNameAtom);
   const setSessions = useSetAtom(sessionsAtom);
+  const [isSessionConfigOpen, setIsSessionConfigOpen] = useAtom(isSessionConfigOpenAtom);
   const sessionManager = useSessionManagerContext();
   const sessionId = getSessionId(sessionManager.sessionState);
   const location = useLocation();
@@ -72,44 +81,57 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({ workspaces, onSessionRename, on
 
   return (
     <div className="chat-header">
-      {/* Left: Hamburger menu for mobile */}
-      {isMobile && (
-        <button
-          className="chat-header-hamburger"
-          onClick={onToggleSidebar}
-          aria-label="Toggle sidebar"
-          title="Toggle sidebar"
-        >
-          <FaBars size={20} />
-        </button>
-      )}
-
-      {/* Center: Session name */}
-      <div className="chat-header-title">
-        <span>{sessionName}</span>
-        {(sessionType === 'temp' || isTempURL) && (
-          <FaLock className="chat-header-icon" title="Temporary session, deleted after 48 hours of inactivity" />
+      <div className="chat-header-content">
+        {/* Left: Hamburger menu for mobile */}
+        {isMobile && (
+          <button
+            className="chat-header-hamburger"
+            onClick={onToggleSidebar}
+            aria-label="Toggle sidebar"
+            title="Toggle sidebar"
+          >
+            <FaBars size={20} />
+          </button>
         )}
-        {sessionType === 'internal' && (
-          <FaPuzzlePiece className="chat-header-icon" title="Internal session created by system/subagent" />
+
+        {/* Center: Session name */}
+        <div
+          className="chat-header-title"
+          onClick={() => setIsSessionConfigOpen(!isSessionConfigOpen)}
+          style={{ cursor: 'pointer' }}
+          title="Click to toggle session configuration"
+        >
+          {(sessionType === 'temp' || isTempURL) && (
+            <FaLock className="chat-header-icon" title="Temporary session, deleted after 48 hours of inactivity" />
+          )}
+          {sessionType === 'internal' && (
+            <FaPuzzlePiece className="chat-header-icon" title="Internal session created by system/subagent" />
+          )}
+          <span>{sessionName}</span>
+          {isSessionConfigOpen ? (
+            <FaChevronUp className="chat-header-icon" style={{ fontSize: '12px' }} />
+          ) : (
+            <FaChevronDown className="chat-header-icon" style={{ fontSize: '12px' }} />
+          )}
+        </div>
+
+        {/* Right: Session menu */}
+        {sessionId && !sessionId.startsWith('.') && (
+          <SessionMenu
+            sessionId={sessionId}
+            sessionName={sessionName}
+            onRename={handleRename}
+            onDelete={handleDelete}
+            isMobile={isMobile}
+            currentWorkspaceId={currentWorkspaceId}
+            workspaces={workspaces}
+            onSessionMoved={handleSessionMoved}
+            isCurrentSession={true}
+            onMenuToggle={handleMenuToggle}
+          />
         )}
       </div>
-
-      {/* Right: Session menu */}
-      {sessionId && !sessionId.startsWith('.') && (
-        <SessionMenu
-          sessionId={sessionId}
-          sessionName={sessionName}
-          onRename={handleRename}
-          onDelete={handleDelete}
-          isMobile={isMobile}
-          currentWorkspaceId={currentWorkspaceId}
-          workspaces={workspaces}
-          onSessionMoved={handleSessionMoved}
-          isCurrentSession={true}
-          onMenuToggle={handleMenuToggle}
-        />
-      )}
+      {children}
     </div>
   );
 };

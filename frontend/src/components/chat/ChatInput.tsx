@@ -3,9 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { FaPaperclip, FaPaperPlane, FaTimes } from 'react-icons/fa';
 import { useAtom, useSetAtom } from 'jotai';
 import { inputMessageAtom } from '../../atoms/chatAtoms';
-import { availableModelsAtom, selectedModelAtom } from '../../atoms/modelAtoms';
 import { selectedFilesAtom } from '../../atoms/fileAtoms';
-import { statusMessageAtom, isModelManuallySelectedAtom } from '../../atoms/uiAtoms';
+import { statusMessageAtom } from '../../atoms/uiAtoms';
 import { useCommandProcessor } from '../../hooks/useCommandProcessor';
 import { useProcessingState } from '../../hooks/useProcessingState';
 import { handleEnterKey } from '../../utils/enterKeyHandler';
@@ -38,12 +37,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   // Local state for typing performance
   const [localInput, setLocalInput] = useState(inputMessage);
-  const [availableModels] = useAtom(availableModelsAtom);
-  const [selectedModel] = useAtom(selectedModelAtom);
-  const setSelectedModel = useSetAtom(selectedModelAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [statusMessage, setStatusMessage] = useAtom(statusMessageAtom);
-  const setIsModelManuallySelected = useSetAtom(isModelManuallySelectedAtom);
 
   const { runCommand } = useCommandProcessor(sessionId);
 
@@ -355,7 +350,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
         )}
       </div>
 
-      {/* Second row: Status and Model selector - smaller height */}
+      {/* Second row: Status message - smaller height */}
       <div
         style={{
           display: 'flex',
@@ -374,35 +369,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
         >
           {statusMessage === null ? (isCommandMode ? '' : 'Type / to enter command mode') : statusMessage}
         </div>
-        <label htmlFor="model-select" style={{ marginRight: '5px', fontSize: '0.9em' }}>
-          Model:
-        </label>
-        <select
-          id="model-select"
-          value={selectedModel?.name || ''}
-          onChange={(e) => {
-            const selectedModelName = e.target.value;
-            const model = availableModels.get(selectedModelName);
-            if (model) {
-              setSelectedModel(model);
-              setIsModelManuallySelected(true);
-            }
-          }}
-          style={{
-            padding: '2px 6px',
-            borderRadius: '4px',
-            border: '1px solid #ccc',
-            backgroundColor: '#fff',
-            cursor: 'pointer',
-            fontSize: '0.9em',
-          }}
-        >
-          {Array.from(availableModels.values()).map((model) => (
-            <option key={model.name} value={model.name}>
-              {model.name}
-            </option>
-          ))}
-        </select>
       </div>
     </div>
   );

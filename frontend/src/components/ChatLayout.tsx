@@ -17,6 +17,7 @@ import ChatArea from './chat/ChatArea';
 import ChatHeader from './chat/ChatHeader';
 import Sidebar from './sidebar/Sidebar';
 import ToastMessage from './ToastMessage';
+import SessionConfiguration from './chat/SessionConfiguration';
 import { isTextInputKey } from '../utils/navigationKeys';
 interface ChatLayoutProps {
   children?: React.ReactNode;
@@ -32,6 +33,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
   const setGlobalPrompts = useSetAtom(globalPromptsAtom);
   const setSelectedGlobalPrompt = useSetAtom(selectedGlobalPromptAtom);
   const [sessions, setSessions] = useAtom(sessionsAtom);
+  const [globalPrompts] = useAtom(globalPromptsAtom);
 
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -42,7 +44,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
 
   // Get workspace info from sessionFSM
   const sessionFSM = useSessionFSM();
-  const { workspaceId: sessionWorkspaceId } = sessionFSM;
+  const { workspaceId: sessionWorkspaceId, sessionId } = sessionFSM;
   const {
     handleFilesSelected,
     handleRemoveFile,
@@ -209,7 +211,13 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
               onSessionRename={handleSessionRename}
               onSessionDelete={handleSessionDelete}
               onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-            />
+            >
+              <SessionConfiguration
+                workspaceId={sessionWorkspaceId ?? undefined}
+                predefinedPrompts={globalPrompts}
+                sessionId={sessionId ?? undefined}
+              />
+            </ChatHeader>
           }
         />
       )}

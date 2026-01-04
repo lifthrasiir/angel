@@ -1,17 +1,16 @@
 import type React from 'react';
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import SystemPromptEditor from './SystemPromptEditor';
 import InputArea from './InputArea';
 import ConfirmationDialog from '../ConfirmationDialog';
 import MessageListContainer from './MessageListContainer';
 import ChatAreaDragDropOverlay from './ChatAreaDragDropOverlay';
-import { messagesAtom, systemPromptAtom, primaryBranchIdAtom } from '../../atoms/chatAtoms';
+import { messagesAtom, primaryBranchIdAtom } from '../../atoms/chatAtoms';
 import { pendingConfirmationAtom } from '../../atoms/confirmationAtoms';
 import { selectedFilesAtom } from '../../atoms/fileAtoms';
-import { availableModelsAtom, globalPromptsAtom } from '../../atoms/modelAtoms';
+import { availableModelsAtom } from '../../atoms/modelAtoms';
 import { isAuthenticatedAtom } from '../../atoms/systemAtoms';
-import { isSystemPromptEditingAtom, lastAutoDisplayedThoughtIdAtom } from '../../atoms/uiAtoms';
+import { lastAutoDisplayedThoughtIdAtom } from '../../atoms/uiAtoms';
 import { useSessionFSM } from '../../hooks/useSessionFSM';
 import { useProcessingState } from '../../hooks/useProcessingState';
 import { useMessageGrouping } from '../../hooks/useMessageGrouping';
@@ -64,9 +63,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [availableModels] = useAtom(availableModelsAtom);
   const [isAuthenticated] = useAtom(isAuthenticatedAtom);
-  const [systemPrompt, setSystemPrompt] = useAtom(systemPromptAtom);
-  const isSystemPromptEditing = useAtomValue(isSystemPromptEditingAtom);
-  const [globalPrompts] = useAtom(globalPromptsAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
   const setLastAutoDisplayedThoughtId = useSetAtom(lastAutoDisplayedThoughtIdAtom);
 
@@ -98,7 +94,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   const {
     sessionId,
-    workspaceId,
     isLoading: isPriorSessionLoading,
     hasMoreMessages: hasMoreMessagesState,
     loadEarlierMessages,
@@ -117,11 +112,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     handleRetryError,
   });
 
-  const currentSystemPromptLabel = useMemo(() => {
-    const found = globalPrompts.find((p) => p.value === systemPrompt);
-    return found ? found.label : ''; // Return label if found, else empty string for custom
-  }, [systemPrompt, globalPrompts]);
-
   return (
     <div
       style={{
@@ -129,6 +119,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         flexDirection: 'column',
         flex: 1,
         overflow: 'hidden',
+        position: 'relative',
       }}
     >
       {chatHeader}
@@ -141,21 +132,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           isLoading={isPriorSessionLoading}
           loadEarlierMessages={loadEarlierMessages}
         >
-          {!hasMoreMessagesState && (
-            <>
-              <SystemPromptEditor
-                key={sessionId || 'new'}
-                initialPrompt={systemPrompt}
-                currentLabel={currentSystemPromptLabel}
-                onPromptUpdate={(updatedPrompt) => {
-                  setSystemPrompt(updatedPrompt.value);
-                }}
-                isEditing={isSystemPromptEditing}
-                predefinedPrompts={globalPrompts}
-                workspaceId={workspaceId ?? undefined}
-              />
-            </>
-          )}
           {renderedMessages}
         </MessageListContainer>
         {pendingConfirmation ? (

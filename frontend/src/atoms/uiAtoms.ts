@@ -7,3 +7,5 @@ export const toastMessageAtom = atom<string | null>(null);
 export const isSystemPromptEditingAtom = atom<boolean>(false);
 export const editingMessageIdAtom = atom<string | null>(null);
 export const isModelManuallySelectedAtom = atom<boolean>(false);
+export const isSessionConfigOpenAtom = atom<boolean>(false);
+export const sessionConfigTabAtom = atom<'model' | 'prompt'>('model');

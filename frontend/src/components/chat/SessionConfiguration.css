@@ -1,0 +1,110 @@
+@layer components.SessionConfiguration {
+  .session-config-drawer {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100%);
+    width: 80%;
+    max-width: 800px;
+    background-color: #ffffff;
+    border-radius: 0 0 12px 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0);
+    z-index: 99;
+    transition:
+      transform 0.2s ease-out,
+      box-shadow 0.2s ease-out;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .session-config-drawer.open {
+    transform: translateX(-50%) translateY(0);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  }
+
+  .session-config-tabs {
+    display: flex;
+    border-bottom: 1px solid #e0e0e0;
+    background-color: #f9f9f9;
+  }
+
+  .config-tab {
+    padding: 10px 20px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-size: 14px;
+    color: #555;
+    transition: all 0.2s ease;
+  }
+
+  .config-tab:hover {
+    color: #333;
+    background-color: #f0f0f0;
+  }
+
+  .config-tab.active {
+    color: #2196f3;
+    border-bottom-color: #2196f3;
+    font-weight: 500;
+  }
+
+  .session-config-content {
+    padding: 16px;
+  }
+
+  .config-form-group {
+    margin-bottom: 12px;
+  }
+
+  .config-form-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .config-form-group label {
+    display: block;
+    font-weight: 600;
+    font-size: 14px;
+    color: #333;
+    margin-bottom: 6px;
+  }
+
+  .config-select,
+  .config-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    font-size: 14px;
+    background-color: #fff;
+    transition: border-color 0.2s ease;
+  }
+
+  .config-select:focus,
+  .config-input:focus {
+    outline: none;
+    border-color: #2196f3;
+  }
+
+  .config-select {
+    cursor: pointer;
+  }
+
+  /* SystemPromptEditor adjustments when used in SessionConfiguration */
+  .session-config-content .system-prompt-message {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+  }
+
+  .session-config-content .chat-bubble {
+    border: none;
+    background: transparent;
+    padding: 0;
+  }
+
+  .session-config-content .system-prompt-textarea-editable {
+    min-height: 80px;
+  }
+}
