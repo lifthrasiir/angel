@@ -167,7 +167,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
   }, [children, chatInputRef]);
 
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', width: '100dvw', height: '100dvh', overflow: 'hidden' }}>
       <Sidebar
         workspaces={workspaces}
         refreshWorkspaces={refreshWorkspaces}

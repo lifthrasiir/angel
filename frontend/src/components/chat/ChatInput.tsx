@@ -85,8 +85,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // Adjust textarea height when localInput changes
   useEffect(() => {
     if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+      debouncedAdjustTextareaHeight(inputRef.current);
     }
   }, [localInput]);
 
