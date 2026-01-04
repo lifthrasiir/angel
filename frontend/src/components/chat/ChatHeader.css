@@ -48,13 +48,19 @@
     font-size: 16px;
     font-weight: 600;
     color: #333;
-    overflow: hidden;
   }
 
-  .chat-header-title span {
+  .chat-header-title-text {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .chat-header-title > .tooltip-container {
+    line-height: 0;
+  }
+  .chat-header-title > .tooltip-container > .tooltip {
+    line-height: initial;
   }
 
   .chat-header-icon {

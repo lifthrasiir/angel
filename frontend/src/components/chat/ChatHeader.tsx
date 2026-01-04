@@ -10,6 +10,7 @@ import { isSessionConfigOpenAtom } from '../../atoms/uiAtoms';
 import type { Workspace } from '../../types/chat';
 import SessionMenu from '../sidebar/SessionMenu';
 import './ChatHeader.css';
+import Tooltip from '../Tooltip';
 
 interface ChatHeaderProps {
   workspaces: Workspace[];
@@ -102,12 +103,16 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           title="Click to toggle session configuration"
         >
           {(sessionType === 'temp' || isTempURL) && (
-            <FaLock className="chat-header-icon" title="Temporary session, deleted after 48 hours of inactivity" />
+            <Tooltip content="Temporary session, deleted after 48 hours of inactivity">
+              <FaLock className="chat-header-icon" />
+            </Tooltip>
           )}
           {sessionType === 'internal' && (
-            <FaPuzzlePiece className="chat-header-icon" title="Internal session created by system/subagent" />
+            <Tooltip content="Internal session created by system/subagent">
+              <FaPuzzlePiece className="chat-header-icon" />
+            </Tooltip>
           )}
-          <span>{sessionName}</span>
+          <span className="chat-header-title-text">{sessionName}</span>
           {isSessionConfigOpen ? (
             <FaChevronUp className="chat-header-icon" style={{ fontSize: '12px' }} />
           ) : (
