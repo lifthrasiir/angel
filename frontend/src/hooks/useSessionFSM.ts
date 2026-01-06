@@ -667,6 +667,12 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
     }
   }, [operationManager]);
 
+  const cancelActiveCall = useCallback(async () => {
+    if (operationManager) {
+      await operationManager.cancelActiveCall();
+    }
+  }, [operationManager]);
+
   return {
     // State
     sessionState: sessionManager.sessionState,
@@ -690,6 +696,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
     editMessage,
     retryError,
     cancelCurrentOperation,
+    cancelActiveCall,
 
     // Navigation
     navigateToNewSession: sessionManager.navigateToNewSession,

@@ -69,11 +69,18 @@ export const processStreamResponse = async (
   let qReceived = false;
   let nReceived = false;
 
+  // Set up abort listener to immediately cancel the reader when abort is signaled
+  const abortListener = () => {
+    reader.cancel();
+  };
+
+  if (abortSignal) {
+    abortSignal.addEventListener('abort', abortListener, { once: true });
+  }
+
   streamLoop: while (true) {
     // Check if the operation was aborted
     if (abortSignal?.aborted) {
-      console.log('🚫 Stream processing aborted, cancelling reader');
-      reader.cancel();
       throw new DOMException('Stream processing was aborted', 'AbortError');
     }
 

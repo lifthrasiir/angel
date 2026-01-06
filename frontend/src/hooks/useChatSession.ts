@@ -109,8 +109,16 @@ export const useChatSession = (isTemporary: boolean = false) => {
 
   // workspaceId is now managed by FSM - no need to set it here
 
-  const { sendMessage, cancelCurrentOperation, confirmTool, switchBranch, retryMessage, editMessage, retryError } =
-    useSessionFSM();
+  const {
+    sendMessage,
+    cancelCurrentOperation,
+    cancelActiveCall,
+    confirmTool,
+    switchBranch,
+    retryMessage,
+    editMessage,
+    retryError,
+  } = useSessionFSM();
 
   const handleSetSelectedModel = (model: ModelInfo) => {
     setSelectedModel(model);
@@ -184,9 +192,9 @@ export const useChatSession = (isTemporary: boolean = false) => {
     [retryError],
   );
 
-  const cancelStreamingCall = useCallback(() => {
-    cancelCurrentOperation();
-  }, [cancelCurrentOperation]);
+  const cancelStreamingCall = useCallback(async () => {
+    await cancelActiveCall();
+  }, [cancelActiveCall]);
 
   const cancelActiveStreams = useCallback(() => {
     cancelCurrentOperation();

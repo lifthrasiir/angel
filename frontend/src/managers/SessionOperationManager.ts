@@ -75,6 +75,33 @@ export class SessionOperationManager {
   }
 
   /**
+   * Cancel active streaming call (called when user clicks Cancel button)
+   * This cancels both client-side streaming and server-side active call
+   */
+  async cancelActiveCall(): Promise<void> {
+    const sessionId = this.currentSessionId;
+
+    // Cancel client-side streaming
+    this.cancelCurrentOperation();
+
+    // Dispatch STREAM_COMPLETED to update UI state
+    // This ensures the Cancel button changes back to Send button
+    this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
+
+    // Cancel server-side active call
+    if (sessionId) {
+      try {
+        await apiFetch(`/api/chat/${sessionId}/call`, {
+          method: 'DELETE',
+        });
+      } catch (error) {
+        // Log error but don't throw - cancellation should complete regardless
+        console.error('Failed to cancel call on server:', error);
+      }
+    }
+  }
+
+  /**
    * Handle operation errors with consistent dispatch and cleanup
    */
   private handleOperationError(error: any, errorMessage: string): void {
@@ -152,16 +179,36 @@ export class SessionOperationManager {
 
     const eventHandlers: SseEventHandler = (event) => {
       // Only process events if this is still the active operation
-      if (this.activeOperation !== 'streaming' || this.currentSessionId !== sessionId) {
+      if (this.activeOperation !== 'streaming') {
+        return;
+      }
+
+      // For new sessions, sessionId parameter starts as null
+      // currentSessionId gets updated from EventInitialState
+      // We should only filter out events if both are non-null AND different
+      if (this.currentSessionId !== null && sessionId !== null && this.currentSessionId !== sessionId) {
         return;
       }
 
       this.handleStreamingEvent(event, sessionId, hasMoreMessages, wrappedHandlers);
     };
 
-    await processStreamResponse(response, eventHandlers, this.currentAbortController.signal);
+    try {
+      await processStreamResponse(response, eventHandlers, this.currentAbortController.signal);
+    } catch (error) {
+      // Handle AbortError from user cancellation
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        // User cancelled - already cleaned up by cancelActiveCall(), but ensure state is reset
+        this.resetOperationState();
+        return;
+      }
+      // Re-throw other errors
+      throw error;
+    }
 
     // Cleanup on successful completion
+    // Ensure UI is updated to non-processing state when stream completes normally
+    this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
     this.resetOperationState();
   }
 
@@ -186,6 +233,10 @@ export class SessionOperationManager {
       case EventInitialStateNoCall: {
         const initialState = event.initialState;
 
+        // Update currentSessionId from InitialState
+        // This is important for new sessions where sessionId was null initially
+        this.currentSessionId = initialState.sessionId;
+
         // If we haven't determined whether to expect session name yet,
         // and we receive EventInitialState without EventWorkspaceHint first,
         // this is a new session creation
@@ -208,6 +259,7 @@ export class SessionOperationManager {
         handlers?.onInitialState?.(mappedData);
         break;
       }
+
       case EventComplete:
         // Only set activeOperation to 'none' if we're not waiting for EventSessionName
         if (this.expectSessionName !== true) {
@@ -220,6 +272,7 @@ export class SessionOperationManager {
           handlers?.onComplete?.();
         }
         break;
+
       case EventSessionName:
         // EventSessionName received, now we can complete
         this.expectSessionName = false;
@@ -227,11 +280,13 @@ export class SessionOperationManager {
         this.activeOperation = 'none';
         handlers?.onEvent?.(event);
         break;
+
       case EventError:
         this._dispatch({ type: 'ERROR_OCCURRED', error: (event as any).error || 'Unknown error' });
         handlers?.onError?.(event);
         this.activeOperation = 'none';
         break;
+
       default:
         handlers?.onEvent?.(event);
     }
