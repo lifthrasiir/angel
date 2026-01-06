@@ -134,6 +134,17 @@ func parseSseStream(t *testing.T, resp *http.Response) iter.Seq[Sse] {
 				eventType := EventType(rune(header[0]))
 				log.Printf("parseSseStream(%p): type=%c payload=[%s]", resp, eventType, strings.ReplaceAll(payload, "\n", "|"))
 
+				// EventFinish indicates no more events will be sent
+				// Do not yield EventFinish, and ensure no events come after it
+				if eventType == EventFinish {
+					buffer = ""
+					// Check that there are no more events after EventFinish
+					if scanner.Scan() {
+						t.Fatalf("EventFinish was followed by another event")
+					}
+					return
+				}
+
 				if !yield(Sse{Type: eventType, Payload: payload}) {
 					return
 				}

@@ -155,6 +155,7 @@ func (sseW *sseWriter) Broadcast(eventType EventType, data string) {
 			if err == nil {
 				sseW.flushUnsafe()
 			}
+			sseW.closeIfFinish(eventType)
 		} else {
 			log.Printf("Skipping broadcast to disconnected sseWriter for session %s", sseW.sessionId)
 		}
@@ -231,6 +232,24 @@ func (sseW *sseWriter) Send(eventType EventType, data string) {
 	if err == nil {
 		sseW.flushUnsafe()
 	}
+
+	sseW.closeIfFinish(eventType)
+}
+
+// closeIfFinish closes the connection if the event type is EventFinish
+// Must be called with mutex already held
+func (sseW *sseWriter) closeIfFinish(eventType EventType) {
+	if eventType == EventFinish {
+		sseW.disconnected = true
+		sseW.stopPingTimer()
+	}
+}
+
+// HeadersSent returns whether SSE headers have been sent
+func (sseW *sseWriter) HeadersSent() bool {
+	sseW.mu.Lock()
+	defer sseW.mu.Unlock()
+	return sseW.headersSent
 }
 
 // startPingTimer starts the automatic ping timer for this sseWriter

@@ -39,6 +39,7 @@ import {
   EventPendingConfirmation,
   EventGenerationChanged,
   EventPing,
+  EventFinish,
   type SseEvent,
   EARLIER_MESSAGES_LOADED,
 } from '../types/events';
@@ -74,7 +75,6 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   const setInputMessage = useSetAtom(inputMessageAtom);
   const setEditingMessageId = useSetAtom(editingMessageIdAtom);
   const updateUserMessageId = useSetAtom(updateUserMessageIdAtom);
-  const setSessions = useSetAtom(sessionsAtom);
 
   const messages = useAtomValue(messagesAtom);
   const selectedModel = useAtomValue(selectedModelAtom);
@@ -269,32 +269,16 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
           case EventSessionName:
             // Update current session name (for both temporary and regular sessions)
             setCurrentSessionName(event.newName);
-
-            // Update session name in the sidebar list (only for non-temporary sessions)
-            if (!event.sessionId.includes('.')) {
-              setSessionNameInList({ sessionId: event.sessionId, name: event.newName });
-
-              // If the session is new (not in the sidebar list), add it locally
-              // Conditions:
-              // i) sidebar's workspace matches current session's workspace
-              //    (implicitly true because they are strictly synchronized for now)
-              // ii) session ID doesn't contain '.' (not a temporary session)
-              // iii) session is not already in the list
-              if (!sessions.some((s) => s.id === event.sessionId)) {
-                setSessions([
-                  {
-                    id: event.sessionId,
-                    name: event.newName,
-                    last_updated_at: new Date().toISOString(),
-                  },
-                  ...sessions,
-                ]);
-              }
-            }
+            setSessionNameInList({ sessionId: event.sessionId, name: event.newName });
             break;
 
           case EventPing:
             // Handle ping (keepalive) - no action needed
+            break;
+
+          case EventFinish:
+            // Handle stream finish - no more events will be sent
+            console.log('Stream finished');
             break;
 
           default:

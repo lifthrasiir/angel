@@ -3,9 +3,9 @@ import type { InitialState } from './chat';
 
 // SSE Event Types
 //
-// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
-// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
-// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
+// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P/E or (Q -> N) -> $
+// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/E/Q -> $
+// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> P/E or (Q -> optional N) -> $)
 export const EventWorkspaceHint = 'W';
 export const EventInitialState = '0';
 export const EventInitialStateNoCall = '1';
@@ -15,13 +15,14 @@ export const EventModelMessage = 'M';
 export const EventFunctionCall = 'F';
 export const EventFunctionResponse = 'R';
 export const EventInlineData = 'I';
-export const EventComplete = 'Q';
 export const EventSessionName = 'N';
 export const EventCumulTokenCount = 'C';
 export const EventPendingConfirmation = 'P';
 export const EventGenerationChanged = 'G';
-export const EventPing = '.';
 export const EventError = 'E';
+export const EventComplete = 'Q';
+export const EventFinish = '$';
+export const EventPing = '.';
 
 export type SseWorkspaceHint = {
   type: typeof EventWorkspaceHint;
@@ -114,6 +115,10 @@ export type SseError = {
   error: string;
 };
 
+export type SseFinish = {
+  type: typeof EventFinish;
+};
+
 export type SseSyntheticEvent = {
   type: number;
   data: any;
@@ -131,13 +136,14 @@ export type SseEvent =
   | SseFunctionCall
   | SseFunctionResponse
   | SseInlineData
-  | SseComplete
   | SseSessionName
   | SseCumulTokenCount
   | SsePendingConfirmation
   | SseGenerationChanged
-  | SsePing
   | SseError
+  | SseComplete
+  | SseFinish
+  | SsePing
   | SseSyntheticEvent;
 
 export function parseSseEvent(eventString: string): SseEvent {
@@ -264,6 +270,11 @@ export function parseSseEvent(eventString: string): SseEvent {
         type: EventError,
         error: data,
       } as SseError;
+
+    case EventFinish:
+      return {
+        type: EventFinish,
+      } as SseFinish;
 
     default:
       throw new Error(`Unknown SSE event type: ${type}`);

@@ -80,10 +80,19 @@ export const setSessionNameAtom = atom(null, (_get, set, payload: { sessionId: s
   }
 
   const currentSessions = _get(sessionsAtom);
-  set(
-    sessionsAtom,
-    currentSessions.map((session) => (session.id === payload.sessionId ? { ...session, name: payload.name } : session)),
-  );
+  if (currentSessions.find((s) => s.id === payload.sessionId)) {
+    set(
+      sessionsAtom,
+      currentSessions.map((session) =>
+        session.id === payload.sessionId ? { ...session, name: payload.name } : session,
+      ),
+    );
+  } else {
+    set(sessionsAtom, [
+      { id: payload.sessionId, name: payload.name, last_updated_at: new Date().toISOString() },
+      ...currentSessions,
+    ]);
+  }
 });
 
 export const updateUserMessageIdAtom = atom(null, (_get, set, payload: { temporaryId: string; newId: string }) => {

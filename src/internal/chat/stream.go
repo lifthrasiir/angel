@@ -22,6 +22,12 @@ import (
 
 var thoughtPattern = regexp.MustCompile(`^\*\*(.*?)\*\*\n+(.*)\n*$`)
 
+// broadcastAndFinish broadcasts an event and then sends EventFinish
+func broadcastAndFinish(ew EventWriter, eventType EventType, data string) {
+	ew.Broadcast(eventType, data)
+	ew.Broadcast(EventFinish, "")
+}
+
 // Helper function to stream LLM response
 func streamLLMResponse(
 	db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
@@ -45,7 +51,7 @@ func streamLLMResponse(
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {
 		log.Printf("streamLLMResponse: Failed to start call for session %s: %v", initialState.SessionId, err)
-		ew.Broadcast(EventError, err.Error())
+		broadcastAndFinish(ew, EventError, err.Error())
 		return err
 	}
 
@@ -96,7 +102,7 @@ func streamLLMResponse(
 				}
 			}
 			// Send error to frontend
-			ew.Broadcast(EventError, errorMessage)
+			broadcastAndFinish(ew, EventError, errorMessage)
 			return fmt.Errorf("CodeAssist API call failed: %w", err)
 		}
 		defer closer.Close() // This closes the server-initiated API request.
@@ -485,6 +491,7 @@ func streamLLMResponse(
 	completeCall(initialState.SessionId) // Mark the call as completed and remove from active calls
 	callCompleted = true                 // Prevent defer from calling completeCall again
 	inferWg.Wait()
+	ew.Broadcast(EventFinish, "")
 	return nil
 }
 
@@ -493,19 +500,19 @@ func handlePendingConfirmation(
 ) error {
 	confirmationDataBytes, marshalErr := json.Marshal(pendingConfirmation.Data)
 	if marshalErr != nil {
-		ew.Broadcast(EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
+		broadcastAndFinish(ew, EventError, fmt.Sprintf("Failed to process confirmation: %v", marshalErr))
 		return logAndErrorf(marshalErr, "Failed to marshal pending confirmation data")
 	}
 	confirmationData := string(confirmationDataBytes)
 
 	// Update branch pending_confirmation
 	if err := database.UpdateBranchPendingConfirmation(db, initialState.PrimaryBranchID, confirmationData); err != nil {
-		ew.Broadcast(EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
+		broadcastAndFinish(ew, EventError, fmt.Sprintf("Failed to update confirmation status: %v", err))
 		return logAndErrorf(err, "Failed to update branch pending_confirmation")
 	}
 
 	// Send P event to frontend
-	ew.Broadcast(EventPendingConfirmation, confirmationData)
+	broadcastAndFinish(ew, EventPendingConfirmation, confirmationData)
 
 	// Stop streaming
 	return fmt.Errorf("user confirmation pending")
@@ -528,7 +535,7 @@ func checkStreamCancellation(
 		cancelCallback()
 
 		// Send error to frontend
-		ew.Broadcast(EventError, "user canceled request")
+		broadcastAndFinish(ew, EventError, "user canceled request")
 		return ctx.Err()
 	default:
 		// Continue with the LLM call
@@ -548,7 +555,7 @@ func inferAndSetSessionName(
 	defer func() {
 		// This defer will execute at the end of the function, ensuring 'N' is sent.
 		// If inferredName is still empty, it means inference failed or was skipped.
-		ew.Send(EventSessionName, fmt.Sprintf("%s\n%s", db.SessionId(), inferredName))
+		ew.Broadcast(EventSessionName, fmt.Sprintf("%s\n%s", db.SessionId(), inferredName))
 	}()
 
 	if db == nil {

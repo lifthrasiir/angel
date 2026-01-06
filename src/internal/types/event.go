@@ -5,9 +5,9 @@ type EventType rune
 const (
 	// SSE Event Types
 	//
-	// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P or (Q -> N) or E
-	// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/Q/E
-	// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> Q/E)
+	// Sending initial messages: A -> 0 -> any number of T/M/F/R/C/I -> P/E or (Q -> N) -> $
+	// Sending subsequent messages: any number of G -> A -> any number of T/M/F/R/C/I -> P/E/Q -> $
+	// Loading messages and streaming current call: W -> 1 or (0 -> any number of T/M/F/R/C/I -> P/E or (Q -> optional N) -> $)
 	//
 	// Several events have payloads, described in brackets after the event type.
 	// Multiple comma-separated items in the payload should be separated by newlines.
@@ -21,13 +21,14 @@ const (
 	EventFunctionCall        EventType = 'F' // Function call                                         [Function name, arguments JSON]
 	EventFunctionResponse    EventType = 'R' // Function response                       [Function name, FunctionResponsePayload JSON]
 	EventInlineData          EventType = 'I' // Inline file/image data with hash keys                        [InlineDataPayload JSON]
-	EventComplete            EventType = 'Q' // Query complete
 	EventSessionName         EventType = 'N' // Session name inferred/updated                                      [New session name]
 	EventCumulTokenCount     EventType = 'C' // Cumulative token count update                                       [New token count]
 	EventPendingConfirmation EventType = 'P' // Pending confirmation, following EventFunctionCall msg [tool.PendingConfirmation JSON]
 	EventGenerationChanged   EventType = 'G' // Generation changed event                                        [env.EnvChanged JSON]
-	EventPing                EventType = '.' // Ping message for connection keep-alive
 	EventError               EventType = 'E' // Error message                                                     [Error description]
+	EventComplete            EventType = 'Q' // Query complete, but more auxiliary messages possible (e.g. EventSessionName)
+	EventFinish              EventType = '$' // Query completely finished, no further messages will be sent
+	EventPing                EventType = '.' // Ping message for connection keep-alive
 )
 
 // FunctionResponsePayload defines the structure for the EventFunctionResponse payload
@@ -48,4 +49,5 @@ type EventWriter interface {
 	Send(eventType EventType, data string)
 	Broadcast(eventType EventType, data string)
 	Close()
+	HeadersSent() bool
 }

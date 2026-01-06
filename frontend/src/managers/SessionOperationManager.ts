@@ -12,8 +12,7 @@ import {
   parseSseEvent,
   EventInitialState,
   EventInitialStateNoCall,
-  EventWorkspaceHint,
-  EventSessionName,
+  EventFinish,
   EARLIER_MESSAGES_LOADED,
 } from '../types/events';
 
@@ -41,7 +40,6 @@ export class SessionOperationManager {
   private currentAbortController: AbortController | null = null;
   private currentSessionId: string | null = null;
   private currentHandlers?: OperationEventHandlers;
-  private expectSessionName: boolean | null = null; // null = undetermined, true = new session, false = not new session
 
   constructor(params: { dispatch: (action: SessionAction) => void; sessionState?: any }) {
     this._dispatch = params.dispatch;
@@ -71,7 +69,6 @@ export class SessionOperationManager {
     this.activeOperation = 'none';
     this.currentSessionId = null;
     this.currentHandlers = undefined;
-    this.expectSessionName = null;
   }
 
   /**
@@ -118,7 +115,6 @@ export class SessionOperationManager {
     this.currentSessionId = null;
     this.currentAbortController = null;
     this.currentHandlers = undefined;
-    this.expectSessionName = null;
   }
 
   /**
@@ -178,11 +174,6 @@ export class SessionOperationManager {
     };
 
     const eventHandlers: SseEventHandler = (event) => {
-      // Only process events if this is still the active operation
-      if (this.activeOperation !== 'streaming') {
-        return;
-      }
-
       // For new sessions, sessionId parameter starts as null
       // currentSessionId gets updated from EventInitialState
       // We should only filter out events if both are non-null AND different
@@ -222,13 +213,6 @@ export class SessionOperationManager {
     handlers?: OperationEventHandlers,
   ): void {
     switch (event.type) {
-      case EventWorkspaceHint:
-        // EventWorkspaceHint indicates session loading or subsequent message
-        // In both cases, EventSessionName is not expected
-        this.expectSessionName = false;
-        handlers?.onEvent?.(event);
-        break;
-
       case EventInitialState:
       case EventInitialStateNoCall: {
         const initialState = event.initialState;
@@ -236,13 +220,6 @@ export class SessionOperationManager {
         // Update currentSessionId from InitialState
         // This is important for new sessions where sessionId was null initially
         this.currentSessionId = initialState.sessionId;
-
-        // If we haven't determined whether to expect session name yet,
-        // and we receive EventInitialState without EventWorkspaceHint first,
-        // this is a new session creation
-        if (this.expectSessionName === null) {
-          this.expectSessionName = true;
-        }
 
         // Dispatch SESSION_CREATED to update sessionManager.sessionId
         // This prevents duplicate session loads when URL is updated
@@ -261,30 +238,29 @@ export class SessionOperationManager {
       }
 
       case EventComplete:
-        // Only set activeOperation to 'none' if we're not waiting for EventSessionName
-        if (this.expectSessionName !== true) {
-          this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
-          handlers?.onComplete?.();
-          this.activeOperation = 'none';
-        } else {
-          // Waiting for EventSessionName, don't complete yet
-          this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'streaming' });
-          handlers?.onComplete?.();
-        }
-        break;
-
-      case EventSessionName:
-        // EventSessionName received, now we can complete
-        this.expectSessionName = false;
+        // EventComplete indicates current turn is complete, but stream may continue (e.g., EventSessionName)
+        // Set activeOperation to 'none' to hide Cancel button, but keep stream open for EventFinish
         this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
-        this.activeOperation = 'none';
-        handlers?.onEvent?.(event);
+        handlers?.onComplete?.();
+        this.activeOperation = 'none'; // Update internal state but don't close stream yet
         break;
 
       case EventError:
+        // EventError indicates an error occurred, but EventFinish will follow
+        // Set activeOperation to 'none' to hide Cancel button
         this._dispatch({ type: 'ERROR_OCCURRED', error: (event as any).error || 'Unknown error' });
         handlers?.onError?.(event);
-        this.activeOperation = 'none';
+        this.activeOperation = 'none'; // Update internal state but don't close stream yet
+        break;
+
+      case EventFinish:
+        // EventFinish indicates no more events will be sent
+        // Close the EventSource and reset operation state
+        if (this.currentEventSource) {
+          this.currentEventSource.close();
+          this.currentEventSource = null;
+        }
+        this.resetOperationState();
         break;
 
       default:
@@ -345,11 +321,8 @@ export class SessionOperationManager {
         sessionId,
         fetchLimit,
         (event: MessageEvent) => {
-          // Allow both 'loading' and 'streaming' operations
-          if (
-            (this.activeOperation !== 'loading' && this.activeOperation !== 'streaming') ||
-            this.currentSessionId !== sessionId
-          ) {
+          // Only check session ID to allow post-operation events (EventSessionName, EventFinish)
+          if (this.currentSessionId !== sessionId) {
             return;
           }
 
@@ -397,33 +370,31 @@ export class SessionOperationManager {
               }
 
               case EventComplete: {
-                // Handle stream completion
+                // Handle stream completion - turn complete, but stream may continue (e.g., EventSessionName)
                 handlers?.onComplete?.();
-
-                // Close the EventSource and reset operation state
-                if (this.currentEventSource) {
-                  this.currentEventSource.close();
-                  this.currentEventSource = null;
-                }
-                this.resetOperationState();
-
-                // Dispatch STREAM_COMPLETED to update UI state
+                // Dispatch STREAM_COMPLETED to update UI state (hide Cancel button)
                 this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
+                this.activeOperation = 'none'; // Update internal state but don't close stream yet
                 break;
               }
 
               case EventError: {
-                // Handle error
+                // Handle error - EventError indicates an error occurred, but EventFinish will follow
                 handlers?.onError?.(parsedEvent);
+                // Dispatch ERROR_OCCURRED to update UI state (hide Cancel button)
+                this._dispatch({ type: 'ERROR_OCCURRED', error: (parsedEvent as any).error || 'Unknown error' });
+                this.activeOperation = 'none'; // Update internal state but don't close stream yet
+                break;
+              }
 
+              case EventFinish: {
+                // EventFinish indicates no more events will be sent
                 // Close the EventSource and reset operation state
                 if (this.currentEventSource) {
                   this.currentEventSource.close();
                   this.currentEventSource = null;
                 }
                 this.resetOperationState();
-
-                this._dispatch({ type: 'ERROR_OCCURRED', error: (parsedEvent as any).error || 'Unknown error' });
                 break;
               }
 

@@ -443,7 +443,7 @@ func ConfirmBranch(
 		ew.Send(EventFunctionResponse, formattedData)
 
 		// Send EventComplete to signal the end of the pending state
-		ew.Broadcast(EventComplete, "") // Signal completion
+		broadcastAndFinish(ew, EventComplete, "")
 		return nil
 	}
 

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -48,7 +49,11 @@ func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 		ew, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
 		sessionId, requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
 	); err != nil {
-		sendInternalServerError(w, r, err, "Failed to create new session and message")
+		if ew.HeadersSent() {
+			log.Printf("Failed to create new session and message: %v", err)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to create new session and message")
+		}
 	}
 }
 
@@ -85,7 +90,11 @@ func newTempSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 		ew, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
 		sessionId, requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
 	); err != nil {
-		sendInternalServerError(w, r, err, "Failed to create new temporary session and message")
+		if ew.HeadersSent() {
+			log.Printf("Failed to create new temporary session and message: %v", err)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to create new temporary session and message")
+		}
 	}
 }
 
@@ -130,7 +139,11 @@ func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 		r.Context(), sdb, models, ga, tools,
 		ew, requestBody.Message, requestBody.Attachments, requestBody.Model, requestBody.FetchLimit,
 	); err != nil {
-		sendInternalServerError(w, r, err, "Failed to process chat message")
+		if ew.HeadersSent() {
+			log.Printf("Failed to process chat message: %v", err)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to process chat message")
+		}
 	}
 }
 
@@ -188,7 +201,11 @@ func loadChatSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	initialState, err := chat.LoadChatSession(r.Context(), sdb, ew, beforeMessageID, fetchLimit)
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to load chat session")
+		if ew != nil && ew.HeadersSent() {
+			log.Printf("Failed to load chat session: %v", err)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to load chat session")
+		}
 		return
 	}
 
@@ -308,7 +325,11 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		err = chat.CreateBranch(r.Context(), sdb, models, ga, tools, ew, requestBody.UpdatedMessageID, requestBody.NewMessageText)
 	}
 	if err != nil {
-		sendInternalServerError(w, r, err, "Failed to create branch")
+		if ew.HeadersSent() {
+			log.Printf("Failed to create branch: %v", err)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to create branch")
+		}
 	}
 }
 
@@ -389,7 +410,11 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 		r.Context(), sdb, models, ga, tools,
 		ew, branchId, requestBody.Approved, requestBody.ModifiedData,
 	); err != nil {
-		sendInternalServerError(w, r, err, "Failed to confirm branch")
+		if ew.HeadersSent() {
+			log.Printf("Failed to confirm branch: %v", err)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to confirm branch")
+		}
 		return
 	}
 }
@@ -423,7 +448,11 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	defer sdb.Close()
 
 	if err := chat.RetryErrorBranch(r.Context(), sdb, models, ga, tools, ew, branchId); err != nil {
-		sendInternalServerError(w, r, err, "Failed to retry error branch")
+		if ew.HeadersSent() {
+			log.Printf("Failed to retry error branch: %v", err)
+		} else {
+			sendInternalServerError(w, r, err, "Failed to retry error branch")
+		}
 		return
 	}
 }

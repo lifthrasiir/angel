@@ -75,6 +75,11 @@ func (src *SubagentResultCollector) Release() {}
 // Close implements EventWriter.Close (no-op for subagent)
 func (src *SubagentResultCollector) Close() {}
 
+// HeadersSent implements EventWriter.HeadersSent (always false for subagent)
+func (src *SubagentResultCollector) HeadersSent() bool {
+	return false
+}
+
 // processEvent handles different event types and collects relevant data
 func (src *SubagentResultCollector) processEvent(eventType EventType, payload string) {
 	switch eventType {
@@ -137,7 +142,7 @@ func (src *SubagentResultCollector) processEvent(eventType EventType, payload st
 	case EventComplete:
 		// Mark generation as complete
 		src.generationComplete = true
-	case EventThought, EventGenerationChanged, EventSessionName, EventCumulTokenCount:
+	case EventThought, EventGenerationChanged, EventSessionName, EventCumulTokenCount, EventFinish:
 		// Thoughts and metadata are ignored for subagent results
 	}
 }
