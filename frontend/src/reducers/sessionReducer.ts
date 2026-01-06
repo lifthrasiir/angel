@@ -64,7 +64,9 @@ export const sessionReducer = (state: SessionState, action: SessionAction): Sess
     }
 
     case 'SESSION_LOADED': {
-      return {
+      const isActiveStreaming = action.activeOperation === 'streaming' || action.activeOperation === 'sending';
+
+      const readyState = {
         status: 'session_ready' as const,
         sessionId: action.sessionId,
         workspaceId: action.workspaceId,
@@ -72,9 +74,15 @@ export const sessionReducer = (state: SessionState, action: SessionAction): Sess
           type: 'ready' as const,
           hasEarlier: action.hasEarlier || false,
         },
-        isStreaming: false,
+        isStreaming: isActiveStreaming,
         activeOperation: action.activeOperation || 'none',
       };
+
+      // Add startTime if streaming
+      if (isActiveStreaming) {
+        return { ...readyState, startTime: performance.now() };
+      }
+      return readyState;
     }
 
     case 'SESSION_CREATED': {

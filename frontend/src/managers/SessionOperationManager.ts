@@ -345,7 +345,11 @@ export class SessionOperationManager {
         sessionId,
         fetchLimit,
         (event: MessageEvent) => {
-          if (this.activeOperation !== 'loading' || this.currentSessionId !== sessionId) {
+          // Allow both 'loading' and 'streaming' operations
+          if (
+            (this.activeOperation !== 'loading' && this.activeOperation !== 'streaming') ||
+            this.currentSessionId !== sessionId
+          ) {
             return;
           }
 
@@ -358,8 +362,15 @@ export class SessionOperationManager {
                 const initialState = parsedEvent.initialState;
                 console.log('EventInitialState data:', initialState);
 
+                const isCallActive = parsedEvent.type === EventInitialState;
+
+                // Update activeOperation to streaming if call is active
+                if (isCallActive) {
+                  this.activeOperation = 'streaming';
+                }
+
                 const mappedData = this.mapInitialData(initialState, {
-                  isCallActive: event.type === EventInitialState,
+                  isCallActive,
                   fetchLimit,
                 });
 
@@ -368,7 +379,7 @@ export class SessionOperationManager {
                   sessionId,
                   workspaceId: initialState.workspaceId,
                   hasEarlier: mappedData.hasMore,
-                  activeOperation: 'none',
+                  activeOperation: isCallActive ? 'streaming' : 'none',
                 });
 
                 handlers?.onInitialState?.(mappedData);
@@ -384,6 +395,38 @@ export class SessionOperationManager {
                 }
                 break;
               }
+
+              case EventComplete: {
+                // Handle stream completion
+                handlers?.onComplete?.();
+
+                // Close the EventSource and reset operation state
+                if (this.currentEventSource) {
+                  this.currentEventSource.close();
+                  this.currentEventSource = null;
+                }
+                this.resetOperationState();
+
+                // Dispatch STREAM_COMPLETED to update UI state
+                this._dispatch({ type: 'STREAM_COMPLETED', activeOperation: 'none' });
+                break;
+              }
+
+              case EventError: {
+                // Handle error
+                handlers?.onError?.(parsedEvent);
+
+                // Close the EventSource and reset operation state
+                if (this.currentEventSource) {
+                  this.currentEventSource.close();
+                  this.currentEventSource = null;
+                }
+                this.resetOperationState();
+
+                this._dispatch({ type: 'ERROR_OCCURRED', error: (parsedEvent as any).error || 'Unknown error' });
+                break;
+              }
+
               default:
                 handlers?.onEvent?.(parsedEvent);
             }
@@ -393,7 +436,10 @@ export class SessionOperationManager {
           }
         },
         (error: Event) => {
-          if (this.activeOperation === 'loading' && this.currentSessionId === sessionId) {
+          if (
+            (this.activeOperation === 'loading' || this.activeOperation === 'streaming') &&
+            this.currentSessionId === sessionId
+          ) {
             this._dispatch({ type: 'ERROR_OCCURRED', error: 'Failed to load session' });
             handlers?.onError?.(error);
           }
