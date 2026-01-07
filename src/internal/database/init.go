@@ -152,6 +152,8 @@ func InitDB(ctx context.Context, dataSourceName string) (*Database, error) {
 			return nil, fmt.Errorf("failed to create session watcher: %w", err)
 		}
 		database.watcher = watcher
+		// Wire watcher to AttachPool
+		database.attachPool.SetWatcher(watcher)
 
 		// Start the watcher
 		if err := watcher.Start(); err != nil {
@@ -188,6 +190,24 @@ func InitTestDB(testName string, useMemorySessionDB bool) (*Database, error) {
 	// Pooling should be disabled for :memory: databases
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+
+	// If using real filesystem for session DBs, we need to create a watcher
+	// (InitDB skips watcher when UseMemoryDB() returns true, which it does for in-memory main DB)
+	if !useMemorySessionDB && db.watcher == nil {
+		sessionDir := testEnvConfig.SessionDir()
+		watcher, err := NewSessionWatcher(db, sessionDir)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to create session watcher: %w", err)
+		}
+		db.watcher = watcher
+		db.attachPool.SetWatcher(watcher)
+
+		// Start the watcher
+		if err := watcher.Start(); err != nil {
+			log.Printf("Warning: Failed to start session watcher: %v", err)
+		}
+	}
 
 	return db, nil
 }

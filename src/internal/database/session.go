@@ -114,7 +114,8 @@ func (db *Database) CreateSessionDB(mainSessionID string) error {
 	}
 
 	// Attach the session database (SQLite will create the file if it doesn't exist)
-	alias, cleanup, err := db.attachPool.Acquire(sessionDBPath, mainSessionID)
+	// Use skipWait=true because we're creating a new file that the watcher doesn't know about yet
+	alias, cleanup, err := db.attachPool.acquireInternal(sessionDBPath, mainSessionID, true)
 	if err != nil {
 		return fmt.Errorf("failed to attach session DB for schema creation: %w", err)
 	}

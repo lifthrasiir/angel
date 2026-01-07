@@ -1,11 +1,16 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"reflect"
 	"sync"
 	"time"
+
+	"github.com/ncruces/go-sqlite3"
+	_ "github.com/ncruces/go-sqlite3/driver"
 )
 
 const maxAttached = 10 // SQLite ATTACH DATABASE limit
@@ -21,12 +26,14 @@ type AttachedDB struct {
 
 // AttachPool manages ATTACH DATABASE operations with LRU eviction and reference counting.
 type AttachPool struct {
-	mainDB      *sql.DB
-	attached    map[string]*AttachedDB // alias -> AttachedDB
-	lruList     []string               // aliases in LRU order (least recently used first)
-	maxAttached int
-	mu          sync.RWMutex
-	cond        *sync.Cond
+	mainDB          *sql.DB
+	attached        map[string]*AttachedDB // alias -> AttachedDB
+	lruList         []string               // aliases in LRU order (least recently used first)
+	maxAttached     int
+	watcher         *SessionWatcher // Watcher for session database synchronization
+	mu              sync.RWMutex
+	cond            *sync.Cond
+	hooksRegistered bool // Whether commit/rollback hooks are registered
 }
 
 // NewAttachPool creates a new AttachPool for managing database attachments.
@@ -36,17 +43,106 @@ func NewAttachPool(mainDB *sql.DB) *AttachPool {
 		attached:    make(map[string]*AttachedDB),
 		lruList:     make([]string, 0, maxAttached),
 		maxAttached: maxAttached,
+		watcher:     nil, // Will be set later via SetWatcher
 	}
 	p.cond = sync.NewCond(&p.mu)
+
+	// Register commit/rollback hooks to track when we make changes
+	if err := p.registerHooks(); err != nil {
+		log.Printf("AttachPool: Failed to register hooks: %v", err)
+	}
+
 	return p
+}
+
+// registerHooks registers commit and rollback hooks on the main database connection.
+func (p *AttachPool) registerHooks() error {
+	conn, err := p.mainDB.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get connection: %w", err)
+	}
+	defer conn.Close()
+
+	return conn.Raw(func(driverConn interface{}) error {
+		// Use reflection to access the embedded *sqlite3.Conn field
+		// driverConn is *driver.conn which embeds *sqlite3.Conn
+		val := reflect.ValueOf(driverConn).Elem()
+		embeddedConnField := val.FieldByName("Conn")
+		if !embeddedConnField.IsValid() {
+			return fmt.Errorf("could not find Conn field in driverConn")
+		}
+
+		sqliteConn, ok := embeddedConnField.Interface().(*sqlite3.Conn)
+		if !ok {
+			return fmt.Errorf("Conn field is not *sqlite3.Conn")
+		}
+
+		// Register commit hook
+		sqliteConn.CommitHook(func() bool {
+			p.mu.Lock()
+			for _, attached := range p.attached {
+				if p.watcher != nil && attached.RefCount > 0 {
+					p.watcher.MarkExpectedChange(attached.MainSessionID)
+				}
+			}
+			p.mu.Unlock()
+			return true // Allow commit to proceed
+		})
+
+		// Register rollback hook
+		sqliteConn.RollbackHook(func() {
+			p.mu.Lock()
+			for _, attached := range p.attached {
+				if p.watcher != nil && attached.RefCount > 0 {
+					p.watcher.ClearExpectedChange(attached.MainSessionID)
+				}
+			}
+			p.mu.Unlock()
+		})
+
+		p.mu.Lock()
+		p.hooksRegistered = true
+		p.mu.Unlock()
+
+		log.Printf("AttachPool: Registered commit/rollback hooks")
+		return nil
+	})
+}
+
+// SetWatcher sets the SessionWatcher for this AttachPool.
+// This is called after the watcher is created in InitDB.
+func (p *AttachPool) SetWatcher(watcher *SessionWatcher) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.watcher = watcher
 }
 
 // Acquire attaches a session database and returns its alias and a cleanup function.
 // If the database is already attached, it increments the refcount and returns the existing alias.
 // If all slots are full and in use, it blocks until a slot becomes available.
 // The cleanup function should be called when done with the attachment (decrements refcount).
+//
+// IMPORTANT: Files that are not tracked by SessionWatcher will block until they are tracked.
+// This prevents attaching files that were modified externally without synchronization.
 func (p *AttachPool) Acquire(sessionDBPath, mainSessionID string) (string, func(), error) {
+	return p.acquireInternal(sessionDBPath, mainSessionID, false)
+}
+
+// acquireInternal is the internal implementation of Acquire with an option to skip waiting for tracking.
+// skipWait should only be true for new files being created (e.g., in CreateSessionDB).
+func (p *AttachPool) acquireInternal(sessionDBPath, mainSessionID string, skipWait bool) (string, func(), error) {
 	p.mu.Lock()
+
+	// Check if this file is tracked (skip for in-memory databases or when watcher is nil)
+	if p.watcher != nil && !skipWait && sessionDBPath != ":memory:" {
+		// Need to release lock to call WaitUntilTracked (which has its own lock)
+		// Use a background context for indefinite wait
+		p.mu.Unlock()
+		if !p.watcher.WaitUntilTracked(context.Background(), mainSessionID) {
+			return "", nil, fmt.Errorf("session DB %s tracking cancelled", mainSessionID)
+		}
+		p.mu.Lock()
+	}
 
 	// Check if already attached
 	for _, attached := range p.attached {
@@ -163,7 +259,8 @@ func (p *AttachPool) evictLRUInternal() error {
 // Also removes it from the LRU list.
 // Caller must hold p.mu lock.
 func (p *AttachPool) detachInternal(alias string) error {
-	if _, exists := p.attached[alias]; !exists {
+	_, exists := p.attached[alias]
+	if !exists {
 		return fmt.Errorf("alias %s not found in attached map", alias)
 	}
 
