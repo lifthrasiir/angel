@@ -19,6 +19,13 @@ const SearchPage = lazy(() => import('./pages/SearchPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
+// Settings sub-pages
+const AuthSettings = lazy(() => import('./pages/settings/AuthSettings'));
+const MCPSettings = lazy(() => import('./pages/settings/MCPSettings'));
+const OpenAISettings = lazy(() => import('./pages/settings/OpenAISettings'));
+const PromptsSettings = lazy(() => import('./pages/settings/PromptsSettings'));
+const PromptEditor = lazy(() => import('./pages/settings/PromptEditor'));
+
 const AppRoutes = () => (
   <SessionManagerProvider>
     <WorkspaceProvider>
@@ -48,7 +55,16 @@ const AppRoutes = () => (
               </ChatLayout>
             }
           />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<SettingsPage />}>
+            <Route index element={<Navigate to="/settings/auth" replace />} />
+            <Route path="auth" element={<AuthSettings />} />
+            <Route path="mcp" element={<MCPSettings />} />
+            <Route path="openai" element={<OpenAISettings />} />
+            <Route path="prompts" element={<PromptsSettings />}>
+              <Route path="new" element={<PromptEditor isNew={true} />} />
+              <Route path=":promptLabel" element={<PromptEditor />} />
+            </Route>
+          </Route>
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </React.Suspense>

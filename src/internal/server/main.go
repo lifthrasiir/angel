@@ -245,6 +245,7 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 	router.HandleFunc("/temp", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/search", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
+	router.PathPrefix("/settings/").HandlerFunc(serveSPAIndex).Methods("GET")
 
 	router.HandleFunc("/w", handleNotFound).Methods("GET")
 	router.HandleFunc("/w/new", serveSPAIndex).Methods("GET")
