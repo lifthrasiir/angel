@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect, ReactNode } from 'react';
 import './Dropdown.css';
 
-export interface DropdownItem {
-  id: string;
-  label: string;
-  icon?: ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-  submenu?: DropdownItem[];
-}
+export type DropdownItem =
+  | {
+      id: string;
+      label: string;
+      icon?: ReactNode;
+      onClick?: () => void;
+      disabled?: boolean;
+      danger?: boolean;
+      submenu?: DropdownItem[];
+    }
+  | '-';
 
 export interface DropdownProps {
   trigger: ReactNode;
@@ -204,6 +206,8 @@ const Dropdown: React.FC<DropdownProps> = ({
   };
 
   const handleItemClick = (item: DropdownItem) => {
+    if (isDivider(item)) return;
+
     if (item.disabled) return;
 
     if (item.submenu) {
@@ -231,12 +235,16 @@ const Dropdown: React.FC<DropdownProps> = ({
   };
 
   const handleSubmenuItemClick = (item: DropdownItem) => {
-    if (item.disabled) return;
+    if (isDivider(item) || item.disabled) return;
 
     item.onClick?.();
     setIsOpen(false);
     setActiveSubmenu(null);
     if (onClose) onClose();
+  };
+
+  const isDivider = (item: DropdownItem): item is '-' => {
+    return item === '-';
   };
 
   return (
@@ -265,48 +273,58 @@ const Dropdown: React.FC<DropdownProps> = ({
             maxWidth: '300px',
           }}
         >
-          {items.map((item) => (
-            <div key={item.id} style={{ position: 'relative' }}>
-              <button
-                data-submenu-trigger={item.submenu ? item.id : undefined}
-                onClick={() => handleItemClick(item)}
-                disabled={item.disabled}
-                className={`dropdown-item ${
-                  item.disabled ? 'dropdown-item-disabled' : ''
-                } ${item.danger ? 'dropdown-item-danger' : ''} ${
-                  activeSubmenu === item.id ? 'dropdown-item-active' : ''
-                }`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  width: '100%',
-                  padding: '10px 16px',
-                  border: 'none',
-                  background: 'none',
-                  textAlign: 'left',
-                  cursor: item.disabled ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  gap: '12px',
-                  transition: 'background-color 0.2s ease',
-                  color: item.danger ? '#dc3545' : '#333',
-                  backgroundColor: activeSubmenu === item.id ? '#f0f8ff' : 'transparent',
-                  opacity: item.disabled ? 0.5 : 1,
-                }}
-                onMouseEnter={(e) => {
-                  if (!item.disabled && item.submenu) {
-                    e.currentTarget.style.backgroundColor = '#f8f9fa';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (activeSubmenu !== item.id) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
-                }}
-              >
-                {item.icon && <span style={{ flexShrink: 0 }}>{item.icon}</span>}
-                <span style={{ flex: 1 }}>{item.label}</span>
-                {item.submenu && <span style={{ fontSize: '10px', opacity: 0.7 }}>▶</span>}
-              </button>
+          {items.map((item, index) => (
+            <div key={isDivider(item) ? `divider-${index}` : item.id} style={{ position: 'relative' }}>
+              {isDivider(item) ? (
+                <hr
+                  style={{
+                    border: 'none',
+                    borderTop: '1px solid #e0e0e0',
+                    margin: '4px 0',
+                  }}
+                />
+              ) : (
+                <button
+                  data-submenu-trigger={item.submenu ? item.id : undefined}
+                  onClick={() => handleItemClick(item)}
+                  disabled={item.disabled}
+                  className={`dropdown-item ${
+                    item.disabled ? 'dropdown-item-disabled' : ''
+                  } ${item.danger ? 'dropdown-item-danger' : ''} ${
+                    activeSubmenu === item.id ? 'dropdown-item-active' : ''
+                  }`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    width: '100%',
+                    padding: '10px 16px',
+                    border: 'none',
+                    background: 'none',
+                    textAlign: 'left',
+                    cursor: item.disabled ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                    gap: '12px',
+                    transition: 'background-color 0.2s ease',
+                    color: item.danger ? '#dc3545' : '#333',
+                    backgroundColor: activeSubmenu === item.id ? '#f0f8ff' : 'transparent',
+                    opacity: item.disabled ? 0.5 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!item.disabled && item.submenu) {
+                      e.currentTarget.style.backgroundColor = '#f8f9fa';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeSubmenu !== item.id) {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  {item.icon && <span style={{ flexShrink: 0 }}>{item.icon}</span>}
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.submenu && <span style={{ fontSize: '10px', opacity: 0.7 }}>▶</span>}
+                </button>
+              )}
             </div>
           ))}
 
@@ -326,62 +344,78 @@ const Dropdown: React.FC<DropdownProps> = ({
       )}
 
       {/* Submenu */}
-      {activeSubmenu && (
-        <div
-          className={`dropdown-menu dropdown-submenu ${isMobile ? 'dropdown-menu-mobile' : 'dropdown-menu-desktop'}`}
-          style={{
-            position: 'fixed',
-            top: `${submenuPosition.top}px`,
-            left: `${submenuPosition.left}px`,
-            zIndex: 1001,
-            width: '200px',
-            background: 'white',
-            border: '1px solid #ddd',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            padding: '4px 0',
-          }}
-        >
-          {items
-            .find((item) => item.id === activeSubmenu)
-            ?.submenu?.map((subitem) => (
-              <button
-                key={subitem.id}
-                onClick={() => handleSubmenuItemClick(subitem)}
-                disabled={subitem.disabled}
-                className={`dropdown-item ${
-                  subitem.disabled ? 'dropdown-item-disabled' : ''
-                } ${subitem.danger ? 'dropdown-item-danger' : ''}`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  width: '100%',
-                  padding: '10px 16px',
-                  border: 'none',
-                  background: 'none',
-                  textAlign: 'left',
-                  cursor: subitem.disabled ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  gap: '12px',
-                  transition: 'background-color 0.2s ease',
-                  color: subitem.danger ? '#dc3545' : '#333',
-                  opacity: subitem.disabled ? 0.5 : 1,
-                }}
-                onMouseEnter={(e) => {
-                  if (!subitem.disabled) {
-                    e.currentTarget.style.backgroundColor = '#f8f9fa';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                {subitem.icon && <span style={{ flexShrink: 0 }}>{subitem.icon}</span>}
-                <span style={{ flex: 1 }}>{subitem.label}</span>
-              </button>
-            ))}
-        </div>
-      )}
+      {activeSubmenu &&
+        (() => {
+          const activeSubmenuItem = items.find((item) => !isDivider(item) && item.id === activeSubmenu) as
+            | Exclude<DropdownItem, '-'>
+            | undefined;
+          const activeSubmenuList = activeSubmenuItem?.submenu;
+          return (
+            <div
+              className={`dropdown-menu dropdown-submenu ${isMobile ? 'dropdown-menu-mobile' : 'dropdown-menu-desktop'}`}
+              style={{
+                position: 'fixed',
+                top: `${submenuPosition.top}px`,
+                left: `${submenuPosition.left}px`,
+                zIndex: 1001,
+                width: '200px',
+                background: 'white',
+                border: '1px solid #ddd',
+                borderRadius: '6px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                padding: '4px 0',
+              }}
+            >
+              {activeSubmenuList?.map((subitem: DropdownItem, index: number) =>
+                isDivider(subitem) ? (
+                  <hr
+                    key={`submenu-divider-${index}`}
+                    style={{
+                      border: 'none',
+                      borderTop: '1px solid #e0e0e0',
+                      margin: '4px 0',
+                    }}
+                  />
+                ) : (
+                  <button
+                    key={subitem.id}
+                    onClick={() => handleSubmenuItemClick(subitem)}
+                    disabled={subitem.disabled}
+                    className={`dropdown-item ${
+                      subitem.disabled ? 'dropdown-item-disabled' : ''
+                    } ${subitem.danger ? 'dropdown-item-danger' : ''}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      width: '100%',
+                      padding: '10px 16px',
+                      border: 'none',
+                      background: 'none',
+                      textAlign: 'left',
+                      cursor: subitem.disabled ? 'not-allowed' : 'pointer',
+                      fontSize: '14px',
+                      gap: '12px',
+                      transition: 'background-color 0.2s ease',
+                      color: subitem.danger ? '#dc3545' : '#333',
+                      opacity: subitem.disabled ? 0.5 : 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!subitem.disabled) {
+                        e.currentTarget.style.backgroundColor = '#f8f9fa';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    {subitem.icon && <span style={{ flexShrink: 0 }}>{subitem.icon}</span>}
+                    <span style={{ flex: 1 }}>{subitem.label}</span>
+                  </button>
+                ),
+              )}
+            </div>
+          );
+        })()}
     </div>
   );
 };
