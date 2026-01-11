@@ -7,6 +7,7 @@ interface BranchDropdownProps {
   currentMessageText?: string; // Current message text for diff comparison
   onBranchSelect: (newBranchId: string) => void;
   disabled?: boolean;
+  align?: 'left' | 'right'; // Direction of dropdown menu
 }
 
 // Helper function to format relative time
@@ -148,6 +149,7 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
   currentMessageText,
   onBranchSelect,
   disabled = false,
+  align = 'right',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [dropDirection, setDropDirection] = useState<'down' | 'up'>('down');
@@ -191,13 +193,7 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
   };
 
   return (
-    <div
-      ref={dropdownRef}
-      style={{
-        position: 'relative',
-        display: 'inline-block',
-      }}
-    >
+    <div ref={dropdownRef} className="branch-dropdown">
       {/* Dropdown trigger button */}
       <button
         onClick={() => {
@@ -221,6 +217,8 @@ const BranchDropdown: React.FC<BranchDropdownProps> = ({
           style={{
             top: dropDirection === 'up' ? 'auto' : '100%',
             bottom: dropDirection === 'up' ? '100%' : 'auto',
+            left: align === 'left' ? '0' : 'auto',
+            right: align === 'right' ? '0' : 'auto',
           }}
         >
           <div className="branch-dropdown-header">Switch to branch:</div>

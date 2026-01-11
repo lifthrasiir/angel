@@ -22,7 +22,7 @@ func RetryBranch(
 	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, updatedMessageId int,
 ) error {
-	// For retry, get the original message text and attachments if not provided
+	// For retry, get the original message
 	originalMessage, err := database.GetMessageByID(db, updatedMessageId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -32,15 +32,173 @@ func RetryBranch(
 		}
 	}
 
+	// For model messages, use a special retry that creates a new branch and replaces the message content
+	if originalMessage.Type == TypeModelText {
+		return RetryModelMessage(ctx, db, models, ga, tools, ew, updatedMessageId, *originalMessage)
+	}
+
 	return CreateBranch(ctx, db, models, ga, tools, ew, updatedMessageId, originalMessage.Text)
 }
 
+// createBranchInternal creates a new branch and message without streaming.
+// Returns the new message ID, branch ID, session info, and frontend history.
+func createBranchInternal(
+	ctx context.Context, db *database.SessionDatabase, updatedMessageID int, newMessageText string, newMessageType MessageType,
+) (newMessageID int, newBranchID string, session Session, frontendHistoryForInitialState []FrontendMessage, err error) {
+	// Get the updated message's role, type, parent_message_id, and branch_id to validate branching and create new branch
+	updatedType, updatedParentMessageID, updatedBranchID, err := database.GetMessageDetails(db, updatedMessageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, "", Session{}, nil, notFoundError("updated message not found")
+		} else {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to get updated message details: %w", err)
+		}
+	}
+
+	// Validate that the updated message type matches the expected type
+	if updatedType != TypeUserText && updatedType != TypeModelText {
+		return 0, "", Session{}, nil, badRequestError("branching is only allowed from user or model messages of type 'text'.")
+	}
+
+	// Get session details first (common for both paths)
+	session, err = database.GetSession(db)
+	if err != nil {
+		return 0, "", Session{}, nil, fmt.Errorf("failed to get session %s: %w", db.SessionId(), err)
+	}
+
+	// Handle first message editing if the message being updated is the current first message
+	isFirstMessageEdit := !updatedParentMessageID.Valid
+
+	if isFirstMessageEdit {
+		// First message editing logic
+
+		// Create a new branch for the edited first message
+		newBranchID = database.GenerateID()
+		if _, err := database.CreateBranch(db, newBranchID, nil, nil); err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to create new branch for first message edit: %w", err)
+		}
+
+		// Set the new branch as the primary branch for the session
+		if err := database.UpdateSessionPrimaryBranchID(db, newBranchID); err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to set new branch as primary for session %s: %w", db.SessionId(), err)
+		}
+
+		// Get the original message to preserve its properties
+		originalMessage, err := database.GetMessageByID(db, updatedMessageID)
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to get original message %d: %w", updatedMessageID, err)
+		}
+
+		// Create the new first message in the new branch
+		newMessageID, err = database.AddMessageToSession(ctx, db, Message{
+			LocalSessionID:  db.LocalSessionId(),
+			BranchID:        newBranchID,
+			ParentMessageID: nil,
+			ChosenNextID:    nil,
+			Text:            newMessageText,
+			Type:            newMessageType,
+			Attachments:     originalMessage.Attachments,
+			Model:           originalMessage.Model,
+			Generation:      originalMessage.Generation,
+		})
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to create new first message: %w", err)
+		}
+
+		// Update the session's chosen_first_id to point to the new message
+		if err := database.UpdateSessionChosenFirstID(db, &newMessageID); err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to update session chosen_first_id: %w", err)
+		}
+
+		// Retrieve session history for frontend InitialState
+		frontendHistoryForInitialState, err = database.GetSessionHistoryPaginated(db, newBranchID, 0, 20)
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to retrieve paginated session history for frontend: %w", err)
+		}
+	} else {
+		// Normal branching logic for non-first messages
+
+		// For any other message that has no parent (old first messages that are no longer active), reject
+		if !updatedParentMessageID.Valid {
+			return 0, "", Session{}, nil, badRequestError("cannot branch from a message that has no parent message")
+		}
+
+		newBranchID = database.GenerateID()
+		branchFromMessageID := int(updatedParentMessageID.Int64)
+
+		// Create the new branch in the branches table
+		if _, err := database.CreateBranch(db, newBranchID, &updatedBranchID, &branchFromMessageID); err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to create new branch in branches table: %w", err)
+		}
+
+		// Get current generation and original message
+		_, currentGeneration, err := database.GetLatestSessionEnv(db)
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to get latest session environment for session %s: %w", db.SessionId(), err)
+		}
+
+		originalMessage, err := database.GetMessageByID(db, updatedMessageID)
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to get original message %d: %w", updatedMessageID, err)
+		}
+
+		// Create the new message in the new branch
+		newMessageID, err = database.AddMessageToSession(ctx, db, Message{
+			LocalSessionID:  db.LocalSessionId(),
+			BranchID:        newBranchID,
+			ParentMessageID: &branchFromMessageID,
+			ChosenNextID:    nil,
+			Text:            newMessageText,
+			Type:            newMessageType,
+			Attachments:     originalMessage.Attachments,
+			CumulTokenCount: nil,
+			Model:           originalMessage.Model,
+			Generation:      currentGeneration,
+		})
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to add new message to new branch: %w", err)
+		}
+
+		// Update the chosen_next_id of the branch_from_message_id to point to the new message
+		if err := database.UpdateMessageChosenNextID(db, branchFromMessageID, &newMessageID); err != nil {
+			log.Printf("createBranchHandler: Failed to update chosen_next_id for branch_from_message_id %d: %v", branchFromMessageID, err)
+			// Non-fatal, but log it
+		}
+
+		// Set the new branch as the primary branch for the session
+		if err := database.UpdateSessionPrimaryBranchID(db, newBranchID); err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to set new branch as primary for session %s: %w", db.SessionId(), err)
+		}
+
+		// Create frontend history with the new message
+		newMessageAsFrontendMessage, err := database.GetMessageByID(db, newMessageID)
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to get new message %d for initial state: %w", newMessageID, err)
+		}
+
+		fm, _, err := database.CreateFrontendMessage(*newMessageAsFrontendMessage, sql.NullString{}, nil, false, false, false)
+		if err != nil {
+			return 0, "", Session{}, nil, fmt.Errorf("failed to convert new message %d to frontend message: %w", newMessageID, err)
+		}
+		frontendHistoryForInitialState = []FrontendMessage{fm}
+	}
+
+	// Update last_updated_at for the session (common for both paths)
+	if err := database.UpdateSessionLastUpdated(db); err != nil {
+		log.Printf("Failed to update last_updated_at for session %s after branch operation: %v", db.SessionId(), err)
+		// Non-fatal error, continue with response
+	}
+
+	return newMessageID, newBranchID, session, frontendHistoryForInitialState, nil
+}
+
+// CreateBranch creates a new branch from a given message and streams LLM response.
 func CreateBranch(
 	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
 	ew EventWriter, updatedMessageID int, newMessageText string,
 ) error {
-	// Get the updated message's role, type, parent_message_id, and branch_id to validate branching and create new branch
-	updatedType, updatedParentMessageID, updatedBranchID, err := database.GetMessageDetails(db, updatedMessageID)
+	// Use the original message type for the new message
+	updatedType, _, _, err := database.GetMessageDetails(db, updatedMessageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFoundError("updated message not found")
@@ -54,198 +212,146 @@ func CreateBranch(
 		return badRequestError("branching is only allowed from user messages of type 'text'.")
 	}
 
-	// Get session details first (common for both paths)
-	session, err := database.GetSession(db)
+	// Create branch and message internally
+	newMessageID, newBranchID, session, frontendHistoryForInitialState, err := createBranchInternal(ctx, db, updatedMessageID, newMessageText, TypeUserText)
 	if err != nil {
-		return fmt.Errorf("failed to get session %s: %w", db.SessionId(), err)
+		return err
 	}
 
-	// Handle first message editing if the message being updated is the current first message
-	// A message is considered the first message if it has no parent, regardless of whether it's the current chosen first
-	// This is especially important for retry scenarios where the original first message may no longer be the chosen first
-	isFirstMessageEdit := !updatedParentMessageID.Valid
-
-	// Common variables that will be used by both paths
-	var newBranchID string
-	var newMessageID int
-	var frontendHistoryForInitialState []FrontendMessage
-
-	if isFirstMessageEdit {
-		// First message editing logic
-
-		// Create a new branch for the edited first message
-		newBranchID = database.GenerateID()
-		if _, err := database.CreateBranch(db, newBranchID, nil, nil); err != nil {
-			return fmt.Errorf("failed to create new branch for first message edit: %w", err)
-		}
-
-		// Set the new branch as the primary branch for the session
-		if err := database.UpdateSessionPrimaryBranchID(db, newBranchID); err != nil {
-			return fmt.Errorf("failed to set new branch as primary for session %s: %w", db.SessionId(), err)
-		}
-
-		// Get the original message to preserve its properties
-		originalMessage, err := database.GetMessageByID(db, updatedMessageID)
-		if err != nil {
-			return fmt.Errorf("failed to get original message %d: %w", updatedMessageID, err)
-		}
-
-		// Create the new first message in the new branch
-		newMessageID, err = database.AddMessageToSession(ctx, db, Message{
-			LocalSessionID:  db.LocalSessionId(),
-			BranchID:        newBranchID,
-			ParentMessageID: nil,
-			ChosenNextID:    nil,
-			Text:            newMessageText,
-			Type:            TypeUserText,
-			Attachments:     originalMessage.Attachments,
-			Model:           originalMessage.Model,
-			Generation:      originalMessage.Generation,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create new first message: %w", err)
-		}
-
-		// Update the session's chosen_first_id to point to the new message
-		if err := database.UpdateSessionChosenFirstID(db, &newMessageID); err != nil {
-			return fmt.Errorf("failed to update session chosen_first_id: %w", err)
-		}
-
-		// Retrieve session history for frontend InitialState
-		frontendHistoryForInitialState, err = database.GetSessionHistoryPaginated(db, newBranchID, 0, 20)
-		if err != nil {
-			return fmt.Errorf("failed to retrieve paginated session history for frontend: %w", err)
-		}
-	} else {
-		// Normal branching logic for non-first messages
-
-		// For any other message that has no parent (old first messages that are no longer active), reject
-		if !updatedParentMessageID.Valid {
-			return badRequestError("cannot branch from a message that has no parent message")
-		}
-
-		newBranchID = database.GenerateID()
-		branchFromMessageID := int(updatedParentMessageID.Int64)
-
-		// Create the new branch in the branches table
-		if _, err := database.CreateBranch(db, newBranchID, &updatedBranchID, &branchFromMessageID); err != nil {
-			return fmt.Errorf("failed to create new branch in branches table: %w", err)
-		}
-
-		// Get current generation and original message
-		_, currentGeneration, err := database.GetLatestSessionEnv(db)
-		if err != nil {
-			return fmt.Errorf("failed to get latest session environment for session %s: %w", db.SessionId(), err)
-		}
-
-		originalMessage, err := database.GetMessageByID(db, updatedMessageID)
-		if err != nil {
-			return fmt.Errorf("failed to get original message %d: %w", updatedMessageID, err)
-		}
-
-		// Create the new message in the new branch
-		newMessageID, err = database.AddMessageToSession(ctx, db, Message{
-			LocalSessionID:  db.LocalSessionId(),
-			BranchID:        newBranchID,
-			ParentMessageID: &branchFromMessageID,
-			ChosenNextID:    nil,
-			Text:            newMessageText,
-			Type:            TypeUserText,
-			Attachments:     originalMessage.Attachments,
-			CumulTokenCount: nil,
-			Model:           originalMessage.Model,
-			Generation:      currentGeneration,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to add new message to new branch: %w", err)
-		}
-
-		// Update the chosen_next_id of the branch_from_message_id to point to the new message
-		if err := database.UpdateMessageChosenNextID(db, branchFromMessageID, &newMessageID); err != nil {
-			log.Printf("createBranchHandler: Failed to update chosen_next_id for branch_from_message_id %d: %v", branchFromMessageID, err)
-			// Non-fatal, but log it
-		}
-
-		// Set the new branch as the primary branch for the session
-		if err := database.UpdateSessionPrimaryBranchID(db, newBranchID); err != nil {
-			return fmt.Errorf("failed to set new branch as primary for session %s: %w", db.SessionId(), err)
-		}
-
-		// Create frontend history with the new message
-		newMessageAsFrontendMessage, err := database.GetMessageByID(db, newMessageID)
-		if err != nil {
-			return fmt.Errorf("failed to get new message %d for initial state: %w", newMessageID, err)
-		}
-
-		fm, _, err := database.CreateFrontendMessage(*newMessageAsFrontendMessage, sql.NullString{}, nil, false, false, false)
-		if err != nil {
-			return fmt.Errorf("failed to convert new message %d to frontend message: %w", newMessageID, err)
-		}
-		frontendHistoryForInitialState = []FrontendMessage{fm}
-	}
-
-	// Update last_updated_at for the session (common for both paths)
-	if err := database.UpdateSessionLastUpdated(db); err != nil {
-		log.Printf("Failed to update last_updated_at for session %s after branch operation: %v", db.SessionId(), err)
-		// Non-fatal error, continue with response
-	}
-
-	// Common streaming logic for both paths
+	// Set up SSE streaming
 	ew.Acquire()
 	defer ew.Release()
 
-	// Retrieve session history for LLM (full context) - common for both paths
+	// Retrieve session history for LLM (full context)
 	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, newBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve full session history for LLM: %w", err)
 	}
 
-	// Get latest session environment - common for both paths
+	// Get latest session environment
 	roots, _, err := database.GetLatestSessionEnv(db)
 	if err != nil {
 		return fmt.Errorf("failed to get latest session environment for session %s: %w", db.SessionId(), err)
 	}
 
-	// Prepare initial state for streaming - common for both paths
-	var primaryBranchID string
-	if isFirstMessageEdit {
-		primaryBranchID = session.PrimaryBranchID // Use the original primary branch ID
-	} else {
-		primaryBranchID = newBranchID // Use the new branch ID
-	}
-
+	// Prepare initial state for streaming
 	initialState := InitialState{
 		SessionId:       db.SessionId(),
 		History:         frontendHistoryForInitialState,
 		SystemPrompt:    session.SystemPrompt,
 		WorkspaceID:     session.WorkspaceID,
-		PrimaryBranchID: primaryBranchID,
+		PrimaryBranchID: newBranchID,
 		Roots:           roots,
 	}
 
 	// Send WorkspaceID hint to frontend
 	ew.Send(EventWorkspaceHint, session.WorkspaceID)
 
-	// Send initial state - common for both paths
+	// Send initial state
 	initialStateJSON, err := json.Marshal(initialState)
 	if err != nil {
 		return fmt.Errorf("failed to marshal initial state: %w", err)
 	}
 	ew.Send(EventInitialState, string(initialStateJSON))
 
-	// Send acknowledgement for the new message - common for both paths
+	// Send acknowledgement for the new message
 	ew.Send(EventAcknowledge, fmt.Sprintf("%d", newMessageID))
 
-	// Create a new message chain for streaming - common for both paths
+	// Create a new message chain for streaming
 	mc, err := database.NewMessageChain(ctx, db, newBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create message chain for branch operation: %w", err)
 	}
 
-	// Stream LLM response - common for both paths
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	// Stream LLM response
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response after branch operation: %w", err)
 	}
+	return nil
+}
+
+// RetryModelMessage creates a new branch from a model message and regenerates its content.
+// It uses createBranchInternal to create the branch and message, then streams in append mode.
+func RetryModelMessage(
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ew EventWriter, modelMessageId int, originalMessage Message,
+) error {
+	// Get message details to validate
+	_, parentMessageID, _, err := database.GetMessageDetails(db, modelMessageId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return notFoundError("model message not found")
+		} else {
+			return fmt.Errorf("failed to get model message details: %w", err)
+		}
+	}
+
+	// Model messages should have a parent (user message)
+	if !parentMessageID.Valid {
+		return badRequestError("cannot retry a model message that has no parent")
+	}
+
+	// Create branch with empty model message (for LLM to regenerate)
+	newMessageID, newBranchID, session, _, err := createBranchInternal(ctx, db, modelMessageId, "", TypeModelText)
+	if err != nil {
+		return err
+	}
+
+	// Store original content in aux before streaming
+	if err := database.UpdateMessageContentWithAux(db, newMessageID, originalMessage.Text); err != nil {
+		return fmt.Errorf("failed to store original content in aux: %w", err)
+	}
+
+	// Get session history for LLM
+	fullFrontendHistoryForLLM, err := database.GetSessionHistoryContext(db, newBranchID)
+	if err != nil {
+		return fmt.Errorf("failed to get session history for LLM: %w", err)
+	}
+
+	// Get latest session environment
+	roots, _, err := database.GetLatestSessionEnv(db)
+	if err != nil {
+		return fmt.Errorf("failed to get latest session environment: %w", err)
+	}
+
+	// Set up SSE streaming
+	ew.Acquire()
+	defer ew.Release()
+
+	// Prepare initial state for streaming (empty history for retry)
+	initialState := InitialState{
+		SessionId:       db.SessionId(),
+		History:         []FrontendMessage{},
+		SystemPrompt:    session.SystemPrompt,
+		WorkspaceID:     session.WorkspaceID,
+		PrimaryBranchID: newBranchID,
+		Roots:           roots,
+	}
+
+	// Send WorkspaceID hint
+	ew.Send(EventWorkspaceHint, session.WorkspaceID)
+
+	// Send initial state
+	initialStateJSON, err := json.Marshal(initialState)
+	if err != nil {
+		return fmt.Errorf("failed to marshal initial state: %w", err)
+	}
+	ew.Send(EventInitialState, string(initialStateJSON))
+
+	// Send acknowledgement
+	ew.Send(EventAcknowledge, fmt.Sprintf("%d", newMessageID))
+
+	// Create message chain for streaming
+	mc, err := database.NewMessageChain(ctx, db, newBranchID)
+	if err != nil {
+		return fmt.Errorf("failed to create message chain: %w", err)
+	}
+
+	// Stream LLM response in append mode (appends to the current model message)
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, true, time.Now(), fullFrontendHistoryForLLM, newMessageID); err != nil {
+		return fmt.Errorf("error streaming LLM response: %w", err)
+	}
+
 	return nil
 }
 
@@ -539,7 +645,7 @@ func ConfirmBranch(
 	}
 
 	// Resume streaming from the point after the function response
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response after confirmation: %w", err)
 	}
 	return nil
@@ -738,7 +844,7 @@ func RetryErrorBranch(
 	}
 
 	// Resume streaming from the cleaned up state
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), filteredHistoryContext); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), filteredHistoryContext, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response during retry: %w", err)
 	}
 	return nil

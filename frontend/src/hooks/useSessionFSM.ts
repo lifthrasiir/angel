@@ -645,6 +645,87 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
     ],
   );
 
+  const updateMessage = useCallback(
+    async (messageId: string, editedText: string) => {
+      if (!operationManager) return;
+
+      const sessionId = sessionManager.sessionId;
+      if (!sessionId) {
+        addErrorMessage('No session to update message');
+        return;
+      }
+
+      setEditingMessageId(null); // Exit editing mode
+
+      // Update message content in the frontend
+      setMessages((prevMessages) => {
+        const updatedMessages = [...prevMessages];
+        const messageIndex = updatedMessages.findIndex((msg) => msg.id === messageId);
+
+        if (messageIndex !== -1) {
+          // Update message content
+          updatedMessages[messageIndex] = {
+            ...updatedMessages[messageIndex],
+            parts: [{ text: editedText }],
+            aux: {
+              ...updatedMessages[messageIndex].aux,
+              beforeUpdate: true, // Mark as updated
+            },
+          };
+        }
+        return updatedMessages;
+      });
+
+      await operationManager.handleMessageUpdate(sessionId, messageId, editedText, eventHandlers);
+    },
+    [sessionManager, operationManager, addErrorMessage, eventHandlers, setEditingMessageId, setMessages],
+  );
+
+  const continueMessage = useCallback(
+    async (modelMessageId: string) => {
+      if (!operationManager) return;
+
+      const sessionId = sessionManager.sessionId;
+      if (!sessionId) {
+        addErrorMessage('No session to continue message');
+        return;
+      }
+
+      setEditingMessageId(null); // Exit editing mode if active
+
+      // Remove messages after the model message being continued
+      setMessages((prevMessages) => {
+        const updatedMessages = [...prevMessages];
+        const messageIndex = updatedMessages.findIndex((msg) => msg.id === modelMessageId);
+
+        if (messageIndex !== -1) {
+          // Remove all messages after the continue message
+          return updatedMessages.slice(0, messageIndex + 1);
+        }
+        return prevMessages;
+      });
+
+      sessionManager.dispatch({
+        type: 'SEND_MESSAGE',
+        content: '',
+        attachments: [],
+        model: selectedModel,
+        systemPrompt,
+      });
+      await operationManager.handleMessageContinue(sessionId, modelMessageId, eventHandlers);
+    },
+    [
+      sessionManager,
+      operationManager,
+      addErrorMessage,
+      selectedModel,
+      systemPrompt,
+      eventHandlers,
+      setEditingMessageId,
+      setMessages,
+    ],
+  );
+
   const cancelCurrentOperation = useCallback(() => {
     if (operationManager) {
       operationManager.cancelCurrentOperation();
@@ -679,6 +760,8 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
     retryMessage,
     editMessage,
     retryError,
+    updateMessage,
+    continueMessage,
     cancelCurrentOperation,
     cancelActiveCall,
 

@@ -245,6 +245,32 @@ func UpdateMessageContent(db *SessionDatabase, messageID int, content string, sy
 	return tx.Commit()
 }
 
+// UpdateMessageContentWithAux updates the content of a message and stores the previous content in aux.
+// The previous content is stored as {"beforeUpdate": "previous content"} in the aux field.
+// If the aux field already contains "beforeUpdate", it is not modified.
+// This function uses SQLite's built-in JSON functions for atomicity.
+func UpdateMessageContentWithAux(db *SessionDatabase, messageID int, content string) error {
+	// Use SQLite's JSON functions for atomic update:
+	// - If aux is empty, create a new JSON object with beforeUpdate
+	// - If aux already has beforeUpdate key, keep it as is
+	// - Otherwise, add beforeUpdate to the existing JSON object
+	query := `
+		UPDATE S.messages
+		SET text = ?,
+		    aux = CASE
+		        WHEN aux = '' THEN json_object('beforeUpdate', text)
+		        WHEN json_extract(aux, '$.beforeUpdate') IS NOT NULL THEN aux
+		        ELSE json_set(aux, '$.beforeUpdate', text)
+		    END
+		WHERE id = ?
+	`
+	_, err := db.Exec(query, content, messageID)
+	if err != nil {
+		return fmt.Errorf("failed to update message content with aux: %w", err)
+	}
+	return nil
+}
+
 // GetMessageBranchID retrieves the branch_id for a given message ID.
 func GetMessageBranchID(db *SessionDatabase, messageID int) (string, error) {
 	var branchID string

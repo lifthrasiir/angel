@@ -29,9 +29,11 @@ func broadcastAndFinish(ew EventWriter, eventType EventType, data string) {
 }
 
 // Helper function to stream LLM response
+// appendToMessageID, if >= 0, specifies an existing message ID to append to instead of creating a new message
 func streamLLMResponse(
 	db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
 	ew EventWriter, mc *database.MessageChain, inferSessionName bool, callStartTime time.Time, fullHistoryForLLM []FrontendMessage,
+	appendToMessageID int,
 ) error {
 	var agentResponseText string
 	var lastUsageMetadata *UsageMetadata
@@ -67,7 +69,17 @@ func streamLLMResponse(
 	initialState.CallElapsedTimeSeconds = time.Since(callStartTime).Seconds()
 
 	// Initialize modelMessageID to negative. It's used for the current streaming model message.
-	modelMessageID := -1
+	// If appendToMessageID >= 0, use that ID instead of creating a new message.
+	modelMessageID := appendToMessageID
+
+	// If appending to an existing message, get its current text
+	if modelMessageID >= 0 {
+		msg, err := database.GetMessageByID(db, modelMessageID)
+		if err != nil {
+			return fmt.Errorf("failed to get message to append to: %w", err)
+		}
+		agentResponseText = msg.Text
+	}
 
 	modelProvider, err := models.GetModelProvider(mc.LastMessageModel)
 	if err != nil {

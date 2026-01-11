@@ -1,9 +1,9 @@
 import React, { useRef } from 'react';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import type { FileAttachment, ChatMessage } from '../../types/chat';
 import FileAttachmentList from '../FileAttachmentList';
 import ChatBubble, { type ChatBubbleRef } from './ChatBubble';
-import { editingMessageIdAtom } from '../../atoms/uiAtoms';
+import { editingMessageIdAtom, editingSourceAtom } from '../../atoms/uiAtoms';
 import { useProcessingState } from '../../hooks/useProcessingState';
 import type { MessageInfoProps } from './MessageInfo';
 import MessageInfo from './MessageInfo';
@@ -38,6 +38,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
 }) => {
   const { isProcessing } = useProcessingState();
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
+  const setEditingSource = useSetAtom(editingSourceAtom);
   const chatBubbleRef = useRef<ChatBubbleRef>(null);
 
   const isEditing = messageId === editingMessageId;
@@ -46,6 +47,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   const handleEditClick = () => {
     if (!isProcessing) {
       setEditingMessageId(messageId || null);
+      setEditingSource('edit');
     }
   };
 
@@ -54,6 +56,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
       onSaveEdit(messageId, newText);
     }
     setEditingMessageId(null);
+    setEditingSource(null);
   };
 
   const handleRetry = () => {
@@ -64,6 +67,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
 
   const handleEditCancel = () => {
     setEditingMessageId(null);
+    setEditingSource(null);
   };
 
   return (
@@ -88,6 +92,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
               isMobile: isMobile,
               editAccessKey: isMostRecentUserMessage ? 'e' : undefined,
               retryAccessKey: isMostRecentUserMessage ? 'r' : undefined,
+              branchDropdownAlign: 'right',
             } as Partial<MessageInfoProps>) // Cast to Partial<MessageInfoProps>
           : messageInfo
       }

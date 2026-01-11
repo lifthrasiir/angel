@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaEllipsisH, FaCut, FaCopy } from 'react-icons/fa';
+import { FaEllipsisH, FaCut, FaCopy, FaSync } from 'react-icons/fa';
 import { useSetAtom } from 'jotai';
 import type { ChatMessage, Session } from '../../types/chat';
 import Dropdown, { DropdownItem } from '../Dropdown';
@@ -13,9 +13,16 @@ export interface MessageMenuProps {
   sessionId: string;
   isMobile?: boolean;
   className?: string;
+  onUpdateClick?: () => void;
 }
 
-const MessageMenu: React.FC<MessageMenuProps> = ({ message, sessionId, isMobile = false, className = '' }) => {
+const MessageMenu: React.FC<MessageMenuProps> = ({
+  message,
+  sessionId,
+  isMobile = false,
+  className = '',
+  onUpdateClick,
+}) => {
   const navigate = useNavigate();
   const addSession = useSetAtom(addSessionAtom);
   const resetChatSessionState = useSetAtom(resetChatSessionStateAtom);
@@ -51,6 +58,16 @@ const MessageMenu: React.FC<MessageMenuProps> = ({ message, sessionId, isMobile 
 
   // Menu items with copy and extract actions
   const menuItems: DropdownItem[] = [
+    ...(onUpdateClick
+      ? [
+          {
+            id: 'update',
+            label: 'Update in place',
+            icon: <FaSync size={14} />,
+            onClick: onUpdateClick,
+          } as DropdownItem,
+        ]
+      : []),
     {
       id: 'copy',
       label: 'Copy',

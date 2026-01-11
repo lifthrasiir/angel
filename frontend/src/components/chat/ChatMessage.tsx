@@ -31,6 +31,8 @@ interface ChatMessageProps {
   onBranchSelect?: (newBranchId: string) => void;
   isMobile?: boolean;
   isMostRecentUserMessage?: boolean;
+  onSaveUpdate?: (messageId: string, editedText: string) => void;
+  onContinueClick?: (messageId: string) => void;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
@@ -44,6 +46,8 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
     onBranchSelect,
     isMobile = false,
     isMostRecentUserMessage = false,
+    onSaveUpdate,
+    onContinueClick,
   }) => {
     const { type, attachments, cumulTokenCount, model } = message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
@@ -98,6 +102,8 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           sessionId={message.sessionId}
           message={message}
           isMobile={isMobile}
+          onSaveUpdate={onSaveUpdate}
+          onContinueClick={onContinueClick}
         />
       );
     } else if (type === 'function_call') {
@@ -173,6 +179,8 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           attachments={attachments}
           message={message}
           isMobile={isMobile}
+          onSaveUpdate={onSaveUpdate}
+          onContinueClick={onContinueClick}
         />
       );
     }

@@ -118,6 +118,8 @@ export const useChatSession = (isTemporary: boolean = false) => {
     retryMessage,
     editMessage,
     retryError,
+    updateMessage,
+    continueMessage,
   } = useSessionFSM();
 
   const handleSetSelectedModel = (model: ModelInfo) => {
@@ -192,6 +194,20 @@ export const useChatSession = (isTemporary: boolean = false) => {
     [retryError],
   );
 
+  const handleUpdateMessage = useCallback(
+    async (messageId: string, editedText: string) => {
+      await updateMessage(messageId, editedText);
+    },
+    [updateMessage],
+  );
+
+  const handleContinueMessage = useCallback(
+    async (messageId: string) => {
+      await continueMessage(messageId);
+    },
+    [continueMessage],
+  );
+
   const cancelStreamingCall = useCallback(async () => {
     await cancelActiveCall();
   }, [cancelActiveCall]);
@@ -232,5 +248,7 @@ export const useChatSession = (isTemporary: boolean = false) => {
     handleBranchSwitch,
     handleRetryMessage,
     handleRetryError,
+    handleUpdateMessage,
+    handleContinueMessage,
   };
 };

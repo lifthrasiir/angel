@@ -1,7 +1,9 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -331,6 +333,75 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 			sendInternalServerError(w, r, err, "Failed to create branch")
 		}
 	}
+}
+
+// updateMessageHandler updates the content of a specific message.
+// Only user and model messages can be updated; other message types return an error.
+func updateMessageHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	messageIdStr := vars["messageId"]
+	if sessionId == "" || messageIdStr == "" {
+		sendBadRequestError(w, r, "Session ID and Message ID are required")
+		return
+	}
+
+	messageId, err := strconv.Atoi(messageIdStr)
+	if err != nil {
+		sendBadRequestError(w, r, "Invalid message ID")
+		return
+	}
+
+	var requestBody struct {
+		Text string `json:"text"`
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "updateMessageHandler") {
+		return
+	}
+
+	if requestBody.Text == "" {
+		sendBadRequestError(w, r, "Message text is required")
+		return
+	}
+
+	sdb, err := db.WithSession(sessionId)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to access session database")
+		return
+	}
+	defer sdb.Close()
+
+	// Get message type to validate
+	msgType, _, _, err := database.GetMessageDetails(sdb, messageId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			sendNotFoundError(w, r, "Message not found")
+			return
+		}
+		sendInternalServerError(w, r, err, "Failed to get message details")
+		return
+	}
+
+	// Only allow updating user and model messages
+	if msgType != TypeUserText && msgType != TypeModelText {
+		sendBadRequestError(w, r, "Only user and model messages can be updated")
+		return
+	}
+
+	// Update message content with aux
+	if err := database.UpdateMessageContentWithAux(sdb, messageId, requestBody.Text); err != nil {
+		sendInternalServerError(w, r, err, "Failed to update message")
+		return
+	}
+
+	sendJSONResponse(w, map[string]interface{}{
+		"status":    "success",
+		"messageId": messageId,
+		"text":      requestBody.Text,
+	})
 }
 
 // switchBranchHandler switches the primary branch of a session.

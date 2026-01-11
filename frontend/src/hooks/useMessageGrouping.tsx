@@ -15,6 +15,8 @@ interface UseMessageGroupingParams {
   handleBranchSwitch: (newBranchId: string) => Promise<void>;
   handleRetryMessage?: (originalMessageId: string) => Promise<void>;
   handleRetryError?: (errorMessageId: string) => Promise<void>;
+  handleUpdateMessage?: (messageId: string, editedText: string) => Promise<void>;
+  handleContinueMessage?: (messageId: string) => Promise<void>;
 }
 
 interface UseMessageGroupingResult {
@@ -31,6 +33,8 @@ export const useMessageGrouping = ({
   handleBranchSwitch,
   handleRetryMessage,
   handleRetryError,
+  handleUpdateMessage,
+  handleContinueMessage,
 }: UseMessageGroupingParams): UseMessageGroupingResult => {
   // Helper function to check if a message is retryable (last consecutive error messages)
   const isRetryableError = (message: ChatMessageType, allMessages: ChatMessageType[]): boolean => {
@@ -61,6 +65,8 @@ export const useMessageGrouping = ({
     handleEditMessage: (originalMessageId: string, editedText: string) => Promise<void>,
     handleBranchSwitch: (newBranchId: string) => Promise<void>,
     handleRetryError?: (errorMessageId: string) => Promise<void>,
+    handleUpdateMessage?: (messageId: string, editedText: string) => Promise<void>,
+    handleContinueMessage?: (messageId: string) => Promise<void>,
     mostRecentUserMessageId?: string | null,
   ): { element: JSX.Element; messagesConsumed: number } => {
     // Find maxTokens for the current message's model
@@ -169,6 +175,8 @@ export const useMessageGrouping = ({
                   : undefined
               }
               onBranchSelect={handleBranchSwitch}
+              onSaveUpdate={handleUpdateMessage}
+              onContinueClick={handleContinueMessage}
               isMostRecentUserMessage={currentMessage.id === mostRecentUserMessageId}
             />
           </>
@@ -226,6 +234,8 @@ export const useMessageGrouping = ({
         handleEditMessage,
         handleBranchSwitch,
         handleRetryError,
+        handleUpdateMessage,
+        handleContinueMessage,
         mostRecentUserMessageId,
       );
       renderedElements.push(element);
@@ -280,6 +290,8 @@ export const useMessageGrouping = ({
     handleBranchSwitch,
     handleRetryMessage,
     handleRetryError,
+    handleUpdateMessage,
+    handleContinueMessage,
   ]);
 
   // Find most recent user message ID

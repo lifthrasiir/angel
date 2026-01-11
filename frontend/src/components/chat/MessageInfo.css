@@ -132,6 +132,15 @@
     color: var(--color-combined-verydark);
   }
 
+  .branch-dropdown {
+    position: relative;
+    display: inline-block;
+  }
+
+  .agent-message > .message-info > .branch-dropdown {
+    order: -1;
+  }
+
   /* BranchDropdown trigger button styles - same as MessageInfo buttons */
   .branch-dropdown-trigger {
     padding: 4px 10px;

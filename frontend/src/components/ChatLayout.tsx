@@ -60,6 +60,8 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
     handleBranchSwitch,
     handleRetryMessage,
     handleRetryError,
+    handleUpdateMessage,
+    handleContinueMessage,
     isSendDisabledByResizing,
   } = useChatSession(isTemporary);
 
@@ -204,6 +206,8 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
           handleRetryMessage={handleRetryMessage}
           handleRetryError={handleRetryError}
           handleBranchSwitch={handleBranchSwitch}
+          handleUpdateMessage={handleUpdateMessage}
+          handleContinueMessage={handleContinueMessage}
           isSendDisabledByResizing={isSendDisabledByResizing}
           chatHeader={
             <ChatHeader

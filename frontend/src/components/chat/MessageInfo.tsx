@@ -1,9 +1,11 @@
 import React from 'react';
 import type { PossibleNextMessage, ChatMessage } from '../../types/chat';
-import { FaEdit, FaRedo, FaTimes, FaPaperPlane } from 'react-icons/fa';
+import { FaEdit, FaRedo, FaTimes, FaPaperPlane, FaArrowDown, FaSave } from 'react-icons/fa';
 import BranchDropdown from './BranchDropdown';
 import MessageMenu from './MessageMenu';
 import { useProcessingState } from '../../hooks/useProcessingState';
+import { useAtomValue } from 'jotai';
+import { editingSourceAtom } from '../../atoms/uiAtoms';
 import './MessageInfo.css';
 
 export interface MessageInfoProps {
@@ -11,8 +13,10 @@ export interface MessageInfoProps {
   possibleBranches?: PossibleNextMessage[];
   model?: string;
   maxTokens?: number;
-  onEditClick?: () => void;
+  onEditClick?: () => void; // Edit with retry (creates new branch)
+  onUpdateClick?: () => void; // Update without retry (just save changes)
   onRetryClick?: () => void;
+  onContinueClick?: () => void; // Continue button for updated model messages
   onBranchSelect?: (newBranchId: string) => void;
   sessionId?: string;
   currentMessageText?: string; // Current message text for diff comparison
@@ -23,6 +27,8 @@ export interface MessageInfoProps {
   isMobile?: boolean;
   editAccessKey?: string; // Access key for edit button
   retryAccessKey?: string; // Access key for retry button
+  continueAccessKey?: string; // Access key for continue button
+  branchDropdownAlign?: 'left' | 'right'; // Direction of branch dropdown menu
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = React.memo(
@@ -32,7 +38,9 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     model,
     maxTokens,
     onEditClick,
+    onUpdateClick,
     onRetryClick,
+    onContinueClick,
     onBranchSelect,
     sessionId,
     currentMessageText,
@@ -43,15 +51,20 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     isMobile = false,
     editAccessKey,
     retryAccessKey,
+    continueAccessKey,
+    branchDropdownAlign = 'right',
   }) => {
     const { isProcessing } = useProcessingState();
+    const editingSource = useAtomValue(editingSourceAtom);
     const hasInfo =
       cumulTokenCount !== undefined ||
       (possibleBranches && possibleBranches.length > 0) ||
       model ||
       maxTokens ||
       onEditClick ||
+      onUpdateClick ||
       onRetryClick ||
+      onContinueClick ||
       onBranchSelect;
 
     if (!hasInfo) {
@@ -74,11 +87,11 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
               <button
                 onClick={onEditSave}
                 disabled={isProcessing}
-                title="Save edit"
+                title={editingSource === 'update' ? 'Save' : 'Send'}
                 className="edit-confirm-btn"
-                aria-label="Save edit"
+                aria-label={editingSource === 'update' ? 'Save update' : 'Send edit'}
               >
-                <FaPaperPlane size={16} />
+                {editingSource === 'update' ? <FaSave size={16} /> : <FaPaperPlane size={16} />}
               </button>
             )}
             {onEditCancel && (
@@ -100,6 +113,16 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
                 <FaEdit size={16} />
               </button>
             )}
+            {onContinueClick && (
+              <button
+                onClick={onContinueClick}
+                disabled={isProcessing}
+                title="Continue after this point"
+                accessKey={continueAccessKey}
+              >
+                <FaArrowDown size={16} />
+              </button>
+            )}
             {onRetryClick && (
               <button onClick={onRetryClick} disabled={isProcessing} title="Retry message" accessKey={retryAccessKey}>
                 <FaRedo size={16} />
@@ -113,10 +136,11 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
             currentMessageText={currentMessageText}
             onBranchSelect={onBranchSelect}
             disabled={isProcessing}
+            align={branchDropdownAlign}
           />
         )}
         {message && sessionId && (message.type === 'model' || message.type === 'user') && (
-          <MessageMenu message={message} sessionId={sessionId} isMobile={isMobile} />
+          <MessageMenu message={message} sessionId={sessionId} isMobile={isMobile} onUpdateClick={onUpdateClick} />
         )}
       </div>
     );

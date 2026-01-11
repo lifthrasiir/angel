@@ -645,4 +645,62 @@ export class SessionOperationManager {
       this.handleOperationError(error, `Error retry failed: ${error}`);
     }
   }
+
+  /**
+   * Handle message update operation (PUT, no streaming, no side effects)
+   */
+  async handleMessageUpdate(
+    sessionId: string,
+    messageId: string,
+    editedText: string,
+    handlers?: OperationEventHandlers,
+  ): Promise<void> {
+    // No setupStreamingOperation - this is a simple PUT request
+    try {
+      const response = await apiFetch(`/api/chat/${sessionId}/message/${messageId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: editedText }),
+      });
+
+      if (this.validateResponse(response, 'Message update')) return;
+
+      // No streaming, just dispatch completion
+      handlers?.onComplete?.();
+    } catch (error) {
+      this.handleOperationError(error, `Message update failed: ${error}`);
+    }
+  }
+
+  /**
+   * Handle message continue operation (same as retry but for model messages)
+   */
+  async handleMessageContinue(
+    sessionId: string,
+    modelMessageId: string,
+    handlers?: OperationEventHandlers,
+  ): Promise<void> {
+    this.setupStreamingOperation(sessionId, handlers);
+
+    try {
+      this._dispatch({ type: 'STREAM_STARTED', activeOperation: 'streaming' });
+
+      const requestBody = {
+        updatedMessageId: parseInt(modelMessageId, 10),
+        newMessageText: '', // Empty text for continue (server will get original text)
+      };
+
+      const response = await apiFetch(`/api/chat/${sessionId}/branch?retry=1`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (this.validateResponse(response, 'Message continue')) return;
+
+      await this.startStreaming(response, sessionId, false);
+    } catch (error) {
+      this.handleOperationError(error, `Message continue failed: ${error}`);
+    }
+  }
 }

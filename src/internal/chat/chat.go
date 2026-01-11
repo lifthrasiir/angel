@@ -153,7 +153,7 @@ func NewSessionAndMessage(
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(sdb, models, ga, tools, initialState, ew, mc, inferSessionName, time.Now(), historyContext); err != nil {
+	if err := streamLLMResponse(sdb, models, ga, tools, initialState, ew, mc, inferSessionName, time.Now(), historyContext, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response: %w", err)
 	}
 	return nil
@@ -305,7 +305,7 @@ func NewChatMessage(
 	}
 	ew.Send(EventInitialState, string(initialStateJSON))
 
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
 		return fmt.Errorf("failed to stream LLM response: %w", err)
 	}
 	return nil

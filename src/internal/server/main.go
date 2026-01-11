@@ -276,6 +276,7 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 	router.HandleFunc("/api/chat/{sessionId}", deleteSessionHandler).Methods("DELETE")
 	router.HandleFunc("/api/chat/{sessionId}/branch", createBranchHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/branch", switchBranchHandler).Methods("PUT")
+	router.HandleFunc("/api/chat/{sessionId}/message/{messageId}", updateMessageHandler).Methods("PUT")
 	router.HandleFunc("/api/chat/{sessionId}/branch/{branchId}/confirm", confirmBranchHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/branch/{branchId}/retry-error", retryErrorBranchHandler).Methods("POST")
 	router.HandleFunc("/api/chat/{sessionId}/compress", compressSessionHandler).Methods("POST")

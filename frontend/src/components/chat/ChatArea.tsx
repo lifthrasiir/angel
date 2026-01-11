@@ -36,6 +36,8 @@ interface ChatAreaProps {
   handleRetryMessage?: (originalMessageId: string) => Promise<void>;
   handleRetryError?: (errorMessageId: string) => Promise<void>;
   handleBranchSwitch: (newBranchId: string) => Promise<void>;
+  handleUpdateMessage?: (messageId: string, editedText: string) => Promise<void>;
+  handleContinueMessage?: (messageId: string) => Promise<void>;
   isSendDisabledByResizing?: () => boolean;
   chatHeader?: React.ReactNode;
 }
@@ -56,6 +58,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleRetryMessage,
   handleRetryError,
   handleBranchSwitch,
+  handleUpdateMessage,
+  handleContinueMessage,
   isSendDisabledByResizing,
   chatHeader,
 }) => {
@@ -110,6 +114,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     handleBranchSwitch,
     handleRetryMessage,
     handleRetryError,
+    handleUpdateMessage,
+    handleContinueMessage,
   });
 
   return (
