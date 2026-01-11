@@ -1,7 +1,8 @@
 import React from 'react';
-import { FaEllipsisV, FaEdit, FaTrash, FaChevronRight } from 'react-icons/fa';
+import { FaEllipsisV, FaEdit, FaTrash, FaChevronRight, FaPlus } from 'react-icons/fa';
 import { apiFetch } from '../../api/apiClient';
-import type { Workspace } from '../../types/chat';
+import type { Workspace, ChatMessage } from '../../types/chat';
+import { useCommandProcessor } from '../../hooks/useCommandProcessor';
 import Dropdown, { DropdownItem } from '../Dropdown';
 
 interface SessionMenuProps {
@@ -16,6 +17,7 @@ interface SessionMenuProps {
   isCurrentSession?: boolean;
   onNavigateToWorkspace?: (workspaceId: string) => void;
   onMenuToggle?: (sessionId: string, isOpen: boolean) => void;
+  messages?: ChatMessage[]; // Only provided for current session
 }
 
 const SessionMenu: React.FC<SessionMenuProps> = ({
@@ -30,7 +32,10 @@ const SessionMenu: React.FC<SessionMenuProps> = ({
   isCurrentSession = false,
   onNavigateToWorkspace,
   onMenuToggle,
+  messages,
 }) => {
+  const { runNewMessageCommand } = useCommandProcessor(sessionId);
+
   const handleRename = () => {
     onRename(sessionId);
     if (onMenuToggle) {
@@ -77,6 +82,25 @@ const SessionMenu: React.FC<SessionMenuProps> = ({
     }
   };
 
+  // Factory function to create handlers for new user/model messages
+  const makeHandleNewMessage = (commandType: 'new-user-message' | 'new-model-message') => async () => {
+    // Close the menu
+    if (onMenuToggle) {
+      onMenuToggle(sessionId, false);
+    }
+    // Use the command processor to run the command
+    await runNewMessageCommand(commandType);
+  };
+
+  // Only show append options when messages are provided (not undefined)
+  let showNewModelMessage = false;
+  let showNewUserMessage = false;
+  if (isCurrentSession && messages !== undefined) {
+    const lastMessageType = messages.length > 0 ? messages[messages.length - 1].type : null;
+    showNewUserMessage = lastMessageType !== 'user';
+    showNewModelMessage = lastMessageType !== 'model';
+  }
+
   // Create workspace submenu items
   const workspaceSubmenuItems: DropdownItem[] = [
     // Anonymous workspace option
@@ -110,6 +134,30 @@ const SessionMenu: React.FC<SessionMenuProps> = ({
 
   // Main menu items
   const menuItems: DropdownItem[] = [
+    // Append new user message (only for current session, not when last message is user)
+    ...(showNewUserMessage
+      ? [
+          {
+            id: 'new-user-message',
+            label: 'Append new user message',
+            icon: <FaPlus size={14} />,
+            onClick: makeHandleNewMessage('new-user-message'),
+          } as DropdownItem,
+        ]
+      : []),
+    // Append new model message (only for current session, not when last message is model)
+    ...(showNewModelMessage
+      ? [
+          {
+            id: 'new-model-message',
+            label: 'Append new model message',
+            icon: <FaPlus size={14} />,
+            onClick: makeHandleNewMessage('new-model-message'),
+          } as DropdownItem,
+        ]
+      : []),
+    // Divider (only show when we have append options)
+    ...(showNewUserMessage || showNewModelMessage ? ['-' as const] : []),
     {
       id: 'rename',
       label: 'Rename',

@@ -493,6 +493,8 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 	switch requestBody.Command {
 	case "clear", "clearblobs":
 		commandMessageID, err = chat.ExecuteClearCommand(r.Context(), sdb, requestBody.Command)
+	case "new-user-message", "new-model-message":
+		commandMessageID, err = chat.ExecuteNewMessageCommand(r.Context(), sdb, requestBody.Command)
 	default:
 		sendBadRequestError(w, r, fmt.Sprintf("Unknown command: %s", requestBody.Command))
 		return

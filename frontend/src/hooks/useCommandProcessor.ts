@@ -1,7 +1,7 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useRef } from 'react';
 import { apiFetch } from '../api/apiClient';
-import { sessionsAtom, primaryBranchIdAtom, addMessageAtom } from '../atoms/chatAtoms';
+import { sessionsAtom, primaryBranchIdAtom, addMessageAtom, messagesAtom } from '../atoms/chatAtoms';
 import { statusMessageAtom } from '../atoms/uiAtoms';
 import { temporaryEnvChangeMessageAtom } from '../atoms/confirmationAtoms';
 import { pendingRootsAtom } from '../atoms/fileAtoms';
@@ -27,6 +27,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const setPendingRoots = useSetAtom(pendingRootsAtom);
   const currentPendingRoots = useAtomValue(pendingRootsAtom);
   const addMessage = useSetAtom(addMessageAtom);
+  const messages = useAtomValue(messagesAtom);
 
   // Generic helper to refresh sessions
   const refreshSessions = async () => {
@@ -41,7 +42,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
   };
 
   // Generic helper to add message to chat
-  const addMessageToChat = (messageId: string, type: string, text: string) => {
+  const addMessageToChat = (messageId: string, type: string, text: string, options?: { model?: string }) => {
     if (sessionId) {
       const message: ChatMessage = {
         id: messageId,
@@ -49,6 +50,7 @@ export const useCommandProcessor = (sessionId: string | null) => {
         parts: [{ text }],
         sessionId: sessionId,
         branchId: primaryBranchId,
+        ...options,
       };
       addMessage(message);
     }
@@ -300,6 +302,47 @@ export const useCommandProcessor = (sessionId: string | null) => {
   const runClear = () => runClearCommand('clear');
   const runClearBlobs = () => runClearCommand('clearblobs');
 
+  const runNewMessageCommand = async (commandType: 'new-user-message' | 'new-model-message') => {
+    if (!sessionId) {
+      setStatusMessage(`Error: No active session to run /${commandType}.`);
+      return;
+    }
+
+    const commandLabel = commandType === 'new-user-message' ? 'New user message' : 'New model message';
+    setStatusMessage(`Creating ${commandLabel}...`);
+
+    try {
+      const response = await apiFetch(`/api/chat/${sessionId}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: commandType }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `Failed to create ${commandLabel}`);
+      }
+
+      const result = await response.json();
+      setStatusMessage(`${commandLabel} created successfully!`);
+
+      // Get the model from the last message if available
+      const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
+      const model = lastMessage?.model;
+
+      addMessageToChat(
+        String(result.commandMessageId),
+        commandType === 'new-user-message' ? 'user' : 'model',
+        '',
+        model !== undefined ? { model } : undefined,
+      );
+      await refreshSessions();
+    } catch (error: any) {
+      setStatusMessage(`${commandType} failed: ${error.message}`);
+      console.error(`${commandType} failed:`, error);
+    }
+  };
+
   const runCommand = async (command: string, args: string) => {
     setStatusMessage(null); // Clear previous status messages
     const fullCommand = `/${command}${args ? ` ${args}` : ''}`;
@@ -319,6 +362,10 @@ export const useCommandProcessor = (sessionId: string | null) => {
       case 'clearblobs':
         runClearBlobs();
         break;
+      case 'new-user-message':
+      case 'new-model-message':
+        await runNewMessageCommand(command as 'new-user-message' | 'new-model-message');
+        break;
       case 'expose':
       case 'unexpose':
         await runExposeOrUnexpose(command, args);
@@ -329,5 +376,5 @@ export const useCommandProcessor = (sessionId: string | null) => {
     }
   };
 
-  return { runCommand };
+  return { runCommand, runNewMessageCommand };
 };
