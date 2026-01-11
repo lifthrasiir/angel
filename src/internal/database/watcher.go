@@ -201,6 +201,29 @@ func (sw *SessionWatcher) WaitUntilTracked(ctx context.Context, mainSessionID st
 	}
 }
 
+// TrackNewFile marks a newly created session DB file as tracked.
+// This should be called immediately after creating a new session DB file
+// to avoid waiting for the filesystem watcher to detect it.
+func (sw *SessionWatcher) TrackNewFile(mainSessionID string) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+
+	state := sw.states[mainSessionID]
+	if state == nil {
+		state = &sessionTrackState{}
+		sw.states[mainSessionID] = state
+	}
+	state.tracked = true
+
+	// Signal any waiters that this file is now tracked
+	if state.waitChan != nil {
+		close(state.waitChan)
+		state.waitChan = nil
+	}
+
+	log.Printf("SessionWatcher: Marked new session DB as tracked: %s", mainSessionID)
+}
+
 // MarkExpectedChange marks that a change to the session DB is expected.
 // This should be called when a session DB is first attached.
 func (sw *SessionWatcher) MarkExpectedChange(mainSessionID string) {

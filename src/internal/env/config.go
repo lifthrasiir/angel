@@ -45,11 +45,32 @@ func NewEnvConfig() *EnvConfig {
 
 // NewTestEnvConfig creates a new fresh EnvConfig for testing purposes.
 // If useMemoryDB is true, uses in-memory databases for better performance.
-// If false, uses real files for testing file system operations.
+// If false, uses real files in a unique temp directory for testing file system operations.
+// Each call creates a new unique temp directory to avoid conflicts between test runs.
 func NewTestEnvConfig(useMemoryDB bool) *EnvConfig {
-	config := NewEnvConfig()
-	config.useMemoryDB = useMemoryDB
-	return config
+	if useMemoryDB {
+		// For in-memory tests, use default config
+		config := NewEnvConfig()
+		config.useMemoryDB = true
+		return config
+	}
+
+	// For filesystem tests, create a unique temp directory
+	tempDir, err := os.MkdirTemp("", "angel-test-*")
+	if err != nil {
+		// Fallback to default config if temp dir creation fails
+		config := NewEnvConfig()
+		config.useMemoryDB = false
+		return config
+	}
+
+	sessionDir := filepath.Join(tempDir, "sessions")
+
+	return &EnvConfig{
+		dataDir:     tempDir,
+		sessionDir:  sessionDir,
+		useMemoryDB: false,
+	}
 }
 
 // ContextWithEnvConfig returns a new context with the given EnvConfig.

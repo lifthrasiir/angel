@@ -131,6 +131,11 @@ func (db *Database) CreateSessionDB(mainSessionID string) error {
 		return fmt.Errorf("failed to create session schema: %w", err)
 	}
 
+	// Mark the new file as tracked so subsequent Attach waits don't block
+	if db.watcher != nil {
+		db.watcher.TrackNewFile(mainSessionID)
+	}
+
 	log.Printf("Database: Created new session DB: %s", sessionDBPath)
 	return nil
 }

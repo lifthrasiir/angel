@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -217,7 +218,7 @@ func GetSessionDBPath(ctx context.Context, mainSessionID string) (string, error)
 	}
 
 	sessionDir := envConfig.SessionDir()
-	return fmt.Sprintf("%s/%s.db", sessionDir, mainSessionID), nil
+	return filepath.Join(sessionDir, mainSessionID+".db"), nil
 }
 
 // GetSessionDBPathFromDB returns the file path for a session DB using the database's internal context.
