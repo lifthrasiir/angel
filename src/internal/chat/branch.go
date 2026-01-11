@@ -13,13 +13,14 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 func RetryBranch(
-	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig,
 	ew EventWriter, updatedMessageId int,
 ) error {
 	// For retry, get the original message
@@ -34,10 +35,10 @@ func RetryBranch(
 
 	// For model messages, use a special retry that creates a new branch and replaces the message content
 	if originalMessage.Type == TypeModelText {
-		return RetryModelMessage(ctx, db, models, ga, tools, ew, updatedMessageId, *originalMessage)
+		return RetryModelMessage(ctx, db, models, ga, tools, config, ew, updatedMessageId, *originalMessage)
 	}
 
-	return CreateBranch(ctx, db, models, ga, tools, ew, updatedMessageId, originalMessage.Text)
+	return CreateBranch(ctx, db, models, ga, tools, config, ew, updatedMessageId, originalMessage.Text)
 }
 
 // createBranchInternal creates a new branch and message without streaming.
@@ -194,7 +195,7 @@ func createBranchInternal(
 
 // CreateBranch creates a new branch from a given message and streams LLM response.
 func CreateBranch(
-	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig,
 	ew EventWriter, updatedMessageID int, newMessageText string,
 ) error {
 	// Use the original message type for the new message
@@ -264,7 +265,7 @@ func CreateBranch(
 	}
 
 	// Stream LLM response
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, config, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response after branch operation: %w", err)
 	}
 	return nil
@@ -273,7 +274,7 @@ func CreateBranch(
 // RetryModelMessage creates a new branch from a model message and regenerates its content.
 // It uses createBranchInternal to create the branch and message, then streams in append mode.
 func RetryModelMessage(
-	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig,
 	ew EventWriter, modelMessageId int, originalMessage Message,
 ) error {
 	// Get message details to validate
@@ -348,7 +349,7 @@ func RetryModelMessage(
 	}
 
 	// Stream LLM response in append mode (appends to the current model message)
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, true, time.Now(), fullFrontendHistoryForLLM, newMessageID); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, config, initialState, ew, mc, true, time.Now(), fullFrontendHistoryForLLM, newMessageID); err != nil {
 		return fmt.Errorf("error streaming LLM response: %w", err)
 	}
 
@@ -477,7 +478,7 @@ func handleNewPrimaryBranchChosenNextID(db *database.SessionDatabase, newPrimary
 }
 
 func ConfirmBranch(
-	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig,
 	ew EventWriter, branchId string, approved bool, modifiedData map[string]interface{},
 ) error {
 	// Clear pending_confirmation for the branch regardless of approval/denial
@@ -645,7 +646,7 @@ func ConfirmBranch(
 	}
 
 	// Resume streaming from the point after the function response
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, config, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response after confirmation: %w", err)
 	}
 	return nil
@@ -704,7 +705,7 @@ func deleteErrorMessages(db *database.SessionDatabase, branchID string) error {
 }
 
 func RetryErrorBranch(
-	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig,
 	ew EventWriter, branchId string,
 ) error {
 	// Verify that the session exists
@@ -844,7 +845,7 @@ func RetryErrorBranch(
 	}
 
 	// Resume streaming from the cleaned up state
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), filteredHistoryContext, -1); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, config, initialState, ew, mc, false, time.Now(), filteredHistoryContext, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response during retry: %w", err)
 	}
 	return nil

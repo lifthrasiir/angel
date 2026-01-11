@@ -209,6 +209,10 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 	if err != nil {
 		return tool.HandlerResults{}, err
 	}
+	config, err := env.EnvConfigFromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
 
 	// Check if the current session is already a subagent session
 	if IsSubsessionId(params.SessionId) {
@@ -272,6 +276,7 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 		models,
 		ga,
 		tools,
+		config,
 		resultCollector, // Custom EventWriter that captures events
 		text,
 		nil,                        // No attachments for regular subagent
@@ -374,6 +379,10 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 	if err != nil {
 		return tool.HandlerResults{}, err
 	}
+	config, err := env.EnvConfigFromContext(ctx)
+	if err != nil {
+		return tool.HandlerResults{}, err
+	}
 
 	// Create a subsession for image generation
 	agentID := database.GenerateID()
@@ -429,6 +438,7 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		models,
 		ga,
 		tools,
+		config,
 		resultCollector, // Custom EventWriter that captures events
 		text,
 		inputAttachments,        // Input images as attachments

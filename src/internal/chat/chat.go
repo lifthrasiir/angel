@@ -34,7 +34,7 @@ type InitialState struct {
 }
 
 func NewSessionAndMessage(
-	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.Database, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig,
 	ew EventWriter, userMessage string, systemPrompt string, attachments []FileAttachment,
 	sessionID string, workspaceId string, modelToUse string, fetchLimit int, initialRoots []string,
 ) error {
@@ -153,14 +153,14 @@ func NewSessionAndMessage(
 
 	// Handle streaming response from LLM
 	// Pass full history to streamLLMResponse for LLM
-	if err := streamLLMResponse(sdb, models, ga, tools, initialState, ew, mc, inferSessionName, time.Now(), historyContext, -1); err != nil {
+	if err := streamLLMResponse(sdb, models, ga, tools, config, initialState, ew, mc, inferSessionName, time.Now(), historyContext, -1); err != nil {
 		return fmt.Errorf("error streaming LLM response: %w", err)
 	}
 	return nil
 }
 
 func NewChatMessage(
-	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools,
+	ctx context.Context, db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig,
 	ew EventWriter, userMessage string, attachments []FileAttachment, modelToUse string, fetchLimit int,
 ) error {
 	session, err := database.GetSession(db)
@@ -305,7 +305,7 @@ func NewChatMessage(
 	}
 	ew.Send(EventInitialState, string(initialStateJSON))
 
-	if err := streamLLMResponse(db, models, ga, tools, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
+	if err := streamLLMResponse(db, models, ga, tools, config, initialState, ew, mc, false, time.Now(), fullFrontendHistoryForLLM, -1); err != nil {
 		return fmt.Errorf("failed to stream LLM response: %w", err)
 	}
 	return nil

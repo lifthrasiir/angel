@@ -14,6 +14,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/env"
 	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/prompts"
 	"github.com/lifthrasiir/angel/internal/tool"
@@ -31,7 +32,7 @@ func broadcastAndFinish(ew EventWriter, eventType EventType, data string) {
 // Helper function to stream LLM response
 // appendToMessageID, if >= 0, specifies an existing message ID to append to instead of creating a new message
 func streamLLMResponse(
-	db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, initialState InitialState,
+	db *database.SessionDatabase, models *llm.Models, ga *llm.GeminiAuth, tools *tool.Tools, config *env.EnvConfig, initialState InitialState,
 	ew EventWriter, mc *database.MessageChain, inferSessionName bool, callStartTime time.Time, fullHistoryForLLM []FrontendMessage,
 	appendToMessageID int,
 ) error {
@@ -49,6 +50,7 @@ func streamLLMResponse(
 	ctx = llm.ContextWithModels(ctx, models)
 	ctx = llm.ContextWithGeminiAuth(ctx, ga)
 	ctx = tool.ContextWith(ctx, tools)
+	ctx = env.ContextWithEnvConfig(ctx, config)
 
 	// Register the call with the call manager
 	if err := startCall(initialState.SessionId, cancel); err != nil {

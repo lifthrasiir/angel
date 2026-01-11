@@ -25,6 +25,7 @@ func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
 	tools := getTools(w, r)
+	config := getEnvConfig(w, r)
 
 	var requestBody struct {
 		Message      string           `json:"message"`
@@ -47,7 +48,7 @@ func newSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := chat.NewSessionAndMessage(
-		r.Context(), db, models, ga, tools,
+		r.Context(), db, models, ga, tools, config,
 		ew, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
 		sessionId, requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
 	); err != nil {
@@ -65,6 +66,7 @@ func newTempSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
 	tools := getTools(w, r)
+	config := getEnvConfig(w, r)
 
 	var requestBody struct {
 		Message      string           `json:"message"`
@@ -88,7 +90,7 @@ func newTempSessionAndMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := chat.NewSessionAndMessage(
-		r.Context(), db, models, ga, tools,
+		r.Context(), db, models, ga, tools, config,
 		ew, requestBody.Message, requestBody.SystemPrompt, requestBody.Attachments,
 		sessionId, requestBody.WorkspaceID, requestBody.Model, requestBody.FetchLimit, requestBody.InitialRoots,
 	); err != nil {
@@ -106,6 +108,7 @@ func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
 	tools := getTools(w, r)
+	config := getEnvConfig(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -138,7 +141,7 @@ func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := chat.NewChatMessage(
-		r.Context(), sdb, models, ga, tools,
+		r.Context(), sdb, models, ga, tools, config,
 		ew, requestBody.Message, requestBody.Attachments, requestBody.Model, requestBody.FetchLimit,
 	); err != nil {
 		if ew.HeadersSent() {
@@ -289,6 +292,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
 	tools := getTools(w, r)
+	config := getEnvConfig(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -322,9 +326,9 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 	defer sdb.Close()
 
 	if isRetry && requestBody.NewMessageText == "" {
-		err = chat.RetryBranch(r.Context(), sdb, models, ga, tools, ew, requestBody.UpdatedMessageID)
+		err = chat.RetryBranch(r.Context(), sdb, models, ga, tools, config, ew, requestBody.UpdatedMessageID)
 	} else {
-		err = chat.CreateBranch(r.Context(), sdb, models, ga, tools, ew, requestBody.UpdatedMessageID, requestBody.NewMessageText)
+		err = chat.CreateBranch(r.Context(), sdb, models, ga, tools, config, ew, requestBody.UpdatedMessageID, requestBody.NewMessageText)
 	}
 	if err != nil {
 		if ew.HeadersSent() {
@@ -447,6 +451,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
 	tools := getTools(w, r)
+	config := getEnvConfig(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -478,7 +483,7 @@ func confirmBranchHandler(w http.ResponseWriter, r *http.Request) {
 	defer sdb.Close()
 
 	if err := chat.ConfirmBranch(
-		r.Context(), sdb, models, ga, tools,
+		r.Context(), sdb, models, ga, tools, config,
 		ew, branchId, requestBody.Approved, requestBody.ModifiedData,
 	); err != nil {
 		if ew.HeadersSent() {
@@ -496,6 +501,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	models := getModels(w, r)
 	ga := getGeminiAuth(w, r)
 	tools := getTools(w, r)
+	config := getEnvConfig(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -518,7 +524,7 @@ func retryErrorBranchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer sdb.Close()
 
-	if err := chat.RetryErrorBranch(r.Context(), sdb, models, ga, tools, ew, branchId); err != nil {
+	if err := chat.RetryErrorBranch(r.Context(), sdb, models, ga, tools, config, ew, branchId); err != nil {
 		if ew.HeadersSent() {
 			log.Printf("Failed to retry error branch: %v", err)
 		} else {
