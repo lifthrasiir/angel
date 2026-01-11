@@ -24,7 +24,7 @@ import { pendingConfirmationAtom, temporaryEnvChangeMessageAtom } from '../atoms
 import { isSystemPromptEditingAtom, editingMessageIdAtom } from '../atoms/uiAtoms';
 import { selectedFilesAtom, preserveSelectedFilesAtom } from '../atoms/fileAtoms';
 import { selectedModelAtom } from '../atoms/modelAtoms';
-import type { MessageSendParams, OperationEventHandlers } from '../managers/SessionOperationManager';
+import type { InitialStateData, MessageSendParams, OperationEventHandlers } from '../managers/SessionOperationManager';
 import {
   EventThought,
   EventModelMessage,
@@ -85,7 +85,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   // Event handlers for operation manager
   const eventHandlers: OperationEventHandlers = useMemo(
     () => ({
-      onInitialState: (data: any) => {
+      onInitialState: (data: InitialStateData) => {
         // Reset chat state for new session
         if (!data.isCallActive) {
           resetChatSessionState();
@@ -116,7 +116,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
         }
 
         // Set workspace ID, just in case (should have been already set by EventWorkspaceHint)
-        sessionManager.setSessionWorkspaceId(data.workspaceId);
+        sessionManager.setSessionWorkspaceId(data.workspaceId!);
 
         // Set current session name (for both temporary and regular sessions)
         setCurrentSessionName(data.name);
@@ -256,8 +256,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
           case EventPendingConfirmation:
             // Handle pending confirmation (tool approval needed)
-            const confirmationData = JSON.parse(event.data);
-            setPendingConfirmation(confirmationData);
+            setPendingConfirmation(event.data);
             break;
 
           case EventGenerationChanged:

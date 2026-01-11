@@ -1,4 +1,4 @@
-import type { FileAttachment, InitialState } from '../types/chat';
+import type { ChatMessage, FileAttachment, InitialState } from '../types/chat';
 import type { ModelInfo } from '../api/models';
 import { apiFetch, fetchSessionHistory } from '../api/apiClient';
 import { sendMessage, processStreamResponse, type SseEventHandler } from '../utils/messageHandler';
@@ -26,8 +26,22 @@ export interface MessageSendParams {
   isTemporary?: boolean;
 }
 
+export interface InitialStateData {
+  isCallActive: boolean;
+  sessionId: string;
+  name: string;
+  messages: Array<ChatMessage>;
+  systemPrompt: string;
+  primaryBranchId: string;
+  hasMore: boolean;
+  elapsedTimeMs?: number;
+  pendingConfirmation?: string;
+  workspaceId?: string;
+  temporaryEnvChangeMessage?: ChatMessage;
+}
+
 export interface OperationEventHandlers {
-  onInitialState?: (data: any) => void;
+  onInitialState?: (data: InitialStateData) => void;
   onEvent?: (event: SseEvent) => void;
   onComplete?: () => void;
   onError?: (error: Error | Event | any) => void;
@@ -278,7 +292,7 @@ export class SessionOperationManager {
       hasMore?: boolean;
       fetchLimit?: number;
     },
-  ) {
+  ): InitialStateData {
     // If fetchLimit is provided, calculate hasMore from message count
     const hasMore =
       options.hasMore !== undefined
