@@ -110,6 +110,7 @@ type FrontendMessage struct {
 	ChosenNextID     *string               `json:"chosenNextId,omitempty"`
 	PossibleBranches []PossibleNextMessage `json:"possibleBranches,omitempty"`
 	Model            string                `json:"model,omitempty"`
+	Aux              map[string]any        `json:"aux,omitempty"`
 }
 
 // Session struct to hold session data

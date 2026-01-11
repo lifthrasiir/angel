@@ -48,6 +48,7 @@ export interface ChatMessage {
   model?: string;
   sessionId?: string;
   edited?: boolean;
+  aux?: Record<string, any>; // Auxiliary data for additional metadata
 }
 
 export interface InitialState {

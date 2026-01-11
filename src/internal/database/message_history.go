@@ -90,7 +90,7 @@ func getSessionHistoryInternal(
 				SELECT
 					m.id, m.session_id, m.branch_id, m.parent_message_id, m.chosen_next_id,
 					m.text, m.type, m.attachments, m.cumul_token_count, m.created_at, m.model,
-					m.state, coalesce(
+					m.state, m.aux, coalesce(
 						json_group_array(
 							json_object(
 								'id', mm.id,
@@ -118,13 +118,19 @@ func getSessionHistoryInternal(
 			for rows.Next() {
 				var m Message
 				var attachmentsJSON sql.NullString
+				var auxJSON sql.NullString
 				var possibleNextIDsAndBranchesStr string
 				if err := rows.Scan(
 					&m.ID, &m.LocalSessionID, &m.BranchID, &m.ParentMessageID, &m.ChosenNextID,
 					&m.Text, &m.Type, &attachmentsJSON, &m.CumulTokenCount, &m.CreatedAt, &m.Model,
-					&m.State, &possibleNextIDsAndBranchesStr,
+					&m.State, &auxJSON, &possibleNextIDsAndBranchesStr,
 				); err != nil {
 					return fmt.Errorf("failed to scan message: %w", err)
+				}
+
+				// Store aux JSON string in m.Aux for later processing
+				if auxJSON.Valid {
+					m.Aux = auxJSON.String
 				}
 
 				if discardThoughts && m.Type == TypeThought {
@@ -432,6 +438,16 @@ func createFrontendMessage(
 		processedAttachments = m.Attachments
 	}
 
+	// Parse aux JSON if present
+	var auxMap map[string]any
+	if m.Aux != "" {
+		if err := json.Unmarshal([]byte(m.Aux), &auxMap); err != nil {
+			log.Printf("Failed to unmarshal aux for message %d: %v", m.ID, err)
+			// Continue even if unmarshaling fails
+			auxMap = nil
+		}
+	}
+
 	// Define fm here, before the switch statement
 	fm := FrontendMessage{
 		ID:               fmt.Sprintf("%d", m.ID),
@@ -445,6 +461,7 @@ func createFrontendMessage(
 		ChosenNextID:     fmChosenNextID,
 		PossibleBranches: filteredPossibleBranches,
 		Model:            m.Model,
+		Aux:              auxMap,
 	}
 
 	thoughtSignature := m.State
