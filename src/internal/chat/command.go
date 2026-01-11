@@ -79,11 +79,12 @@ func ExecuteNewMessageCommand(ctx context.Context, db database.SessionDbOrTx, me
 
 	// Determine message type
 	var msgType MessageType
-	if messageType == "new-user-message" {
+	switch messageType {
+	case "new-user-message":
 		msgType = TypeUserText
-	} else if messageType == "new-model-message" {
+	case "new-model-message":
 		msgType = TypeModelText
-	} else {
+	default:
 		return 0, fmt.Errorf("invalid message type: %s", messageType)
 	}
 

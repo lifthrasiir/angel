@@ -90,7 +90,8 @@ func streamLLMResponse(
 
 	var firstFinishReason string
 	for {
-		if err := checkStreamCancellation(ctx, initialState, db, ew, modelMessageID, agentResponseText, func() {}); err != nil {
+		if err := checkStreamCancellation(ctx, db, ew, modelMessageID, agentResponseText, func() {
+		}); err != nil {
 			return err
 		}
 
@@ -137,7 +138,8 @@ func streamLLMResponse(
 				}
 			}
 
-			if err := checkStreamCancellation(ctx, initialState, db, ew, modelMessageID, agentResponseText, func() {}); err != nil {
+			if err := checkStreamCancellation(ctx, db, ew, modelMessageID, agentResponseText, func() {
+			}); err != nil {
 				return err
 			}
 
@@ -421,7 +423,7 @@ func streamLLMResponse(
 		}
 
 		// Check if context was cancelled after stream ended
-		if err := checkStreamCancellation(ctx, initialState, db, ew, modelMessageID, agentResponseText, addCancelErrorMessage); err != nil {
+		if err := checkStreamCancellation(ctx, db, ew, modelMessageID, agentResponseText, addCancelErrorMessage); err != nil {
 			return err
 		}
 
@@ -532,10 +534,7 @@ func handlePendingConfirmation(
 	return fmt.Errorf("user confirmation pending")
 }
 
-func checkStreamCancellation(
-	ctx context.Context, initialState InitialState, db *database.SessionDatabase,
-	ew EventWriter, modelMessageID int, agentResponseText string, cancelCallback func(),
-) error {
+func checkStreamCancellation(ctx context.Context, db *database.SessionDatabase, ew EventWriter, modelMessageID int, agentResponseText string, cancelCallback func()) error {
 	select {
 	case <-ctx.Done():
 		// API call was cancelled (either by client disconnect or explicit cancel)

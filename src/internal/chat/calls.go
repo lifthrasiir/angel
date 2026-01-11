@@ -74,7 +74,7 @@ func completeCall(sessionId string) {
 	delete(activeCalls, sessionId)
 
 	subsessionPrefix := sessionId + "."
-	for subsessionId, _ := range activeCalls {
+	for subsessionId := range activeCalls {
 		if strings.HasPrefix(subsessionId, subsessionPrefix) {
 			delete(activeCalls, subsessionId)
 		}
