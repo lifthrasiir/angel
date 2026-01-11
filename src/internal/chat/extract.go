@@ -81,24 +81,6 @@ func ExtractSession(ctx context.Context, db *database.SessionDatabase, targetMes
 
 	// Create a new session
 	newSessionId = database.GenerateID()
-	newDb, err := db.WithSession(newSessionId)
-	if err != nil {
-		err = fmt.Errorf("failed to create session database for new session: %w", err)
-		return
-	}
-	defer newDb.Close()
-
-	// Collect subsession IDs from subagent FunctionResponse messages
-	subsessionIDs := collectSubsessionIDs(processedMessages)
-
-	// Copy subsessions if any exist
-	if len(subsessionIDs) > 0 {
-		err := copySubsessionsToNewSession(db, newDb, subsessionIDs)
-		if err != nil {
-			log.Printf("extractSessionHandler: Failed to copy subsessions: %v", err)
-			// Non-fatal error, continue without subsessions
-		}
-	}
 
 	// Generate a name for the new session
 	newSessionName = generateCopySessionName(originalSession.Name)
@@ -106,13 +88,25 @@ func ExtractSession(ctx context.Context, db *database.SessionDatabase, targetMes
 	// Use the already evaluated system prompt from original session
 	// originalSession.SystemPrompt is already evaluated, so use it directly
 
-	// Create the new session
-	newDb, newPrimaryBranchID, err := database.CreateSession(newDb.Database, newSessionId, originalSession.SystemPrompt, originalSession.WorkspaceID)
+	// Create the new session (this inserts into main DB and attaches the session DB)
+	newDb, newPrimaryBranchID, err := database.CreateSession(db.Database, newSessionId, originalSession.SystemPrompt, originalSession.WorkspaceID)
 	if err != nil {
 		err = fmt.Errorf("failed to create new session: %w", err)
 		return
 	}
 	defer newDb.Close()
+
+	// Collect subsession IDs from subagent FunctionResponse messages
+	subsessionIDs := collectSubsessionIDs(processedMessages)
+
+	// Copy subsessions if any exist (must be done after CreateSession)
+	if len(subsessionIDs) > 0 {
+		err := copySubsessionsToNewSession(db, newDb, subsessionIDs)
+		if err != nil {
+			log.Printf("extractSessionHandler: Failed to copy subsessions: %v", err)
+			// Non-fatal error, continue without subsessions
+		}
+	}
 
 	// Set the name for the new session
 	if err := database.UpdateSessionName(newDb, newSessionName); err != nil {
