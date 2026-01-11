@@ -538,7 +538,7 @@ func (sw *SessionWatcher) rescanSessions(knownFiles map[string]time.Time) {
 // It attaches the session DB to the main DB and copies user/model messages.
 func syncSessionToMainDB(db *Database, mainSessionID, sessionDBPath string) error {
 	// Attach the session DB to the main DB
-	attachAlias := fmt.Sprintf("`session:%s`", mainSessionID)
+	attachAlias := fmt.Sprintf("`sync-session:%s`", mainSessionID)
 	_, err := db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS %s", sessionDBPath, attachAlias))
 	if err != nil {
 		return fmt.Errorf("failed to attach session DB: %w", err)
