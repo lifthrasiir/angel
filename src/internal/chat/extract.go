@@ -114,6 +114,14 @@ func ExtractSession(ctx context.Context, db *database.SessionDatabase, targetMes
 		// Non-fatal error, continue
 	}
 
+	// Copy blobs referenced by processed messages BEFORE copying messages
+	// This ensures blobs exist when triggers fire on message insert
+	err = copyBlobsBetweenSessions(db, newDb, processedMessages)
+	if err != nil {
+		log.Printf("extractSessionHandler: Failed to copy blobs: %v", err)
+		// Non-fatal error, continue with message copying
+	}
+
 	// Create a new message chain for the new session
 	mc, err := database.NewMessageChain(ctx, newDb, newPrimaryBranchID)
 	if err != nil {
@@ -295,6 +303,13 @@ func copySubsessionsToNewSession(db, newDb *database.SessionDatabase, subsession
 			continue
 		}
 
+		// Get source messages to verify
+		_, err = database.GetSessionHistory(sourceDb, originalSubsession.PrimaryBranchID)
+		if err != nil {
+			log.Printf("Failed to get source messages from %s: %v", fullSessionID, err)
+			continue
+		}
+
 		// Create new subsession with new full session ID and new session ID as parent
 		targetDb, _, err := database.CreateSession(db.Database, newFullSessionID, originalSubsession.SystemPrompt, originalSubsession.WorkspaceID)
 		if err != nil {
@@ -314,12 +329,70 @@ func copySubsessionsToNewSession(db, newDb *database.SessionDatabase, subsession
 	return nil
 }
 
+// copyBlobsBetweenSessions copies blobs referenced by messages from source to target session.
+// It collects all blob hashes from the source messages and copies the blob data.
+func copyBlobsBetweenSessions(sourceDb, targetDb *database.SessionDatabase, messages []FrontendMessage) error {
+	// Collect all unique blob hashes from message attachments
+	blobHashes := make(map[string]bool)
+	for _, msg := range messages {
+		if len(msg.Attachments) > 0 {
+			for _, att := range msg.Attachments {
+				if att.Hash != "" {
+					blobHashes[att.Hash] = true
+				}
+			}
+		}
+	}
+
+	// If no blobs to copy, return early
+	if len(blobHashes) == 0 {
+		return nil
+	}
+
+	// Copy each blob from source to target
+	for hash := range blobHashes {
+		// Get blob data from source session
+		data, err := database.GetBlob(sourceDb, hash)
+		if err != nil {
+			log.Printf("Failed to get blob %s from source session: %v", hash, err)
+			continue
+		}
+
+		// Save blob to target session (this will use the same hash since SHA-512/256 is deterministic)
+		// Note: We set ref_count to 0 here, and triggers will increment when messages are inserted
+		_, err = targetDb.Exec(`
+			INSERT INTO S.blobs (id, data, ref_count) VALUES (?, ?, 0)
+			ON CONFLICT(id) DO UPDATE SET data = excluded.data
+		`, hash, data)
+		if err != nil {
+			log.Printf("Failed to copy blob %s to target session: %v", hash, err)
+			continue
+		}
+	}
+
+	return nil
+}
+
 // copyMessagesBetweenSessions copies all messages from one session to another
 func copyMessagesBetweenSessions(sourceDb, targetDb *database.SessionDatabase) error {
+	// Get the source session's primary branch ID
+	sourceBranchID, err := database.GetSessionPrimaryBranchID(sourceDb)
+	if err != nil {
+		return fmt.Errorf("failed to get primary branch ID for source session: %w", err)
+	}
+
 	// Get all messages from source session
-	sourceMessages, err := database.GetSessionHistory(sourceDb, "")
+	sourceMessages, err := database.GetSessionHistory(sourceDb, sourceBranchID)
 	if err != nil {
 		return fmt.Errorf("failed to get messages from source session: %w", err)
+	}
+
+	// Copy blobs referenced by these messages BEFORE copying messages
+	// This ensures blobs exist when triggers fire on message insert
+	err = copyBlobsBetweenSessions(sourceDb, targetDb, sourceMessages)
+	if err != nil {
+		log.Printf("Failed to copy blobs: %v", err)
+		// Non-fatal error, continue with message copying
 	}
 
 	// Create message chain for target session
