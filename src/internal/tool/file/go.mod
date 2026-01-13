@@ -1,4 +1,4 @@
-module github.com/lifthrasiir/angel/internal/tool/filesystem
+module github.com/lifthrasiir/angel/internal/tool/file
 
 go 1.25
 
