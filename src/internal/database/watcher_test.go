@@ -489,8 +489,19 @@ func TestSessionWatcher_ConcurrentAccess(t *testing.T) {
 		t.Fatal("Timeout waiting for all database files to be created")
 	}
 
-	// Give watcher a moment to process the events
-	time.Sleep(100 * time.Millisecond)
+	// Wait for watcher to track all sessions
+	// This is important for count=3 test runs to avoid "database is closed" errors
+	if !waitForTimeout(func() bool {
+		for i := 0; i < numGoroutines; i++ {
+			sessionID := "session" + strconv.Itoa(i)
+			if !watcher.IsTracked(sessionID) {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second) {
+		t.Fatal("Timeout waiting for watcher to track all sessions")
+	}
 }
 
 // TestSessionWatcher_WriteEvent tests handling of database write events.
