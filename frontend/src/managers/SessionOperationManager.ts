@@ -557,6 +557,7 @@ export class SessionOperationManager {
         type: EARLIER_MESSAGES_LOADED,
         data: {
           ...data,
+          history: (data.history || []).map((message: ChatMessage) => ({ sessionId, ...message })),
           hasMore: hasMore,
         },
       });
