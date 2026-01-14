@@ -9,6 +9,7 @@ use (
 	./src/internal/database
 	./src/internal/env
 	./src/internal/llm
+	./src/internal/llm/spec
 	./src/internal/prompts
 	./src/internal/server
 	./src/internal/test

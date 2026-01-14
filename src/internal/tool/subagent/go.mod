@@ -8,6 +8,7 @@ require (
 	github.com/lifthrasiir/angel/internal/database v0.0.0-00010101000000-000000000000
 	github.com/lifthrasiir/angel/internal/env v0.0.0-00010101000000-000000000000
 	github.com/lifthrasiir/angel/internal/llm v0.0.0-00010101000000-000000000000
+	github.com/lifthrasiir/angel/internal/llm/spec v0.0.0-00010101000000-000000000000 // indirect
 	github.com/lifthrasiir/angel/internal/tool v0.0.0-00010101000000-000000000000
 	github.com/lifthrasiir/angel/internal/types v0.0.0-00010101000000-000000000000
 )
