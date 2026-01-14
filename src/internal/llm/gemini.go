@@ -22,17 +22,9 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
-// Ensure GeminiProvider implements LLMProvider
-var _ LLMProvider = (*GeminiProvider)(nil)
-
-type GeminiProvider struct {
-	models map[string]*Model
-}
-
-// NewGeminiProvider creates a new GeminiProvider with the given models
-func NewGeminiProvider(models map[string]*Model) *GeminiProvider {
-	return &GeminiProvider{models: models}
-}
+// Ensure providers implement LLMProvider
+var _ LLMProvider = (*GeminiAPIProvider)(nil)
+var _ LLMProvider = (*CodeAssistProvider)(nil)
 
 // Reserved names for Gemini's internal tools.
 const (
@@ -40,8 +32,18 @@ const (
 	GeminiCodeExecutionToolName = ".code_execution"
 )
 
-// resolveModelName resolves the model key to the actual API model name
-func (p *GeminiProvider) resolveModel(modelName string) (*Model, string) {
+// GeminiAPIProvider handles the "api" provider type
+type GeminiAPIProvider struct {
+	models map[string]*Model
+}
+
+// NewGeminiAPIProvider creates a new GeminiAPIProvider with the given models
+func NewGeminiAPIProvider(models map[string]*Model) *GeminiAPIProvider {
+	return &GeminiAPIProvider{models: models}
+}
+
+// resolveModel resolves the model key to the actual API model name
+func (p *GeminiAPIProvider) resolveModel(modelName string) (*Model, string) {
 	if model, exists := p.models[modelName]; exists {
 		apiModelName := model.ModelName
 		if apiModelName != "" {
@@ -51,9 +53,8 @@ func (p *GeminiProvider) resolveModel(modelName string) (*Model, string) {
 	return nil, "" // Return nil to indicate model not found
 }
 
-// SendMessageStream calls the streamGenerateContent of Code Assist API and returns an iter.Seq of responses.
-func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
-	// Resolve the model to get both model info and API model name
+// SendMessageStream calls the Gemini API and returns an iter.Seq of responses
+func (p *GeminiAPIProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 	model, apiModelName := p.resolveModel(modelName)
 	if model == nil {
 		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
@@ -68,19 +69,46 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 		return nil, nil, err
 	}
 
-	type StreamResult struct {
-		iter.Seq[GenerateContentResponse]
-		io.Closer
+	configs, err := database.GetGeminiAPIConfigs(db)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get Gemini API configs: %w", err)
 	}
 
-	apiCallback := func(geminiClient *GeminiAPIClient, config GeminiAPIConfig) (out StreamResult, err error) {
+	// Sort configs by last_used for this model (oldest first)
+	sort.Slice(configs, func(i, j int) bool {
+		return configs[i].LastUsedByModel[apiModelName].Before(configs[j].LastUsedByModel[apiModelName])
+	})
+
+	var lastErr error
+	for _, config := range configs {
+		if !config.Enabled {
+			continue
+		}
+
+		// Create client
+		clientProvider := NewGeminiAPIHTTPClientProvider(config.APIKey)
+		client := NewGeminiAPIClient(clientProvider, config.APIKey)
+
+		// Update last_used for this model
+		database.UpdateModelLastUsed(db, config.ID, apiModelName)
+
 		// Convert SessionParams to GenerateContentRequest
 		request := convertSessionParamsToGenerateRequest(tools, model, params)
 
-		respBody, err := geminiClient.StreamGenerateContent(ctx, apiModelName, request)
+		respBody, err := client.StreamGenerateContent(ctx, apiModelName, request)
 		if err != nil {
-			err = fmt.Errorf("failed to call Gemini API: %w", err)
-			return
+			lastErr = err
+
+			// Check rate limit
+			if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
+				// Handle rate limit
+				go func() {
+					retryAfter := parseRetryAfter("")
+					database.HandleModelRateLimit(db, config.ID, apiModelName, retryAfter)
+					log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, apiModelName)
+				}()
+			}
+			continue
 		}
 
 		dec := json.NewDecoder(respBody)
@@ -91,8 +119,8 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 		if err != nil {
 			respBody.Close()
 			log.Printf("GeminiAPIProvider.SendMessageStream: Expected opening bracket '[', but got %v", err)
-			err = fmt.Errorf("expected opening bracket '[', but got %w", err)
-			return
+			lastErr = fmt.Errorf("expected opening bracket '[', but got %w", err)
+			continue
 		}
 
 		// Create an iter.Seq that yields GenerateContentResponse
@@ -110,60 +138,14 @@ func (p *GeminiProvider) SendMessageStream(ctx context.Context, modelName string
 			}
 		}
 
-		out.Seq = seq
-		out.Closer = respBody
-		return
+		return seq, respBody, nil
 	}
 
-	codeAssistCallback := func(client *CodeAssistClient) (out StreamResult, err error) {
-		// Use Code Assist API with the provided client
-		request := convertSessionParamsToGenerateRequest(tools, model, params)
-		respBody, err := client.StreamGenerateContent(ctx, apiModelName, request)
-		if err != nil {
-			log.Printf("SendMessageStream: streamGenerateContent failed: %v", err)
-			return
-		}
-
-		dec := json.NewDecoder(respBody)
-
-		// Code Assist returns a JSON array of responses
-		_, err = dec.Token()
-		if err != nil {
-			respBody.Close()
-			log.Printf("SendMessageStream: Expected opening bracket '[', but got %v", err)
-			err = fmt.Errorf("expected opening bracket '[', but got %w", err)
-			return
-		}
-
-		// Create an iter.Seq that yields GenerateContentResponse
-		seq := func(yield func(GenerateContentResponse) bool) {
-			for dec.More() {
-				var caResp CaGenerateContentResponse
-				if err := dec.Decode(&caResp); err != nil {
-					log.Printf("SendMessageStream: Failed to decode JSON object from stream: %v", err)
-					return
-				}
-
-				if !yield(caResp.Response) {
-					return
-				}
-			}
-		}
-
-		out.Seq = seq
-		out.Closer = respBody
-		return
-	}
-
-	out, err := tryAllProviders(ctx, db, model, apiCallback, codeAssistCallback)
-	if err != nil {
-		return nil, nil, err
-	}
-	return out.Seq, out.Closer, nil
+	return nil, nil, lastErr
 }
 
-// GenerateContentOneShot calls the streamGenerateContent API and returns a single response.
-func (p *GeminiProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
+// GenerateContentOneShot calls the Gemini API and returns a single response
+func (p *GeminiAPIProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
 	seq, closer, err := p.SendMessageStream(ctx, modelName, params)
 	if err != nil {
 		log.Printf("GenerateContentOneShot: SendMessageStream failed: %v", err)
@@ -171,7 +153,7 @@ func (p *GeminiProvider) GenerateContentOneShot(ctx context.Context, modelName s
 	}
 	defer closer.Close()
 
-	var fullResponse strings.Builder // Use a strings.Builder for efficient concatenation
+	var fullResponse strings.Builder
 	var urlContextMeta *URLContextMetadata
 	var groundingMetadata *GroundingMetadata
 
@@ -180,13 +162,11 @@ func (p *GeminiProvider) GenerateContentOneShot(ctx context.Context, modelName s
 			candidate := resp.Candidates[0]
 			if len(candidate.Content.Parts) > 0 {
 				for _, part := range candidate.Content.Parts {
-					if part.Text != "" { // Check if it's a text part
+					if part.Text != "" {
 						fullResponse.WriteString(part.Text)
 					}
-					// TODO: Handle other part types if necessary (e.g., function_call, function_response)
 				}
 			}
-			// Extract metadata from the last candidate (assuming it's cumulative or final)
 			if candidate.URLContextMetadata != nil {
 				urlContextMeta = candidate.URLContextMetadata
 			}
@@ -207,31 +187,317 @@ func (p *GeminiProvider) GenerateContentOneShot(ctx context.Context, modelName s
 	return OneShotResult{}, fmt.Errorf("no text content found in LLM response")
 }
 
-func (p *GeminiProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
-	// Resolve the model name to the actual API model name
+func (p *GeminiAPIProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 	model, apiModelName := p.resolveModel(modelName)
 	if model == nil {
 		return nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
 
-	// Get database from context
 	db, err := database.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	apiCallback := func(client *GeminiAPIClient, config GeminiAPIConfig) (*CaCountTokenResponse, error) {
-		return client.CountTokens(ctx, apiModelName, contents)
+	configs, err := database.GetGeminiAPIConfigs(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Gemini API configs: %w", err)
 	}
-	codeAssistCallback := func(client *CodeAssistClient) (*CaCountTokenResponse, error) {
-		return client.CountTokens(ctx, apiModelName, contents)
+
+	// Sort configs by last_used for this model (oldest first)
+	sort.Slice(configs, func(i, j int) bool {
+		return configs[i].LastUsedByModel[apiModelName].Before(configs[j].LastUsedByModel[apiModelName])
+	})
+
+	var lastErr error
+	for _, config := range configs {
+		if !config.Enabled {
+			continue
+		}
+
+		clientProvider := NewGeminiAPIHTTPClientProvider(config.APIKey)
+		client := NewGeminiAPIClient(clientProvider, config.APIKey)
+
+		database.UpdateModelLastUsed(db, config.ID, apiModelName)
+
+		result, err := client.CountTokens(ctx, apiModelName, contents)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+
+		// Check rate limit
+		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
+			go func() {
+				retryAfter := parseRetryAfter("")
+				database.HandleModelRateLimit(db, config.ID, apiModelName, retryAfter)
+				log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, apiModelName)
+			}()
+		}
 	}
-	return tryAllProviders(ctx, db, model, apiCallback, codeAssistCallback)
+
+	return nil, lastErr
 }
 
-// MaxTokens implements the LLMProvider interface for CodeAssistProvider.
-func (p *GeminiProvider) MaxTokens(modelName string) int {
-	// Use model information from ModelRegistry models map
+func (p *GeminiAPIProvider) MaxTokens(modelName string) int {
+	if model, exists := p.models[modelName]; exists {
+		return model.MaxTokens
+	}
+	return 0
+}
+
+// CodeAssistProvider handles the "geminicli" and "antigravity" provider types
+type CodeAssistProvider struct {
+	providerKind string // "geminicli" or "antigravity"
+	models       map[string]*Model
+}
+
+// NewCodeAssistProvider creates a new CodeAssistProvider for a specific provider kind
+func NewCodeAssistProvider(providerKind string, models map[string]*Model) *CodeAssistProvider {
+	return &CodeAssistProvider{
+		providerKind: providerKind,
+		models:       models,
+	}
+}
+
+// resolveModel resolves the model key to the actual API model name
+func (p *CodeAssistProvider) resolveModel(modelName string) (*Model, string) {
+	if model, exists := p.models[modelName]; exists {
+		apiModelName := model.ModelName
+		if apiModelName != "" {
+			return model, apiModelName
+		}
+	}
+	return nil, ""
+}
+
+// SendMessageStream calls the Code Assist API and returns an iter.Seq of responses
+func (p *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	model, apiModelName := p.resolveModel(modelName)
+	if model == nil {
+		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
+	}
+
+	db, err := database.FromContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	tools, err := tool.FromContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	ga, err := GeminiAuthFromContext(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get GeminiAuth from context: %w", err)
+	}
+
+	tokens, err := database.GetOAuthTokensWithValidProjectID(db)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get OAuth tokens: %w", err)
+	}
+
+	// Filter tokens for the current provider kind and sort by last_used for this model (oldest first)
+	var providerTokens []OAuthToken
+	for _, token := range tokens {
+		if token.Kind == p.providerKind {
+			providerTokens = append(providerTokens, token)
+		}
+	}
+
+	sort.Slice(providerTokens, func(i, j int) bool {
+		return providerTokens[i].LastUsedByModel[apiModelName].Before(providerTokens[j].LastUsedByModel[apiModelName])
+	})
+
+	var lastErr error
+	for _, token := range providerTokens {
+		// Parse OAuth token
+		var oauthToken oauth2.Token
+		if err := json.Unmarshal([]byte(token.TokenData), &oauthToken); err != nil {
+			log.Printf("Failed to unmarshal OAuth token %d: %v", token.ID, err)
+			continue
+		}
+
+		// Create token source with database refresh hook
+		oauthConfig := ga.OAuthConfig(p.providerKind)
+		tokenSource := &databaseTokenSource{
+			db:          db,
+			tokenID:     token.ID,
+			kind:        p.providerKind,
+			userEmail:   token.UserEmail,
+			projectID:   token.ProjectID,
+			baseToken:   &oauthToken,
+			tokenSource: oauthConfig.TokenSource(context.Background(), &oauthToken),
+		}
+		client := NewCodeAssistClient(TokenSourceClientProvider(tokenSource), token.ProjectID, p.providerKind)
+
+		// Update last_used for this model
+		database.UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
+
+		// Convert SessionParams to GenerateContentRequest
+		request := convertSessionParamsToGenerateRequest(tools, model, params)
+
+		respBody, err := client.StreamGenerateContent(ctx, apiModelName, request)
+		if err != nil {
+			lastErr = err
+
+			// Check rate limit
+			if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
+				go func() {
+					retryAfter := parseRetryAfter("")
+					database.HandleOAuthRateLimit(db, token.ID, apiModelName, retryAfter)
+					log.Printf("Rate limit detected for OAuth token %d, model %s", token.ID, apiModelName)
+				}()
+			}
+			continue
+		}
+
+		dec := json.NewDecoder(respBody)
+
+		// Code Assist returns a JSON array of responses
+		_, err = dec.Token()
+		if err != nil {
+			respBody.Close()
+			log.Printf("CodeAssistProvider.SendMessageStream: Expected opening bracket '[', but got %v", err)
+			lastErr = fmt.Errorf("expected opening bracket '[', but got %w", err)
+			continue
+		}
+
+		// Create an iter.Seq that yields GenerateContentResponse
+		seq := func(yield func(GenerateContentResponse) bool) {
+			for dec.More() {
+				var caResp CaGenerateContentResponse
+				if err := dec.Decode(&caResp); err != nil {
+					log.Printf("CodeAssistProvider.SendMessageStream: Failed to decode JSON object from stream: %v", err)
+					return
+				}
+
+				if !yield(caResp.Response) {
+					return
+				}
+			}
+		}
+
+		return seq, respBody, nil
+	}
+
+	return nil, nil, lastErr
+}
+
+// GenerateContentOneShot calls the Code Assist API and returns a single response
+func (p *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, modelName string, params SessionParams) (OneShotResult, error) {
+	seq, closer, err := p.SendMessageStream(ctx, modelName, params)
+	if err != nil {
+		log.Printf("GenerateContentOneShot: SendMessageStream failed: %v", err)
+		return OneShotResult{}, err
+	}
+	defer closer.Close()
+
+	var fullResponse strings.Builder
+	var urlContextMeta *URLContextMetadata
+	var groundingMetadata *GroundingMetadata
+
+	for resp := range seq {
+		if len(resp.Candidates) > 0 {
+			candidate := resp.Candidates[0]
+			if len(candidate.Content.Parts) > 0 {
+				for _, part := range candidate.Content.Parts {
+					if part.Text != "" {
+						fullResponse.WriteString(part.Text)
+					}
+				}
+			}
+			if candidate.URLContextMetadata != nil {
+				urlContextMeta = candidate.URLContextMetadata
+			}
+			if candidate.GroundingMetadata != nil {
+				groundingMetadata = candidate.GroundingMetadata
+			}
+		}
+	}
+
+	if fullResponse.Len() > 0 {
+		return OneShotResult{
+			Text:               fullResponse.String(),
+			URLContextMetadata: urlContextMeta,
+			GroundingMetadata:  groundingMetadata,
+		}, nil
+	}
+
+	return OneShotResult{}, fmt.Errorf("no text content found in LLM response")
+}
+
+func (p *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
+	model, apiModelName := p.resolveModel(modelName)
+	if model == nil {
+		return nil, fmt.Errorf("unsupported model: %s", modelName)
+	}
+
+	db, err := database.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ga, err := GeminiAuthFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get GeminiAuth from context: %w", err)
+	}
+
+	tokens, err := database.GetOAuthTokensWithValidProjectID(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OAuth tokens: %w", err)
+	}
+
+	// Filter tokens for the current provider kind
+	var providerTokens []OAuthToken
+	for _, token := range tokens {
+		if token.Kind == p.providerKind {
+			providerTokens = append(providerTokens, token)
+		}
+	}
+
+	sort.Slice(providerTokens, func(i, j int) bool {
+		return providerTokens[i].LastUsedByModel[apiModelName].Before(providerTokens[j].LastUsedByModel[apiModelName])
+	})
+
+	var lastErr error
+	for _, token := range providerTokens {
+		var oauthToken oauth2.Token
+		if err := json.Unmarshal([]byte(token.TokenData), &oauthToken); err != nil {
+			log.Printf("Failed to unmarshal OAuth token %d: %v", token.ID, err)
+			continue
+		}
+
+		oauthConfig := ga.OAuthConfig(p.providerKind)
+		tokenSource := &databaseTokenSource{
+			db:          db,
+			tokenID:     token.ID,
+			kind:        p.providerKind,
+			userEmail:   token.UserEmail,
+			projectID:   token.ProjectID,
+			baseToken:   &oauthToken,
+			tokenSource: oauthConfig.TokenSource(context.Background(), &oauthToken),
+		}
+		client := NewCodeAssistClient(TokenSourceClientProvider(tokenSource), token.ProjectID, p.providerKind)
+
+		database.UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
+
+		result, err := client.CountTokens(ctx, apiModelName, contents)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+
+		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
+			go func() {
+				retryAfter := parseRetryAfter("")
+				database.HandleOAuthRateLimit(db, token.ID, apiModelName, retryAfter)
+				log.Printf("Rate limit detected for OAuth token %d, model %s", token.ID, apiModelName)
+			}()
+		}
+	}
+
+	return nil, lastErr
+}
+
+func (p *CodeAssistProvider) MaxTokens(modelName string) int {
 	if model, exists := p.models[modelName]; exists {
 		return model.MaxTokens
 	}
@@ -256,142 +522,6 @@ func parseRetryAfter(retryAfter string) time.Duration {
 
 	// Fallback to 60 seconds
 	return 60 * time.Second
-}
-
-func tryAllProviders[T any](
-	ctx context.Context,
-	db *database.Database,
-	model *Model,
-	apiCallback func(*GeminiAPIClient, GeminiAPIConfig) (T, error),
-	codeAssistCallback func(*CodeAssistClient) (T, error),
-) (out T, err error) {
-	for _, providerType := range model.Providers {
-		switch providerType {
-		case "api":
-			var configs []GeminiAPIConfig
-			configs, err = database.GetGeminiAPIConfigs(db)
-			if err != nil {
-				err = fmt.Errorf("failed to get Gemini API configs: %w", err)
-				return
-			}
-
-			apiModelName := model.ModelName
-
-			// Sort configs by last_used for this model (oldest first)
-			sort.Slice(configs, func(i, j int) bool {
-				return configs[i].LastUsedByModel[apiModelName].Before(configs[j].LastUsedByModel[apiModelName])
-			})
-
-			for _, config := range configs {
-				if !config.Enabled {
-					continue
-				}
-
-				// Create client
-				clientProvider := NewGeminiAPIHTTPClientProvider(config.APIKey)
-				client := NewGeminiAPIClient(clientProvider, config.APIKey)
-
-				// Update last_used for this model
-				database.UpdateModelLastUsed(db, config.ID, apiModelName)
-
-				out, err = apiCallback(client, config)
-				if err == nil {
-					return
-				}
-
-				// Check rate limit
-				if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
-					// Handle rate limit
-					go func() {
-						retryAfter := parseRetryAfter("")
-						database.HandleModelRateLimit(db, config.ID, apiModelName, retryAfter)
-						log.Printf("Rate limit detected for Gemini API config %s, model %s", config.ID, apiModelName)
-					}()
-					err = fmt.Errorf("rate limited for model %s", apiModelName)
-				}
-			}
-
-		case "geminicli", "antigravity":
-			// Handle OAuth-based providers
-			var tokens []OAuthToken
-			tokens, err = database.GetOAuthTokensWithValidProjectID(db)
-			if err != nil {
-				err = fmt.Errorf("failed to get OAuth tokens: %w", err)
-				return
-			}
-
-			// Filter tokens for the current provider kind and sort by last_used for this model (oldest first)
-			var providerTokens []OAuthToken
-			for _, token := range tokens {
-				if token.Kind == providerType {
-					providerTokens = append(providerTokens, token)
-				}
-			}
-
-			apiModelName := model.ModelName
-
-			sort.Slice(providerTokens, func(i, j int) bool {
-				return providerTokens[i].LastUsedByModel[apiModelName].Before(providerTokens[j].LastUsedByModel[apiModelName])
-			})
-
-			for _, token := range providerTokens {
-				// Parse OAuth token
-				var oauthToken oauth2.Token
-				if err := json.Unmarshal([]byte(token.TokenData), &oauthToken); err != nil {
-					log.Printf("Failed to unmarshal OAuth token %d: %v", token.ID, err)
-					continue
-				}
-
-				var ga *GeminiAuth
-				ga, err = GeminiAuthFromContext(ctx)
-				if err != nil {
-					err = fmt.Errorf("failed to get GeminiAuth from context: %w", err)
-					return
-				}
-
-				// Create token source with database refresh hook
-				oauthConfig := ga.OAuthConfig(providerType)
-				tokenSource := &databaseTokenSource{
-					db:          db,
-					tokenID:     token.ID,
-					kind:        providerType,
-					userEmail:   token.UserEmail,
-					projectID:   token.ProjectID,
-					baseToken:   &oauthToken,
-					tokenSource: oauthConfig.TokenSource(context.Background(), &oauthToken),
-				}
-				client := NewCodeAssistClient(TokenSourceClientProvider(tokenSource), token.ProjectID, providerType)
-
-				// Update last_used for this model
-				database.UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
-
-				out, err = codeAssistCallback(client)
-				if err == nil {
-					return
-				}
-
-				// Check rate limit
-				if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 429 {
-					// Handle rate limit
-					go func() {
-						retryAfter := parseRetryAfter("")
-						database.HandleOAuthRateLimit(db, token.ID, apiModelName, retryAfter)
-						log.Printf("Rate limit detected for OAuth token %d, model %s", token.ID, apiModelName)
-					}()
-					err = fmt.Errorf("rate limited for model %s", apiModelName)
-				}
-			}
-
-		default:
-			log.Panicf("Unknown provider type: %s", providerType)
-		}
-	}
-
-	// If we reach here, all providers failed. Return the last error if available, otherwise create a generic error.
-	if err == nil {
-		err = fmt.Errorf("all providers failed for model %s", model.ModelName)
-	}
-	return
 }
 
 // NewGeminiAPIHTTPClientProvider creates a simple HTTP client provider for Gemini API

@@ -27,6 +27,10 @@ import (
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
+// MockLLMProviderForTests is the mock LLM provider used in tests
+// This is set up by SetupTestEnvironment and can be accessed by tests to customize mock behavior
+var MockLLMProviderForTests *llm.MockLLMProvider
+
 // Helper function to set up the test environment
 func setupTest(t *testing.T) (*mux.Router, *database.Database, *llm.Models) {
 	return setupTestWithSessionDB(t, true)
@@ -72,7 +76,7 @@ func setupTestWithSessionDB(t *testing.T, useMemorySessionDB bool) (*mux.Router,
 	}
 
 	// Override CurrentProvider with MockLLMProvider for testing
-	mockLLMProvider := &llm.MockLLMProvider{
+	MockLLMProviderForTests = &llm.MockLLMProvider{
 		SendMessageStreamFunc: func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 			// Default mock implementation: return an empty sequence
 			return iter.Seq[GenerateContentResponse](func(yield func(GenerateContentResponse) bool) {}), io.NopCloser(nil), nil
@@ -87,7 +91,7 @@ func setupTestWithSessionDB(t *testing.T, useMemorySessionDB bool) (*mux.Router,
 			return 1048576 // Mocked max tokens
 		},
 	}
-	models.SetGeminiProvider(mockLLMProvider)
+	models.SetGeminiProvider(MockLLMProviderForTests)
 
 	// Initialize GeminiAuth
 	geminiAuth := llm.NewGeminiAuth("")

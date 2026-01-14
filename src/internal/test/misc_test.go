@@ -9,19 +9,16 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
-	"github.com/lifthrasiir/angel/internal/llm"
 	"github.com/lifthrasiir/angel/internal/server"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // TestCountTokensHandler tests the countTokensHandler function
 func TestCountTokensHandler(t *testing.T) {
-	router, _, models := setupTest(t)
+	router, _, _ := setupTest(t)
 
 	// Mock the CountTokens method of CurrentProvider
-	provider := models.GetProvider(DefaultGeminiModel)
-	mockLLMProvider := provider.(*llm.MockLLMProvider)
-	mockLLMProvider.CountTokensFunc = func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
+	MockLLMProviderForTests.CountTokensFunc = func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
 		// Simulate token counting based on input text length
 		totalTokens := len(contents[0].Parts[0].Text) / 2 // Example: 2 chars per token
 		return &CaCountTokenResponse{TotalTokens: totalTokens}, nil
@@ -52,12 +49,14 @@ func TestCountTokensHandler(t *testing.T) {
 
 	// Test case 3: Authentication failure
 	t.Run("Authentication Failure", func(t *testing.T) {
-		// Temporarily set CurrentProvider to nil to simulate uninitialized client
-		models.SetGeminiProvider(&llm.MockLLMProvider{
-			CountTokensFunc: func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
-				return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: "Authentication failed"}
-			},
-		})
+		// Temporarily modify the mock to simulate authentication failure
+		oldCountTokensFunc := MockLLMProviderForTests.CountTokensFunc
+		MockLLMProviderForTests.CountTokensFunc = func(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
+			return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: "Authentication failed"}
+		}
+		defer func() {
+			MockLLMProviderForTests.CountTokensFunc = oldCountTokensFunc
+		}()
 
 		payload := []byte(`{"text": "Some text"}`)
 		testRequest(t, router, "POST", "/api/countTokens", payload, http.StatusUnauthorized)

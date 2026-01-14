@@ -279,9 +279,9 @@ func SubagentTool(ctx context.Context, args map[string]interface{}, params tool.
 		config,
 		resultCollector, // Custom EventWriter that captures events
 		text,
-		nil,                        // No attachments for regular subagent
-		subagentModelProvider.Name, // Use the resolved subagent model
-		0,                          // fetchLimit is not needed for subagent
+		nil,                          // No attachments for regular subagent
+		subagentModelProvider.Name(), // Use the resolved subagent model
+		0,                            // fetchLimit is not needed for subagent
 	)
 
 	if err != nil {
@@ -441,9 +441,9 @@ func GenerateImageTool(ctx context.Context, args map[string]interface{}, params 
 		config,
 		resultCollector, // Custom EventWriter that captures events
 		text,
-		inputAttachments,        // Input images as attachments
-		imageModelProvider.Name, // Use the resolved image generation model
-		0,                       // fetchLimit is not needed for image generation
+		inputAttachments,          // Input images as attachments
+		imageModelProvider.Name(), // Use the resolved image generation model
+		0,                         // fetchLimit is not needed for image generation
 	)
 
 	if err != nil {

@@ -99,9 +99,8 @@ type Models struct {
 	rawConfig     *ModelsConfig // Keep for reference resolution
 
 	// Provider management
-	providers       map[string]LLMProvider     // model name -> provider
+	providers       map[string]ModelProvider   // model name -> provider
 	openAIEndpoints map[string]*OpenAIEndpoint // config hash -> endpoint
-	geminiProvider  LLMProvider                // Single Gemini provider
 
 	// Thread safety
 	mutex sync.RWMutex
@@ -123,7 +122,7 @@ func LoadModels(data []byte) (*Models, error) {
 		displayOrder:    config.DisplayOrder,
 		aliases:         make(map[string]string),
 		rawConfig:       &config,
-		providers:       make(map[string]LLMProvider),
+		providers:       make(map[string]ModelProvider),
 		openAIEndpoints: make(map[string]*OpenAIEndpoint),
 	}
 
@@ -690,7 +689,7 @@ func (r *Models) createOpenAIEndpoint(config *OpenAIConfig) error {
 
 	// Register models with provider
 	for _, model := range models {
-		r.providers[model.ID] = client
+		r.providers[model.ID] = newModelProvider(client, model.ID)
 	}
 
 	return nil
@@ -770,7 +769,7 @@ func (r *Models) createOpenAIEndpointUnsafe(config *OpenAIConfig) error {
 	r.openAIEndpoints[hash] = endpoint
 
 	for _, model := range models {
-		r.providers[model.ID] = client
+		r.providers[model.ID] = newModelProvider(client, model.ID)
 	}
 
 	return nil
@@ -791,9 +790,10 @@ func (r *Models) cleanupUnusedEndpointsUnsafe(neededHashes map[string]bool) {
 
 // updateModelProvidersUnsafe updates the model to provider mappings (internal use)
 func (r *Models) updateModelProvidersUnsafe() {
-	// Clear existing non-Gemini providers (but preserve angel-eval)
-	for model, provider := range r.providers {
-		if provider != r.geminiProvider && model != AngelEvalModelName {
+	// Clear existing non-Gemini providers (but preserve angel-eval and builtin models)
+	for model := range r.providers {
+		_, isBuiltin := r.builtinModels[model]
+		if !isBuiltin && model != AngelEvalModelName {
 			delete(r.providers, model)
 		}
 	}
@@ -801,7 +801,7 @@ func (r *Models) updateModelProvidersUnsafe() {
 	// Re-add OpenAI models
 	for _, endpoint := range r.openAIEndpoints {
 		for _, model := range endpoint.models {
-			r.providers[model.ID] = endpoint.provider
+			r.providers[model.ID] = newModelProvider(endpoint.provider, model.ID)
 		}
 	}
 }
@@ -811,7 +811,7 @@ func (r *Models) SetAngelEvalProvider(provider LLMProvider) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	r.providers[AngelEvalModelName] = provider
+	r.providers[AngelEvalModelName] = newModelProvider(provider, AngelEvalModelName)
 
 	// Create the angel-eval model
 	angelEvalModel := &Model{
@@ -836,7 +836,7 @@ func (r *Models) SetAngelEvalProvider(provider LLMProvider) {
 	angelEvalModel.Subagents[SubagentImageGenerationTask] = angelEvalModel
 }
 
-// ResetGeminiProvider creates and sets the Gemini provider.
+// ResetGeminiProvider creates and sets the Gemini provider chains.
 func (r *Models) ResetGeminiProvider() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -849,12 +849,41 @@ func (r *Models) ResetGeminiProvider() {
 		}
 	}
 
-	// Create a single provider instance that will be shared by all Gemini models
-	r.geminiProvider = NewGeminiProvider(geminiModels)
+	// Create shared provider instances for each provider type
+	// These will be reused across all models
+	apiProvider := NewGeminiAPIProvider(geminiModels)
+	geminiCliProvider := NewCodeAssistProvider("geminicli", geminiModels)
+	antigravityProvider := NewCodeAssistProvider("antigravity", geminiModels)
 
-	// Register all Gemini models with the provider
-	for modelName := range geminiModels {
-		r.providers[modelName] = r.geminiProvider
+	// For each model, create a chain of providers based on its Providers array
+	for modelName, model := range geminiModels {
+		var modelProviders []ModelProvider
+
+		// Create providers in the order specified by model.Providers
+		for _, providerType := range model.Providers {
+			switch providerType {
+			case "api":
+				modelProviders = append(modelProviders, newModelProvider(apiProvider, modelName))
+			case "geminicli":
+				modelProviders = append(modelProviders, newModelProvider(geminiCliProvider, modelName))
+			case "antigravity":
+				modelProviders = append(modelProviders, newModelProvider(antigravityProvider, modelName))
+			default:
+				// Unknown provider type, skip
+				continue
+			}
+		}
+
+		// Create a chain if we have any providers
+		if len(modelProviders) > 0 {
+			if len(modelProviders) == 1 {
+				// No need to create a chain for a single provider
+				r.providers[modelName] = modelProviders[0]
+			} else {
+				// Create a chain of providers
+				r.providers[modelName] = NewModelProviderChain(modelProviders, modelName)
+			}
+		}
 	}
 }
 
@@ -863,18 +892,16 @@ func (r *Models) SetGeminiProvider(provider LLMProvider) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	r.geminiProvider = provider
-
 	// Register all Gemini models with the provider
 	for _, model := range r.builtinModels {
 		if r.isGeminiModelUnsafe(model) {
-			r.providers[model.Name] = provider
+			r.providers[model.Name] = newModelProvider(provider, model.Name)
 		}
 	}
 }
 
 // GetProvider returns the provider for a model name
-func (r *Models) GetProvider(modelName string) LLMProvider {
+func (r *Models) GetProvider(modelName string) ModelProvider {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -885,9 +912,9 @@ func (r *Models) GetProvider(modelName string) LLMProvider {
 func (r *Models) GetModelProvider(modelName string) (ModelProvider, error) {
 	provider := r.GetProvider(modelName)
 	if provider == nil {
-		return ModelProvider{}, fmt.Errorf("unsupported model: %s", modelName)
+		return nil, fmt.Errorf("unsupported model: %s", modelName)
 	}
-	return ModelProvider{LLMProvider: provider, Name: modelName}, nil
+	return provider, nil
 }
 
 // Clear removes all providers and resets the registry
@@ -895,9 +922,8 @@ func (r *Models) Clear() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	r.providers = make(map[string]LLMProvider)
+	r.providers = make(map[string]ModelProvider)
 	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
-	r.geminiProvider = nil
 }
 
 // IsEmpty returns true if no providers are registered
@@ -905,7 +931,7 @@ func (r *Models) IsEmpty() bool {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	return r.geminiProvider == nil && len(r.providers) == 0
+	return len(r.providers) == 0
 }
 
 // isGeminiModelUnsafe checks if a model is a built-in model that should be handled by GeminiProvider (internal use, no mutex)
@@ -932,9 +958,11 @@ func (r *Models) GetAllModels() []*Model {
 	func() {
 		r.mutex.RLock()
 		defer r.mutex.RUnlock()
-		for name, provider := range r.providers {
-			if !seen[name] && !strings.HasPrefix(name, "$") && provider != r.geminiProvider {
-				maxTokens := provider.MaxTokens(name)
+		for name := range r.providers {
+			_, isBuiltin := r.builtinModels[name]
+			if !seen[name] && !strings.HasPrefix(name, "$") && !isBuiltin {
+				provider := r.providers[name]
+				maxTokens := provider.MaxTokens()
 				nonGeminiModels = append(nonGeminiModels, &Model{Name: name, MaxTokens: maxTokens})
 				seen[name] = true
 			}
@@ -1019,7 +1047,7 @@ func (r *Models) ResolveSubagent(modelName string, task string) (ModelProvider, 
 
 	model, exists := r.builtinModels[modelName]
 	if !exists {
-		return ModelProvider{}, ModelsError{
+		return nil, ModelsError{
 			Type:    ErrTypeNotFound,
 			Message: fmt.Sprintf("Model not found: %s", modelName),
 			Model:   modelName,
@@ -1029,7 +1057,7 @@ func (r *Models) ResolveSubagent(modelName string, task string) (ModelProvider, 
 	// Check if model has the requested subagent
 	subagentModel, exists := model.Subagents[task]
 	if !exists {
-		return ModelProvider{}, ModelsError{
+		return nil, ModelsError{
 			Type:    ErrTypeNotFound,
 			Message: fmt.Sprintf("Subagent not found for task '%s' in model '%s'", task, modelName),
 			Model:   modelName,
@@ -1043,12 +1071,12 @@ func (r *Models) ResolveSubagent(modelName string, task string) (ModelProvider, 
 	r.mutex.RUnlock()
 
 	if provider == nil {
-		return ModelProvider{}, ModelsError{
+		return nil, ModelsError{
 			Type:    ErrTypeResolution,
 			Message: fmt.Sprintf("No provider available for subagent model '%s'", subagentModel.Name),
 			Model:   subagentModel.Name,
 		}
 	}
 
-	return ModelProvider{LLMProvider: provider, Name: subagentModel.Name}, nil
+	return provider, nil
 }

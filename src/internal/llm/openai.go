@@ -838,8 +838,9 @@ func ReloadOpenAIProviders(db *database.Database, registry *Models) {
 	func() {
 		registry.mutex.Lock()
 		defer registry.mutex.Unlock()
-		for modelName, provider := range registry.providers {
-			if _, ok := provider.(*OpenAIClient); ok {
+		for modelName := range registry.providers {
+			// Check if this is a non-builtin model (i.e., OpenAI model)
+			if _, isBuiltin := registry.builtinModels[modelName]; !isBuiltin {
 				if !validModels[modelName] {
 					delete(registry.providers, modelName)
 					log.Printf("Removed OpenAI model provider: %s", modelName)
@@ -865,14 +866,14 @@ func ReloadOpenAIProviders(db *database.Database, registry *Models) {
 			if validModels[model.ID] {
 				// Use the same client instance for all models from this config
 				registry.mutex.Lock()
-				registry.providers[model.ID] = client
+				registry.providers[model.ID] = newModelProvider(client, model.ID)
 				registry.mutex.Unlock()
 				log.Printf("Registered/updated OpenAI model: %s (from config: %s)", model.ID, config.Name)
 
 				// Pre-warm MaxTokens cache asynchronously
-				go func(modelName string, provider LLMProvider) {
-					_ = provider.MaxTokens(modelName)
-				}(model.ID, client)
+				go func(modelName string) {
+					_ = client.MaxTokens(modelName)
+				}(model.ID)
 			}
 		}
 	}

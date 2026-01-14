@@ -18,15 +18,13 @@ import (
 
 // TestInlineDataStreaming tests inlineData streaming functionality with proper SSE parsing
 func TestInlineDataStreaming(t *testing.T) {
-	router, _, models := setupTest(t)
+	router, _, _ := setupTest(t)
 
 	// Create a simple 1x1 PNG image (base64 encoded)
 	pngData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
 	// Mock the SendMessageStream method to simulate inlineData response
-	provider := models.GetProvider(DefaultGeminiModel)
-	mockLLMProvider := provider.(*llm.MockLLMProvider)
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	MockLLMProviderForTests.SendMessageStreamFunc = func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 		// Create a mock response with text and inlineData
 		responses := []GenerateContentResponse{
 			{
@@ -171,17 +169,14 @@ func TestInlineDataStreaming(t *testing.T) {
 
 // TestInlineDataCounterReset tests that the inlineData counter resets for each streaming session
 func TestInlineDataCounterReset(t *testing.T) {
-	router, db, models := setupTest(t)
+	router, db, _ := setupTest(t)
 
 	// Create a simple 1x1 PNG image (base64 encoded)
 	pngData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
 	// Mock the SendMessageStream method to simulate inlineData response
-	provider := models.GetProvider(DefaultGeminiModel)
-	mockLLMProvider := provider.(*llm.MockLLMProvider)
-
 	var callCount int = 0
-	mockLLMProvider.SendMessageStreamFunc = func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	MockLLMProviderForTests.SendMessageStreamFunc = func(ctx context.Context, modelName string, params llm.SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
 		callCount++
 
 		responses := []GenerateContentResponse{

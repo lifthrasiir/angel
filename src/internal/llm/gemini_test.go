@@ -37,13 +37,8 @@ func TestGeminiSubagentProvider(t *testing.T) {
 		}
 
 		// Should return gemini-2.5-flash/subagent, which modelName *is* gemini-2.5-flash-lite
-		if modelProvider.Name != "gemini-2.5-flash/subagent" {
-			t.Errorf("Expected 'gemini-2.5-flash/subagent', got '%s'", modelProvider.Name)
-		}
-
-		// Provider should be self
-		if modelProvider.LLMProvider != models.geminiProvider {
-			t.Error("Expected modelProvider.provider to be the same as geminiProvider")
+		if modelProvider.Name() != "gemini-2.5-flash/subagent" {
+			t.Errorf("Expected 'gemini-2.5-flash/subagent', got '%s'", modelProvider.Name())
 		}
 	})
 
@@ -55,8 +50,8 @@ func TestGeminiSubagentProvider(t *testing.T) {
 		}
 
 		// Should return some image model (currently gemini-2.5-flash-image, but may change)
-		if !strings.Contains(modelProvider.Name, "-image") {
-			t.Errorf("Expected some image model, got '%s'", modelProvider.Name)
+		if !strings.Contains(modelProvider.Name(), "-image") {
+			t.Errorf("Expected some image model, got '%s'", modelProvider.Name())
 		}
 	})
 
@@ -67,9 +62,9 @@ func TestGeminiSubagentProvider(t *testing.T) {
 			t.Fatalf("Expected error for non-existent task, got none")
 		}
 
-		// Should return empty values when task not found
-		if modelProvider.Name != "" {
-			t.Errorf("Expected empty model name for non-existent task, got '%s'", modelProvider.Name)
+		// Should return nil when task not found
+		if modelProvider != nil {
+			t.Errorf("Expected nil for non-existent task, got non-nil model provider")
 		}
 	})
 
@@ -80,9 +75,9 @@ func TestGeminiSubagentProvider(t *testing.T) {
 			t.Fatalf("Expected error for non-existent model, got none")
 		}
 
-		// Should return empty values when model not found
-		if modelProvider.Name != "" {
-			t.Errorf("Expected empty model name for non-existent model, got '%s'", modelProvider.Name)
+		// Should return nil when model not found
+		if modelProvider != nil {
+			t.Errorf("Expected nil for non-existent model, got non-nil model provider")
 		}
 	})
 
@@ -99,29 +94,25 @@ func TestGeminiSubagentProvider(t *testing.T) {
 			t.Errorf("Expected modelName 'claude-sonnet-4-5', got '%s'", model.ModelName)
 		}
 
-		// Verify the model is handled by GeminiProvider
+		// Verify the model has a provider
 		provider := models.GetProvider("claude-sonnet-4.5")
 		if provider == nil {
 			t.Fatalf("No provider found for claude-sonnet-4.5")
 		}
 
-		if provider != models.geminiProvider {
-			t.Error("claude-sonnet-4.5 should be handled by GeminiProvider")
+		// Verify the provider returns the correct model name
+		if provider.Name() != "claude-sonnet-4.5" {
+			t.Errorf("Expected provider name 'claude-sonnet-4.5', got '%s'", provider.Name())
 		}
 
-		// Test GetModelProvider method (which internally calls resolveModel)
+		// Test GetModelProvider method (which internally calls GetProvider)
 		modelProvider, err := models.GetModelProvider("claude-sonnet-4.5")
 		if err != nil {
 			t.Fatalf("GetModelProvider failed for claude-sonnet-4.5: %v", err)
 		}
 
-		if modelProvider.Name != "claude-sonnet-4.5" {
-			t.Errorf("Expected model provider name 'claude-sonnet-4.5', got '%s'", modelProvider.Name)
-		}
-
-		// Verify the model provider can resolve the model (implicitly testing resolveModel)
-		if modelProvider.LLMProvider == nil {
-			t.Fatal("GetModelProvider returned nil LLMProvider for claude-sonnet-4.5")
+		if modelProvider.Name() != "claude-sonnet-4.5" {
+			t.Errorf("Expected model provider name 'claude-sonnet-4.5', got '%s'", modelProvider.Name())
 		}
 	})
 
@@ -134,35 +125,35 @@ func TestGeminiSubagentProvider(t *testing.T) {
 		}
 
 		// Should return claude-sonnet-4.5/subagent
-		if modelProvider.Name != "claude-sonnet-4.5/subagent" {
-			t.Errorf("Expected 'claude-sonnet-4.5/subagent', got '%s'", modelProvider.Name)
-		}
-
-		// Provider should be the GeminiProvider
-		if modelProvider.LLMProvider != models.geminiProvider {
-			t.Error("Expected subagent provider to be GeminiProvider")
+		if modelProvider.Name() != "claude-sonnet-4.5/subagent" {
+			t.Errorf("Expected 'claude-sonnet-4.5/subagent', got '%s'", modelProvider.Name())
 		}
 	})
 
 	// Test 7: Verify MaxTokens method uses models
 	t.Run("MaxTokensFromModels", func(t *testing.T) {
-		maxTokens := models.geminiProvider.MaxTokens("gemini-2.5-flash")
+		// Get the provider for gemini-2.5-flash
+		provider := models.GetProvider("gemini-2.5-flash")
+		if provider == nil {
+			t.Fatalf("No provider found for gemini-2.5-flash")
+		}
+
+		maxTokens := provider.MaxTokens()
 		expected := 1048576 // From models.go MaxTokens logic
 		if maxTokens != expected {
 			t.Errorf("Expected maxTokens %d, got %d", expected, maxTokens)
 		}
 
 		// Test claude-sonnet-4.5 max tokens
-		claudeTokens := models.geminiProvider.MaxTokens("claude-sonnet-4.5")
+		claudeProvider := models.GetProvider("claude-sonnet-4.5")
+		if claudeProvider == nil {
+			t.Fatalf("No provider found for claude-sonnet-4.5")
+		}
+
+		claudeTokens := claudeProvider.MaxTokens()
 		expectedClaudeTokens := 200000 // From models.json
 		if claudeTokens != expectedClaudeTokens {
 			t.Errorf("Expected claude-sonnet-4.5 maxTokens %d, got %d", expectedClaudeTokens, claudeTokens)
-		}
-
-		// Test non-existent model (should return default)
-		defaultTokens := models.geminiProvider.MaxTokens("non-existent-model")
-		if defaultTokens != 0 {
-			t.Errorf("Expected default maxTokens %d, got %d", 0, defaultTokens)
 		}
 	})
 }
