@@ -156,7 +156,7 @@ func TestMessageChainWithThoughtAndModel(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "**Thinking**\nThis is a thought.", Thought: true}),
@@ -320,7 +320,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// i) Create three messages: A-B-C
 	// 1. Send initial user message (A)
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "A's thought", Thought: true}),
@@ -377,7 +377,7 @@ func TestBranchingMessageChain(t *testing.T) {
 	printMessages(t, sdb, "After A1-A3 chain")
 
 	// 2. Send second user message (C)
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for B (thought, model)
 			responseFromPart(Part{Text: "B's thought", Thought: true}),
@@ -445,7 +445,7 @@ func TestBranchingMessageChain(t *testing.T) {
 
 	// ii) Create a new branch C1-C2-C3 after A3 (Model A)
 	// Create a new branch from message A3 (Model A)
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			// Responses for C (thought, model)
 			responseFromPart(Part{Text: "C's thought", Thought: true}),
@@ -621,7 +621,7 @@ func TestStreamingMessageConsolidation(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider to stream "A", "B", "C" and then complete
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B"}),
@@ -708,7 +708,7 @@ func TestSyncDuringThought(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -873,7 +873,7 @@ func TestSyncDuringResponse(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -1027,7 +1027,7 @@ func TestCancelDuringSync(t *testing.T) {
 	}
 
 	// Mock Gemini Provider: A, B (thought), C (thought), D, E, F
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "A"}),
 			responseFromPart(Part{Text: "B", Thought: true}),
@@ -1258,7 +1258,7 @@ func TestCodeExecutionMessageHandling(t *testing.T) {
 	}
 
 	// Mock Gemini Provider to return ExecutableCode and CodeExecutionResult
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{ExecutableCode: &ExecutableCode{Language: "python", Code: "print('hello')"}}),
 			responseFromPart(Part{CodeExecutionResult: &CodeExecutionResult{Outcome: "OUTCOME_OK", Output: "hello"}}),
@@ -1473,7 +1473,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	}
 
 	// Step 3: Test retry with error message
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry response"}),
 		},
@@ -1534,7 +1534,7 @@ func TestRetryErrorBranchHandler(t *testing.T) {
 	// Wait a bit to ensure the first retry call is completely finished
 	time.Sleep(100 * time.Millisecond)
 
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{Text: "Retry without errors"}),
 		},

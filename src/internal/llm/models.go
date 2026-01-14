@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/fvbommel/sortorder"
 
 	"github.com/lifthrasiir/angel/internal/database"
+	. "github.com/lifthrasiir/angel/internal/llm/spec"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
 
@@ -39,39 +39,11 @@ const (
 	ErrTypeNotFound   = "not_found_error"
 )
 
-// Raw structures for JSON unmarshaling
-type ModelsConfig struct {
-	GenParams    map[string]interface{} `json:"genParams"`
-	Models       map[string]interface{} `json:"models"`
-	DisplayOrder []string               `json:"displayOrder"`
-}
-
-type RawModel struct {
-	Extends            string            `json:"extends,omitempty"`
-	Providers          []string          `json:"providers,omitempty"`
-	ModelName          string            `json:"modelName,omitempty"`
-	GenParams          interface{}       `json:"genParams,omitempty"`
-	Fallback           string            `json:"fallback,omitempty"`
-	Subagents          map[string]string `json:"subagents,omitempty"`
-	IgnoreSystemPrompt *bool             `json:"ignoreSystemPrompt,omitempty"`
-	ThoughtEnabled     *bool             `json:"thoughtEnabled,omitempty"`
-	ToolSupported      *bool             `json:"toolSupported,omitempty"`
-	ResponseModalities []string          `json:"responseModalities,omitempty"`
-	MaxTokens          *int              `json:"maxTokens,omitempty"`
-}
-
-// Resolved runtime structures
-type GenerationParams struct {
-	Temperature float32     `json:"temperature"`
-	TopK        int32       `json:"topK"`
-	TopP        float32     `json:"topP"`
-	Thinking    interface{} `json:"thinking,omitempty"`
-}
-
+// Model represents a resolved model with its properties
 type Model struct {
 	Name               string
-	Providers          []string
-	ModelName          string
+	ModelName          string          // Internal model name for the provider
+	ProviderModels     []ProviderModel // Parsed provider-model specifications
 	GenParams          GenerationParams
 	Fallback           *Model
 	Subagents          map[string]*Model
@@ -93,47 +65,65 @@ type OpenAIEndpoint struct {
 }
 
 type Models struct {
-	builtinModels map[string]*Model
-	displayOrder  []string
-	aliases       map[string]string
-	rawConfig     *ModelsConfig // Keep for reference resolution
+	specRegistry *SpecRegistry
+	displayOrder []string
 
 	// Provider management
-	providers       map[string]ModelProvider   // model name -> provider
+	// Map of provider type -> LLMProvider
+	// For OpenAI-compatible providers, the provider type is the endpoint URL
+	llmProviders map[string]LLMProvider
+
+	// Map of external model name -> ModelProvider
+	// This is built from the spec registry and registered providers
+	modelProviders map[string]ModelProvider
+
+	// Legacy fields for compatibility with openai.go
+	// providers is an alias for modelProviders
+	// builtinModels is derived from specRegistry.ModelSpecs
+	providers     map[string]ModelProvider
+	builtinModels map[string]*Model
+
 	openAIEndpoints map[string]*OpenAIEndpoint // config hash -> endpoint
 
 	// Thread safety
 	mutex sync.RWMutex
 }
 
-// LoadModels loads and parses the models.json file
+// LoadModels loads and parses the models.json file using the spec package
 func LoadModels(data []byte) (*Models, error) {
-	var config ModelsConfig
-	if err := json.Unmarshal(data, &config); err != nil {
+	specRegistry, err := LoadSpecs(data)
+	if err != nil {
 		return nil, ModelsError{
 			Type:    ErrTypeParse,
-			Message: fmt.Sprintf("Failed to parse models JSON: %v", err),
+			Message: fmt.Sprintf("Failed to load model specs: %v", err),
 			Context: map[string]interface{}{},
 		}
 	}
 
 	registry := &Models{
-		builtinModels:   make(map[string]*Model),
-		displayOrder:    config.DisplayOrder,
-		aliases:         make(map[string]string),
-		rawConfig:       &config,
-		providers:       make(map[string]ModelProvider),
+		specRegistry:    specRegistry,
+		displayOrder:    specRegistry.DisplayOrder,
+		llmProviders:    make(map[string]LLMProvider),
+		modelProviders:  make(map[string]ModelProvider),
+		providers:       make(map[string]ModelProvider), // Alias for modelProviders
+		builtinModels:   make(map[string]*Model),        // Derived from specRegistry
 		openAIEndpoints: make(map[string]*OpenAIEndpoint),
 	}
 
-	// First pass: Parse raw models and handle aliases
-	if err := registry.parseRawModels(&config); err != nil {
-		return nil, err
-	}
-
-	// Second pass: Resolve inheritance and references
-	if err := registry.resolveModels(); err != nil {
-		return nil, err
+	// Build builtinModels from specRegistry
+	for name, spec := range specRegistry.ModelSpecs {
+		registry.builtinModels[name] = &Model{
+			Name:               spec.Name,
+			ModelName:          spec.ModelName,
+			ProviderModels:     spec.ProviderModels,
+			GenParams:          spec.GenParams,
+			IgnoreSystemPrompt: spec.IgnoreSystemPrompt,
+			ThoughtEnabled:     spec.ThoughtEnabled,
+			ToolSupported:      spec.ToolSupported,
+			ResponseModalities: spec.ResponseModalities,
+			MaxTokens:          spec.MaxTokens,
+			InheritanceChain:   spec.InheritanceChain,
+		}
 	}
 
 	// Validation phase
@@ -141,466 +131,41 @@ func LoadModels(data []byte) (*Models, error) {
 		return nil, err
 	}
 
-	registry.ResetGeminiProvider()
-
 	return registry, nil
 }
 
-// parseRawModels converts raw JSON structures to intermediate representation
-func (r *Models) parseRawModels(config *ModelsConfig) error {
-	// Parse genParams (basic validation)
-	for name := range config.GenParams {
-		if _, exists := config.GenParams[name]; !exists {
-			return ModelsError{
-				Type:    ErrTypeValidation,
-				Message: fmt.Sprintf("Duplicate genParams name: %s", name),
-			}
-		}
-	}
-
-	// Parse models and aliases
-	for name, raw := range config.Models {
-		switch v := raw.(type) {
-		case string:
-			// String alias
-			r.aliases[name] = v
-		case map[string]interface{}:
-			// Convert to RawModel
-			jsonBytes, err := json.Marshal(v)
-			if err != nil {
-				return ModelsError{
-					Type:    ErrTypeParse,
-					Message: fmt.Sprintf("Failed to convert model %s: %v", name, err),
-					Model:   name,
-				}
-			}
-
-			var rawModel RawModel
-			if err := json.Unmarshal(jsonBytes, &rawModel); err != nil {
-				return ModelsError{
-					Type:    ErrTypeParse,
-					Message: fmt.Sprintf("Failed to parse model %s: %v", name, err),
-					Model:   name,
-				}
-			}
-
-			// Create intermediate model representation
-			intermediate := &Model{
-				Name:               name,
-				Providers:          rawModel.Providers,
-				ModelName:          rawModel.ModelName,
-				IgnoreSystemPrompt: r.getBoolValue(rawModel.IgnoreSystemPrompt, false),
-				ThoughtEnabled:     r.getBoolValue(rawModel.ThoughtEnabled, false),
-				ToolSupported:      r.getBoolValue(rawModel.ToolSupported, false),
-				ResponseModalities: rawModel.ResponseModalities,
-				MaxTokens:          r.getIntValue(rawModel.MaxTokens, 8192),
-				InheritanceChain:   []string{name},
-			}
-
-			// Store raw model data for resolution
-			r.builtinModels[name] = intermediate
-		default:
-			return ModelsError{
-				Type:    ErrTypeParse,
-				Message: fmt.Sprintf("Invalid model type for %s: expected object or string", name),
-				Model:   name,
-			}
-		}
-	}
-
-	return nil
-}
-
-// resolveModels handles inheritance, genParams, subagents, and fallbacks in a single pass
-func (r *Models) resolveModels() error {
-	// Resolve inheritance chains first
-	for name, model := range r.builtinModels {
-		if err := r.resolveInheritance(model, name); err != nil {
-			return err
-		}
-	}
-
-	// Now resolve everything from RawModel perspective
-	for name, model := range r.builtinModels {
-		if err := r.resolveModelFromRaw(name, model); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// resolveModelFromRaw resolves all model properties from RawModel in a single pass
-func (r *Models) resolveModelFromRaw(name string, model *Model) error {
-	rawModel := r.getRawModel(name)
-	if rawModel == nil {
-		return nil // Skip if no raw model (e.g., computed models)
-	}
-
-	// Resolve genParams with inheritance fallback
-	var genParams GenerationParams
-	var err error
-
-	if rawModel.GenParams != nil {
-		// Model has explicit genParams
-		genParams, err = r.resolveGenParams(rawModel.GenParams)
-		if err != nil {
-			return ModelsError{
-				Type:    ErrTypeResolution,
-				Message: fmt.Sprintf("Failed to resolve genParams for %s: %v", name, err),
-				Model:   name,
-			}
-		}
-	} else {
-		// Model has no explicit genParams, inherit from parent via inheritance chain
-		for _, ancestorName := range model.InheritanceChain {
-			ancestorRaw := r.getRawModel(ancestorName)
-			if ancestorRaw != nil && ancestorRaw.GenParams != nil {
-				genParams, err = r.resolveGenParams(ancestorRaw.GenParams)
-				if err != nil {
-					return ModelsError{
-						Type:    ErrTypeResolution,
-						Message: fmt.Sprintf("Failed to resolve inherited genParams for %s from %s: %v", name, ancestorName, err),
-						Model:   name,
-					}
-				}
-				break // Found genParams, stop searching
-			}
-		}
-	}
-
-	model.GenParams = genParams
-
-	// Resolve fallback
-	if rawModel.Fallback != "" {
-		fallbackModel, err := r.resolveModelReference(nil, rawModel.Fallback)
-		if err != nil {
-			return ModelsError{
-				Type:    ErrTypeResolution,
-				Message: fmt.Sprintf("Failed to resolve fallback '%s' for %s: %v", rawModel.Fallback, name, err),
-				Model:   name,
-			}
-		}
-		model.Fallback = fallbackModel
-	}
-
-	// Resolve subagents (only for non-abstract models)
-	if !strings.HasPrefix(name, "$") {
-		subagents := make(map[string]*Model)
-		// Walk through inheritance chain to collect subagents
-		for _, parentModelName := range model.InheritanceChain {
-			parentRaw := r.getRawModel(parentModelName)
-			if parentRaw == nil {
-				continue
-			}
-			for task, subagentRef := range parentRaw.Subagents {
-				if _, exists := subagents[task]; exists {
-					continue // Already resolved from a child model
-				}
-				subagentModel, err := r.resolveModelReference(model, subagentRef)
-				if err != nil {
-					return ModelsError{
-						Type:    ErrTypeResolution,
-						Message: fmt.Sprintf("Failed to resolve subagent '%s' for task '%s' in %s: %v", subagentRef, task, name, err),
-						Model:   name,
-						Context: map[string]interface{}{"task": task, "subagent": subagentRef},
-					}
-				}
-				subagents[task] = subagentModel
-			}
-		}
-		model.Subagents = subagents
-	}
-
-	return nil
-}
-
-// getRawModel retrieves the raw model data from config
-func (r *Models) getRawModel(name string) *RawModel {
-	if r.rawConfig == nil {
-		return nil
-	}
-
-	raw, exists := r.rawConfig.Models[name]
-	if !exists {
-		return nil
-	}
-
-	// Handle aliases
-	if alias, isAlias := raw.(string); isAlias {
-		return r.getRawModel(alias)
-	}
-
-	// Convert map to RawModel
-	if rawMap, isMap := raw.(map[string]interface{}); isMap {
-		jsonBytes, _ := json.Marshal(rawMap)
-		var rawModel RawModel
-		json.Unmarshal(jsonBytes, &rawModel)
-		return &rawModel
-	}
-
-	return nil
-}
-
-// resolveInheritance resolves the inheritance chain for a model
-func (r *Models) resolveInheritance(model *Model, modelName string) error {
-	visited := make(map[string]bool)
-	return r.resolveInheritanceRecursive(model, modelName, visited)
-}
-
-func (r *Models) resolveInheritanceRecursive(model *Model, modelName string, visited map[string]bool) error {
-	if visited[modelName] {
-		return ModelsError{
-			Type:    ErrTypeValidation,
-			Message: fmt.Sprintf("Inheritance cycle detected: %s", strings.Join(model.InheritanceChain, " -> ")),
-			Model:   modelName,
-			Context: map[string]interface{}{"chain": model.InheritanceChain},
-		}
-	}
-
-	visited[modelName] = true
-
-	rawModel := r.getRawModel(modelName)
-	if rawModel == nil {
-		return ModelsError{
-			Type:    ErrTypeNotFound,
-			Message: fmt.Sprintf("Model not found: %s", modelName),
-			Model:   modelName,
-		}
-	}
-
-	// If this model extends another, resolve parent first
-	if rawModel.Extends != "" {
-		parentModel, err := r.resolveModelReference(nil, rawModel.Extends)
-		if err != nil {
-			return ModelsError{
-				Type:    ErrTypeResolution,
-				Message: fmt.Sprintf("Failed to resolve parent '%s' for %s: %v", rawModel.Extends, modelName, err),
-				Model:   modelName,
-			}
-		}
-
-		// Recursively resolve parent inheritance
-		if err := r.resolveInheritanceRecursive(parentModel, rawModel.Extends, visited); err != nil {
-			return err
-		}
-
-		// Merge parent into child (arrays completely replaced)
-		r.mergeModel(parentModel, model, modelName)
-		// Child should be at the front of inheritance chain, followed by parent's chain
-		model.InheritanceChain = append([]string{modelName}, parentModel.InheritanceChain...)
-	}
-
-	delete(visited, modelName)
-	return nil
-}
-
-// getBoolValue gets the boolean value from a tristate pointer
-func (r *Models) getBoolValue(ptr *bool, defaultValue bool) bool {
-	if ptr == nil {
-		return defaultValue
-	}
-	return *ptr
-}
-
-// getIntValue gets the integer value from a tristate pointer
-func (r *Models) getIntValue(ptr *int, defaultValue int) int {
-	if ptr == nil {
-		return defaultValue
-	}
-	return *ptr
-}
-
-// mergeModel merges parent model into child model (child overrides parent)
-func (r *Models) mergeModel(parent, child *Model, childName string) {
-	// Merge non-array fields (child overrides parent if present)
-	if child.Providers == nil {
-		child.Providers = parent.Providers
-	}
-
-	if child.ModelName == "" {
-		child.ModelName = parent.ModelName
-	}
-
-	// Get raw models to check if child explicitly set the values
-	childRaw := r.getRawModel(childName)
-
-	// Only override if child didn't explicitly set the value (nil)
-	if childRaw != nil {
-		if childRaw.IgnoreSystemPrompt == nil {
-			child.IgnoreSystemPrompt = parent.IgnoreSystemPrompt
-		}
-		if childRaw.ThoughtEnabled == nil {
-			child.ThoughtEnabled = parent.ThoughtEnabled
-		}
-		if childRaw.ToolSupported == nil {
-			child.ToolSupported = parent.ToolSupported
-		}
-		if childRaw.MaxTokens == nil {
-			child.MaxTokens = parent.MaxTokens
-		}
-	}
-
-	if child.ResponseModalities == nil {
-		child.ResponseModalities = parent.ResponseModalities
-	}
-
-	// Set fallback to parent's fallback if child doesn't have one
-	if child.Fallback == nil {
-		child.Fallback = parent.Fallback
-	}
-
-	// Note: GenParams are now handled in resolveModelFromRaw
-}
-
-// resolveModelReference resolves a model reference with inheritance-aware subagent path resolution
-func (r *Models) resolveModelReference(baseModel *Model, name string) (*Model, error) {
-	// 1. Check if it's an alias first
-	if alias, exists := r.aliases[name]; exists {
-		name = alias
-	}
-
-	// 2. Check if direct model exists (after alias resolution)
-	if model, exists := r.builtinModels[name]; exists {
-		return model, nil
-	}
-
-	// 3. Handle any name containing "/" (the last one used if multiple) with inheritance semantics
-	sep := strings.LastIndexByte(name, '/')
-	if sep == -1 {
-		return nil, ModelsError{
-			Type:    ErrTypeNotFound,
-			Message: fmt.Sprintf("Model reference not found: %s", name),
-			Context: map[string]interface{}{"reference": name},
-		}
-	}
-	parentName, subagentPath := name[:sep], name[sep:]
-
-	var parentModel *Model
-	if parentName == "" {
-		parentModel = baseModel
-	} else {
-		parentModel = r.builtinModels[parentName]
-	}
-	if parentModel == nil {
-		return nil, ModelsError{
-			Type:    ErrTypeValidation,
-			Message: fmt.Sprintf("Path with '/' requires parent model context: %s", name),
-			Context: map[string]interface{}{"reference": name},
-		}
-	}
-
-	// Traverse parentModel's inheritance chain and try each ancestor/subagentPath
-	for _, ancestorName := range parentModel.InheritanceChain {
-		targetName := ancestorName + subagentPath
-		if targetModel, exists := r.builtinModels[targetName]; exists {
-			return targetModel, nil
-		}
-	}
-
-	return nil, ModelsError{
-		Type:    ErrTypeNotFound,
-		Message: fmt.Sprintf("Subagent not found in inheritance chain: %s", name),
-		Context: map[string]interface{}{
-			"subagentPath":     name,
-			"parentModel":      parentModel.Name,
-			"inheritanceChain": parentModel.InheritanceChain,
-		},
-	}
-}
-
-// resolveGenParams resolves genParams from reference or inline object
-func (r *Models) resolveGenParams(raw interface{}) (GenerationParams, error) {
-	switch v := raw.(type) {
-	case string:
-		if paramSet, exists := r.rawConfig.GenParams[v]; exists {
-			return r.convertToGenParams(paramSet)
-		} else {
-			return GenerationParams{}, ModelsError{
-				Type:    ErrTypeNotFound,
-				Message: fmt.Sprintf("genParams reference not found: %s", v),
-				Context: map[string]interface{}{"reference": v},
-			}
-		}
-	case map[string]interface{}:
-		// Inline genParams object
-		return r.convertToGenParams(v)
-	default:
-		return GenerationParams{}, ModelsError{
-			Type:    ErrTypeValidation,
-			Message: fmt.Sprintf("Invalid genParams type: %T", raw),
-		}
-	}
-}
-
-// convertToGenParams converts raw interface{} to GenerationParams with strict type validation
-func (r *Models) convertToGenParams(raw interface{}) (GenerationParams, error) {
-	paramMap, ok := raw.(map[string]interface{})
-	if !ok {
-		return GenerationParams{}, ModelsError{
-			Type:    ErrTypeValidation,
-			Message: fmt.Sprintf("genParams must be an object, got %T", raw),
-		}
-	}
-
-	var genParams GenerationParams
-
-	// Direct JSON unmarshal to the GenerationParams struct
-	jsonBytes, err := json.Marshal(paramMap)
-	if err != nil {
-		return GenerationParams{}, ModelsError{
-			Type:    ErrTypeParse,
-			Message: fmt.Sprintf("Failed to marshal genParams: %v", err),
-		}
-	}
-
-	if err := json.Unmarshal(jsonBytes, &genParams); err != nil {
-		return GenerationParams{}, ModelsError{
-			Type:    ErrTypeParse,
-			Message: fmt.Sprintf("Failed to unmarshal genParams: %v", err),
-		}
-	}
-
-	return genParams, nil
-}
-
-// validate performs comprehensive validation of the resolved models
+// validate performs comprehensive validation of the loaded models
 func (r *Models) validate() error {
 	var errors []ModelsError
 
 	// Validate displayOrder references
-	for _, modelName := range r.displayOrder {
-		if _, exists := r.builtinModels[modelName]; !exists {
+	if errs := r.specRegistry.ValidateDisplayOrder(); len(errs) > 0 {
+		for _, e := range errs {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
-				Message: fmt.Sprintf("Model in displayOrder not found: %s", modelName),
+				Message: e.Error(),
 				Context: map[string]interface{}{"displayOrder": true},
 			})
 		}
 	}
 
-	// Validate that all models have proper inheritance chains resolved
-	for name, model := range r.builtinModels {
-		if len(model.InheritanceChain) == 0 {
+	// Validate inheritance chains
+	if errs := r.specRegistry.ValidateInheritanceChains(); len(errs) > 0 {
+		for _, e := range errs {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
-				Message: fmt.Sprintf("Model has empty inheritance chain: %s", name),
-				Model:   name,
+				Message: e.Error(),
 			})
 		}
 	}
 
-	// Validate aliases point to existing models
-	for alias, target := range r.aliases {
-		if _, exists := r.builtinModels[target]; !exists {
-			// Check if target is also an alias
-			if _, targetExists := r.aliases[target]; !targetExists {
-				errors = append(errors, ModelsError{
-					Type:    ErrTypeValidation,
-					Message: fmt.Sprintf("Alias target not found: %s -> %s", alias, target),
-					Context: map[string]interface{}{"alias": alias, "target": target},
-				})
-			}
+	// Validate aliases
+	if errs := r.specRegistry.ValidateAliases(); len(errs) > 0 {
+		for _, e := range errs {
+			errors = append(errors, ModelsError{
+				Type:    ErrTypeValidation,
+				Message: e.Error(),
+			})
 		}
 	}
 
@@ -611,15 +176,144 @@ func (r *Models) validate() error {
 	return nil
 }
 
-// GetModel retrieves a model by name or alias
-func (r *Models) GetModel(name string) (*Model, bool) {
-	// Check if it's an alias
-	if alias, exists := r.aliases[name]; exists {
-		name = alias
+// SetLLMProvider registers an LLMProvider for a given provider type
+// The provider type can be:
+// - "geminicli" for Gemini Code Assist API
+// - "antigravity" for custom Gemini endpoint
+// - An endpoint URL for OpenAI-compatible providers
+// - "" (empty string) for wildcard providers that match any provider
+func (r *Models) SetLLMProvider(providerType string, provider LLMProvider) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	r.llmProviders[providerType] = provider
+
+	// Rebuild model providers that depend on this provider type
+	r.rebuildModelProvidersUnsafe()
+}
+
+// rebuildModelProvidersUnsafe rebuilds the model providers map (internal use, no mutex)
+func (r *Models) rebuildModelProvidersUnsafe() {
+	// Clear existing model providers for spec-based models
+	for name := range r.modelProviders {
+		if r.specRegistry.GetModelSpec(name) != nil {
+			delete(r.modelProviders, name)
+		}
 	}
 
-	model, exists := r.builtinModels[name]
-	return model, exists
+	// Rebuild model providers from specs
+	for _, modelSpec := range r.specRegistry.ModelSpecs {
+		r.buildModelProviderForSpecUnsafe(modelSpec.Name)
+
+		// Build model providers for variants
+		for variantName := range modelSpec.Variants {
+			variantModelName := modelSpec.Name + variantName
+			r.buildModelProviderForSpecUnsafe(variantModelName)
+		}
+	}
+
+	// Sync providers (legacy compatibility)
+	r.providers = r.modelProviders
+}
+
+// buildModelProviderForSpecUnsafe builds a ModelProvider for a given external model name (internal use, no mutex)
+func (r *Models) buildModelProviderForSpecUnsafe(externalName string) {
+	tuples := r.specRegistry.GetProviderTuples(externalName)
+	if len(tuples) == 0 {
+		return
+	}
+
+	// Get the ModelSpec for this external name
+	modelSpec := r.specRegistry.GetModelSpec(externalName)
+
+	var providers []ModelProvider
+	for _, tuple := range tuples {
+		// Find LLMProvider for this provider type
+		llmProvider, exists := r.llmProviders[tuple.ProviderType]
+		if !exists {
+			// Try wildcard provider
+			llmProvider, exists = r.llmProviders[""]
+			if !exists {
+				continue // No provider available for this type
+			}
+		}
+
+		// Create ModelProvider with the internal model name and spec
+		providers = append(providers, newModelProviderWithSpec(llmProvider, tuple.ModelName, modelSpec))
+	}
+
+	if len(providers) > 0 {
+		if len(providers) == 1 {
+			r.modelProviders[externalName] = providers[0]
+		} else {
+			r.modelProviders[externalName] = NewModelProviderChain(providers, externalName)
+		}
+	}
+}
+
+// GetModel retrieves a model spec by name or alias
+func (r *Models) GetModel(name string) *Model {
+	spec := r.specRegistry.GetModelSpec(name)
+	if spec == nil {
+		return nil
+	}
+
+	// Build Model from ModelSpec
+	model := &Model{
+		Name:               spec.Name,
+		ModelName:          spec.ModelName,
+		ProviderModels:     spec.ProviderModels,
+		GenParams:          spec.GenParams,
+		IgnoreSystemPrompt: spec.IgnoreSystemPrompt,
+		ThoughtEnabled:     spec.ThoughtEnabled,
+		ToolSupported:      spec.ToolSupported,
+		ResponseModalities: spec.ResponseModalities,
+		MaxTokens:          spec.MaxTokens,
+		InheritanceChain:   spec.InheritanceChain,
+	}
+
+	// Resolve fallback
+	if spec.Fallback != "" {
+		if fallbackSpec := r.specRegistry.GetModelSpec(spec.Fallback); fallbackSpec != nil {
+			fallbackModel := &Model{
+				Name:               fallbackSpec.Name,
+				ModelName:          fallbackSpec.ModelName,
+				ProviderModels:     fallbackSpec.ProviderModels,
+				GenParams:          fallbackSpec.GenParams,
+				IgnoreSystemPrompt: fallbackSpec.IgnoreSystemPrompt,
+				ThoughtEnabled:     fallbackSpec.ThoughtEnabled,
+				ToolSupported:      fallbackSpec.ToolSupported,
+				ResponseModalities: fallbackSpec.ResponseModalities,
+				MaxTokens:          fallbackSpec.MaxTokens,
+				InheritanceChain:   fallbackSpec.InheritanceChain,
+			}
+			model.Fallback = fallbackModel
+		}
+	}
+
+	// Resolve subagents
+	if len(spec.Subagents) > 0 {
+		model.Subagents = make(map[string]*Model)
+		for task, subagentRef := range spec.Subagents {
+			if subagentSpec := r.specRegistry.GetModelSpec(subagentRef); subagentSpec != nil {
+				subagentModel := &Model{
+					Name:               subagentSpec.Name,
+					ModelName:          subagentSpec.ModelName,
+					ProviderModels:     subagentSpec.ProviderModels,
+					GenParams:          subagentSpec.GenParams,
+					IgnoreSystemPrompt: subagentSpec.IgnoreSystemPrompt,
+					ThoughtEnabled:     subagentSpec.ThoughtEnabled,
+					ToolSupported:      subagentSpec.ToolSupported,
+					ResponseModalities: subagentSpec.ResponseModalities,
+					MaxTokens:          subagentSpec.MaxTokens,
+					InheritanceChain:   subagentSpec.InheritanceChain,
+				}
+				model.Subagents[task] = subagentModel
+			}
+		}
+	}
+
+	return model
 }
 
 // InitializeOpenAIEndpoints sets up OpenAI providers from database configs
@@ -634,10 +328,8 @@ func (r *Models) InitializeOpenAIEndpoints(db *database.Database) error {
 
 	// Clear existing OpenAI endpoints
 	for _, endpoint := range r.openAIEndpoints {
-		// Remove models from provider mapping
-		for _, model := range endpoint.models {
-			delete(r.providers, model.ID)
-		}
+		// Remove provider
+		delete(r.llmProviders, endpoint.config.Endpoint)
 	}
 	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
 
@@ -647,18 +339,21 @@ func (r *Models) InitializeOpenAIEndpoints(db *database.Database) error {
 			continue
 		}
 
-		if err := r.createOpenAIEndpoint(&config); err != nil {
+		if err := r.createOpenAIEndpointUnsafe(&config); err != nil {
 			// Log error but continue with other configs
 			fmt.Printf("Failed to create OpenAI endpoint for %s: %v\n", config.Name, err)
 			continue
 		}
 	}
 
+	// Rebuild model providers after updating endpoints
+	r.rebuildModelProvidersUnsafe()
+
 	return nil
 }
 
-// createOpenAIEndpoint creates a new OpenAI endpoint
-func (r *Models) createOpenAIEndpoint(config *OpenAIConfig) error {
+// createOpenAIEndpointUnsafe creates a new OpenAI endpoint without mutex (internal use)
+func (r *Models) createOpenAIEndpointUnsafe(config *OpenAIConfig) error {
 	hash := config.Hash()
 	if _, exists := r.openAIEndpoints[hash]; exists {
 		return fmt.Errorf("endpoint with hash %s already exists", hash)
@@ -687,10 +382,8 @@ func (r *Models) createOpenAIEndpoint(config *OpenAIConfig) error {
 
 	r.openAIEndpoints[hash] = endpoint
 
-	// Register models with provider
-	for _, model := range models {
-		r.providers[model.ID] = newModelProvider(client, model.ID)
-	}
+	// Register LLMProvider with endpoint URL as provider type
+	r.llmProviders[config.Endpoint] = client
 
 	return nil
 }
@@ -723,9 +416,9 @@ func (r *Models) UpdateOpenAIEndpoints(db *database.Database) error {
 		hash := config.Hash()
 		neededHashes[hash] = true
 
-		if endpoint, exists := r.openAIEndpoints[hash]; exists {
+		if _, exists := r.openAIEndpoints[hash]; exists {
 			// Update existing endpoint config reference
-			endpoint.config = &config
+			r.openAIEndpoints[hash].config = &config
 		} else {
 			// Create new endpoint
 			if err := r.createOpenAIEndpointUnsafe(&config); err != nil {
@@ -736,179 +429,29 @@ func (r *Models) UpdateOpenAIEndpoints(db *database.Database) error {
 	}
 
 	// Remove unused endpoints
-	r.cleanupUnusedEndpointsUnsafe(neededHashes)
-
-	// Update model provider mappings
-	r.updateModelProvidersUnsafe()
-
-	return nil
-}
-
-// createOpenAIEndpointUnsafe creates endpoint without mutex lock (internal use)
-func (r *Models) createOpenAIEndpointUnsafe(config *OpenAIConfig) error {
-	hash := config.Hash()
-
-	client := NewOpenAIClient(config)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	models, err := client.GetModels(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get models for %s: %w", config.Name, err)
-	}
-
-	endpoint := &OpenAIEndpoint{
-		config:     config,
-		provider:   client,
-		models:     models,
-		lastUpdate: time.Now(),
-		hash:       hash,
-	}
-
-	r.openAIEndpoints[hash] = endpoint
-
-	for _, model := range models {
-		r.providers[model.ID] = newModelProvider(client, model.ID)
-	}
-
-	return nil
-}
-
-// cleanupUnusedEndpointsUnsafe removes endpoints that are no longer needed (internal use)
-func (r *Models) cleanupUnusedEndpointsUnsafe(neededHashes map[string]bool) {
 	for hash, endpoint := range r.openAIEndpoints {
 		if !neededHashes[hash] {
-			// Remove models from provider mapping
-			for _, model := range endpoint.models {
-				delete(r.providers, model.ID)
-			}
+			// Remove provider
+			delete(r.llmProviders, endpoint.config.Endpoint)
 			delete(r.openAIEndpoints, hash)
 		}
 	}
+
+	// Rebuild model providers after updating endpoints
+	r.rebuildModelProvidersUnsafe()
+
+	return nil
 }
 
-// updateModelProvidersUnsafe updates the model to provider mappings (internal use)
-func (r *Models) updateModelProvidersUnsafe() {
-	// Clear existing non-Gemini providers (but preserve angel-eval and builtin models)
-	for model := range r.providers {
-		_, isBuiltin := r.builtinModels[model]
-		if !isBuiltin && model != AngelEvalModelName {
-			delete(r.providers, model)
-		}
-	}
-
-	// Re-add OpenAI models
-	for _, endpoint := range r.openAIEndpoints {
-		for _, model := range endpoint.models {
-			r.providers[model.ID] = newModelProvider(endpoint.provider, model.ID)
-		}
-	}
-}
-
-// SetAngelEvalProvider sets the angel-eval provider
-func (r *Models) SetAngelEvalProvider(provider LLMProvider) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	r.providers[AngelEvalModelName] = newModelProvider(provider, AngelEvalModelName)
-
-	// Create the angel-eval model
-	angelEvalModel := &Model{
-		Name:               AngelEvalModelName,
-		Providers:          []string{},
-		ModelName:          AngelEvalModelName,
-		GenParams:          GenerationParams{},
-		Fallback:           nil,
-		Subagents:          make(map[string]*Model),
-		IgnoreSystemPrompt: false,
-		ThoughtEnabled:     true,
-		ToolSupported:      true,
-		ResponseModalities: []string{"TEXT", "IMAGE"},
-		MaxTokens:          1024,
-		InheritanceChain:   []string{AngelEvalModelName},
-	}
-
-	// Add to builtinModels
-	r.builtinModels[AngelEvalModelName] = angelEvalModel
-
-	// Set image_generation to reference itself (self-reference)
-	angelEvalModel.Subagents[SubagentImageGenerationTask] = angelEvalModel
-}
-
-// ResetGeminiProvider creates and sets the Gemini provider chains.
-func (r *Models) ResetGeminiProvider() {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	// Collect all Gemini models
-	geminiModels := make(map[string]*Model)
-	for _, model := range r.builtinModels {
-		if r.isGeminiModelUnsafe(model) {
-			geminiModels[model.Name] = model
-		}
-	}
-
-	// Create shared provider instances for each provider type
-	// These will be reused across all models
-	apiProvider := NewGeminiAPIProvider(geminiModels)
-	geminiCliProvider := NewCodeAssistProvider("geminicli", geminiModels)
-	antigravityProvider := NewCodeAssistProvider("antigravity", geminiModels)
-
-	// For each model, create a chain of providers based on its Providers array
-	for modelName, model := range geminiModels {
-		var modelProviders []ModelProvider
-
-		// Create providers in the order specified by model.Providers
-		for _, providerType := range model.Providers {
-			switch providerType {
-			case "api":
-				modelProviders = append(modelProviders, newModelProvider(apiProvider, modelName))
-			case "geminicli":
-				modelProviders = append(modelProviders, newModelProvider(geminiCliProvider, modelName))
-			case "antigravity":
-				modelProviders = append(modelProviders, newModelProvider(antigravityProvider, modelName))
-			default:
-				// Unknown provider type, skip
-				continue
-			}
-		}
-
-		// Create a chain if we have any providers
-		if len(modelProviders) > 0 {
-			if len(modelProviders) == 1 {
-				// No need to create a chain for a single provider
-				r.providers[modelName] = modelProviders[0]
-			} else {
-				// Create a chain of providers
-				r.providers[modelName] = NewModelProviderChain(modelProviders, modelName)
-			}
-		}
-	}
-}
-
-// SetGeminiProvider sets a custom LLM provider for Gemini models (for testing)
-func (r *Models) SetGeminiProvider(provider LLMProvider) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	// Register all Gemini models with the provider
-	for _, model := range r.builtinModels {
-		if r.isGeminiModelUnsafe(model) {
-			r.providers[model.Name] = newModelProvider(provider, model.Name)
-		}
-	}
-}
-
-// GetProvider returns the provider for a model name
+// GetProvider returns the ModelProvider for a given external model name
 func (r *Models) GetProvider(modelName string) ModelProvider {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	return r.providers[modelName]
+	return r.modelProviders[modelName]
 }
 
-// GetModelProvider returns a ModelProvider wrapper that automatically handles the model name
+// GetModelProvider returns a ModelProvider wrapper for a given model name
 func (r *Models) GetModelProvider(modelName string) (ModelProvider, error) {
 	provider := r.GetProvider(modelName)
 	if provider == nil {
@@ -922,7 +465,8 @@ func (r *Models) Clear() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	r.providers = make(map[string]ModelProvider)
+	r.llmProviders = make(map[string]LLMProvider)
+	r.modelProviders = make(map[string]ModelProvider)
 	r.openAIEndpoints = make(map[string]*OpenAIEndpoint)
 }
 
@@ -931,13 +475,7 @@ func (r *Models) IsEmpty() bool {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	return len(r.providers) == 0
-}
-
-// isGeminiModelUnsafe checks if a model is a built-in model that should be handled by GeminiProvider (internal use, no mutex)
-func (r *Models) isGeminiModelUnsafe(model *Model) bool {
-	// Built-in models have providers, external models (like OpenAI) don't
-	return len(model.Providers) > 0
+	return len(r.llmProviders) == 0
 }
 
 // GetAllModels returns all non-subagent models in display order
@@ -947,34 +485,32 @@ func (r *Models) GetAllModels() []*Model {
 
 	// First add models in displayOrder
 	for _, name := range r.displayOrder {
-		if model, exists := r.builtinModels[name]; exists {
+		if model := r.GetModel(name); model != nil {
 			models = append(models, model)
 			seen[name] = true
 		}
 	}
 
-	// Then add any remaining non-Gemini models
-	var nonGeminiModels []*Model
-	func() {
-		r.mutex.RLock()
-		defer r.mutex.RUnlock()
-		for name := range r.providers {
-			_, isBuiltin := r.builtinModels[name]
-			if !seen[name] && !strings.HasPrefix(name, "$") && !isBuiltin {
-				provider := r.providers[name]
-				maxTokens := provider.MaxTokens()
-				nonGeminiModels = append(nonGeminiModels, &Model{Name: name, MaxTokens: maxTokens})
-				seen[name] = true
-			}
-		}
-	}()
+	// Then add any remaining models from modelProviders
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
 
-	// Non-Gemini models are sorted by name in natural ascending order
-	sort.Slice(nonGeminiModels, func(i, j int) bool {
-		return sortorder.NaturalLess(nonGeminiModels[i].Name, nonGeminiModels[j].Name)
+	var otherModels []*Model
+	for name := range r.modelProviders {
+		if !seen[name] && !strings.HasPrefix(name, "$") {
+			provider := r.modelProviders[name]
+			maxTokens := provider.MaxTokens()
+			otherModels = append(otherModels, &Model{Name: name, MaxTokens: maxTokens})
+			seen[name] = true
+		}
+	}
+
+	// Sort other models by name in natural ascending order
+	sort.Slice(otherModels, func(i, j int) bool {
+		return sortorder.NaturalLess(otherModels[i].Name, otherModels[j].Name)
 	})
 
-	return append(models, nonGeminiModels...)
+	return append(models, otherModels...)
 }
 
 // Validate performs validation and returns detailed errors
@@ -982,37 +518,34 @@ func (r *Models) Validate() []ModelsError {
 	var errors []ModelsError
 
 	// Validate displayOrder references
-	for _, modelName := range r.displayOrder {
-		if _, exists := r.builtinModels[modelName]; !exists {
+	if errs := r.specRegistry.ValidateDisplayOrder(); len(errs) > 0 {
+		for _, e := range errs {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
-				Message: fmt.Sprintf("Model in displayOrder not found: %s", modelName),
+				Message: e.Error(),
 				Context: map[string]interface{}{"displayOrder": true},
 			})
 		}
 	}
 
 	// Validate inheritance chains
-	for name, model := range r.builtinModels {
-		if len(model.InheritanceChain) == 0 {
+	if errs := r.specRegistry.ValidateInheritanceChains(); len(errs) > 0 {
+		for _, e := range errs {
 			errors = append(errors, ModelsError{
 				Type:    ErrTypeValidation,
-				Message: fmt.Sprintf("Model has empty inheritance chain: %s", name),
-				Model:   name,
+				Message: e.Error(),
 			})
 		}
 	}
 
 	// Validate aliases
-	for alias, target := range r.aliases {
-		if _, exists := r.builtinModels[target]; !exists {
-			if _, targetExists := r.aliases[target]; !targetExists {
-				errors = append(errors, ModelsError{
-					Type:    ErrTypeValidation,
-					Message: fmt.Sprintf("Alias target not found: %s -> %s", alias, target),
-					Context: map[string]interface{}{"alias": alias, "target": target},
-				})
-			}
+	if errs := r.specRegistry.ValidateAliases(); len(errs) > 0 {
+		for _, e := range errs {
+			errors = append(errors, ModelsError{
+				Type:    ErrTypeValidation,
+				Message: e.Error(),
+				Context: map[string]interface{}{"alias": e.Error()},
+			})
 		}
 	}
 
@@ -1021,13 +554,8 @@ func (r *Models) Validate() []ModelsError {
 
 // ModelGenerationParams returns the generation parameters for a given model name
 func (r *Models) ModelGenerationParams(modelName string) (GenerationParams, error) {
-	// Check if it's an alias
-	if alias, exists := r.aliases[modelName]; exists {
-		modelName = alias
-	}
-
-	model, exists := r.builtinModels[modelName]
-	if !exists {
+	spec := r.specRegistry.GetModelSpec(modelName)
+	if spec == nil {
 		return GenerationParams{}, ModelsError{
 			Type:    ErrTypeNotFound,
 			Message: fmt.Sprintf("Model not found: %s", modelName),
@@ -1035,18 +563,13 @@ func (r *Models) ModelGenerationParams(modelName string) (GenerationParams, erro
 		}
 	}
 
-	return model.GenParams, nil
+	return spec.GenParams, nil
 }
 
-// ResolveSubagent resolves a subagent for a given model and task, returning the resolved model name and provider
+// ResolveSubagent resolves a subagent for a given model and task, returning the ModelProvider
 func (r *Models) ResolveSubagent(modelName string, task string) (ModelProvider, error) {
-	// Check if it's an alias
-	if alias, exists := r.aliases[modelName]; exists {
-		modelName = alias
-	}
-
-	model, exists := r.builtinModels[modelName]
-	if !exists {
+	spec := r.specRegistry.GetModelSpec(modelName)
+	if spec == nil {
 		return nil, ModelsError{
 			Type:    ErrTypeNotFound,
 			Message: fmt.Sprintf("Model not found: %s", modelName),
@@ -1054,8 +577,8 @@ func (r *Models) ResolveSubagent(modelName string, task string) (ModelProvider, 
 		}
 	}
 
-	// Check if model has the requested subagent
-	subagentModel, exists := model.Subagents[task]
+	// Check if model spec has the requested subagent
+	subagentRef, exists := spec.Subagents[task]
 	if !exists {
 		return nil, ModelsError{
 			Type:    ErrTypeNotFound,
@@ -1065,18 +588,37 @@ func (r *Models) ResolveSubagent(modelName string, task string) (ModelProvider, 
 		}
 	}
 
+	// Handle relative paths (starting with /)
+	// If subagentRef starts with "/", it's a relative path from the current model
+	resolvedRef := subagentRef
+	if strings.HasPrefix(subagentRef, "/") {
+		resolvedRef = modelName + subagentRef
+	}
+
 	// Get provider for the subagent model
 	r.mutex.RLock()
-	provider := r.providers[subagentModel.Name]
+	provider := r.modelProviders[resolvedRef]
 	r.mutex.RUnlock()
 
 	if provider == nil {
 		return nil, ModelsError{
 			Type:    ErrTypeResolution,
-			Message: fmt.Sprintf("No provider available for subagent model '%s'", subagentModel.Name),
-			Model:   subagentModel.Name,
+			Message: fmt.Sprintf("No provider available for subagent model '%s' (resolved from '%s')", resolvedRef, subagentRef),
+			Model:   resolvedRef,
 		}
 	}
 
 	return provider, nil
+}
+
+// GetKnownProviders returns the list of known provider::model specifications
+func (r *Models) GetKnownProviders() []string {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	var providers []string
+	for provider := range r.specRegistry.KnownProviders {
+		providers = append(providers, provider)
+	}
+	return providers
 }

@@ -7,6 +7,7 @@ import (
 	"iter"
 
 	. "github.com/lifthrasiir/angel/gemini"
+	"github.com/lifthrasiir/angel/internal/llm/spec"
 )
 
 // SessionParams holds parameters for a chat session.
@@ -44,28 +45,34 @@ type ModelProvider interface {
 
 // modelProviderImpl is the default implementation of ModelProvider that wraps LLMProvider
 type modelProviderImpl struct {
-	LLMProvider
-	modelName string
+	llm                LLMProvider
+	modelName          string
+	maxTokens          int
+	genParams          spec.GenerationParams
+	toolSupported      bool
+	thoughtEnabled     bool
+	ignoreSystemPrompt bool
+	responseModalities []string
 }
 
 // SendMessageStream calls the underlying provider with the stored model name
 func (mp *modelProviderImpl) SendMessageStream(ctx context.Context, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
-	return mp.LLMProvider.SendMessageStream(ctx, mp.modelName, params)
+	return mp.llm.SendMessageStream(ctx, mp.modelName, params)
 }
 
 // GenerateContentOneShot calls the underlying provider with the stored model name
 func (mp *modelProviderImpl) GenerateContentOneShot(ctx context.Context, params SessionParams) (OneShotResult, error) {
-	return mp.LLMProvider.GenerateContentOneShot(ctx, mp.modelName, params)
+	return mp.llm.GenerateContentOneShot(ctx, mp.modelName, params)
 }
 
 // CountTokens calls the underlying provider with the stored model name
 func (mp *modelProviderImpl) CountTokens(ctx context.Context, contents []Content) (*CaCountTokenResponse, error) {
-	return mp.LLMProvider.CountTokens(ctx, mp.modelName, contents)
+	return mp.llm.CountTokens(ctx, mp.modelName, contents)
 }
 
-// MaxTokens calls the underlying provider with the stored model name
+// MaxTokens returns the max tokens for this model
 func (mp *modelProviderImpl) MaxTokens() int {
-	return mp.LLMProvider.MaxTokens(mp.modelName)
+	return mp.maxTokens
 }
 
 // Name returns the model name
@@ -73,12 +80,60 @@ func (mp *modelProviderImpl) Name() string {
 	return mp.modelName
 }
 
-// newModelProvider creates a new ModelProvider from an LLMProvider and model name
-func newModelProvider(provider LLMProvider, modelName string) ModelProvider {
-	return &modelProviderImpl{
-		LLMProvider: provider,
-		modelName:   modelName,
+// GetModelConfig returns the model configuration for providers that need it
+func (mp *modelProviderImpl) GetModelConfig() *Model {
+	return &Model{
+		Name:               mp.modelName,
+		ModelName:          mp.modelName,
+		GenParams:          mp.genParams,
+		MaxTokens:          mp.maxTokens,
+		ToolSupported:      mp.toolSupported,
+		ThoughtEnabled:     mp.thoughtEnabled,
+		IgnoreSystemPrompt: mp.ignoreSystemPrompt,
+		ResponseModalities: mp.responseModalities,
 	}
+}
+
+// newModelProvider creates a new ModelProvider from an LLMProvider, model name, and model spec
+func newModelProviderWithSpec(provider LLMProvider, modelName string, modelSpec *spec.ModelSpec) ModelProvider {
+	var genParams spec.GenerationParams
+	var maxTokens int
+	var toolSupported, thoughtEnabled, ignoreSystemPrompt bool
+	var responseModalities []string
+
+	if modelSpec != nil {
+		genParams = modelSpec.GenParams
+		maxTokens = modelSpec.MaxTokens
+		toolSupported = modelSpec.ToolSupported
+		thoughtEnabled = modelSpec.ThoughtEnabled
+		ignoreSystemPrompt = modelSpec.IgnoreSystemPrompt
+		responseModalities = modelSpec.ResponseModalities
+	} else {
+		// Default values
+		genParams = spec.GenerationParams{}
+		maxTokens = 1048576
+		toolSupported = true
+		thoughtEnabled = true
+		ignoreSystemPrompt = false
+		responseModalities = []string{"TEXT"}
+	}
+
+	return &modelProviderImpl{
+		llm:                provider,
+		modelName:          modelName,
+		maxTokens:          maxTokens,
+		genParams:          genParams,
+		toolSupported:      toolSupported,
+		thoughtEnabled:     thoughtEnabled,
+		ignoreSystemPrompt: ignoreSystemPrompt,
+		responseModalities: responseModalities,
+	}
+}
+
+// newModelProvider creates a new ModelProvider from an LLMProvider and model name
+// Uses default model configuration
+func newModelProvider(provider LLMProvider, modelName string) ModelProvider {
+	return newModelProviderWithSpec(provider, modelName, nil)
 }
 
 // ModelProviderChain chains multiple ModelProviders with ordered fallback

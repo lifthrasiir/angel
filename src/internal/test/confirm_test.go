@@ -29,7 +29,7 @@ func setupSessionWithPendingConfirmation(
 	toolArgs map[string]interface{},
 ) (sdb *database.SessionDatabase, sessionId string, branchId string, pendingConfirmationData string, resp *http.Response) {
 	// Setup Mock Gemini Provider to return a function call for the specified tool
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{FunctionCall: &FunctionCall{Name: toolName, Args: toolArgs}}),
 		},
@@ -194,7 +194,7 @@ func TestConfirmationApproval(t *testing.T) {
 	}
 
 	// Setup Mock Gemini Provider to return a function response and a model response
-	models.SetGeminiProvider(&MockGeminiProvider{
+	models.SetLLMProvider("", &MockGeminiProvider{
 		Responses: []GenerateContentResponse{
 			responseFromPart(Part{FunctionResponse: &FunctionResponse{Name: "write_file", Response: map[string]interface{}{"status": "success"}}}),
 			responseFromPart(Part{Text: "File written successfully."}),

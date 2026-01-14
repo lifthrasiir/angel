@@ -142,10 +142,15 @@ func (sr *SpecRegistry) parseModels(config *ModelsConfig) error {
 			}
 
 			// Create ModelSpec
+			// If ModelName is not specified, default to name
+			modelName := rawModel.ModelName
+			if modelName == "" {
+				modelName = name
+			}
 			spec := &ModelSpec{
 				Name:               name,
 				ProviderModels:     providerModels,
-				ModelName:          rawModel.ModelName,
+				ModelName:          modelName,
 				GenParams:          genParams,
 				Fallback:           rawModel.Fallback,
 				Subagents:          rawModel.Subagents,

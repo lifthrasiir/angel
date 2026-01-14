@@ -18,6 +18,7 @@ import (
 
 	. "github.com/lifthrasiir/angel/gemini"
 	"github.com/lifthrasiir/angel/internal/database"
+	"github.com/lifthrasiir/angel/internal/llm/spec"
 	"github.com/lifthrasiir/angel/internal/tool"
 	. "github.com/lifthrasiir/angel/internal/types"
 )
@@ -34,30 +35,20 @@ const (
 
 // GeminiAPIProvider handles the "api" provider type
 type GeminiAPIProvider struct {
-	models map[string]*Model
+	models *Models
 }
 
-// NewGeminiAPIProvider creates a new GeminiAPIProvider with the given models
-func NewGeminiAPIProvider(models map[string]*Model) *GeminiAPIProvider {
+// NewGeminiAPIProvider creates a new GeminiAPIProvider
+func NewGeminiAPIProvider(models *Models) *GeminiAPIProvider {
 	return &GeminiAPIProvider{models: models}
 }
 
-// resolveModel resolves the model key to the actual API model name
-func (p *GeminiAPIProvider) resolveModel(modelName string) (*Model, string) {
-	if model, exists := p.models[modelName]; exists {
-		apiModelName := model.ModelName
-		if apiModelName != "" {
-			return model, apiModelName
-		}
-	}
-	return nil, "" // Return nil to indicate model not found
-}
-
 // SendMessageStream calls the Gemini API and returns an iter.Seq of responses
-func (p *GeminiAPIProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
-	model, apiModelName := p.resolveModel(modelName)
-	if model == nil {
-		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
+// The modelName parameter is already the internal model name (e.g., "gemini-3-flash-preview")
+// as resolved by the Models registry from the provider-model pair in models.json
+func (p *GeminiAPIProvider) SendMessageStream(ctx context.Context, apiModelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	if apiModelName == "" {
+		return nil, nil, fmt.Errorf("model name cannot be empty")
 	}
 
 	db, err := database.FromContext(ctx)
@@ -68,6 +59,9 @@ func (p *GeminiAPIProvider) SendMessageStream(ctx context.Context, modelName str
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Get model configuration from models registry
+	model := p.models.GetModel(apiModelName)
 
 	configs, err := database.GetGeminiAPIConfigs(db)
 	if err != nil {
@@ -187,10 +181,9 @@ func (p *GeminiAPIProvider) GenerateContentOneShot(ctx context.Context, modelNam
 	return OneShotResult{}, fmt.Errorf("no text content found in LLM response")
 }
 
-func (p *GeminiAPIProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
-	model, apiModelName := p.resolveModel(modelName)
-	if model == nil {
-		return nil, fmt.Errorf("unsupported model: %s", modelName)
+func (p *GeminiAPIProvider) CountTokens(ctx context.Context, apiModelName string, contents []Content) (*CaCountTokenResponse, error) {
+	if apiModelName == "" {
+		return nil, fmt.Errorf("model name cannot be empty")
 	}
 
 	db, err := database.FromContext(ctx)
@@ -238,43 +231,31 @@ func (p *GeminiAPIProvider) CountTokens(ctx context.Context, modelName string, c
 	return nil, lastErr
 }
 
-func (p *GeminiAPIProvider) MaxTokens(modelName string) int {
-	if model, exists := p.models[modelName]; exists {
-		return model.MaxTokens
-	}
-	return 0
+func (p *GeminiAPIProvider) MaxTokens(apiModelName string) int {
+	// Return a default max tokens value
+	// The actual max tokens is managed by the Models registry
+	return 1048576
 }
 
 // CodeAssistProvider handles the "geminicli" and "antigravity" provider types
 type CodeAssistProvider struct {
 	providerKind string // "geminicli" or "antigravity"
-	models       map[string]*Model
+	models       *Models
 }
 
 // NewCodeAssistProvider creates a new CodeAssistProvider for a specific provider kind
-func NewCodeAssistProvider(providerKind string, models map[string]*Model) *CodeAssistProvider {
+func NewCodeAssistProvider(providerKind string, models *Models) *CodeAssistProvider {
 	return &CodeAssistProvider{
 		providerKind: providerKind,
 		models:       models,
 	}
 }
 
-// resolveModel resolves the model key to the actual API model name
-func (p *CodeAssistProvider) resolveModel(modelName string) (*Model, string) {
-	if model, exists := p.models[modelName]; exists {
-		apiModelName := model.ModelName
-		if apiModelName != "" {
-			return model, apiModelName
-		}
-	}
-	return nil, ""
-}
-
 // SendMessageStream calls the Code Assist API and returns an iter.Seq of responses
-func (p *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
-	model, apiModelName := p.resolveModel(modelName)
-	if model == nil {
-		return nil, nil, fmt.Errorf("unsupported model: %s", modelName)
+// The modelName parameter is already the internal model name as resolved by Models registry
+func (p *CodeAssistProvider) SendMessageStream(ctx context.Context, apiModelName string, params SessionParams) (iter.Seq[GenerateContentResponse], io.Closer, error) {
+	if apiModelName == "" {
+		return nil, nil, fmt.Errorf("model name cannot be empty")
 	}
 
 	db, err := database.FromContext(ctx)
@@ -331,6 +312,9 @@ func (p *CodeAssistProvider) SendMessageStream(ctx context.Context, modelName st
 
 		// Update last_used for this model
 		database.UpdateOAuthTokenModelLastUsed(db, token.ID, apiModelName)
+
+		// Get model configuration from models registry
+		model := p.models.GetModel(apiModelName)
 
 		// Convert SessionParams to GenerateContentRequest
 		request := convertSessionParamsToGenerateRequest(tools, model, params)
@@ -425,10 +409,9 @@ func (p *CodeAssistProvider) GenerateContentOneShot(ctx context.Context, modelNa
 	return OneShotResult{}, fmt.Errorf("no text content found in LLM response")
 }
 
-func (p *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, contents []Content) (*CaCountTokenResponse, error) {
-	model, apiModelName := p.resolveModel(modelName)
-	if model == nil {
-		return nil, fmt.Errorf("unsupported model: %s", modelName)
+func (p *CodeAssistProvider) CountTokens(ctx context.Context, apiModelName string, contents []Content) (*CaCountTokenResponse, error) {
+	if apiModelName == "" {
+		return nil, fmt.Errorf("model name cannot be empty")
 	}
 
 	db, err := database.FromContext(ctx)
@@ -497,11 +480,10 @@ func (p *CodeAssistProvider) CountTokens(ctx context.Context, modelName string, 
 	return nil, lastErr
 }
 
-func (p *CodeAssistProvider) MaxTokens(modelName string) int {
-	if model, exists := p.models[modelName]; exists {
-		return model.MaxTokens
-	}
-	return 0
+func (p *CodeAssistProvider) MaxTokens(apiModelName string) int {
+	// Return a default max tokens value
+	// The actual max tokens is managed by the Models registry
+	return 1048576
 }
 
 // parseRetryAfter parses Retry-After header
@@ -541,8 +523,32 @@ func (p *geminiAPIHTTPClientProvider) Client(ctx context.Context) *http.Client {
 
 // convertSessionParamsToGenerateRequest converts SessionParams to GenerateContentRequest
 func convertSessionParamsToGenerateRequest(toolRegistry *tool.Tools, model *Model, params SessionParams) GenerateContentRequest {
+	// Determine generation params source
+	// Priority: model.GenParams > defaults
+	var ignoreSystemPrompt bool
+	var toolSupported bool
+	var thoughtEnabled bool
+	var responseModalities []string
+	var genParams spec.GenerationParams
+
+	if model != nil {
+		// Use model config
+		ignoreSystemPrompt = model.IgnoreSystemPrompt
+		toolSupported = model.ToolSupported
+		thoughtEnabled = model.ThoughtEnabled
+		responseModalities = model.ResponseModalities
+		genParams = model.GenParams
+	} else {
+		// Use defaults
+		ignoreSystemPrompt = false
+		toolSupported = true
+		thoughtEnabled = true
+		responseModalities = []string{"TEXT"}
+		genParams = spec.GenerationParams{}
+	}
+
 	var systemInstruction *Content
-	if params.SystemPrompt != "" && !model.IgnoreSystemPrompt {
+	if params.SystemPrompt != "" && !ignoreSystemPrompt {
 		systemInstruction = &Content{
 			Parts: []Part{
 				{Text: params.SystemPrompt},
@@ -551,7 +557,7 @@ func convertSessionParamsToGenerateRequest(toolRegistry *tool.Tools, model *Mode
 	}
 
 	var tools []Tool
-	if model.ToolSupported {
+	if toolSupported {
 		tools = toolRegistry.ForGemini()
 		if params.ToolConfig != nil {
 			if _, ok := params.ToolConfig[""]; ok {
@@ -570,7 +576,7 @@ func convertSessionParamsToGenerateRequest(toolRegistry *tool.Tools, model *Mode
 	}
 
 	var thinkingConfig *ThinkingConfig
-	if params.IncludeThoughts && model.ThoughtEnabled {
+	if params.IncludeThoughts && thoughtEnabled {
 		thinkingConfig = &ThinkingConfig{
 			IncludeThoughts: true,
 		}
@@ -578,14 +584,14 @@ func convertSessionParamsToGenerateRequest(toolRegistry *tool.Tools, model *Mode
 
 	var temperature, topP *float32
 	var topK *int32
-	if model.GenParams.Temperature >= 0 {
-		temperature = &model.GenParams.Temperature
+	if genParams.Temperature >= 0 {
+		temperature = &genParams.Temperature
 	}
-	if model.GenParams.TopP >= 0 {
-		topP = &model.GenParams.TopP
+	if genParams.TopP >= 0 {
+		topP = &genParams.TopP
 	}
-	if model.GenParams.TopK >= 0 {
-		topK = &model.GenParams.TopK
+	if genParams.TopK >= 0 {
+		topK = &genParams.TopK
 	}
 
 	return GenerateContentRequest{
@@ -597,7 +603,7 @@ func convertSessionParamsToGenerateRequest(toolRegistry *tool.Tools, model *Mode
 			Temperature:        temperature,
 			TopP:               topP,
 			TopK:               topK,
-			ResponseModalities: model.ResponseModalities,
+			ResponseModalities: responseModalities,
 		},
 	}
 }

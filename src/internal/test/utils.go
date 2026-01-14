@@ -91,7 +91,8 @@ func setupTestWithSessionDB(t *testing.T, useMemorySessionDB bool) (*mux.Router,
 			return 1048576 // Mocked max tokens
 		},
 	}
-	models.SetGeminiProvider(MockLLMProviderForTests)
+	// Set wildcard provider for all models
+	models.SetLLMProvider("", MockLLMProviderForTests)
 
 	// Initialize GeminiAuth
 	geminiAuth := llm.NewGeminiAuth("")

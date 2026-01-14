@@ -5,6 +5,14 @@
             "topK": 64,
             "topP": 0.95
         },
+        "@chat-thinking-low": {
+            "extends": "@chat",
+            "thinking": "low"
+        },
+        "@chat-thinking-high": {
+            "extends": "@chat",
+            "thinking": "high"
+        },
         "@subagent": {
             "temperature": 0.0,
             "topK": -1,
@@ -13,11 +21,6 @@
     },
     "models": {
         "$base": {
-            "providers": [
-                "geminicli",
-                "antigravity",
-                "api"
-            ],
             "genParams": "@chat",
             "fallback": ""
         },
@@ -27,8 +30,8 @@
                 "": "/subagent",
                 "compression": "/subagent",
                 "session_name": "/subagent",
-                "web_fetch": "gemini-2.5-flash/web_fetch",
-                "web_fetch_fallback": "gemini-2.5-flash/web_fetch",
+                "web_fetch": "gemini-3-flash/web_fetch",
+                "web_fetch_fallback": "gemini-3-flash/web_fetch",
                 "image_generation": "gemini-2.5-flash-image"
             },
             "ignoreSystemPrompt": false,
@@ -42,7 +45,7 @@
             "extends": "$base",
             "genParams": "@subagent",
             "subagents": {
-                "session_name": "gemini-2.5-flash"
+                "session_name": "gemini-3-flash"
             },
             "ignoreSystemPrompt": true,
             "thoughtEnabled": false,
@@ -54,7 +57,7 @@
         },
         "gemini-2.5-flash-lite": {
             "extends": "$chat",
-            "modelName": "gemini-2.5-flash-lite",
+            "thoughtEnabled": false,
             "toolSupported": true,
             "maxTokens": 1048576
         },
@@ -64,7 +67,6 @@
         },
         "gemini-2.5-flash": {
             "extends": "$chat",
-            "modelName": "gemini-2.5-flash",
             "fallback": "gemini-2.5-flash-lite",
             "thoughtEnabled": true,
             "toolSupported": true,
@@ -80,7 +82,6 @@
         },
         "gemini-2.5-pro": {
             "extends": "$chat",
-            "modelName": "gemini-2.5-pro",
             "fallback": "gemini-2.5-flash",
             "subagents": {
                 "image_generation": "gemini-3-pro-image"
@@ -96,184 +97,339 @@
         "gemini-3-flash": {
             "extends": "$chat",
             "providers": [
-                "antigravity"
+                "geminicli::gemini-3-flash-preview",
+                "antigravity::gemini-3-flash",
+                "::gemini-3-flash",
+                "::gemini-3-flash-preview"
             ],
-            "modelName": "gemini-3-flash",
-            "fallback": "gemini-2.5-flash",
-            "thoughtEnabled": true,
-            "toolSupported": true,
-            "maxTokens": 1048576
-        },
-        "gemini-3-flash-preview": {
-            "extends": "gemini-3-flash",
-            "providers": [
-                "geminicli"
-            ],
-            "modelName": "gemini-3-flash-preview",
             "fallback": "gemini-2.5-flash",
             "thoughtEnabled": true,
             "toolSupported": true,
             "maxTokens": 1048576
         },
         "gemini-3-flash/subagent": {
-            "extends": "gemini-2.5-flash",
+            "extends": "gemini-3-flash",
             "genParams": "@subagent"
         },
-        "gemini-3-flash-preview/subagent": {
-            "extends": "gemini-3-flash-preview",
+        "gemini-3-flash/web_fetch": {
+            "extends": "gemini-3-flash",
             "genParams": "@subagent"
         },
+        "gemini-3-flash-preview": "gemini-3-flash",
+        "gemini-3-flash-preview/subagent": "gemini-3-flash/subagent",
+        "gemini-3-pro-preview": "gemini-3-pro",
         "gemini-3-pro": {
             "extends": "$chat",
             "providers": [
-                "api"
+                "geminicli::gemini-3-pro-preview",
+                "+low antigravity::gemini-3-pro-low",
+                "+high antigravity::gemini-3-pro-high",
+                "::gemini-3-pro",
+                "::gemini-3-pro-preview"
             ],
-            "modelName": "gemini-3-pro-preview",
             "fallback": "gemini-2.5-pro",
             "subagents": {
                 "image_generation": "gemini-3-pro-image"
             },
             "thoughtEnabled": true,
             "toolSupported": true,
-            "maxTokens": 1048576
-        },
-        "gemini-3-pro-preview": {
-            "extends": "gemini-3-pro",
-            "providers": [
-                "geminicli"
-            ],
-            "modelName": "gemini-3-pro-preview",
-            "fallback": "gemini-2.5-pro",
-            "thoughtEnabled": true,
-            "toolSupported": true,
-            "maxTokens": 1048576
+            "maxTokens": 1048576,
+            "variants": {
+                "+low": {
+                    "genParams": "@chat-thinking-low"
+                },
+                "+high": {
+                    "genParams": "@chat-thinking-high"
+                }
+            }
         },
         "gemini-3-pro/subagent": {
             "extends": "gemini-2.5-flash",
             "genParams": "@subagent"
         },
-        "gemini-3-pro-preview/subagent": {
-            "extends": "gemini-3-flash-preview",
-            "genParams": "@subagent"
+        "gemini-2.0-flash-preview-image-generation": {
+            "extends": "$image",
+            "fallback": "gemini-2.5-flash-image",
+            "maxTokens": 65536
         },
-        "gemini-3-pro+low": {
-            "extends": "gemini-3-pro",
-            "providers": [
-                "antigravity"
-            ],
-            "modelName": "gemini-3-pro-low",
-            "fallback": "gemini-3-pro"
-        },
-        "gemini-3-pro+high": {
-            "extends": "gemini-3-pro",
-            "providers": [
-                "antigravity"
-            ],
-            "modelName": "gemini-3-pro-high",
-            "fallback": "gemini-3-pro"
-        },
-        "gemini-2.0-flash-preview-image-generation": "gemini-2.5-flash-image",
         "gemini-2.5-flash-image": {
             "extends": "$image",
             "providers": [
-                "antigravity",
-                "api"
+                "antigravity::gemini-2.5-flash-image",
+                "::gemini-2.5-flash-image",
+                "::gemini-2.5-flash-image-preview"
             ],
-            "modelName": "gemini-2.5-flash-image",
             "maxTokens": 65536
         },
         "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image",
         "gemini-3-pro-image": {
             "extends": "$image",
             "providers": [
-                "antigravity"
+                "antigravity::gemini-3-pro-image",
+                "::gemini-3-pro-image",
+                "::gemini-3-pro-image-preview"
             ],
-            "modelName": "gemini-3-pro-image",
-            "fallback": "gemini-3-pro-image-preview",
+            "fallback": "gemini-2.5-flash-image",
             "thoughtEnabled": true,
             "maxTokens": 65536
         },
-        "gemini-3-pro-image-preview": {
-            "extends": "gemini-3-pro-image",
+        "claude-haiku-4.5": {
+            "extends": "$chat",
             "providers": [
-                "api"
+                "::claude-haiku-4-5"
             ],
-            "modelName": "gemini-3-pro-image-preview",
-            "fallback": "gemini-2.5-flash-image"
+            "thoughtEnabled": false,
+            "toolSupported": true,
+            "maxTokens": 200000,
+            "variants": {
+                "+thinking": {
+                    "thoughtEnabled": true
+                }
+            }
+        },
+        "claude-haiku-4.5/subagent": {
+            "extends": "claude-haiku-4.5",
+            "genParams": "@subagent"
         },
         "claude-sonnet-4.5": {
             "extends": "$chat",
             "providers": [
-                "antigravity"
+                "antigravity::claude-sonnet-4-5",
+                "+thinking antigravity::claude-sonnet-4-5-thinking",
+                "::claude-sonnet-4-5"
             ],
-            "modelName": "claude-sonnet-4-5",
+            "fallback": "claude-haiku-4.5",
             "thoughtEnabled": false,
             "toolSupported": true,
-            "maxTokens": 200000
+            "maxTokens": 200000,
+            "variants": {
+                "+thinking": {
+                    "thoughtEnabled": true
+                }
+            }
         },
         "claude-sonnet-4.5/subagent": {
-            "extends": "claude-sonnet-4.5",
+            "extends": "claude-haiku-4.5",
             "genParams": "@subagent"
         },
-        "claude-sonnet-4.5+thinking": {
+        "claude-opus-4.5": {
             "extends": "$chat",
             "providers": [
-                "antigravity"
+                "+thinking antigravity::claude-opus-4-5-thinking",
+                "::claude-opus-4-5"
             ],
-            "modelName": "claude-sonnet-4-5-thinking",
             "fallback": "claude-sonnet-4.5",
-            "thoughtEnabled": true,
+            "thoughtEnabled": false,
             "toolSupported": true,
-            "maxTokens": 200000
+            "maxTokens": 200000,
+            "variants": {
+                "+thinking": {
+                    "thoughtEnabled": true
+                }
+            }
         },
-        "claude-sonnet-4.5+thinking/subagent": {
-            "extends": "claude-sonnet-4.5",
+        "claude-opus-4.5/subagent": {
+            "extends": "claude-opus-4.5",
             "genParams": "@subagent"
         },
-        "claude-opus-4.5+thinking": {
-            "extends": "$chat",
-            "providers": [
-                "antigravity"
-            ],
-            "modelName": "claude-opus-4-5-thinking",
-            "fallback": "claude-sonnet-4.5+thinking",
-            "thoughtEnabled": true,
-            "toolSupported": true,
+        "gpt-5": {
+            "maxTokens": 400000
+        },
+        "gpt-5-mini": {
+            "maxTokens": 400000
+        },
+        "gpt-5-nano": {
+            "maxTokens": 400000
+        },
+        "gpt-5-codex": {
+            "maxTokens": 400000
+        },
+        "gpt-5-pro": {
+            "maxTokens": 400000
+        },
+        "gpt-5-chat-latest": {
+            "maxTokens": 128000
+        },
+        "gpt-4.5-preview": {
+            "maxTokens": 128000
+        },
+        "gpt-4.1": {
+            "maxTokens": 1047576
+        },
+        "gpt-4.1-mini": {
+            "maxTokens": 1047576
+        },
+        "gpt-4.1-nano": {
+            "maxTokens": 1047576
+        },
+        "gpt-4o": {
+            "maxTokens": 128000
+        },
+        "gpt-4o-audio": {
+            "maxTokens": 128000
+        },
+        "gpt-4o-mini": {
+            "maxTokens": 128000
+        },
+        "gpt-4o-mini-audio": {
+            "maxTokens": 128000
+        },
+        "gpt-4o-search-preview": {
+            "maxTokens": 128000
+        },
+        "gpt-4o-mini-search-preview": {
+            "maxTokens": 128000
+        },
+        "chatgpt-4o-latest": {
+            "maxTokens": 128000
+        },
+        "gpt-4o-realtime-preview": {
+            "maxTokens": 32000
+        },
+        "gpt-4o-mini-realtime-preview": {
+            "maxTokens": 16000
+        },
+        "gpt-4o-mini-transcribe": {
+            "maxTokens": 16000
+        },
+        "gpt-4o-transcribe": {
+            "maxTokens": 16000
+        },
+        "gpt-4": {
+            "maxTokens": 8192
+        },
+        "gpt-4-turbo": {
+            "maxTokens": 128000
+        },
+        "gpt-4-turbo-preview": {
+            "maxTokens": 128000
+        },
+        "gpt-3.5-turbo": {
+            "maxTokens": 16385
+        },
+        "babbage-002": {
+            "maxTokens": 16384
+        },
+        "davinci-002": {
+            "maxTokens": 16384
+        },
+        "codex-mini-latest": {
             "maxTokens": 200000
         },
-        "claude-opus-4.5+thinking/subagent": {
-            "extends": "claude-opus-4.5+thinking",
-            "genParams": "@subagent"
+        "o4-mini": {
+            "maxTokens": 200000
         },
-        "gpt-oss:120b+medium": {
+        "o4-deep-research": {
+            "maxTokens": 200000
+        },
+        "o3": {
+            "maxTokens": 200000
+        },
+        "o3-mini": {
+            "maxTokens": 200000
+        },
+        "o3-pro": {
+            "maxTokens": 200000
+        },
+        "o3-deep-research": {
+            "maxTokens": 200000
+        },
+        "o1": {
+            "maxTokens": 200000
+        },
+        "o1-mini": {
+            "maxTokens": 200000
+        },
+        "o1-pro": {
+            "maxTokens": 200000
+        },
+        "o1-preview": {
+            "maxTokens": 128000
+        },
+        "computer-use-preview": {
+            "maxTokens": 8192
+        },
+        "gpt-audio": {
+            "maxTokens": 128000
+        },
+        "gpt-audio-mini": {
+            "maxTokens": 128000
+        },
+        "gpt-realtime": {
+            "maxTokens": 32000
+        },
+        "gpt-realtime-mini": {
+            "maxTokens": 32000
+        },
+        "text-moderation": {
+            "maxTokens": 32768
+        },
+        "text-moderation-stable": {
+            "maxTokens": 32768
+        },
+        "gpt-oss": {
             "extends": "$chat",
             "providers": [
-                "antigravity"
+                ":120b +medium antigravity::gpt-oss-120b-medium"
             ],
-            "modelName": "gpt-oss-120b-medium",
+            "toolSupported": true,
+            "maxTokens": 131072,
+            "variants": {
+                "+medium": {
+                    "thoughtEnabled": true
+                }
+            }
+        },
+        "gpt-oss/subagent": {
+            "extends": "gpt-oss",
+            "genParams": "@subagent"
+        },
+        "angel-eval": {
+            "extends": "$chat",
+            "providers": [
+                "angel-internal::eval"
+            ],
             "thoughtEnabled": true,
             "toolSupported": true,
-            "maxTokens": 131072
+            "maxTokens": 1024
         },
-        "gpt-oss:120b+medium/subagent": {
-            "extends": "gpt-oss:120b+medium",
+        "angel-eval/subagent": {
+            "extends": "angel-eval",
             "genParams": "@subagent"
         }
     },
+    "knownProviders": [
+        "geminicli::gemini-2.0-flash",
+        "geminicli::gemini-2.5-flash",
+        "geminicli::gemini-2.5-flash-lite",
+        "geminicli::gemini-2.5-pro",
+        "geminicli::gemini-3-flash-preview",
+        "geminicli::gemini-3-pro-preview",
+        "antigravity::claude-opus-4-5-thinking",
+        "antigravity::claude-sonnet-4-5",
+        "antigravity::claude-sonnet-4-5-thinking",
+        "antigravity::gemini-2.5-flash",
+        "antigravity::gemini-2.5-flash-thinking",
+        "antigravity::gemini-2.5-flash-lite",
+        "antigravity::gemini-2.5-pro",
+        "antigravity::gemini-3-flash",
+        "antigravity::gemini-3-pro-high",
+        "antigravity::gemini-3-pro-low",
+        "antigravity::gemini-3-pro-image",
+        "antigravity::gpt-oss-120b-medium"
+    ],
     "displayOrder": [
-        "gemini-2.5-flash",
         "gemini-3-flash",
-        "gemini-3-flash-preview",
         "gemini-3-pro+low",
         "gemini-3-pro+high",
         "gemini-3-pro-preview",
-        "gemini-2.5-pro",
         "gemini-2.5-flash-lite",
         "gemini-3-pro-image",
         "gemini-2.5-flash-image",
         "claude-sonnet-4.5",
         "claude-sonnet-4.5+thinking",
         "claude-opus-4.5+thinking",
-        "gpt-oss:120b+medium"
+        "gpt-oss:120b+medium",
+        "angel-eval"
     ]
 }

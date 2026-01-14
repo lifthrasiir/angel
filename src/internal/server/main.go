@@ -127,8 +127,11 @@ func Main(config *env.EnvConfig, embeddedFiles embed.FS, loginUnavailableHTML []
 	// Initialize OpenAI endpoints from database configurations
 	models.InitializeOpenAIEndpoints(db)
 
-	// Add angel-eval provider after all other providers are initialized
-	models.SetAngelEvalProvider(&llm.AngelEvalProvider{})
+	// Initialize Gemini providers
+	models.SetLLMProvider("api", llm.NewGeminiAPIProvider(models))
+	models.SetLLMProvider("geminicli", llm.NewCodeAssistProvider("geminicli", models))
+	models.SetLLMProvider("antigravity", llm.NewCodeAssistProvider("antigravity", models))
+	models.SetLLMProvider("angel-internal", &llm.AngelEvalProvider{})
 
 	router := mux.NewRouter()
 	router.Use(MakeContextMiddleware(db, models, geminiAuth, tools, config))
