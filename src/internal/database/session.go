@@ -680,7 +680,7 @@ func DeleteSession(db *Database, sessionID string, sandboxBaseDir string) error 
 // GenerateID generates a random ID for sessions and branches
 func GenerateID() string {
 	for {
-		b := make([]byte, 8) // 8 bytes will result in an 11-character base64 string
+		b := make([]byte, 6) // 6 bytes will result in an 8-character base64 string
 		if _, err := rand.Read(b); err != nil {
 			log.Panicf("Error generating random ID: %v", err)
 		}
@@ -693,8 +693,8 @@ func GenerateID() string {
 				break
 			}
 		}
-		// If no uppercase letters, return the ID
-		if !hasUppercase {
+		// If it has uppercase letters, return it
+		if hasUppercase {
 			return id
 		}
 		// Otherwise, try again (very unlikely to happen multiple times)
