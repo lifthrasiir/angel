@@ -46,13 +46,18 @@ replace (
 
 require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
+	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
+	github.com/UserExistsError/conpty v0.1.4 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
+	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fvbommel/sortorder v1.1.0 // indirect
 	github.com/gorilla/csrf v1.7.3 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/k3a/html2text v1.2.0 // indirect
+	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/modelcontextprotocol/go-sdk v0.2.0 // indirect
 	github.com/ncruces/go-sqlite3 v0.30.3 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect

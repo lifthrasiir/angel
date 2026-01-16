@@ -21,4 +21,5 @@ use (
 	./src/internal/tool/todo
 	./src/internal/tool/webfetch
 	./src/internal/types
+	./src/terminal
 )

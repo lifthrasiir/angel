@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings" // For checking string content
 	"testing"
 )
@@ -26,6 +27,15 @@ func checkExpectedError(t *testing.T, err error, expectedSubstring string) {
 	if !strings.Contains(err.Error(), expectedSubstring) {
 		t.Fatalf("Expected error to contain \"%s\", but got: %v", expectedSubstring, err)
 	}
+}
+
+// Helper function to get exit code from RunningCommand
+// On Windows with ConPTY, ProcessState might not be populated, so fall back to rc.exitCode
+func getExitCode(rc *RunningCommand) int {
+	if rc.Cmd.ProcessState != nil {
+		return rc.Cmd.ProcessState.ExitCode()
+	}
+	return rc.exitCode
 }
 
 // Helper function to check if a directory exists
@@ -224,7 +234,7 @@ func TestSessionFS_Run(t *testing.T) {
 
 		stdout := string(rc.TakeStdout())
 		stderr := string(rc.TakeStderr())
-		exitCode := rc.Cmd.ProcessState.ExitCode() // Get exit code from ProcessState
+		exitCode := getExitCode(rc)
 
 		if exitCode != 0 {
 			t.Errorf("Expected exitCode 0, got %d", exitCode)
@@ -254,7 +264,7 @@ func TestSessionFS_Run(t *testing.T) {
 		<-rc.done
 
 		stdout := string(rc.TakeStdout())
-		exitCode := rc.Cmd.ProcessState.ExitCode()
+		exitCode := getExitCode(rc)
 
 		if exitCode != 0 {
 			t.Errorf("Expected exitCode 0, got %d", exitCode)
@@ -277,8 +287,8 @@ func TestSessionFS_Run(t *testing.T) {
 		}
 		// The error should be returned by sf.Run, so exitCode might not be meaningful here
 		// if rc is nil. If rc is not nil, check its exitCode.
-		if rc != nil && rc.Cmd.ProcessState != nil && rc.Cmd.ProcessState.ExitCode() == 0 {
-			t.Errorf("Expected non-zero exitCode, got %d", rc.Cmd.ProcessState.ExitCode())
+		if rc != nil && getExitCode(rc) == 0 {
+			t.Errorf("Expected non-zero exitCode, got %d", getExitCode(rc))
 		}
 	})
 
@@ -299,7 +309,7 @@ func TestSessionFS_Run(t *testing.T) {
 		<-rc.done
 
 		stdout := string(rc.TakeStdout())
-		exitCode := rc.Cmd.ProcessState.ExitCode()
+		exitCode := getExitCode(rc)
 
 		if exitCode != 0 {
 			t.Errorf("Expected exitCode 0, got %d", exitCode)
@@ -322,8 +332,8 @@ func TestSessionFS_Run(t *testing.T) {
 			// Wait for the command to finish if it started
 			<-rc.done
 		}
-		if rc != nil && rc.Cmd.ProcessState != nil && rc.Cmd.ProcessState.ExitCode() == 0 {
-			t.Errorf("Expected non-zero exitCode, got %d", rc.Cmd.ProcessState.ExitCode())
+		if rc != nil && getExitCode(rc) == 0 {
+			t.Errorf("Expected non-zero exitCode, got %d", getExitCode(rc))
 		}
 	})
 
@@ -337,18 +347,17 @@ func TestSessionFS_Run(t *testing.T) {
 		<-rc.done
 
 		// Check exit code and stderr only if command started and failed
-		if rc.Cmd.ProcessState != nil {
-			exitCode := rc.Cmd.ProcessState.ExitCode()
-			stderr := string(rc.TakeStderr())
-			if exitCode == 0 {
-				t.Errorf("Expected non-zero exitCode for nonexistent_command, got %d", exitCode)
-			}
-			if stderr == "" {
-				t.Errorf("Expected non-empty stderr for nonexistent_command, got empty")
-			}
-		} else {
-			t.Fatalf("ProcessState is nil for nonexistent_command") // Should not happen if command was run
+		exitCode := getExitCode(rc)
+		stderr := string(rc.TakeStderr())
+		if exitCode == 0 {
+			t.Errorf("Expected non-zero exitCode for nonexistent_command, got %d", exitCode)
 		}
+		// On Windows, nonexistent commands may not produce stderr output
+		// so we only check stderr on non-Windows platforms
+		if stderr == "" && runtime.GOOS != "windows" {
+			t.Errorf("Expected non-empty stderr for nonexistent_command, got empty")
+		}
+		// On Windows, just verify exit code is non-zero (already checked above)
 	})
 }
 

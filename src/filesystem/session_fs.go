@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/lifthrasiir/angel/terminal"
 )
 
 // SessionFS manages file system operations for a specific session,
@@ -177,10 +179,14 @@ func (sf *SessionFS) ReadDir(path string) ([]fs.DirEntry, error) {
 // RunningCommand represents a shell command that is currently running.
 // It provides atomic methods to take accumulated stdout/stderr.
 type RunningCommand struct {
-	Cmd     *exec.Cmd
-	sandbox *Sandbox
-	Cancel  context.CancelFunc
-	done    chan struct{} // Closed when the command goroutine finishes
+	Cmd       *exec.Cmd
+	sandbox   *Sandbox
+	Cancel    context.CancelFunc
+	pty       terminal.PTY  // PTY for terminal I/O
+	ptyMu     sync.Mutex    // Protects pty closing to avoid race condition
+	ptyClosed bool          // Track whether PTY has been closed
+	exitCode  int           // Exit code (set when command completes)
+	done      chan struct{} // Closed when the command goroutine finishes
 
 	stdoutMu  sync.Mutex
 	stdoutBuf bytes.Buffer
@@ -221,12 +227,17 @@ func (rc *RunningCommand) TakeStderr() []byte {
 func (rc *RunningCommand) Close() error {
 	var err error
 
-	// Attempt to kill the process if it's still running
-	if rc.Cmd != nil && rc.Cmd.Process != nil && rc.Cmd.ProcessState == nil {
-		if killErr := rc.Cmd.Process.Kill(); killErr != nil {
-			err = fmt.Errorf("failed to kill process: %w", killErr)
+	// Close PTY if it still exists
+	// Use mutex to avoid race condition with goroutine which also closes PTY
+	rc.ptyMu.Lock()
+	if !rc.ptyClosed && rc.pty != nil {
+		if ptyErr := rc.pty.Close(); ptyErr != nil {
+			err = fmt.Errorf("failed to close PTY: %w", ptyErr)
 		}
+		rc.ptyClosed = true
+		rc.pty = nil
 	}
+	rc.ptyMu.Unlock()
 
 	// Wait for the command goroutine to finish if it hasn't already
 	if rc.done != nil {
@@ -279,11 +290,14 @@ func readPipeToBuffer(wg *sync.WaitGroup, pipe io.ReadCloser, mu *sync.Mutex, bu
 	}
 }
 
-// Run executes a command within the specified working directory.
+// Run executes a command within the specified working directory using a pseudo-terminal (PTY).
 // If workingDir is empty, it defaults to the anonymous root (sandbox root).
 // If workingDir is a relative path, it's resolved against the anonymous root.
 // If workingDir is an absolute path, it must be within a registered root or the anonymous root.
 // It returns a *RunningCommand handle.
+//
+// The PTY provides terminal emulation, allowing interactive programs and ANSI escape
+// sequences to work properly. The terminal size is set to 80x24 characters.
 func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string) (*RunningCommand, error) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -365,6 +379,7 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 		return nil, fmt.Errorf("working directory is not a directory: %s", actualWorkingDir)
 	}
 
+	// Create exec.Cmd for the command
 	cmdCtx, cancel := context.WithCancel(ctx)
 	var execCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
@@ -375,46 +390,62 @@ func (sf *SessionFS) Run(ctx context.Context, command string, workingDir string)
 
 	execCmd.Dir = actualWorkingDir
 
-	stdoutPipe, err := execCmd.StdoutPipe()
+	// Start PTY with the command (80x24 terminal size)
+	pty, err := terminal.StartPTY(execCmd, 80, 24)
 	if err != nil {
 		cancel()
 		_ = sandbox.Close()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	stderrPipe, err := execCmd.StderrPipe()
-	if err != nil {
-		cancel()
-		_ = stdoutPipe.Close() // Close stdout pipe as well
-		_ = sandbox.Close()
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
 
 	rc := &RunningCommand{
 		Cmd:     execCmd,
 		sandbox: sandbox,
 		Cancel:  cancel,
+		pty:     pty,
 		done:    make(chan struct{}),
 	}
 
+	// Start goroutine to read from PTY and wait for command to complete
 	go func() {
-		var wg sync.WaitGroup
-		wg.Add(2)
+		defer close(rc.done)
 
-		go readPipeToBuffer(&wg, stdoutPipe, &rc.stdoutMu, &rc.stdoutBuf)
-		go readPipeToBuffer(&wg, stderrPipe, &rc.stderrMu, &rc.stderrBuf)
+		// Read from PTY in background with a timeout
+		readDone := make(chan struct{})
+		go func() {
+			defer close(readDone)
+			readBuf := make([]byte, 4096)
+			for {
+				n, err := pty.Read(readBuf)
+				if n > 0 {
+					rc.stdoutMu.Lock()
+					rc.stdoutBuf.Write(readBuf[:n])
+					rc.stdoutMu.Unlock()
+				}
+				if err != nil {
+					// Error or EOF, exit the read loop
+					break
+				}
+			}
+		}()
 
-		err = execCmd.Start()
+		// Wait for command to complete
+		exitCode, err := pty.Wait()
 		if err != nil {
-			log.Printf("Error starting command: %v\n", err)
-			cancel()            // Cancel the context
-			_ = sandbox.Close() // Close the sandbox
-			// Do not close doneChan here, as it's handled by the caller if this goroutine returns early.
-			return
+			// Command execution error, but continue cleanup
 		}
+		rc.exitCode = exitCode
 
-		wg.Wait()          // Wait for stdout/stderr goroutines to finish reading
-		_ = execCmd.Wait() // Wait for the command to finish
-		close(rc.done)     // Close doneChan AFTER Wait() completes
+		// Close PTY to unblock the reader (Windows ConPTY Read may not return after process exits)
+		rc.ptyMu.Lock()
+		if !rc.ptyClosed && rc.pty != nil {
+			_ = rc.pty.Close()
+			rc.ptyClosed = true
+		}
+		rc.ptyMu.Unlock()
+
+		// Wait for reader to finish
+		<-readDone
 	}()
 
 	return rc, nil
