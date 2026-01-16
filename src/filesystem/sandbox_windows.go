@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"golang.org/x/sys/windows"
 )
 
 var sandboxMutex sync.Mutex
@@ -24,8 +25,6 @@ type Sandbox struct {
 // NewSandbox creates a new Sandbox instance.
 // It creates a temporary directory under the specified directory and substs it.
 func NewSandbox(sessionDir string) (*Sandbox, error) {
-	var err error
-
 	baseDir := sessionDir
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create session temporary directory %s: %w", baseDir, err)
@@ -75,15 +74,37 @@ func (s *Sandbox) Close() error {
 }
 
 func findAvailableDriveLetter() (string, error) {
-	var used int // Use an int as a bitmask for drive letters A-Z
-	for l := 'A'; l <= 'Z'; l++ {
-		_, err := os.Stat(string(l) + ":\\")
-		if err == nil || !os.IsNotExist(err) {
-			// Drive exists or we can't determine if it exists (permission error, etc.)
-			// Treat it as used to be safe. Set the corresponding bit.
-			used |= (1 << (l - 'A'))
+	// Use GetLogicalDriveStrings Windows API to get a bitmask of currently used drives
+	// This is much faster and more reliable than checking each drive individually
+	bufSize, err := windows.GetLogicalDriveStrings(0, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to get logical drives buffer size: %w", err)
+	}
+
+	// Increase buffer size by one to account for null terminator
+	bufSize++
+	buf := make([]uint16, bufSize)
+	_, err = windows.GetLogicalDriveStrings(bufSize, &buf[0])
+	if err != nil {
+		return "", fmt.Errorf("failed to get logical drives: %w", err)
+	}
+
+	// Parse the drive strings (format: "C:\\\0D:\\\0\0")
+	var used int
+	for i := range buf {
+		if buf[i] == 0 {
+			if i > 0 && buf[i-1] == 0 {
+				// Double null terminator means end of list
+				break
+			}
+			continue
+		}
+		// Each drive string is like "C:\"
+		if buf[i] >= 'A' && buf[i] <= 'Z' && i+2 < len(buf) && buf[i+1] == ':' && buf[i+2] == '\\' {
+			used |= (1 << (buf[i] - 'A'))
 		}
 	}
+
 	return findBestDriveLetter(used)
 }
 

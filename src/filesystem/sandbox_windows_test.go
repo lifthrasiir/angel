@@ -36,12 +36,17 @@ func TestSandboxLifecycle(t *testing.T) {
 
 	sessionId := "testSandboxLifecycle"
 	testDir := createTestSandboxDir(sessionId)
+	t.Cleanup(func() { removeTestSandboxDir(sessionId) })
 
 	s, err := NewSandbox(testDir)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
-	defer removeTestSandboxDir(sessionId)
+	t.Cleanup(func() {
+		if s != nil {
+			s.Close()
+		}
+	})
 
 	drivePath := s.driveLetter + ":\\"
 	if _, err := os.Stat(drivePath); os.IsNotExist(err) {
@@ -67,13 +72,17 @@ func TestSandboxFSInterface(t *testing.T) {
 
 	sessionId := "testSandboxFSInterface"
 	testDir := createTestSandboxDir(sessionId)
+	t.Cleanup(func() { removeTestSandboxDir(sessionId) })
 
 	s, err := NewSandbox(testDir)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
-	defer s.Close()
-	defer removeTestSandboxDir(sessionId)
+	t.Cleanup(func() {
+		if s != nil {
+			s.Close()
+		}
+	})
 
 	testContent := "hello world"
 	testFile := "test.txt"
@@ -100,13 +109,17 @@ func TestSandboxRunCommand(t *testing.T) {
 
 	sessionId := "testSandboxRunCommand"
 	testDir := createTestSandboxDir(sessionId)
+	t.Cleanup(func() { removeTestSandboxDir(sessionId) })
 
 	s, err := NewSandbox(testDir)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
-	defer s.Close()
-	defer removeTestSandboxDir(sessionId)
+	t.Cleanup(func() {
+		if s != nil {
+			s.Close()
+		}
+	})
 
 	testFile := "output.txt"
 	testContent := "hello from command"
@@ -136,13 +149,17 @@ func TestSandboxGlob(t *testing.T) {
 
 	sessionId := "testSandboxGlob"
 	testDir := createTestSandboxDir(sessionId)
+	t.Cleanup(func() { removeTestSandboxDir(sessionId) })
 
 	s, err := NewSandbox(testDir)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
-	defer s.Close()
-	defer removeTestSandboxDir(sessionId)
+	t.Cleanup(func() {
+		if s != nil {
+			s.Close()
+		}
+	})
 
 	// Create some files and directories in the sandbox
 	os.MkdirAll(filepath.Join(s.BaseDir(), "dir1", "subdir"), 0755)
