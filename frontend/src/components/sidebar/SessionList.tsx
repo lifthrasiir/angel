@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Session, Workspace } from '../../types/chat';
-import { sessionsAtom } from '../../atoms/chatAtoms';
+import { sessionsAtom, currentSessionNameAtom } from '../../atoms/chatAtoms';
 import { selectedFilesAtom, preserveSelectedFilesAtom } from '../../atoms/fileAtoms';
 import { useSessionManagerContext } from '../../hooks/SessionManagerContext';
 import { getSessionId } from '../../utils/sessionStateHelpers';
@@ -33,6 +33,7 @@ const SessionList: React.FC<SessionListProps> = ({
   const sessionManager = useSessionManagerContext();
   const chatSessionId = getSessionId(sessionManager.sessionState);
   const [selectedFiles, setSelectedFiles] = useAtom(selectedFilesAtom);
+  const setCurrentSessionName = useSetAtom(currentSessionNameAtom);
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -180,6 +181,10 @@ const SessionList: React.FC<SessionListProps> = ({
                           ...s,
                           name: tempEditValue,
                         }));
+                        // If this is the current session, also update currentSessionName
+                        if (session.id === chatSessionId) {
+                          setCurrentSessionName(tempEditValue);
+                        }
                       } catch (error) {
                         console.error('Error updating session name:', error);
                       }

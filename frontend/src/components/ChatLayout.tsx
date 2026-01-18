@@ -5,7 +5,7 @@ import { apiFetch } from '../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
 import { globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/modelAtoms';
 import { toastMessageAtom } from '../atoms/uiAtoms';
-import { sessionsAtom } from '../atoms/chatAtoms';
+import { sessionsAtom, currentSessionNameAtom } from '../atoms/chatAtoms';
 import { PredefinedPrompt } from './chat/SystemPromptEditor';
 import { useChatSession } from '../hooks/useChatSession';
 import { useSessionFSM } from '../hooks/useSessionFSM';
@@ -34,6 +34,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
   const setSelectedGlobalPrompt = useSetAtom(selectedGlobalPromptAtom);
   const [sessions, setSessions] = useAtom(sessionsAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
+  const setCurrentSessionName = useSetAtom(currentSessionNameAtom);
 
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -80,6 +81,10 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
         })
           .then(() => {
             setSessions(sessions.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
+            // If this is the current session, also update currentSessionName
+            if (sessionId === chatSessionId) {
+              setCurrentSessionName(newName);
+            }
           })
           .catch((error) => {
             console.error('Error updating session name:', error);
