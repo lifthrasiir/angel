@@ -56,6 +56,9 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
   // Ref to track previous pathname to detect actual URL transitions
   const prevPathnameRef = useRef<string | null>(null);
+  // Ref to track the original message ID that should be updated with new ID from EventAcknowledge
+  // Used for edit/retry operations where the original message gets a new ID in a new branch
+  const pendingMessageIdToUpdate = useRef<string | null>(null);
 
   // Jotai atoms
   const setMessages = useSetAtom(messagesAtom);
@@ -165,7 +168,12 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
             // Update temporary message ID with actual server ID
             const tempId = (event as any).temporaryMessageId;
             if (tempId && event.messageId) {
+              // New message: temporary ID -> actual server ID
               updateUserMessageId({ temporaryId: tempId, newId: event.messageId });
+            } else if (pendingMessageIdToUpdate.current && event.messageId) {
+              // Edit/retry: original message ID -> new message ID in new branch
+              updateUserMessageId({ temporaryId: pendingMessageIdToUpdate.current, newId: event.messageId });
+              pendingMessageIdToUpdate.current = null; // Clear after update
             }
             break;
 
@@ -487,6 +495,9 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
       setEditingMessageId(null); // Exit editing mode if active
 
+      // Store the original message ID for update when EventAcknowledge arrives
+      pendingMessageIdToUpdate.current = originalMessageId;
+
       // Remove this message and all subsequent messages on the frontend
       setMessages((prevMessages) => {
         const updatedMessages = [...prevMessages];
@@ -531,6 +542,9 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
       }
 
       setEditingMessageId(null); // Exit editing mode
+
+      // Store the original message ID for update when EventAcknowledge arrives
+      pendingMessageIdToUpdate.current = originalMessageId;
 
       // Update message content and remove subsequent messages on the frontend
       setMessages((prevMessages) => {
