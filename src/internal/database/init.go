@@ -320,7 +320,7 @@ func createTables(db *sql.DB) error {
 
 	CREATE TRIGGER IF NOT EXISTS update_blob_refs
 		AFTER UPDATE ON messages
-		WHEN NEW.attachments IS NOT NULL OR OLD.attachments IS NOT NULL
+		WHEN NEW.attachments != OLD.attachments
 	BEGIN
 		-- Decrease ref count for old attachments
 		UPDATE blobs SET ref_count = ref_count - 1

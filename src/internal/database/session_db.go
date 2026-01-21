@@ -91,7 +91,7 @@ const createSessionSchemaSQL = `
 
 	CREATE TRIGGER IF NOT EXISTS S.update_blob_refs
 		AFTER UPDATE ON messages
-		WHEN NEW.attachments IS NOT NULL OR OLD.attachments IS NOT NULL
+		WHEN NEW.attachments != OLD.attachments
 	BEGIN
 		UPDATE blobs SET ref_count = ref_count - 1
 		WHERE id IN (

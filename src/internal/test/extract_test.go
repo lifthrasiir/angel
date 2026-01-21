@@ -653,6 +653,192 @@ func TestExtractSession_Comprehensive(t *testing.T) {
 	}
 }
 
+// TestExtractSession_WithClearAndClearblobs tests session extraction when /clear and /clearblobs commands were used.
+// Both commands should NOT prevent blobs from being copied to the extracted session.
+// Each message group has unique blobs to verify all blobs are properly copied.
+func TestExtractSession_WithClearAndClearblobs(t *testing.T) {
+	_, testDB, _ := setupTestWithFilesystem(t)
+
+	sessionId := "testExtractClearClearblobs"
+	sdb, primaryBranchID, err := database.CreateSession(testDB, sessionId, "Test system prompt", "default")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	defer sdb.Close()
+
+	ctx := context.Background()
+	mc, err := database.NewMessageChain(ctx, sdb, primaryBranchID)
+	if err != nil {
+		t.Fatalf("Failed to create message chain: %v", err)
+	}
+
+	// === Message Group 1: Before /clear ===
+	blobData1 := []byte("file content 1 - before clear")
+	blobHash1, err := database.SaveBlob(ctx, sdb, blobData1)
+	if err != nil {
+		t.Fatalf("Failed to save blob1: %v", err)
+	}
+
+	_, err = mc.Add(Message{
+		Text: "Message 1 with file before clear",
+		Type: TypeUserText,
+		Attachments: []FileAttachment{
+			{Hash: blobHash1, FileName: "file1.txt", MimeType: "text/plain"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to add message 1: %v", err)
+	}
+
+	_, err = mc.Add(Message{Text: "Response 1", Type: TypeModelText})
+	if err != nil {
+		t.Fatalf("Failed to add response 1: %v", err)
+	}
+
+	// === /clear command ===
+	_, err = mc.Add(Message{Text: "clear", Type: TypeCommand})
+	if err != nil {
+		t.Fatalf("Failed to add /clear command: %v", err)
+	}
+
+	// === Message Group 2: Between /clear and /clearblobs ===
+	blobData2 := []byte("file content 2 - between clear and clearblobs")
+	blobHash2, err := database.SaveBlob(ctx, sdb, blobData2)
+	if err != nil {
+		t.Fatalf("Failed to save blob2: %v", err)
+	}
+
+	_, err = mc.Add(Message{
+		Text: "Message 2 with file after clear",
+		Type: TypeUserText,
+		Attachments: []FileAttachment{
+			{Hash: blobHash2, FileName: "file2.txt", MimeType: "text/plain"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to add message 2: %v", err)
+	}
+
+	_, err = mc.Add(Message{Text: "Response 2", Type: TypeModelText})
+	if err != nil {
+		t.Fatalf("Failed to add response 2: %v", err)
+	}
+
+	// === /clearblobs command ===
+	_, err = mc.Add(Message{Text: "clearblobs", Type: TypeCommand})
+	if err != nil {
+		t.Fatalf("Failed to add /clearblobs command: %v", err)
+	}
+
+	// === Message Group 3: After /clearblobs ===
+	blobData3 := []byte("file content 3 - after clearblobs")
+	blobHash3, err := database.SaveBlob(ctx, sdb, blobData3)
+	if err != nil {
+		t.Fatalf("Failed to save blob3: %v", err)
+	}
+
+	msg3, err := mc.Add(Message{
+		Text: "Message 3 with file after clearblobs",
+		Type: TypeUserText,
+		Attachments: []FileAttachment{
+			{Hash: blobHash3, FileName: "file3.txt", MimeType: "text/plain"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to add message 3: %v", err)
+	}
+
+	_, err = mc.Add(Message{Text: "Response 3", Type: TypeModelText})
+	if err != nil {
+		t.Fatalf("Failed to add response 3: %v", err)
+	}
+
+	// Verify all blobs exist in original session
+	for _, hash := range []string{blobHash1, blobHash2, blobHash3} {
+		_, err := database.GetBlob(sdb, hash)
+		if err != nil {
+			t.Fatalf("Blob %s should exist in original session: %v", hash, err)
+		}
+	}
+
+	// Extract session up to msg3 (after both /clear and /clearblobs)
+	newSessionId, _, err := chat.ExtractSession(ctx, sdb, msg3.ID)
+	if err != nil {
+		t.Fatalf("ExtractSession failed: %v", err)
+	}
+
+	// Open the new session
+	newSdb, err := testDB.WithSession(newSessionId)
+	if err != nil {
+		t.Fatalf("Failed to open new session: %v", err)
+	}
+	defer newSdb.Close()
+
+	// CRITICAL TESTS: Verify ALL blobs were copied despite /clear and /clearblobs commands
+	blobs := []struct {
+		hash string
+		data []byte
+		name string
+	}{
+		{blobHash1, blobData1, "file1.txt"},
+		{blobHash2, blobData2, "file2.txt"},
+		{blobHash3, blobData3, "file3.txt"},
+	}
+
+	for _, blob := range blobs {
+		newBlobData, err := database.GetBlob(newSdb, blob.hash)
+		if err != nil {
+			t.Errorf("Blob %s (%s) should exist in extracted session despite /clear and /clearblobs: %v", blob.hash, blob.name, err)
+			continue
+		}
+		if string(newBlobData) != string(blob.data) {
+			t.Errorf("Blob %s (%s) data mismatch in extracted session: expected '%s', got '%s'", blob.hash, blob.name, string(blob.data), string(newBlobData))
+		}
+
+		// CRITICAL: Verify ref_count is exactly 1 (filesystem DB ensures proper isolation)
+		var refCount int
+		err = newSdb.QueryRow("SELECT ref_count FROM S.blobs WHERE id = ?", blob.hash).Scan(&refCount)
+		if err != nil {
+			t.Errorf("Failed to get ref_count for blob %s: %v", blob.hash, err)
+		} else if refCount != 1 {
+			t.Errorf("Blob %s (%s) has ref_count %d (expected 1, indicates trigger bug)", blob.hash, blob.name, refCount)
+		}
+	}
+
+	// Verify message attachments are preserved
+	newSession, err := database.GetSession(newSdb)
+	if err != nil {
+		t.Fatalf("Failed to get new session: %v", err)
+	}
+
+	newHistory, err := database.GetSessionHistory(newSdb, newSession.PrimaryBranchID)
+	if err != nil {
+		t.Fatalf("Failed to get new session history: %v", err)
+	}
+
+	// Count messages with attachments (should be 3)
+	attachmentCount := 0
+	for _, msg := range newHistory {
+		if len(msg.Attachments) > 0 {
+			attachmentCount++
+		}
+	}
+
+	if attachmentCount != 3 {
+		t.Errorf("Expected 3 messages with attachments in extracted session, got %d", attachmentCount)
+	}
+
+	// Verify attachments are NOT omitted in the extracted session
+	// (clear/clearblobs only affect LLM context, not actual storage)
+	for i, msg := range newHistory {
+		for j, att := range msg.Attachments {
+			if att.Omitted {
+				t.Errorf("Attachment [%d][%d] (hash=%s) should not be omitted in extracted session", i, j, att.Hash)
+			}
+		}
+	}
+}
+
 // TestExtractSession_Handler tests the extract session HTTP handler.
 func TestExtractSession_Handler(t *testing.T) {
 	router, testDB, _ := setupTest(t)
