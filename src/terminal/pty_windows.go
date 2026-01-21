@@ -11,14 +11,46 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unicode/utf8"
 
 	"github.com/UserExistsError/conpty"
+	"golang.org/x/sys/windows"
 )
 
 var ptyCloseMutex sync.Mutex
 
 type windowsPTY struct {
-	cpty *conpty.ConPty
+	cpty     *conpty.ConPty
+	codePage uint32
+}
+
+// multiByteToUTF8 converts a byte array from the given code page to UTF-8.
+func multiByteToUTF8(data []byte, codePage uint32) (string, error) {
+	if len(data) == 0 {
+		return "", nil
+	}
+
+	// First, convert multi-byte to UTF-16
+	// Determine required buffer size
+	size, err := windows.MultiByteToWideChar(codePage, 0, &data[0], int32(len(data)), nil, 0)
+	if err != nil {
+		return "", fmt.Errorf("MultiByteToWideChar size check failed: %w", err)
+	}
+	if size == 0 {
+		return "", nil
+	}
+
+	// Allocate UTF-16 buffer
+	utf16Buf := make([]uint16, size)
+
+	// Perform conversion to UTF-16
+	_, err = windows.MultiByteToWideChar(codePage, 0, &data[0], int32(len(data)), &utf16Buf[0], size)
+	if err != nil {
+		return "", fmt.Errorf("MultiByteToWideChar conversion failed: %w", err)
+	}
+
+	// Convert UTF-16 to Go string (which is UTF-8)
+	return windows.UTF16ToString(utf16Buf), nil
 }
 
 func startPlatformPTY(cmd *exec.Cmd, width, height int) (PTY, error) {
@@ -40,6 +72,13 @@ func startPlatformPTY(cmd *exec.Cmd, width, height int) (PTY, error) {
 		env = cmd.Env
 	}
 
+	// Get the console output code page for encoding conversion
+	cp, err := windows.GetConsoleOutputCP()
+	if err != nil {
+		// Default to UTF-8 if we can't get the code page
+		cp = 65001
+	}
+
 	// Start ConPTY with the command line
 	cpty, err := conpty.Start(
 		commandLine,
@@ -52,7 +91,8 @@ func startPlatformPTY(cmd *exec.Cmd, width, height int) (PTY, error) {
 	}
 
 	return &windowsPTY{
-		cpty: cpty,
+		cpty:     cpty,
+		codePage: cp,
 	}, nil
 }
 
@@ -119,6 +159,27 @@ func (p *windowsPTY) Read(data []byte) (int, error) {
 			return n, io.EOF
 		}
 	}
+
+	// If code page is not UTF-8 (65001), convert the output
+	if p.codePage != 65001 && n > 0 {
+		// Check if the data is already valid UTF-8
+		if !utf8.Valid(data[:n]) {
+			// Convert from the detected code page to UTF-8
+			converted, convErr := multiByteToUTF8(data[:n], p.codePage)
+			if convErr == nil {
+				// Copy converted data back to the buffer
+				convertedBytes := []byte(converted)
+				copy(data, convertedBytes)
+				// Return the length of converted data (truncated if buffer is too small)
+				if len(convertedBytes) > len(data) {
+					return len(data), err
+				}
+				return len(convertedBytes), err
+			}
+			// If conversion fails, return original data
+		}
+	}
+
 	return n, err
 }
 
