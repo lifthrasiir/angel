@@ -12,6 +12,12 @@ import (
 	. "github.com/lifthrasiir/angel/gemini"
 )
 
+// Application ID constants for session databases
+const (
+	ApplicationIDNormal   = 0x10516462 // Normal session database (ten-si-'db')
+	ApplicationIDArchived = 0x10516178 // Archived session database (ten-si-'ax')
+)
+
 // Branch struct to hold branch data
 type Branch struct {
 	ID                  string  `json:"id"`
@@ -132,6 +138,7 @@ type SessionWithDetails struct {
 	WorkspaceID     string `json:"workspace_id"`
 	FirstMessageAt  string `json:"first_message_at,omitempty"`
 	LastMessageText string `json:"last_message_text,omitempty"`
+	Archived        bool   `json:"archived"` // Whether the session is archived
 }
 
 // SplitSessionId splits a session ID into main session ID and suffix for subsessions

@@ -19,6 +19,7 @@ import {
   setSessionNameAtom,
   inputMessageAtom,
   currentSessionNameAtom,
+  currentSessionArchivedAtom,
 } from '../atoms/chatAtoms';
 import { pendingConfirmationAtom, temporaryEnvChangeMessageAtom } from '../atoms/confirmationAtoms';
 import { isSystemPromptEditingAtom, editingMessageIdAtom } from '../atoms/uiAtoms';
@@ -75,6 +76,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
   const setPreserveSelectedFiles = useSetAtom(preserveSelectedFilesAtom);
   const setSessionNameInList = useSetAtom(setSessionNameAtom);
   const setCurrentSessionName = useSetAtom(currentSessionNameAtom);
+  const setCurrentSessionArchived = useSetAtom(currentSessionArchivedAtom);
   const setInputMessage = useSetAtom(inputMessageAtom);
   const setEditingMessageId = useSetAtom(editingMessageIdAtom);
   const updateUserMessageId = useSetAtom(updateUserMessageIdAtom);
@@ -123,6 +125,7 @@ export const useSessionFSM = ({ onSessionSwitch }: UseSessionFSMProps = {}) => {
 
         // Set current session name (for both temporary and regular sessions)
         setCurrentSessionName(data.name);
+        setCurrentSessionArchived(data.archived || false);
 
         // Handle pending confirmation
         if (data.pendingConfirmation) {

@@ -5,7 +5,7 @@ import { useLocation } from 'react-router-dom';
 import { useSessionManagerContext } from '../../hooks/SessionManagerContext';
 import { classifySessionId, getSessionId } from '../../utils/sessionStateHelpers';
 import { isNewTemporarySessionURL } from '../../utils/urlSessionMapping';
-import { sessionsAtom, currentSessionNameAtom, messagesAtom } from '../../atoms/chatAtoms';
+import { sessionsAtom, currentSessionNameAtom, messagesAtom, currentSessionArchivedAtom } from '../../atoms/chatAtoms';
 import { isSessionConfigOpenAtom } from '../../atoms/uiAtoms';
 import type { Workspace } from '../../types/chat';
 import SessionMenu from '../sidebar/SessionMenu';
@@ -29,6 +29,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
 }) => {
   const sessions = useAtomValue(sessionsAtom);
   const currentSessionName = useAtomValue(currentSessionNameAtom);
+  const currentSessionArchived = useAtomValue(currentSessionArchivedAtom);
   const messages = useAtomValue(messagesAtom);
   const setSessions = useSetAtom(sessionsAtom);
   const [isSessionConfigOpen, setIsSessionConfigOpen] = useAtom(isSessionConfigOpenAtom);
@@ -135,6 +136,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
             isCurrentSession={true}
             onMenuToggle={handleMenuToggle}
             messages={messages}
+            archived={currentSessionArchived}
           />
         )}
       </div>

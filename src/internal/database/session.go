@@ -92,6 +92,69 @@ func (db *Database) WithSession(sessionId string) (*SessionDatabase, error) {
 	return &SessionDatabase{Database: db, sessionMeta: meta, cleanup: cleanup}, nil
 }
 
+// WithWritableSession returns a SessionDatabase for a specific session ID, but only if the session is not archived.
+// It checks the application_id first:
+// - If the session is already attached in AttachPool, it uses PRAGMA application_id to check
+// - Otherwise, it reads the application_id directly from the file at offset 68
+// Returns an error if the session is archived (application_id == ApplicationIDArchived).
+func (db *Database) WithWritableSession(sessionId string) (*SessionDatabase, error) {
+	// Extract main session ID to determine which session DB file to use
+	mainSessionID, _ := SplitSessionId(sessionId)
+
+	// Check if session exists in main DB first
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)", sessionId).Scan(&exists)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check session existence: %w", err)
+	}
+	if !exists {
+		return nil, MakeNotFoundError("session not found: %s", sessionId)
+	}
+
+	// Get the session DB path
+	sessionDBPath, err := GetSessionDBPath(db.ctx, mainSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session DB path: %w", err)
+	}
+
+	// Check if file exists (skip for in-memory databases)
+	if sessionDBPath != ":memory:" {
+		if _, err := os.Stat(sessionDBPath); os.IsNotExist(err) {
+			return nil, MakeNotFoundError("session DB does not exist: %s", sessionDBPath)
+		}
+	}
+
+	// Check if session is archived
+	// Try AttachPool first for efficiency
+	var appID int
+	attachedAlias := db.attachPool.GetAliasIfExists(mainSessionID)
+	if attachedAlias != "" {
+		// Session is already attached, use PRAGMA to check application_id
+		err = db.QueryRow(fmt.Sprintf("PRAGMA %s.application_id", attachedAlias)).Scan(&appID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check application_id: %w", err)
+		}
+	} else {
+		// Session is not attached, read directly from file
+		appID, err = GetSessionApplicationID(sessionDBPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check application_id: %w", err)
+		}
+	}
+	if appID == ApplicationIDArchived {
+		return nil, MakeBadRequestError("session is archived and cannot be modified")
+	}
+
+	// Attach the session database to the main connection
+	alias, cleanup, err := db.attachPool.Acquire(sessionDBPath, mainSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach session DB: %w", err)
+	}
+
+	meta := sessionMeta{id: sessionId, attachAlias: alias}
+	return &SessionDatabase{Database: db, sessionMeta: meta, cleanup: cleanup}, nil
+}
+
 // CreateSessionDB creates a new session database file for the given main session ID.
 // If the database file already exists, this is a no-op.
 func (db *Database) CreateSessionDB(mainSessionID string) error {
@@ -543,7 +606,7 @@ func GetWorkspaceAndSessions(db *Database, workspaceID string) (*WorkspaceWithSe
 	rows, err := db.Query(
 		fmt.Sprintf(`
 			SELECT id, last_updated_at, name, workspace_id FROM sessions
-			WHERE workspace_id = %s AND id NOT LIKE '%%.%%' ORDER BY last_updated_at DESC`, placeholder),
+			WHERE workspace_id = %s AND id NOT LIKE '%%.%%' AND archived = 0 ORDER BY last_updated_at DESC`, placeholder),
 		args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions: %w", err)
@@ -754,9 +817,9 @@ func GetSessionsWithDetails(db *Database, workspaceID string) ([]SessionWithDeta
 	whereClause := "WHERE workspace_id = ? AND SUBSTR(id, 2) NOT LIKE '%.%'"
 	args := []interface{}{workspaceID}
 
-	// Query sessions from main DB with first_message_at and last_message_text
+	// Query sessions from main DB with first_message_at, last_message_text, and archived
 	rows, err := db.Query(`
-		SELECT id, created_at, last_updated_at, name, workspace_id, first_message_at, last_message_text
+		SELECT id, created_at, last_updated_at, name, workspace_id, first_message_at, last_message_text, archived
 		FROM sessions
 		`+whereClause+` ORDER BY last_updated_at DESC`, args...)
 	if err != nil {
@@ -768,7 +831,8 @@ func GetSessionsWithDetails(db *Database, workspaceID string) ([]SessionWithDeta
 	for rows.Next() {
 		var s SessionWithDetails
 		var firstMessageAt, lastMessageText sql.NullString
-		if err := rows.Scan(&s.ID, &s.CreatedAt, &s.LastUpdatedAt, &s.Name, &s.WorkspaceID, &firstMessageAt, &lastMessageText); err != nil {
+		var archived int
+		if err := rows.Scan(&s.ID, &s.CreatedAt, &s.LastUpdatedAt, &s.Name, &s.WorkspaceID, &firstMessageAt, &lastMessageText, &archived); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 		if firstMessageAt.Valid {
@@ -783,6 +847,7 @@ func GetSessionsWithDetails(db *Database, workspaceID string) ([]SessionWithDeta
 			}
 			s.LastMessageText = text
 		}
+		s.Archived = archived != 0
 		sessions = append(sessions, s)
 	}
 	if sessions == nil {

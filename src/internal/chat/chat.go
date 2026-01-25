@@ -31,6 +31,7 @@ type InitialState struct {
 	CallElapsedTimeSeconds float64           `json:"callElapsedTimeSeconds,omitempty"`
 	PendingConfirmation    string            `json:"pendingConfirmation,omitempty"`
 	EnvChanged             *env.EnvChanged   `json:"envChanged,omitempty"`
+	Archived               bool              `json:"archived,omitempty"`
 }
 
 func NewSessionAndMessage(
@@ -391,6 +392,12 @@ func LoadChatSession(ctx context.Context, db *database.SessionDatabase, ew Event
 		initialStateEnvChanged = &env.EnvChanged{Roots: &rootsChanged}
 	}
 
+	// Check if session is archived
+	mainSessionID, _ := SplitSessionId(db.SessionId())
+	sessionDBPath, _ := database.GetSessionDBPath(ctx, mainSessionID)
+	appID, _ := database.GetSessionApplicationID(sessionDBPath)
+	isArchived := appID == ApplicationIDArchived
+
 	// Prepare initial state as a single JSON object
 	initialState = InitialState{
 		SessionId:       db.SessionId(),
@@ -401,6 +408,7 @@ func LoadChatSession(ctx context.Context, db *database.SessionDatabase, ew Event
 		PrimaryBranchID: actualBranchID,
 		Roots:           currentRoots,
 		EnvChanged:      initialStateEnvChanged,
+		Archived:        isArchived,
 	}
 
 	branch, err := database.GetBranch(db, actualBranchID)

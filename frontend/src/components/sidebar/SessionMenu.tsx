@@ -1,5 +1,5 @@
 import React from 'react';
-import { FaEllipsisV, FaEdit, FaTrash, FaChevronRight, FaPlus } from 'react-icons/fa';
+import { FaEllipsisV, FaEdit, FaTrash, FaChevronRight, FaPlus, FaArchive } from 'react-icons/fa';
 import { apiFetch } from '../../api/apiClient';
 import type { Workspace, ChatMessage } from '../../types/chat';
 import { useCommandProcessor } from '../../hooks/useCommandProcessor';
@@ -18,6 +18,7 @@ interface SessionMenuProps {
   onNavigateToWorkspace?: (workspaceId: string) => void;
   onMenuToggle?: (sessionId: string, isOpen: boolean) => void;
   messages?: ChatMessage[]; // Only provided for current session
+  archived?: boolean; // Whether the session is archived
 }
 
 const SessionMenu: React.FC<SessionMenuProps> = ({
@@ -33,6 +34,7 @@ const SessionMenu: React.FC<SessionMenuProps> = ({
   onNavigateToWorkspace,
   onMenuToggle,
   messages,
+  archived = false,
 }) => {
   const { runNewMessageCommand } = useCommandProcessor(sessionId);
 
@@ -47,6 +49,33 @@ const SessionMenu: React.FC<SessionMenuProps> = ({
     onDelete(sessionId);
     if (onMenuToggle) {
       onMenuToggle(sessionId, false);
+    }
+  };
+
+  const handleArchiveToggle = async () => {
+    try {
+      const newArchiveState = !archived;
+      const response = await apiFetch(`/api/chat/${sessionId}/archive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ archive: newArchiveState }),
+      });
+
+      if (response.ok) {
+        // Close the menu
+        if (onMenuToggle) {
+          onMenuToggle(sessionId, false);
+        }
+
+        // Refresh the page to update the session list
+        window.location.reload();
+      } else {
+        console.error('Failed to toggle archive state:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Error toggling archive state:', error);
     }
   };
 
@@ -169,6 +198,12 @@ const SessionMenu: React.FC<SessionMenuProps> = ({
       label: 'Move to...',
       icon: <FaChevronRight size={14} />,
       submenu: workspaceSubmenuItems,
+    },
+    {
+      id: 'archive',
+      label: archived ? 'Unarchive' : 'Archive',
+      icon: <FaArchive size={14} />,
+      onClick: handleArchiveToggle,
     },
     {
       id: 'delete',

@@ -158,132 +158,135 @@ const SessionList: React.FC<SessionListProps> = ({
           All Sessions
         </button>
       </li>
-      {sessions.map((session) => (
-        <li key={session.id} className={`sidebar-session-item ${session.id === openMenuSessionId ? 'active' : ''}`}>
-          {editingSessionId === session.id ? (
-            <div className="sidebar-session-edit-container">
-              <input
-                ref={(el) => {
-                  if (el) {
-                    inputRefs.current[session.id] = el;
-                  }
-                }}
-                type="text"
-                value={tempEditValue}
-                onChange={(e) => {
-                  setTempEditValue(e.target.value);
-                }}
-                onBlur={() => {
-                  // On blur, just cancel editing (don't apply changes)
-                  setEditingSessionId(null);
-                  setTempEditValue('');
-                  delete inputRefs.current[session.id];
-                }}
-                onKeyDown={async (e) => {
-                  if (e.key === 'Enter') {
-                    // Apply changes on Enter
-                    if (session.id) {
-                      try {
-                        await apiFetch(`/api/chat/${session.id}/name`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ name: tempEditValue || '' }),
-                        });
-                        // Update local state only after successful API call
-                        updateSessionState(session.id, (s) => ({
-                          ...s,
-                          name: tempEditValue,
-                        }));
-                        // If this is the current session, also update currentSessionName
-                        if (session.id === chatSessionId) {
-                          setCurrentSessionName(tempEditValue);
-                        }
-                      } catch (error) {
-                        console.error('Error updating session name:', error);
-                      }
+      {sessions
+        .filter((s) => !s.archived)
+        .map((session) => (
+          <li key={session.id} className={`sidebar-session-item ${session.id === openMenuSessionId ? 'active' : ''}`}>
+            {editingSessionId === session.id ? (
+              <div className="sidebar-session-edit-container">
+                <input
+                  ref={(el) => {
+                    if (el) {
+                      inputRefs.current[session.id] = el;
                     }
-                    setEditingSessionId(null);
-                    setTempEditValue('');
-                    delete inputRefs.current[session.id];
-                  } else if (e.key === 'Escape') {
-                    // Cancel on Escape
-                    setEditingSessionId(null);
-                    setTempEditValue('');
-                    delete inputRefs.current[session.id];
-                  }
-                }}
-                className="sidebar-session-name-input"
-                aria-label="Edit session name"
-              />
-            </div>
-          ) : (
-            <button
-              onClick={() => onSessionSelect(session.id)}
-              onDrop={(e) => handleFileDrop(e, session.id)}
-              onDragOver={handleDragOver}
-              onDragEnter={(e) => handleDragEnter(e, session.id)}
-              onDragLeave={handleDragLeave}
-              className={`sidebar-session-button ${session.id === chatSessionId ? 'active' : ''} ${draggedSessionId === session.id ? 'drag-over' : ''}`}
-              title={session.name || 'New Chat'}
-              aria-label={`Go to ${session.name || 'New Chat'} session`}
-            >
-              {isDraggingOver && draggedSessionId === session.id && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
-                    border: '2px solid rgba(0, 123, 255, 0.3)',
-                    borderRadius: '4px',
-                    pointerEvents: 'none',
-                    zIndex: 1,
                   }}
+                  type="text"
+                  value={tempEditValue}
+                  onChange={(e) => {
+                    setTempEditValue(e.target.value);
+                  }}
+                  onBlur={() => {
+                    // On blur, just cancel editing (don't apply changes)
+                    setEditingSessionId(null);
+                    setTempEditValue('');
+                    delete inputRefs.current[session.id];
+                  }}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter') {
+                      // Apply changes on Enter
+                      if (session.id) {
+                        try {
+                          await apiFetch(`/api/chat/${session.id}/name`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: tempEditValue || '' }),
+                          });
+                          // Update local state only after successful API call
+                          updateSessionState(session.id, (s) => ({
+                            ...s,
+                            name: tempEditValue,
+                          }));
+                          // If this is the current session, also update currentSessionName
+                          if (session.id === chatSessionId) {
+                            setCurrentSessionName(tempEditValue);
+                          }
+                        } catch (error) {
+                          console.error('Error updating session name:', error);
+                        }
+                      }
+                      setEditingSessionId(null);
+                      setTempEditValue('');
+                      delete inputRefs.current[session.id];
+                    } else if (e.key === 'Escape') {
+                      // Cancel on Escape
+                      setEditingSessionId(null);
+                      setTempEditValue('');
+                      delete inputRefs.current[session.id];
+                    }
+                  }}
+                  className="sidebar-session-name-input"
+                  aria-label="Edit session name"
                 />
-              )}
-              {session.name || 'New Chat'}
-              {selectedFiles.length > 0 && session.id === chatSessionId && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: '2px',
-                    right: '2px',
-                    backgroundColor: '#007bff',
-                    color: 'white',
-                    borderRadius: '50%',
-                    width: '16px',
-                    height: '16px',
-                    fontSize: '10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 'bold',
-                  }}
-                >
-                  {selectedFiles.length}
-                </span>
-              )}
-            </button>
-          )}
-          {!session.isEditing && (
-            <SessionMenu
-              sessionId={session.id}
-              sessionName={session.name || 'New Chat'}
-              onRename={handleRenameSession}
-              onDelete={handleDeleteFromMenu}
-              isMobile={isMobile}
-              currentWorkspaceId={activeWorkspaceId || ''}
-              workspaces={workspaces}
-              onSessionMoved={() => onSessionMoved && onSessionMoved(session.id)}
-              isCurrentSession={session.id === chatSessionId}
-              onNavigateToWorkspace={onNavigateToWorkspace}
-              onMenuToggle={handleMenuToggle}
-            />
-          )}
-        </li>
-      ))}
+              </div>
+            ) : (
+              <button
+                onClick={() => onSessionSelect(session.id)}
+                onDrop={(e) => handleFileDrop(e, session.id)}
+                onDragOver={handleDragOver}
+                onDragEnter={(e) => handleDragEnter(e, session.id)}
+                onDragLeave={handleDragLeave}
+                className={`sidebar-session-button ${session.id === chatSessionId ? 'active' : ''} ${draggedSessionId === session.id ? 'drag-over' : ''}`}
+                title={session.name || 'New Chat'}
+                aria-label={`Go to ${session.name || 'New Chat'} session`}
+              >
+                {isDraggingOver && draggedSessionId === session.id && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                      border: '2px solid rgba(0, 123, 255, 0.3)',
+                      borderRadius: '4px',
+                      pointerEvents: 'none',
+                      zIndex: 1,
+                    }}
+                  />
+                )}
+                {session.name || 'New Chat'}
+                {selectedFiles.length > 0 && session.id === chatSessionId && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '2px',
+                      right: '2px',
+                      backgroundColor: '#007bff',
+                      color: 'white',
+                      borderRadius: '50%',
+                      width: '16px',
+                      height: '16px',
+                      fontSize: '10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    {selectedFiles.length}
+                  </span>
+                )}
+              </button>
+            )}
+            {!session.isEditing && (
+              <SessionMenu
+                sessionId={session.id}
+                sessionName={session.name || 'New Chat'}
+                onRename={handleRenameSession}
+                onDelete={handleDeleteFromMenu}
+                isMobile={isMobile}
+                currentWorkspaceId={activeWorkspaceId || ''}
+                workspaces={workspaces}
+                onSessionMoved={() => onSessionMoved && onSessionMoved(session.id)}
+                isCurrentSession={session.id === chatSessionId}
+                onNavigateToWorkspace={onNavigateToWorkspace}
+                onMenuToggle={handleMenuToggle}
+                archived={session.archived}
+              />
+            )}
+          </li>
+        ))}
     </ul>
   );
 };

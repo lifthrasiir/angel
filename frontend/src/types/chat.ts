@@ -61,6 +61,7 @@ export interface InitialState {
   callElapsedTimeSeconds?: number;
   pendingConfirmation?: string;
   envChanged?: EnvChanged;
+  archived?: boolean;
 }
 
 export interface Session {
@@ -69,6 +70,7 @@ export interface Session {
   name?: string;
   isEditing?: boolean;
   workspace_id?: string;
+  archived?: boolean;
 }
 
 export interface SessionWithDetails extends Session {

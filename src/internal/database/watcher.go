@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	. "github.com/lifthrasiir/angel/internal/types"
 )
 
 // sessionTrackState holds the tracking state for a single session DB file.
@@ -578,6 +579,13 @@ func syncSessionToMainDB(db *Database, mainSessionID, sessionDBPath string) erro
 		workspaceID = ""
 	}
 
+	// Check if session is archived by checking application_id
+	archived := 0
+	appID, err := GetSessionApplicationID(sessionDBPath)
+	if err == nil && appID == ApplicationIDArchived {
+		archived = 1
+	}
+
 	// Sync to messages_searchable table (only user/model messages for FTS)
 	_, err = db.Exec(fmt.Sprintf(`
 		INSERT OR REPLACE INTO messages_searchable (id, text, session_id, workspace_id)
@@ -592,9 +600,9 @@ func syncSessionToMainDB(db *Database, mainSessionID, sessionDBPath string) erro
 		return fmt.Errorf("failed to sync messages_searchable to main DB: %w", err)
 	}
 
-	// Sync sessions table with first_message_at and last_message_text
+	// Sync sessions table with first_message_at, last_message_text, and archived
 	_, err = db.Exec(fmt.Sprintf(`
-		INSERT OR REPLACE INTO sessions (id, created_at, last_updated_at, system_prompt, name, workspace_id, primary_branch_id, chosen_first_id, first_message_at, last_message_text)
+		INSERT OR REPLACE INTO sessions (id, created_at, last_updated_at, system_prompt, name, workspace_id, primary_branch_id, chosen_first_id, first_message_at, last_message_text, archived)
 		SELECT
 			? || CASE WHEN id = '' THEN '' ELSE '.' || id END,
 			created_at,
@@ -605,13 +613,14 @@ func syncSessionToMainDB(db *Database, mainSessionID, sessionDBPath string) erro
 			primary_branch_id,
 			chosen_first_id,
 			(SELECT MIN(created_at) FROM %s.messages WHERE %s.messages.session_id = sessions.id AND type = 'user'),
-			(SELECT text FROM %s.messages WHERE %s.messages.session_id = sessions.id AND type = 'user' ORDER BY created_at DESC LIMIT 1)
+			(SELECT text FROM %s.messages WHERE %s.messages.session_id = sessions.id AND type = 'user' ORDER BY created_at DESC LIMIT 1),
+			?
 		FROM %s.sessions
-	`, attachAlias, attachAlias, attachAlias, attachAlias, attachAlias), mainSessionID)
+	`, attachAlias, attachAlias, attachAlias, attachAlias, attachAlias), mainSessionID, archived)
 	if err != nil {
 		return fmt.Errorf("failed to sync sessions to main DB: %w", err)
 	}
 
-	log.Printf("SessionTracker: Synced session %s to main DB", mainSessionID)
+	log.Printf("SessionTracker: Synced session %s to main DB (archived=%d)", mainSessionID, archived)
 	return nil
 }

@@ -229,7 +229,8 @@ func createTables(db *sql.DB) error {
 		primary_branch_id TEXT, -- New column for primary branch
 		chosen_first_id INTEGER, -- Virtual root message pointer
 		first_message_at DATETIME, -- First user message timestamp
-		last_message_text TEXT -- Last user message text (truncated)
+		last_message_text TEXT, -- Last user message text (truncated)
+		archived INTEGER NOT NULL DEFAULT 0 -- Whether session is archived (based on session DB application_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS branches (
@@ -567,6 +568,20 @@ func migrateDB(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("failed to add last_message_text column: %w", err)
 		}
 		log.Println("Sessions table migration completed")
+	}
+
+	// Migration 4: Add archived column to sessions table
+	var archivedExists bool
+	err = db.QueryRow("SELECT COUNT(*) > 0 FROM pragma_table_info('sessions') WHERE name = 'archived'").Scan(&archivedExists)
+	if err != nil {
+		log.Printf("Warning: Failed to check archived column: %v", err)
+	} else if !archivedExists {
+		log.Println("Migrating sessions table: adding archived column...")
+		_, err = db.Exec("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+		if err != nil {
+			return fmt.Errorf("failed to add archived column: %w", err)
+		}
+		log.Println("Sessions table archived column added")
 	}
 
 	return nil

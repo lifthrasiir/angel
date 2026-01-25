@@ -117,6 +117,20 @@ func (p *AttachPool) SetWatcher(watcher *SessionWatcher) {
 	p.watcher = watcher
 }
 
+// GetAliasIfExists returns the alias for a given mainSessionID if it's already attached.
+// Returns empty string if the session is not attached.
+func (p *AttachPool) GetAliasIfExists(mainSessionID string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	for _, attached := range p.attached {
+		if attached.MainSessionID == mainSessionID {
+			return attached.Alias
+		}
+	}
+	return ""
+}
+
 // Acquire attaches a session database and returns its alias and a cleanup function.
 // If the database is already attached, it increments the refcount and returns the existing alias.
 // If all slots are full and in use, it blocks until a slot becomes available.

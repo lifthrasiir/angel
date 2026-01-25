@@ -2,7 +2,7 @@ import type React from 'react';
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
-import { FaPlus, FaClock, FaSpinner, FaLock } from 'react-icons/fa';
+import { FaPlus, FaClock, FaSpinner, FaLock, FaArchive } from 'react-icons/fa';
 import type { SessionWithDetails } from '../types/chat';
 import './SessionListPage.css';
 
@@ -114,6 +114,7 @@ const SessionListPage: React.FC = () => {
         <div className="session-list-page-list">
           {sessions.map((session) => {
             const isTemporary = session.id.startsWith('.');
+            const isArchived = session.archived;
             const firstDate = formatDate(session.first_message_at || session.created_at);
             const lastDate = formatDate(session.last_updated_at);
             return (
@@ -121,6 +122,7 @@ const SessionListPage: React.FC = () => {
                 <div className="session-list-page-item-header">
                   <h3 className="session-list-page-item-name">
                     {isTemporary && <FaLock className="session-list-page-temp-icon" />}
+                    {isArchived && <FaArchive className="session-list-page-temp-icon" title="Archived" />}
                     {session.name || 'Untitled Session'}
                   </h3>
                   <span className="session-list-page-item-date">

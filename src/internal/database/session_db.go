@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -247,4 +248,75 @@ func ToFullSessionID(mainSessionID, localSessionID string) string {
 		return mainSessionID
 	}
 	return mainSessionID + "." + localSessionID
+}
+
+// GetSessionApplicationID retrieves the application_id from a session database file.
+// Returns 0 if the file doesn't exist or application_id is not set.
+// Reads directly from the SQLite file format at offset 68 (big-endian 4-byte integer).
+// See: https://sqlite.org/fileformat2.html
+func GetSessionApplicationID(dbPath string) (int, error) {
+	// Check if file exists
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return 0, nil
+	}
+
+	// Open file for reading
+	f, err := os.Open(dbPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open session DB file: %w", err)
+	}
+	defer f.Close()
+
+	// Read application_id at offset 68 (4 bytes, big-endian)
+	// SQLite header: 100 bytes total, application_id is at offset 68
+	buf := make([]byte, 4)
+	_, err = f.ReadAt(buf, 68)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read application_id from file: %w", err)
+	}
+
+	// Convert big-endian bytes to int
+	appID := int(buf[0])<<24 | int(buf[1])<<16 | int(buf[2])<<8 | int(buf[3])
+	return appID, nil
+}
+
+// SetSessionApplicationID sets the application_id for a session database file.
+// Uses the SQLite PRAGMA interface to write the application_id.
+func SetSessionApplicationID(dbPath string, appID int) error {
+	// Open database directly
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open session DB: %w", err)
+	}
+	defer db.Close()
+
+	// Set application_id using PRAGMA
+	_, err = db.Exec(fmt.Sprintf("PRAGMA application_id = %d", appID))
+	if err != nil {
+		return fmt.Errorf("failed to set application_id: %w", err)
+	}
+
+	return nil
+}
+
+// IsSessionArchived checks if a session is archived by examining its application_id.
+func IsSessionArchived(dbPath string) (bool, error) {
+	appID, err := GetSessionApplicationID(dbPath)
+	if err != nil {
+		return false, err
+	}
+	return appID == ApplicationIDArchived, nil
+}
+
+// TriggerWatcherSync manually triggers a watcher sync for a session DB file.
+// This is useful when the application_id is changed and we want to immediately update the main DB.
+func TriggerWatcherSync(db *Database, mainSessionID, sessionDBPath string) error {
+	if db.watcher == nil {
+		return nil // No watcher, nothing to sync
+	}
+	// Use the watcher's trackFile method to sync
+	if err := db.watcher.trackFile(mainSessionID, sessionDBPath); err != nil {
+		return fmt.Errorf("failed to trigger watcher sync: %w", err)
+	}
+	return nil
 }

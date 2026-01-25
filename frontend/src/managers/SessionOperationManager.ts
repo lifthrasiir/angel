@@ -38,6 +38,7 @@ export interface InitialStateData {
   pendingConfirmation?: string;
   workspaceId?: string;
   temporaryEnvChangeMessage?: ChatMessage;
+  archived?: boolean;
 }
 
 export interface OperationEventHandlers {
@@ -313,6 +314,7 @@ export class SessionOperationManager {
           : undefined,
       pendingConfirmation: initialState.pendingConfirmation,
       workspaceId: initialState.workspaceId,
+      archived: initialState.archived,
     };
   }
 

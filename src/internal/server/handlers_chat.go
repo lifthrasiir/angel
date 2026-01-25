@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -117,7 +118,7 @@ func chatMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sdb, err := db.WithSession(sessionId)
+	sdb, err := db.WithWritableSession(sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to access session database")
 		return
@@ -333,7 +334,7 @@ func createBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sdb, err := db.WithSession(sessionId)
+	sdb, err := db.WithWritableSession(sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to access session database")
 		return
@@ -386,7 +387,7 @@ func updateMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sdb, err := db.WithSession(sessionId)
+	sdb, err := db.WithWritableSession(sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to access session database")
 		return
@@ -573,7 +574,7 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sdb, err := db.WithSession(sessionID)
+	sdb, err := db.WithWritableSession(sessionID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to access session database")
 		return
@@ -615,7 +616,7 @@ func compressSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sdb, err := db.WithSession(sessionID)
+	sdb, err := db.WithWritableSession(sessionID)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to access session database")
 		return
@@ -670,7 +671,7 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sdb, err := db.WithSession(sessionId)
+	sdb, err := db.WithWritableSession(sessionId)
 	if err != nil {
 		sendInternalServerError(w, r, err, "Failed to access session database")
 		return
@@ -693,4 +694,76 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, response)
+}
+
+// archiveSessionHandler archives or unarchives a session by changing the application_id.
+func archiveSessionHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		sendBadRequestError(w, r, "Session ID is required")
+		return
+	}
+
+	var requestBody struct {
+		Archive bool `json:"archive"` // true to archive, false to unarchive
+	}
+
+	if !decodeJSONRequest(r, w, &requestBody, "archiveSessionHandler") {
+		return
+	}
+
+	// Get main session ID
+	mainSessionID, _ := SplitSessionId(sessionId)
+
+	// Get session DB path
+	sessionDBPath, err := database.GetSessionDBPathFromDB(db, mainSessionID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to get session DB path")
+		return
+	}
+
+	// Check if file exists (skip for in-memory databases)
+	if sessionDBPath != ":memory:" {
+		if _, err := os.Stat(sessionDBPath); os.IsNotExist(err) {
+			sendNotFoundError(w, r, "Session DB file not found")
+			return
+		}
+	}
+
+	// Set the appropriate application_id
+	var targetAppID int
+	if requestBody.Archive {
+		targetAppID = ApplicationIDArchived
+	} else {
+		targetAppID = ApplicationIDNormal
+	}
+
+	if err := database.SetSessionApplicationID(sessionDBPath, targetAppID); err != nil {
+		sendInternalServerError(w, r, err, "Failed to set application_id")
+		return
+	}
+
+	// Trigger a sync to update the main DB's archived flag
+	// Force a watcher sync by marking the file as modified
+	if db.Watcher() != nil {
+		db.Watcher().MarkExpectedChange(mainSessionID)
+		// Trigger a resync
+		if err := database.TriggerWatcherSync(db, mainSessionID, sessionDBPath); err != nil {
+			log.Printf("Warning: Failed to trigger watcher sync: %v", err)
+		}
+	}
+
+	action := "archived"
+	if !requestBody.Archive {
+		action = "unarchived"
+	}
+
+	sendJSONResponse(w, map[string]interface{}{
+		"status":   "success",
+		"message":  fmt.Sprintf("Session %s successfully", action),
+		"archived": requestBody.Archive,
+	})
 }
