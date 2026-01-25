@@ -234,6 +234,21 @@ func listSessionsByWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, wsWithSessions)
 }
 
+// listSessionsWithDetailsHandler retrieves sessions with additional details for the session list page.
+func listSessionsWithDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	db := getDb(w, r)
+
+	workspaceID := r.URL.Query().Get("workspaceId")
+
+	sessions, err := database.GetSessionsWithDetails(db, workspaceID)
+	if err != nil {
+		sendInternalServerError(w, r, err, "Failed to retrieve sessions with details")
+		return
+	}
+
+	sendJSONResponse(w, sessions)
+}
+
 // calculateNewSessionEnvChangedHandler calculates EnvChanged for a new session.
 // It expects newRoots as a JSON string in the query parameter.
 func calculateNewSessionEnvChangedHandler(w http.ResponseWriter, r *http.Request) {

@@ -56,7 +56,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const isInitializedRef = useRef(false);
 
   const isAnonymousWorkspacePath = (pathname: string): boolean => {
-    return pathname === '/new' || pathname === '/' || pathname === '/temp';
+    return pathname === '/new' || pathname === '/' || pathname === '/temp' || pathname === '/all';
   };
 
   const showTemporarySessionButton = isNewNonTemporarySessionURL(location.pathname);

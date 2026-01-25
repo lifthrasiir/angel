@@ -744,3 +744,79 @@ func CleanupOldTemporarySessions(db *Database, olderThan time.Duration, sandboxB
 	log.Printf("Successfully cleaned up %d/%d old temporary sessions", successCount, len(sessionIDsToDelete))
 	return nil
 }
+
+// GetSessionsWithDetails retrieves sessions with additional details including first message date and last message preview.
+// Filters by workspace if workspaceID is provided.
+func GetSessionsWithDetails(db *Database, workspaceID string) ([]SessionWithDetails, error) {
+	// Build the WHERE clause based on workspace filter
+	// Always filter by workspace_id (empty string for anonymous workspace)
+	// Include temporary sessions (starting with '.') but exclude sub-sessions (have '.' not at start)
+	whereClause := "WHERE workspace_id = ? AND SUBSTR(id, 2) NOT LIKE '%.%'"
+	args := []interface{}{workspaceID}
+
+	// Query sessions from main DB
+	rows, err := db.Query(`
+		SELECT id, created_at, last_updated_at, name, workspace_id FROM sessions
+		`+whereClause+` ORDER BY last_updated_at DESC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []SessionWithDetails
+	for rows.Next() {
+		var s SessionWithDetails
+		if err := rows.Scan(&s.ID, &s.CreatedAt, &s.LastUpdatedAt, &s.Name, &s.WorkspaceID); err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		sessions = append(sessions, s)
+	}
+	if sessions == nil {
+		return []SessionWithDetails{}, nil
+	}
+
+	// For each session, attach to session DB and query for details
+	for i := range sessions {
+		// Use a closure to ensure the session DB is closed immediately after each iteration
+		func() {
+			mainSessionID, _ := SplitSessionId(sessions[i].ID)
+
+			sdb, err := db.WithSessionDB(mainSessionID)
+			if err != nil {
+				// Session DB might not exist, skip this session
+				return
+			}
+			defer sdb.Close()
+
+			// Query for first user message date
+			localSessionID := ToLocalSessionID(sessions[i].ID)
+			var firstMessageAt sql.NullString
+			err = sdb.QueryRow(`
+				SELECT MIN(created_at) FROM S.messages
+				WHERE session_id = ? AND type = ?
+			`, localSessionID, TypeUserText).Scan(&firstMessageAt)
+			if err == nil && firstMessageAt.Valid {
+				sessions[i].FirstMessageAt = firstMessageAt.String
+			}
+
+			// Query for last user message text (preview)
+			var lastMessageText sql.NullString
+			err = sdb.QueryRow(`
+				SELECT text FROM S.messages
+				WHERE session_id = ? AND type = ?
+				ORDER BY created_at DESC LIMIT 1
+			`, localSessionID, TypeUserText).Scan(&lastMessageText)
+			if err == nil && lastMessageText.Valid {
+				// Truncate to ~100 characters (rune-aware for UTF-8)
+				text := lastMessageText.String
+				runes := []rune(text)
+				if len(runes) > 100 {
+					text = string(runes[:97]) + "..."
+				}
+				sessions[i].LastMessageText = text
+			}
+		}()
+	}
+
+	return sessions, nil
+}

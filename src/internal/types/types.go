@@ -123,6 +123,17 @@ type Session struct {
 	PrimaryBranchID string `json:"primary_branch_id"`
 }
 
+// SessionWithDetails struct to hold session data with additional details for the session list page
+type SessionWithDetails struct {
+	ID              string `json:"id"`
+	CreatedAt       string `json:"created_at"`
+	LastUpdatedAt   string `json:"last_updated_at"`
+	Name            string `json:"name"`
+	WorkspaceID     string `json:"workspace_id"`
+	FirstMessageAt  string `json:"first_message_at,omitempty"`
+	LastMessageText string `json:"last_message_text,omitempty"`
+}
+
 // SplitSessionId splits a session ID into main session ID and suffix for subsessions
 // Return values satisfy `sessionId == mainSessionId + suffix`.
 func SplitSessionId(sessionId string) (mainSessionId, suffix string) {

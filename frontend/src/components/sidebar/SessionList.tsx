@@ -1,5 +1,7 @@
 import type React from 'react';
 import { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FaList } from 'react-icons/fa';
 import { apiFetch } from '../../api/apiClient';
 import { useAtom, useSetAtom } from 'jotai';
 import type { Session, Workspace } from '../../types/chat';
@@ -28,6 +30,7 @@ const SessionList: React.FC<SessionListProps> = ({
   onNavigateToWorkspace,
   activeWorkspaceId,
 }) => {
+  const navigate = useNavigate();
   const [sessions, setSessions] = useAtom(sessionsAtom);
   // Use sessionManager for current session ID
   const sessionManager = useSessionManagerContext();
@@ -145,6 +148,16 @@ const SessionList: React.FC<SessionListProps> = ({
         width: '100%',
       }}
     >
+      <li className="sidebar-session-list-all-link">
+        <button
+          onClick={() => navigate(activeWorkspaceId ? `/w/${activeWorkspaceId}/all` : '/all')}
+          className="sidebar-session-button"
+          title="View all sessions"
+        >
+          <FaList className="sidebar-list-icon" />
+          All Sessions
+        </button>
+      </li>
       {sessions.map((session) => (
         <li key={session.id} className={`sidebar-session-item ${session.id === openMenuSessionId ? 'active' : ''}`}>
           {editingSessionId === session.id ? (

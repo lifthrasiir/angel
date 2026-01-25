@@ -15,6 +15,11 @@ export const parseURLPath = (pathname: string): URLPath => {
     return { type: 'new_session', workspaceId: '', isTemporary: true };
   }
 
+  // Pattern: /all -> session list page (anonymous workspace)
+  if (segments.length === 1 && segments[0] === 'all') {
+    return { type: 'session_list', workspaceId: '' };
+  }
+
   // Pattern: /w/:workspaceId/new -> new workspace session
   if (segments.length === 3 && segments[0] === 'w' && segments[2] === 'new' && segments[1]) {
     return { type: 'new_session', workspaceId: segments[1], isTemporary: false };
@@ -23,6 +28,11 @@ export const parseURLPath = (pathname: string): URLPath => {
   // Pattern: /w/:workspaceId/temp -> new workspace temporary session
   if (segments.length === 3 && segments[0] === 'w' && segments[2] === 'temp' && segments[1]) {
     return { type: 'new_session', workspaceId: segments[1], isTemporary: true };
+  }
+
+  // Pattern: /w/:workspaceId/all -> session list page (workspace)
+  if (segments.length === 3 && segments[0] === 'w' && segments[2] === 'all' && segments[1]) {
+    return { type: 'session_list', workspaceId: segments[1] };
   }
 
   // Pattern: /:sessionId -> existing session
@@ -57,7 +67,10 @@ export const isWorkspaceURL = (pathname: string): boolean => {
 // Helper function to extract workspace ID from URL
 export const extractWorkspaceId = (pathname: string): string => {
   const urlPath = parseURLPath(pathname);
-  return urlPath.type === 'new_session' ? urlPath.workspaceId : '';
+  if (urlPath.type === 'new_session' || urlPath.type === 'session_list') {
+    return urlPath.workspaceId;
+  }
+  return '';
 };
 
 // Helper function to extract session ID from URL

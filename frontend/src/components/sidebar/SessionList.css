@@ -1,4 +1,19 @@
 @layer components.SessionList {
+  .sidebar-session-list-all-link {
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+  }
+
+  .sidebar-list-icon {
+    margin-right: 6px;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
   .sidebar-session-item {
     margin-bottom: 2px;
     display: flex;

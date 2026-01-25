@@ -247,16 +247,18 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 	router.HandleFunc("/new", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/temp", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/search", serveSPAIndex).Methods("GET")
+	router.HandleFunc("/all", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/settings", serveSPAIndex).Methods("GET")
 	router.PathPrefix("/settings/").HandlerFunc(serveSPAIndex).Methods("GET")
 
 	router.HandleFunc("/w", handleNotFound).Methods("GET")
 	router.HandleFunc("/w/new", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/w/{workspaceId}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, fmt.Sprintf("/w/%s/new", mux.Vars(r)["workspaceId"]), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/w/%s/all", mux.Vars(r)["workspaceId"]), http.StatusFound)
 	}).Methods("GET")
 	router.HandleFunc("/w/{workspaceId}/new", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/w/{workspaceId}/temp", serveSPAIndex).Methods("GET")
+	router.HandleFunc("/w/{workspaceId}/all", serveSPAIndex).Methods("GET")
 	router.HandleFunc("/w/{workspaceId}/{sessionId}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, fmt.Sprintf("/%s", mux.Vars(r)["sessionId"]), http.StatusFound)
 	}).Methods("GET")
@@ -266,6 +268,7 @@ func InitRouter(router *mux.Router, embeddedFiles embed.FS) {
 	router.HandleFunc("/api/workspaces", listWorkspacesHandler).Methods("GET")
 	router.HandleFunc("/api/workspaces/{id}", deleteWorkspaceHandler).Methods("DELETE")
 
+	router.HandleFunc("/api/sessions", listSessionsWithDetailsHandler).Methods("GET")
 	router.HandleFunc("/api/chat", listSessionsByWorkspaceHandler).Methods("GET")
 	router.HandleFunc("/api/chat", newSessionAndMessageHandler).Methods("POST")
 	router.HandleFunc("/api/chat/temp", newTempSessionAndMessageHandler).Methods("POST")

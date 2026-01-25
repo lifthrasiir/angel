@@ -71,6 +71,12 @@ export interface Session {
   workspace_id?: string;
 }
 
+export interface SessionWithDetails extends Session {
+  created_at: string;
+  first_message_at?: string;
+  last_message_text?: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;

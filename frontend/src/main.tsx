@@ -16,6 +16,7 @@ import './components/chat/tools/index.ts';
 
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
+const SessionListPage = lazy(() => import('./pages/SessionListPage'));
 const NewWorkspacePage = lazy(() => import('./pages/NewWorkspacePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
@@ -42,11 +43,27 @@ const AppRoutes = () => (
               </ChatLayout>
             }
           />
-          <Route path="/w/:workspaceId" element={<Navigate to="new" replace />} />
+          <Route path="/w/:workspaceId" element={<Navigate to="all" replace />} />
           <Route path="/w/:workspaceId/new" element={<SessionPage />} />
           <Route path="/w/:workspaceId/temp" element={<SessionPage isTemporary={true} />} />
+          <Route
+            path="/w/:workspaceId/all"
+            element={
+              <ChatLayout>
+                <SessionListPage />
+              </ChatLayout>
+            }
+          />
           <Route path="/w/:workspaceId/:sessionId" element={<SessionRedirector />} />
           <Route path="/:sessionId" element={<SessionPage />} />
+          <Route
+            path="/all"
+            element={
+              <ChatLayout>
+                <SessionListPage />
+              </ChatLayout>
+            }
+          />
           <Route
             path="/search"
             element={

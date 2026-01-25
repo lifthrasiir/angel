@@ -42,7 +42,8 @@ export type SessionState =
 // URL Path Types
 export type URLPath =
   | { type: 'new_session'; workspaceId: string; isTemporary: boolean }
-  | { type: 'existing_session'; sessionId: string };
+  | { type: 'existing_session'; sessionId: string }
+  | { type: 'session_list'; workspaceId: string };
 
 // FSM Action Types - handles session identification and related state changes
 export type SessionAction =
