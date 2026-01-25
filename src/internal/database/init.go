@@ -227,7 +227,9 @@ func createTables(db *sql.DB) error {
 		name TEXT DEFAULT '',
 		workspace_id TEXT DEFAULT '',
 		primary_branch_id TEXT, -- New column for primary branch
-		chosen_first_id INTEGER -- Virtual root message pointer
+		chosen_first_id INTEGER, -- Virtual root message pointer
+		first_message_at DATETIME, -- First user message timestamp
+		last_message_text TEXT -- Last user message text (truncated)
 	);
 
 	CREATE TABLE IF NOT EXISTS branches (
@@ -546,6 +548,25 @@ func migrateDB(ctx context.Context, db *sql.DB) error {
 			}
 			log.Println("Split-DB migration completed successfully")
 		}
+	}
+
+	// Migration 3: Add first_message_at and last_message_text columns to sessions table
+	// Check if migration is needed
+	var firstMessageAtExists bool
+	err = db.QueryRow("SELECT COUNT(*) > 0 FROM pragma_table_info('sessions') WHERE name = 'first_message_at'").Scan(&firstMessageAtExists)
+	if err != nil {
+		log.Printf("Warning: Failed to check first_message_at column: %v", err)
+	} else if !firstMessageAtExists {
+		log.Println("Migrating sessions table: adding first_message_at and last_message_text columns...")
+		_, err = db.Exec("ALTER TABLE sessions ADD COLUMN first_message_at DATETIME")
+		if err != nil {
+			return fmt.Errorf("failed to add first_message_at column: %w", err)
+		}
+		_, err = db.Exec("ALTER TABLE sessions ADD COLUMN last_message_text TEXT")
+		if err != nil {
+			return fmt.Errorf("failed to add last_message_text column: %w", err)
+		}
+		log.Println("Sessions table migration completed")
 	}
 
 	return nil

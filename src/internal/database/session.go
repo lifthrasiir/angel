@@ -754,9 +754,10 @@ func GetSessionsWithDetails(db *Database, workspaceID string) ([]SessionWithDeta
 	whereClause := "WHERE workspace_id = ? AND SUBSTR(id, 2) NOT LIKE '%.%'"
 	args := []interface{}{workspaceID}
 
-	// Query sessions from main DB
+	// Query sessions from main DB with first_message_at and last_message_text
 	rows, err := db.Query(`
-		SELECT id, created_at, last_updated_at, name, workspace_id FROM sessions
+		SELECT id, created_at, last_updated_at, name, workspace_id, first_message_at, last_message_text
+		FROM sessions
 		`+whereClause+` ORDER BY last_updated_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions: %w", err)
@@ -766,56 +767,26 @@ func GetSessionsWithDetails(db *Database, workspaceID string) ([]SessionWithDeta
 	var sessions []SessionWithDetails
 	for rows.Next() {
 		var s SessionWithDetails
-		if err := rows.Scan(&s.ID, &s.CreatedAt, &s.LastUpdatedAt, &s.Name, &s.WorkspaceID); err != nil {
+		var firstMessageAt, lastMessageText sql.NullString
+		if err := rows.Scan(&s.ID, &s.CreatedAt, &s.LastUpdatedAt, &s.Name, &s.WorkspaceID, &firstMessageAt, &lastMessageText); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		if firstMessageAt.Valid {
+			s.FirstMessageAt = firstMessageAt.String
+		}
+		if lastMessageText.Valid {
+			// Truncate to ~100 characters (rune-aware for UTF-8)
+			text := lastMessageText.String
+			runes := []rune(text)
+			if len(runes) > 100 {
+				text = string(runes[:97]) + "..."
+			}
+			s.LastMessageText = text
 		}
 		sessions = append(sessions, s)
 	}
 	if sessions == nil {
 		return []SessionWithDetails{}, nil
-	}
-
-	// For each session, attach to session DB and query for details
-	for i := range sessions {
-		// Use a closure to ensure the session DB is closed immediately after each iteration
-		func() {
-			mainSessionID, _ := SplitSessionId(sessions[i].ID)
-
-			sdb, err := db.WithSessionDB(mainSessionID)
-			if err != nil {
-				// Session DB might not exist, skip this session
-				return
-			}
-			defer sdb.Close()
-
-			// Query for first user message date
-			localSessionID := ToLocalSessionID(sessions[i].ID)
-			var firstMessageAt sql.NullString
-			err = sdb.QueryRow(`
-				SELECT MIN(created_at) FROM S.messages
-				WHERE session_id = ? AND type = ?
-			`, localSessionID, TypeUserText).Scan(&firstMessageAt)
-			if err == nil && firstMessageAt.Valid {
-				sessions[i].FirstMessageAt = firstMessageAt.String
-			}
-
-			// Query for last user message text (preview)
-			var lastMessageText sql.NullString
-			err = sdb.QueryRow(`
-				SELECT text FROM S.messages
-				WHERE session_id = ? AND type = ?
-				ORDER BY created_at DESC LIMIT 1
-			`, localSessionID, TypeUserText).Scan(&lastMessageText)
-			if err == nil && lastMessageText.Valid {
-				// Truncate to ~100 characters (rune-aware for UTF-8)
-				text := lastMessageText.String
-				runes := []rune(text)
-				if len(runes) > 100 {
-					text = string(runes[:97]) + "..."
-				}
-				sessions[i].LastMessageText = text
-			}
-		}()
 	}
 
 	return sessions, nil

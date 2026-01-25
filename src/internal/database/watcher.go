@@ -592,15 +592,22 @@ func syncSessionToMainDB(db *Database, mainSessionID, sessionDBPath string) erro
 		return fmt.Errorf("failed to sync messages_searchable to main DB: %w", err)
 	}
 
-	// Sync sessions table
+	// Sync sessions table with first_message_at and last_message_text
 	_, err = db.Exec(fmt.Sprintf(`
-		INSERT OR REPLACE INTO sessions (id, created_at, last_updated_at, system_prompt, name, workspace_id, primary_branch_id, chosen_first_id)
-		SELECT ? || CASE
-			WHEN id = '' THEN ''
-			ELSE '.' || id
-		END, created_at, last_updated_at, system_prompt, name, workspace_id, primary_branch_id, chosen_first_id
+		INSERT OR REPLACE INTO sessions (id, created_at, last_updated_at, system_prompt, name, workspace_id, primary_branch_id, chosen_first_id, first_message_at, last_message_text)
+		SELECT
+			? || CASE WHEN id = '' THEN '' ELSE '.' || id END,
+			created_at,
+			last_updated_at,
+			system_prompt,
+			name,
+			workspace_id,
+			primary_branch_id,
+			chosen_first_id,
+			(SELECT MIN(created_at) FROM %s.messages WHERE %s.messages.session_id = sessions.id AND type = 'user'),
+			(SELECT text FROM %s.messages WHERE %s.messages.session_id = sessions.id AND type = 'user' ORDER BY created_at DESC LIMIT 1)
 		FROM %s.sessions
-	`, attachAlias), mainSessionID)
+	`, attachAlias, attachAlias, attachAlias, attachAlias, attachAlias), mainSessionID)
 	if err != nil {
 		return fmt.Errorf("failed to sync sessions to main DB: %w", err)
 	}
