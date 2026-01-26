@@ -22,6 +22,7 @@ interface UserTextMessageProps {
   onRetryClick?: (messageId: string) => void;
   isMobile?: boolean;
   isMostRecentUserMessage?: boolean;
+  isDisabled?: boolean;
 }
 
 const UserTextMessage: React.FC<UserTextMessageProps> = ({
@@ -35,6 +36,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   onRetryClick,
   isMobile = false,
   isMostRecentUserMessage = false,
+  isDisabled = false,
 }) => {
   const { isProcessing } = useProcessingState();
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
@@ -45,7 +47,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
   const imageOnly = isImageOnlyMessage(text, attachments);
 
   const handleEditClick = () => {
-    if (!isProcessing) {
+    if (!isProcessing && !isDisabled) {
       setEditingMessageId(messageId || null);
       setEditingSource('edit');
     }
@@ -93,6 +95,7 @@ const UserTextMessage: React.FC<UserTextMessageProps> = ({
               editAccessKey: isMostRecentUserMessage ? 'e' : undefined,
               retryAccessKey: isMostRecentUserMessage ? 'r' : undefined,
               branchDropdownAlign: 'right',
+              isDisabled: isDisabled,
             } as Partial<MessageInfoProps>) // Cast to Partial<MessageInfoProps>
           : messageInfo
       }

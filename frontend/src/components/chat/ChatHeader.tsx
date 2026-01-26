@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FaBars, FaChevronDown, FaChevronUp, FaLock, FaPuzzlePiece } from 'react-icons/fa';
+import { FaBars, FaChevronDown, FaChevronUp, FaLock, FaPuzzlePiece, FaArchive } from 'react-icons/fa';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useLocation } from 'react-router-dom';
 import { useSessionManagerContext } from '../../hooks/SessionManagerContext';
@@ -112,6 +112,11 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           {sessionType === 'internal' && (
             <Tooltip content="Internal session created by system/subagent">
               <FaPuzzlePiece className="chat-header-icon" />
+            </Tooltip>
+          )}
+          {currentSessionArchived && (
+            <Tooltip content="Archived session">
+              <FaArchive className="chat-header-icon" />
             </Tooltip>
           )}
           <span className="chat-header-title-text">{sessionName}</span>

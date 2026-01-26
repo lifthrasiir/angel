@@ -2,10 +2,11 @@ import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { globalPromptsAtom, selectedGlobalPromptAtom } from '../atoms/modelAtoms';
+import { isAuthenticatedAtom } from '../atoms/systemAtoms';
 import { toastMessageAtom } from '../atoms/uiAtoms';
-import { sessionsAtom, currentSessionNameAtom } from '../atoms/chatAtoms';
+import { sessionsAtom, currentSessionNameAtom, currentSessionArchivedAtom } from '../atoms/chatAtoms';
 import { PredefinedPrompt } from './chat/SystemPromptEditor';
 import { useChatSession } from '../hooks/useChatSession';
 import { useSessionFSM } from '../hooks/useSessionFSM';
@@ -35,6 +36,8 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
   const [sessions, setSessions] = useAtom(sessionsAtom);
   const [globalPrompts] = useAtom(globalPromptsAtom);
   const setCurrentSessionName = useSetAtom(currentSessionNameAtom);
+  const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+  const currentSessionArchived = useAtomValue(currentSessionArchivedAtom);
 
   const { workspaces, refreshWorkspaces } = useWorkspaces();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -67,6 +70,13 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
   } = useChatSession(isTemporary);
 
   const [toastMessage, setToastMessage] = useAtom(toastMessageAtom);
+
+  // Determine disabled reason for input
+  const disabledBecause: 'notauth' | 'archived' | undefined = !isAuthenticated
+    ? 'notauth'
+    : currentSessionArchived
+      ? 'archived'
+      : undefined;
 
   // Session menu handlers
   const handleSessionRename = (sessionId: string) => {
@@ -214,6 +224,7 @@ const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isTemporary = false }
           handleUpdateMessage={handleUpdateMessage}
           handleContinueMessage={handleContinueMessage}
           isSendDisabledByResizing={isSendDisabledByResizing}
+          disabledBecause={disabledBecause}
           chatHeader={
             <ChatHeader
               workspaces={workspaces}

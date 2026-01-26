@@ -18,7 +18,7 @@ interface ChatInputProps {
   chatAreaRef?: React.RefObject<HTMLDivElement>;
   sessionId: string | null;
   isSendDisabledByResizing?: () => boolean;
-  isDisabled?: boolean;
+  disabledBecause?: 'notauth' | 'archived';
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -29,7 +29,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   chatAreaRef,
   sessionId,
   isSendDisabledByResizing,
-  isDisabled = false,
+  disabledBecause,
 }) => {
   const { isProcessing } = useProcessingState();
   const [inputMessage] = useAtom(inputMessageAtom);
@@ -194,7 +194,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const isSendButtonDisabled =
-    isDisabled ||
+    !!disabledBecause ||
     (localInput.trim() === '' && selectedFiles.length === 0) ||
     (isSendDisabledByResizing && isSendDisabledByResizing());
 
@@ -222,7 +222,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       {/* File attachment button */}
       <button
         onClick={triggerFileInput}
-        disabled={isDisabled}
+        disabled={!!disabledBecause}
         style={{
           height: '100%',
           minHeight: isMobile ? '1em' : 'auto',
@@ -231,12 +231,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
           background: '#f0f0f0',
           border: '1px solid #ccc',
           borderRadius: '5px',
-          cursor: isDisabled ? 'not-allowed' : 'pointer',
+          cursor: disabledBecause ? 'not-allowed' : 'pointer',
           gridArea: isMobile ? '2 / 1' : '1 / 1',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          opacity: isDisabled ? 0.5 : 1,
+          opacity: disabledBecause ? 0.5 : 1,
         }}
         aria-label="Attach files"
       >
@@ -276,14 +276,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
           }
         }}
         placeholder={
-          isDisabled
+          disabledBecause === 'notauth'
             ? 'Login required to send messages'
-            : isCommandMode
-              ? 'Enter a slash command...'
-              : 'Enter your message...'
+            : disabledBecause === 'archived'
+              ? 'This session is archived and cannot be modified'
+              : isCommandMode
+                ? 'Enter a slash command...'
+                : 'Enter your message...'
         }
         rows={isMobile ? 1 : 2}
-        disabled={isDisabled}
+        disabled={!!disabledBecause}
         style={{
           height: '100%',
           padding: '5px',
@@ -294,8 +296,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
           gridArea: isMobile ? '1 / 1 / 1 / span 2' : '1 / 3',
           color: isCommandMode ? '#1e7e34' : 'inherit',
           fontSize: '16px', // Prevent zoom on iOS
-          backgroundColor: isDisabled ? '#f5f5f5' : 'white',
-          cursor: isDisabled ? 'not-allowed' : 'text',
+          backgroundColor: disabledBecause ? '#f5f5f5' : 'white',
+          cursor: disabledBecause ? 'not-allowed' : 'text',
         }}
         aria-label="Message input"
       />

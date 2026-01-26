@@ -121,10 +121,10 @@ const SessionMenu: React.FC<SessionMenuProps> = ({
     await runNewMessageCommand(commandType);
   };
 
-  // Only show append options when messages are provided (not undefined)
+  // Only show append options when messages are provided (not undefined) and not archived
   let showNewModelMessage = false;
   let showNewUserMessage = false;
-  if (isCurrentSession && messages !== undefined) {
+  if (isCurrentSession && messages !== undefined && !archived) {
     const lastMessageType = messages.length > 0 ? messages[messages.length - 1].type : null;
     showNewUserMessage = lastMessageType !== 'user';
     showNewModelMessage = lastMessageType !== 'model';

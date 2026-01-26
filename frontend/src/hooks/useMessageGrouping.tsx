@@ -17,6 +17,7 @@ interface UseMessageGroupingParams {
   handleRetryError?: (errorMessageId: string) => Promise<void>;
   handleUpdateMessage?: (messageId: string, editedText: string) => Promise<void>;
   handleContinueMessage?: (messageId: string) => Promise<void>;
+  disabledBecause?: 'notauth' | 'archived';
 }
 
 interface UseMessageGroupingResult {
@@ -35,6 +36,7 @@ export const useMessageGrouping = ({
   handleRetryError,
   handleUpdateMessage,
   handleContinueMessage,
+  disabledBecause,
 }: UseMessageGroupingParams): UseMessageGroupingResult => {
   // Helper function to check if a message is retryable (last consecutive error messages)
   const isRetryableError = (message: ChatMessageType, allMessages: ChatMessageType[]): boolean => {
@@ -68,6 +70,7 @@ export const useMessageGrouping = ({
     handleUpdateMessage?: (messageId: string, editedText: string) => Promise<void>,
     handleContinueMessage?: (messageId: string) => Promise<void>,
     mostRecentUserMessageId?: string | null,
+    isDisabled?: boolean,
   ): { element: JSX.Element; messagesConsumed: number } => {
     // Find maxTokens for the current message's model
     const currentModelMaxTokens = currentMessage.model
@@ -178,6 +181,7 @@ export const useMessageGrouping = ({
               onSaveUpdate={handleUpdateMessage}
               onContinueClick={handleContinueMessage}
               isMostRecentUserMessage={currentMessage.id === mostRecentUserMessageId}
+              isDisabled={isDisabled}
             />
           </>
         ),
@@ -237,6 +241,7 @@ export const useMessageGrouping = ({
         handleUpdateMessage,
         handleContinueMessage,
         mostRecentUserMessageId,
+        !!disabledBecause,
       );
       renderedElements.push(element);
       i += messagesConsumed;
@@ -255,6 +260,7 @@ export const useMessageGrouping = ({
           onRetryError={handleRetryError ? (errorMessageId) => handleRetryError(errorMessageId) : undefined}
           onBranchSelect={handleBranchSwitch}
           isMostRecentUserMessage={false}
+          isDisabled={!!disabledBecause}
         />,
       );
     }
@@ -292,6 +298,7 @@ export const useMessageGrouping = ({
     handleRetryError,
     handleUpdateMessage,
     handleContinueMessage,
+    disabledBecause,
   ]);
 
   // Find most recent user message ID

@@ -24,6 +24,7 @@ interface ModelTextMessageProps {
   isMobile?: boolean;
   onSaveUpdate?: (messageId: string, editedText: string) => void;
   onContinueClick?: (messageId: string) => void;
+  isDisabled?: boolean;
 }
 
 const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
@@ -39,6 +40,7 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   isMobile = false,
   onSaveUpdate,
   onContinueClick,
+  isDisabled = false,
 }) => {
   const { isProcessing } = useProcessingState();
   const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
@@ -50,7 +52,7 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
   const isUpdated = message?.aux?.beforeUpdate !== undefined;
 
   const handleUpdateClick = () => {
-    if (!isProcessing && !imageOnly) {
+    if (!isProcessing && !isDisabled && !imageOnly) {
       setEditingMessageId(messageId || null);
       setEditingSource('update');
     }
@@ -98,6 +100,7 @@ const ModelTextMessage: React.FC<ModelTextMessageProps> = ({
               message: message,
               isMobile: isMobile,
               branchDropdownAlign: 'left',
+              isDisabled: isDisabled,
             } as Partial<MessageInfoProps>)
           : messageInfo
       }

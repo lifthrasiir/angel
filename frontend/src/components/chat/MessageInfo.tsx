@@ -29,6 +29,7 @@ export interface MessageInfoProps {
   retryAccessKey?: string; // Access key for retry button
   continueAccessKey?: string; // Access key for continue button
   branchDropdownAlign?: 'left' | 'right'; // Direction of branch dropdown menu
+  isDisabled?: boolean; // Whether editing/retry/continue is disabled
 }
 
 const MessageInfo: React.FC<MessageInfoProps> = React.memo(
@@ -53,6 +54,7 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
     retryAccessKey,
     continueAccessKey,
     branchDropdownAlign = 'right',
+    isDisabled = false,
   }) => {
     const { isProcessing } = useProcessingState();
     const editingSource = useAtomValue(editingSourceAtom);
@@ -109,14 +111,19 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
         ) : (
           <>
             {onEditClick && (
-              <button onClick={onEditClick} disabled={isProcessing} title="Edit message" accessKey={editAccessKey}>
+              <button
+                onClick={onEditClick}
+                disabled={isProcessing || isDisabled}
+                title="Edit message"
+                accessKey={editAccessKey}
+              >
                 <FaEdit size={16} />
               </button>
             )}
             {onContinueClick && (
               <button
                 onClick={onContinueClick}
-                disabled={isProcessing}
+                disabled={isProcessing || isDisabled}
                 title="Continue after this point"
                 accessKey={continueAccessKey}
               >
@@ -124,7 +131,12 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
               </button>
             )}
             {onRetryClick && (
-              <button onClick={onRetryClick} disabled={isProcessing} title="Retry message" accessKey={retryAccessKey}>
+              <button
+                onClick={onRetryClick}
+                disabled={isProcessing || isDisabled}
+                title="Retry message"
+                accessKey={retryAccessKey}
+              >
                 <FaRedo size={16} />
               </button>
             )}
@@ -140,7 +152,13 @@ const MessageInfo: React.FC<MessageInfoProps> = React.memo(
           />
         )}
         {message && sessionId && (message.type === 'model' || message.type === 'user') && (
-          <MessageMenu message={message} sessionId={sessionId} isMobile={isMobile} onUpdateClick={onUpdateClick} />
+          <MessageMenu
+            message={message}
+            sessionId={sessionId}
+            isMobile={isMobile}
+            onUpdateClick={onUpdateClick}
+            isDisabled={isDisabled}
+          />
         )}
       </div>
     );

@@ -33,6 +33,7 @@ interface ChatMessageProps {
   isMostRecentUserMessage?: boolean;
   onSaveUpdate?: (messageId: string, editedText: string) => void;
   onContinueClick?: (messageId: string) => void;
+  isDisabled?: boolean;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = React.memo(
@@ -48,6 +49,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
     isMostRecentUserMessage = false,
     onSaveUpdate,
     onContinueClick,
+    isDisabled = false,
   }) => {
     const { type, attachments, cumulTokenCount, model } = message;
     const { text, functionCall, functionResponse } = message.parts?.[0] || {};
@@ -88,6 +90,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           onRetryClick={onRetryClick}
           isMobile={isMobile}
           isMostRecentUserMessage={isMostRecentUserMessage}
+          isDisabled={isDisabled}
         />
       );
     } else if (type === 'thought') {
@@ -104,6 +107,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           isMobile={isMobile}
           onSaveUpdate={onSaveUpdate}
           onContinueClick={onContinueClick}
+          isDisabled={isDisabled}
         />
       );
     } else if (type === 'function_call') {
@@ -129,9 +133,10 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           messageId={message.id}
           message={message}
           isMobile={isMobile}
+          isDisabled={isDisabled}
           sideContents={
             onRetryError ? (
-              <RetryErrorButton messageId={message.id} onRetryError={onRetryError} isDisabled={false} />
+              <RetryErrorButton messageId={message.id} onRetryError={onRetryError} isDisabled={isDisabled} />
             ) : undefined
           }
         />
@@ -181,6 +186,7 @@ const ChatMessage: React.FC<ChatMessageProps> = React.memo(
           isMobile={isMobile}
           onSaveUpdate={onSaveUpdate}
           onContinueClick={onContinueClick}
+          isDisabled={isDisabled}
         />
       );
     }

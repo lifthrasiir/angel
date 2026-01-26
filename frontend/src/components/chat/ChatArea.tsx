@@ -9,7 +9,6 @@ import { messagesAtom, primaryBranchIdAtom } from '../../atoms/chatAtoms';
 import { pendingConfirmationAtom } from '../../atoms/confirmationAtoms';
 import { selectedFilesAtom } from '../../atoms/fileAtoms';
 import { availableModelsAtom } from '../../atoms/modelAtoms';
-import { isAuthenticatedAtom } from '../../atoms/systemAtoms';
 import { lastAutoDisplayedThoughtIdAtom } from '../../atoms/uiAtoms';
 import { useSessionFSM } from '../../hooks/useSessionFSM';
 import { useProcessingState } from '../../hooks/useProcessingState';
@@ -40,6 +39,7 @@ interface ChatAreaProps {
   handleContinueMessage?: (messageId: string) => Promise<void>;
   isSendDisabledByResizing?: () => boolean;
   chatHeader?: React.ReactNode;
+  disabledBecause?: 'notauth' | 'archived';
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -62,11 +62,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   handleContinueMessage,
   isSendDisabledByResizing,
   chatHeader,
+  disabledBecause,
 }) => {
   const [messages] = useAtom(messagesAtom);
   const [selectedFiles] = useAtom(selectedFilesAtom);
   const [availableModels] = useAtom(availableModelsAtom);
-  const [isAuthenticated] = useAtom(isAuthenticatedAtom);
   const primaryBranchId = useAtomValue(primaryBranchIdAtom);
   const setLastAutoDisplayedThoughtId = useSetAtom(lastAutoDisplayedThoughtIdAtom);
 
@@ -116,6 +116,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     handleRetryError,
     handleUpdateMessage,
     handleContinueMessage,
+    disabledBecause,
   });
 
   return (
@@ -160,7 +161,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             sessionId={sessionId}
             selectedFiles={selectedFiles}
             isSendDisabledByResizing={isSendDisabledByResizing}
-            isDisabled={!isAuthenticated}
+            disabledBecause={disabledBecause}
           />
         )}
       </ChatAreaDragDropOverlay>

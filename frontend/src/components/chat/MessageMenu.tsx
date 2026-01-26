@@ -14,6 +14,7 @@ export interface MessageMenuProps {
   isMobile?: boolean;
   className?: string;
   onUpdateClick?: () => void;
+  isDisabled?: boolean;
 }
 
 const MessageMenu: React.FC<MessageMenuProps> = ({
@@ -22,6 +23,7 @@ const MessageMenu: React.FC<MessageMenuProps> = ({
   isMobile = false,
   className = '',
   onUpdateClick,
+  isDisabled = false,
 }) => {
   const navigate = useNavigate();
   const addSession = useSetAtom(addSessionAtom);
@@ -65,6 +67,7 @@ const MessageMenu: React.FC<MessageMenuProps> = ({
             label: 'Update in place',
             icon: <FaSync size={14} />,
             onClick: onUpdateClick,
+            disabled: isDisabled,
           } as DropdownItem,
         ]
       : []),
