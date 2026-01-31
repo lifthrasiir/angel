@@ -139,6 +139,12 @@ const createSessionSchemaSQL = `
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(session_id, generation)
 	);
+
+	CREATE TABLE IF NOT EXISTS S.files (
+		path TEXT PRIMARY KEY,
+		data BLOB NOT NULL,
+		metadata TEXT NOT NULL
+	);
 `
 
 // InitSessionDBForMigration initializes a SQLite database connection for a session DB.
@@ -252,9 +258,15 @@ func ToFullSessionID(mainSessionID, localSessionID string) string {
 
 // GetSessionApplicationID retrieves the application_id from a session database file.
 // Returns 0 if the file doesn't exist or application_id is not set.
+// For in-memory databases (:memory:), returns ApplicationIDNormal.
 // Reads directly from the SQLite file format at offset 68 (big-endian 4-byte integer).
 // See: https://sqlite.org/fileformat2.html
 func GetSessionApplicationID(dbPath string) (int, error) {
+	// Handle in-memory databases
+	if dbPath == ":memory:" {
+		return ApplicationIDNormal, nil
+	}
+
 	// Check if file exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return 0, nil
@@ -318,5 +330,41 @@ func TriggerWatcherSync(db *Database, mainSessionID, sessionDBPath string) error
 	if err := db.watcher.trackFile(mainSessionID, sessionDBPath); err != nil {
 		return fmt.Errorf("failed to trigger watcher sync: %w", err)
 	}
+	return nil
+}
+
+// MigrateSessionDB performs schema migrations on a session database.
+// This should be called when a session DB is first attached to ensure it has the latest schema.
+// The db parameter should be the main DB with the session DB already attached at the given alias.
+func MigrateSessionDB(db *sql.DB, attachAlias string) error {
+	// Migration 1: Add files table for anonymous root backup/restore
+	// Check if files table exists
+	var tableExists bool
+	query := fmt.Sprintf("SELECT COUNT(*) > 0 FROM %s.sqlite_master WHERE type='table' AND name='files'", attachAlias)
+	err := db.QueryRow(query).Scan(&tableExists)
+	if err != nil {
+		return fmt.Errorf("failed to check files table existence: %w", err)
+	}
+
+	if !tableExists {
+		log.Printf("SessionDB Migration: Creating files table in %s", attachAlias)
+		createFilesTableSQL := fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s.files (
+				path TEXT PRIMARY KEY,
+				data BLOB NOT NULL,
+				metadata TEXT NOT NULL
+			)
+		`, attachAlias)
+		_, err = db.Exec(createFilesTableSQL)
+		if err != nil {
+			return fmt.Errorf("failed to create files table: %w", err)
+		}
+		log.Printf("SessionDB Migration: files table created successfully in %s", attachAlias)
+	}
+
+	// Add more migrations here as needed
+	// Migration 2: ...
+	// Migration 3: ...
+
 	return nil
 }

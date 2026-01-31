@@ -561,6 +561,12 @@ func (sw *SessionWatcher) rescanSessions(knownFiles map[string]time.Time) {
 // syncSessionToMainDB syncs messages from a session DB to the main DB's messages_searchable table.
 // It attaches the session DB to the main DB and copies user/model messages.
 func syncSessionToMainDB(db *Database, mainSessionID, sessionDBPath string) error {
+	// Mark expected changes before attach to avoid watcher re-sync during migration
+	if db.watcher != nil {
+		db.watcher.MarkExpectedChange(mainSessionID)
+		defer db.watcher.ClearExpectedChange(mainSessionID)
+	}
+
 	// Attach the session DB to the main DB
 	attachAlias := fmt.Sprintf("`sync-session:%s`", mainSessionID)
 	_, err := db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS %s", sessionDBPath, attachAlias))
@@ -570,6 +576,11 @@ func syncSessionToMainDB(db *Database, mainSessionID, sessionDBPath string) erro
 	defer func() {
 		db.Exec(fmt.Sprintf("DETACH DATABASE %s", attachAlias))
 	}()
+
+	// Run migrations on the session DB (DDL changes are autocommit and will trigger file writes)
+	if err := MigrateSessionDB(db.DB, attachAlias); err != nil {
+		return fmt.Errorf("failed to migrate session DB: %w", err)
+	}
 
 	// Get workspace_id from session DB
 	var workspaceID string

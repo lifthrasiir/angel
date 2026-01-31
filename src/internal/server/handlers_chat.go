@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -696,9 +697,20 @@ func extractSessionHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, response)
 }
 
-// archiveSessionHandler archives or unarchives a session by changing the application_id.
+// archiveSessionHandler archives or unarchives a session with atomic file backup/restore.
+// Archive protocol (A1-A4):
+// A1. Set main DB archived = 1
+// A2. Backup anonymous root to files table (rollback archived = 0 on error)
+// A3. Set application_id = ApplicationIDArchived
+// A4. (Async) Cleanup anonymous root directory
+// Unarchive protocol (U1-U4):
+// U1. Set main DB archived = 0
+// U2. Restore from files table to anonymous root
+// U3. Set application_id = ApplicationIDNormal
+// U4. (Async) Clear files table
 func archiveSessionHandler(w http.ResponseWriter, r *http.Request) {
 	db := getDb(w, r)
+	config := getEnvConfig(w, r)
 
 	vars := mux.Vars(r)
 	sessionId := vars["sessionId"]
@@ -733,24 +745,72 @@ func archiveSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Set the appropriate application_id
-	var targetAppID int
+	// Get sandbox directory path
+	sandboxDir := sandboxPath(config.SessionDir(), mainSessionID)
+
 	if requestBody.Archive {
-		targetAppID = ApplicationIDArchived
+		// ========== Archive Protocol ==========
+		// A1: Set main DB archived = 1
+		if err := setMainDBArchived(db, mainSessionID, 1); err != nil {
+			sendInternalServerError(w, r, err, "Failed to set main DB archived flag")
+			return
+		}
+
+		// A2: Backup anonymous root to files table
+		backupErr := database.BackupAnonymousRoot(sessionDBPath, sandboxDir)
+		if backupErr != nil {
+			// A2-1: Rollback main DB archived flag on error
+			rollbackErr := setMainDBArchived(db, mainSessionID, 0)
+			if rollbackErr != nil {
+				log.Printf("CRITICAL: Failed to rollback archived flag for %s: %v", mainSessionID, rollbackErr)
+			}
+			sendInternalServerError(w, r, backupErr, "Failed to backup anonymous root")
+			return
+		}
+
+		// A3: Set application_id = ApplicationIDArchived
+		if err := database.SetSessionApplicationID(sessionDBPath, ApplicationIDArchived); err != nil {
+			sendInternalServerError(w, r, err, "Failed to set application_id")
+			return
+		}
+
+		// A4: Fire-and-forget cleanup of anonymous root
+		go func() {
+			if err := database.CleanupAnonymousRoot(sandboxDir); err != nil {
+				log.Printf("Warning: Failed to cleanup sandbox directory %s: %v", sandboxDir, err)
+			}
+		}()
 	} else {
-		targetAppID = ApplicationIDNormal
+		// ========== Unarchive Protocol ==========
+		// U1: Set main DB archived = 0
+		if err := setMainDBArchived(db, mainSessionID, 0); err != nil {
+			sendInternalServerError(w, r, err, "Failed to set main DB archived flag")
+			return
+		}
+
+		// U2: Restore from files table to anonymous root
+		if err := database.RestoreAnonymousRoot(sessionDBPath, sandboxDir); err != nil {
+			sendInternalServerError(w, r, err, "Failed to restore anonymous root")
+			return
+		}
+
+		// U3: Set application_id = ApplicationIDNormal
+		if err := database.SetSessionApplicationID(sessionDBPath, ApplicationIDNormal); err != nil {
+			sendInternalServerError(w, r, err, "Failed to set application_id")
+			return
+		}
+
+		// U4: Fire-and-forget clear files table
+		go func() {
+			if err := database.ClearFilesTable(sessionDBPath); err != nil {
+				log.Printf("Warning: Failed to clear files table for %s: %v", mainSessionID, err)
+			}
+		}()
 	}
 
-	if err := database.SetSessionApplicationID(sessionDBPath, targetAppID); err != nil {
-		sendInternalServerError(w, r, err, "Failed to set application_id")
-		return
-	}
-
-	// Trigger a sync to update the main DB's archived flag
-	// Force a watcher sync by marking the file as modified
+	// Trigger watcher sync
 	if db.Watcher() != nil {
 		db.Watcher().MarkExpectedChange(mainSessionID)
-		// Trigger a resync
 		if err := database.TriggerWatcherSync(db, mainSessionID, sessionDBPath); err != nil {
 			log.Printf("Warning: Failed to trigger watcher sync: %v", err)
 		}
@@ -766,4 +826,18 @@ func archiveSessionHandler(w http.ResponseWriter, r *http.Request) {
 		"message":  fmt.Sprintf("Session %s successfully", action),
 		"archived": requestBody.Archive,
 	})
+}
+
+// sandboxPath returns the sandbox directory path for a given session.
+func sandboxPath(sessionDir, mainSessionID string) string {
+	return filepath.Join(sessionDir, mainSessionID)
+}
+
+// setMainDBArchived sets the archived flag in the main database for a session.
+func setMainDBArchived(db *database.Database, mainSessionID string, archived int) error {
+	_, err := db.Exec("UPDATE sessions SET archived = ? WHERE id = ?", archived, mainSessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update main DB archived flag: %w", err)
+	}
+	return nil
 }
