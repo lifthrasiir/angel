@@ -13,7 +13,7 @@ import (
 	_ "github.com/ncruces/go-sqlite3/driver"
 )
 
-const maxAttached = 10 // SQLite ATTACH DATABASE limit
+const maxAttached = 9 // SQLite ATTACH DATABASE limit - backup attachments for periodic jobs
 
 // AttachedDB represents an attached database with reference counting.
 type AttachedDB struct {
